@@ -1,0 +1,1372 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New API vs Claude Relay Service - 功能对比分析报告</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            line-height: 1.8;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 60px 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 3em;
+            margin-bottom: 15px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .header .subtitle {
+            font-size: 1.3em;
+            opacity: 0.95;
+        }
+
+        .header .date {
+            margin-top: 20px;
+            font-size: 1.1em;
+            opacity: 0.85;
+        }
+
+        .content {
+            padding: 50px;
+        }
+
+        .section {
+            margin-bottom: 60px;
+        }
+
+        .section h2 {
+            font-size: 2.2em;
+            color: #667eea;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #667eea;
+            display: flex;
+            align-items: center;
+        }
+
+        .section h2::before {
+            content: '📊';
+            margin-right: 15px;
+            font-size: 1.2em;
+        }
+
+        .section h3 {
+            font-size: 1.6em;
+            color: #764ba2;
+            margin-top: 30px;
+            margin-bottom: 20px;
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 30px 0;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .comparison-table thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .comparison-table th {
+            padding: 20px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .comparison-table td {
+            padding: 18px 20px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .comparison-table tbody tr:hover {
+            background-color: #f8f9ff;
+            transition: background-color 0.3s;
+        }
+
+        .comparison-table .feature-col {
+            font-weight: 600;
+            color: #555;
+            width: 30%;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin: 3px;
+        }
+
+        .tag-supported {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .tag-partial {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .tag-not-supported {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .tag-excellent {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #f8f9ff 0%, #e8ebff 100%);
+            border-left: 5px solid #667eea;
+            padding: 25px;
+            margin: 25px 0;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(102, 126, 234, 0.1);
+        }
+
+        .highlight-box h4 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .feature-list li {
+            padding: 12px 0;
+            padding-left: 35px;
+            position: relative;
+        }
+
+        .feature-list li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: #667eea;
+            font-weight: bold;
+            font-size: 1.3em;
+        }
+
+        .vs-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 25px;
+            border-radius: 25px;
+            font-weight: 600;
+            margin: 20px 0;
+            font-size: 1.1em;
+        }
+
+        .project-card {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 15px;
+            padding: 30px;
+            margin: 20px 0;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .project-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .project-card h3 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+
+        .summary {
+            background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
+            padding: 40px;
+            border-radius: 15px;
+            margin-top: 40px;
+            box-shadow: 0 10px 30px rgba(253, 203, 110, 0.3);
+        }
+
+        .summary h3 {
+            color: #d63031;
+            margin-bottom: 20px;
+            font-size: 2em;
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 30px;
+            text-align: center;
+            color: #666;
+            font-size: 0.95em;
+        }
+
+        .score-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-right: 10px;
+        }
+
+        .score-high {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .score-medium {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .score-low {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                padding: 25px;
+            }
+
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .comparison-table {
+                font-size: 0.9em;
+            }
+
+            .comparison-table th,
+            .comparison-table td {
+                padding: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 New API vs Claude Relay Service</h1>
+            <div class="subtitle">大模型API网关系统功能对比分析报告</div>
+            <div class="date">📅 生成日期: 2025-11-13</div>
+        </div>
+
+        <div class="content">
+            <!-- 项目概述 -->
+            <div class="section">
+                <h2>项目概述</h2>
+
+                <div class="project-card">
+                    <h3>🎯 New API</h3>
+                    <p><strong>定位：</strong>新一代大模型网关与AI资产管理系统</p>
+                    <p><strong>基础：</strong>基于 One API 二次开发的开源项目</p>
+                    <p><strong>技术栈：</strong>Go + React，支持 Docker 部署</p>
+                    <p><strong>特点：</strong>通用型大模型网关，支持多供应商（OpenAI、Claude、Gemini、Azure、国产大模型等30+种渠道类型）</p>
+                    <p><strong>GitHub：</strong><a href="https://github.com/Calcium-Ion/new-api">Calcium-Ion/new-api</a></p>
+                </div>
+
+                <div class="vs-badge">VS</div>
+
+                <div class="project-card">
+                    <h3>⚡ Claude Relay Service (CRS)</h3>
+                    <p><strong>定位：</strong>自建 Claude Code 镜像，一站式开源中转服务</p>
+                    <p><strong>基础：</strong>专注 Claude API 的中转服务</p>
+                    <p><strong>技术栈：</strong>Node.js/TypeScript，支持 Docker 和 Cloudflare Workers 部署</p>
+                    <p><strong>特点：</strong>专门优化 Claude API 访问，支持 Claude、OpenAI、Gemini、Droid 统一接入，支持拼车共享</p>
+                    <p><strong>GitHub：</strong><a href="https://github.com/Wei-Shaw/claude-relay-service">Wei-Shaw/claude-relay-service</a></p>
+                </div>
+            </div>
+
+            <!-- 核心功能对比 -->
+            <div class="section">
+                <h2>核心功能对比</h2>
+
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th class="feature-col">功能特性</th>
+                            <th>New API</th>
+                            <th>Claude Relay Service</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="feature-col">多供应商支持</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>支持 30+ 种渠道类型：OpenAI、Claude、Azure、Gemini、国产大模型、Midjourney、Suno 等</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-partial">部分支持</span>
+                                <p>主要支持 Claude，兼容 OpenAI、Gemini、Droid 格式</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">渠道管理</td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>完整的渠道 CRUD 管理、渠道分组、渠道标签、优先级设置、权重配置</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>账户管理、OAuth 集成、自定义 API Key 生成</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">用户管理</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>完整的用户系统、角色权限、用户分组、额度管理、邀请码系统</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>API Key 级别的用户管理和权限控制</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">计费系统</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>完整计费系统：按 token、按次数、缓存计费、在线充值（易支付、Stripe）、兑换码</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-partial">基础统计</span>
+                                <p>使用统计和成本分析，无内置支付功能</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">管理界面</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>完整的 Web 管理后台：仪表板、数据看板、日志查询、统计分析、多语言支持</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>Web 管理界面：账户管理、使用监控、配置管理</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">API 格式</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>OpenAI、Claude、Gemini 原生格式，支持格式互转（OpenAI ⇄ Claude、OpenAI ⇄ Gemini）</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>兼容 OpenAI 格式，原生支持 Claude API</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">高级特性</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>模型映射、参数覆盖、Header 覆盖、状态码映射、Thinking 模式、Reasoning Effort 支持</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-partial">部分支持</span>
+                                <p>粘性会话、请求路由、客户端限制</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 防封策略对比 -->
+            <div class="section">
+                <h2>防封策略对比</h2>
+
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th class="feature-col">防封措施</th>
+                            <th>New API</th>
+                            <th>Claude Relay Service</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="feature-col">代理支持</td>
+                            <td>
+                                <span class="tag tag-partial">部分支持</span>
+                                <p>支持通过环境变量配置全局代理（HTTP_PROXY、HTTPS_PROXY），所有渠道共享</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>支持为每个 Claude 账户配置独立的 HTTP/SOCKS5 代理，粒度更细</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">多Key管理</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 支持多 Key 模式（换行分隔或 JSON 数组）<br>
+                                    • 轮询（Polling）和随机（Random）两种模式<br>
+                                    • 单独管理每个 Key 的启用/禁用状态<br>
+                                    • Key 级别的自动禁用和故障转移
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 支持多账户管理和切换<br>
+                                    • OAuth 集成快捷添加账号池<br>
+                                    • 智能账户轮换和故障切换<br>
+                                    • 账户级别的健康检查
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">自动禁用</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • AutoBan 功能：根据错误类型自动禁用渠道<br>
+                                    • 多Key模式下单独禁用失败的 Key<br>
+                                    • 记录禁用原因和时间<br>
+                                    • 支持手动启用/禁用
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 自动检测账户状态<br>
+                                    • 智能故障转移<br>
+                                    • 账户健康监控
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">IP 策略</td>
+                            <td>
+                                <span class="tag tag-partial">依赖代理</span>
+                                <p>需要配置外部代理实现 IP 轮换和地区选择</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 推荐使用静态/住宅 IP 代理<br>
+                                    • 支持美国地区 IP 优化<br>
+                                    • 每个账户独立代理配置
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">请求分散</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 渠道权重配置<br>
+                                    • 多优先级调度<br>
+                                    • 加权随机选择<br>
+                                    • 自动负载均衡
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 多层负载均衡策略<br>
+                                    • 绑定账户优先<br>
+                                    • 粘性会话支持<br>
+                                    • 共享池负载均衡
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">客户端限制</td>
+                            <td>
+                                <span class="tag tag-not-supported">✗ 不支持</span>
+                                <p>无特定客户端识别和限制功能</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>可限制指定 API Key 只能由特定客户端（如官方 CLI）使用</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="highlight-box">
+                    <h4>🛡️ 防封策略总结</h4>
+                    <ul class="feature-list">
+                        <li><strong>New API</strong>：侧重于通用的渠道管理和自动故障处理，适合管理多种不同供应商的 API</li>
+                        <li><strong>Claude Relay Service</strong>：针对 Claude API 的防封策略更加细致，特别是在代理配置和账户管理方面</li>
+                        <li><strong>建议</strong>：如果主要使用 Claude，CRS 的防封策略更专业；如果需要管理多种 API，New API 的通用性更强</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 调度策略对比 -->
+            <div class="section">
+                <h2>调度策略对比</h2>
+
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th class="feature-col">调度机制</th>
+                            <th>New API</th>
+                            <th>Claude Relay Service</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="feature-col">负载均衡算法</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    <strong>加权随机算法：</strong><br>
+                                    • 基于渠道权重（Weight）的随机选择<br>
+                                    • 权重为 0 时不参与随机选择<br>
+                                    • 支持动态权重调整
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    <strong>多层负载均衡：</strong><br>
+                                    • 优先使用绑定账户<br>
+                                    • 粘性会话维护<br>
+                                    • 共享池智能分配
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">优先级调度</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 支持多级优先级（Priority）<br>
+                                    • 优先从高优先级渠道选择<br>
+                                    • 失败重试时自动降级到低优先级<br>
+                                    • 可按优先级分层管理渠道
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-partial">简单优先级</span>
+                                <p>
+                                    • 绑定账户优先<br>
+                                    • 基于账户状态的优先级<br>
+                                    • 无复杂的多级优先级系统
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">渠道分组</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 支持自定义渠道分组（Group）<br>
+                                    • 用户/Token 可绑定特定分组<br>
+                                    • Auto 模式自动选择可用分组<br>
+                                    • 分组可以逗号分隔配置多个
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-not-supported">✗ 不支持</span>
+                                <p>无渠道分组概念，统一管理所有账户</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">多Key轮询</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • Polling 模式：顺序轮询所有启用的 Key<br>
+                                    • Random 模式：随机选择启用的 Key<br>
+                                    • 线程安全的轮询索引管理<br>
+                                    • 自动跳过已禁用的 Key
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 支持账户轮换<br>
+                                    • 智能账户选择<br>
+                                    • 粘性会话保持
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">失败重试</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 可配置重试次数（通用设置）<br>
+                                    • 重试时自动选择其他渠道<br>
+                                    • 按优先级递减重试<br>
+                                    • 支持跳过重试标记
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 自动故障转移<br>
+                                    • 切换到其他健康账户<br>
+                                    • 账户健康检查
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">粘性会话</td>
+                            <td>
+                                <span class="tag tag-not-supported">✗ 不支持</span>
+                                <p>每次请求独立选择渠道，无会话保持</p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 维护会话到账户的映射<br>
+                                    • 保证同一会话使用同一账户<br>
+                                    • 适合需要上下文的场景
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">响应时间优化</td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 记录渠道响应时间<br>
+                                    • 定期测试渠道可用性<br>
+                                    • 可根据响应时间优化选择（需自行实现）
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-partial">基础支持</span>
+                                <p>账户健康检查，无明确的响应时间优化</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="highlight-box">
+                    <h4>🎯 调度策略总结</h4>
+                    <ul class="feature-list">
+                        <li><strong>New API</strong>：提供更复杂和灵活的调度策略，支持优先级、权重、分组等多维度调度</li>
+                        <li><strong>Claude Relay Service</strong>：调度策略更简单但针对性强，粘性会话特性对 Claude API 很实用</li>
+                        <li><strong>适用场景</strong>：New API 适合需要精细控制的大规模部署；CRS 适合中小规模的 Claude API 使用</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 限流机制对比 -->
+            <div class="section">
+                <h2>限流机制对比</h2>
+
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th class="feature-col">限流特性</th>
+                            <th>New API</th>
+                            <th>Claude Relay Service</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="feature-col">用户级限流</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 支持按用户/Token 限流<br>
+                                    • RPM（每分钟请求数）限制<br>
+                                    • TPM（每分钟 Token 数）限制<br>
+                                    • 自定义限流时间窗口
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 基于 API Key 的限流<br>
+                                    • RPM/TPM 限制<br>
+                                    • 并发限制
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">模型级限流</td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • Token 可配置模型访问权限<br>
+                                    • 限制特定模型的访问<br>
+                                    • 按模型进行额度计算
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-partial">基础支持</span>
+                                <p>可通过 API Key 权限控制模型访问</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">并发控制</td>
+                            <td>
+                                <span class="tag tag-partial">基础支持</span>
+                                <p>
+                                    • 通过限流间接控制并发<br>
+                                    • 无直接的并发数限制配置
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 支持并发限制配置<br>
+                                    • 控制同时进行的请求数<br>
+                                    • 防止单一 Key 过载
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">限流算法</td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 滑动窗口算法<br>
+                                    • 内存缓存实现（InMemoryRateLimiter）<br>
+                                    • 支持 Redis 分布式限流
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 标准限流算法<br>
+                                    • 支持 RPM/TPM 计算<br>
+                                    • 实时限流检查
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">缓存机制</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 支持 Redis 缓存<br>
+                                    • 内存缓存模式<br>
+                                    • 缓存渠道信息、用户信息<br>
+                                    • 减少数据库查询压力
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 内置连接池<br>
+                                    • 缓存机制<br>
+                                    • 优化性能
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">配额管理</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 用户额度系统<br>
+                                    • Token 额度限制<br>
+                                    • 实时额度扣除<br>
+                                    • 额度统计和报表
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-partial">基础支持</span>
+                                <p>
+                                    • 使用量统计<br>
+                                    • 成本分析<br>
+                                    • 无内置额度系统
+                                </p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="highlight-box">
+                    <h4>⚡ 限流机制总结</h4>
+                    <ul class="feature-list">
+                        <li><strong>New API</strong>：提供完整的限流和配额管理体系，适合商业化运营</li>
+                        <li><strong>Claude Relay Service</strong>：限流功能实用但相对简单，足够个人和小团队使用</li>
+                        <li><strong>分布式场景</strong>：New API 支持 Redis 分布式限流，更适合多实例部署</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 账户管理对比 -->
+            <div class="section">
+                <h2>账户管理对比</h2>
+
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th class="feature-col">管理功能</th>
+                            <th>New API</th>
+                            <th>Claude Relay Service</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="feature-col">账户类型</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 多种渠道类型（30+）<br>
+                                    • 每个渠道支持多个 Key<br>
+                                    • 渠道分组管理<br>
+                                    • 渠道标签分类
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • Claude OAuth 账户<br>
+                                    • Claude Console 账户<br>
+                                    • 兼容 OpenAI/Gemini 账户<br>
+                                    • 统一账户管理
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">OAuth 集成</td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 支持多种 OAuth 登录<br>
+                                    • GitHub、LinuxDO、Telegram、OIDC<br>
+                                    • 主要用于用户登录
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 快捷添加 Claude 账户<br>
+                                    • OAuth 授权流程<br>
+                                    • 自动获取 Token<br>
+                                    • 简化账户添加过程
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">批量操作</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 批量添加渠道<br>
+                                    • 批量删除渠道<br>
+                                    • 批量启用/禁用<br>
+                                    • 按标签批量编辑
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-partial">基础支持</span>
+                                <p>
+                                    • 多账户管理<br>
+                                    • 批量配置代理<br>
+                                    • 批量状态查看
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">账户监控</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 渠道状态监控<br>
+                                    • 余额监控（部分渠道）<br>
+                                    • 响应时间统计<br>
+                                    • 使用额度统计<br>
+                                    • 定期测试渠道可用性
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 账户健康检查<br>
+                                    • 使用量统计<br>
+                                    • Token 消耗监控<br>
+                                    • 成本分析
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">自动化管理</td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 自动禁用失败渠道<br>
+                                    • 自动故障转移<br>
+                                    • 定期清理过期缓存
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 自动账户切换<br>
+                                    • 故障自动转移<br>
+                                    • 智能负载均衡
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">Key 绑定</td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • Token 可绑定特定渠道<br>
+                                    • 支持渠道 ID 指定<br>
+                                    • 强制使用指定渠道
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • API Key 绑定特定账户<br>
+                                    • 专属账户分配<br>
+                                    • 优先使用绑定账户
+                                </p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 监控与日志对比 -->
+            <div class="section">
+                <h2>监控与日志对比</h2>
+
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th class="feature-col">监控功能</th>
+                            <th>New API</th>
+                            <th>Claude Relay Service</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="feature-col">仪表板</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 完整的数据看板<br>
+                                    • 请求统计图表<br>
+                                    • 额度消耗趋势<br>
+                                    • 模型使用分布<br>
+                                    • 渠道性能对比
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • Web 管理界面<br>
+                                    • 使用量可视化<br>
+                                    • Token 消耗统计<br>
+                                    • 成本分析图表
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">请求日志</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 详细的请求日志<br>
+                                    • 日志查询和过滤<br>
+                                    • 日志导出<br>
+                                    • 错误日志专门记录<br>
+                                    • 日志保留时间配置
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-partial">基础日志</span>
+                                <p>
+                                    • 基本请求日志<br>
+                                    • 错误记录<br>
+                                    • 调试信息
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">统计分析</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 多维度统计<br>
+                                    • 用户使用统计<br>
+                                    • 渠道使用统计<br>
+                                    • 模型调用统计<br>
+                                    • 费用统计报表
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • Token 使用统计<br>
+                                    • 成本分析<br>
+                                    • 账户使用情况<br>
+                                    • API Key 统计
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">告警通知</td>
+                            <td>
+                                <span class="tag tag-partial">部分支持</span>
+                                <p>
+                                    • 邮件通知（需配置）<br>
+                                    • Telegram 通知<br>
+                                    • 主要用于用户通知
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-not-supported">✗ 不支持</span>
+                                <p>无内置告警功能</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">性能监控</td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 响应时间统计<br>
+                                    • 渠道性能对比<br>
+                                    • 系统性能指标<br>
+                                    • 支持 pprof 性能分析
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-partial">基础监控</span>
+                                <p>
+                                    • 基本性能监控<br>
+                                    • 响应时间记录
+                                </p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 部署与架构对比 -->
+            <div class="section">
+                <h2>部署与技术架构对比</h2>
+
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th class="feature-col">技术特性</th>
+                            <th>New API</th>
+                            <th>Claude Relay Service</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="feature-col">技术栈</td>
+                            <td>
+                                <span class="tag tag-supported">Go + React</span>
+                                <p>
+                                    • 后端：Go (Gin 框架)<br>
+                                    • 前端：React<br>
+                                    • 数据库：SQLite / MySQL / PostgreSQL<br>
+                                    • 缓存：Redis / 内存
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">Node.js / TypeScript</span>
+                                <p>
+                                    • Node.js / TypeScript<br>
+                                    • 支持 Cloudflare Workers<br>
+                                    • 数据库：灵活配置<br>
+                                    • 边缘计算部署
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">部署方式</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • Docker / Docker Compose<br>
+                                    • 宝塔面板一键安装<br>
+                                    • 手动编译部署<br>
+                                    • Systemd 服务<br>
+                                    • 多平台支持（Linux、Windows、macOS）
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • Docker 部署<br>
+                                    • 脚本一键部署<br>
+                                    • Cloudflare Workers<br>
+                                    • 跨平台支持
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">数据库支持</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • SQLite（默认）<br>
+                                    • MySQL (≥5.7.8)<br>
+                                    • PostgreSQL (≥9.6)<br>
+                                    • 自动迁移和升级
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 灵活的存储后端<br>
+                                    • 支持多种数据库<br>
+                                    • 轻量级配置
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">高可用性</td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 多实例部署<br>
+                                    • 需配置 Redis 和共享数据库<br>
+                                    • SESSION_SECRET 同步<br>
+                                    • 负载均衡支持
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 边缘计算部署<br>
+                                    • Cloudflare Workers 高可用<br>
+                                    • 全球分布式部署
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">扩展性</td>
+                            <td>
+                                <span class="tag tag-excellent">优秀</span>
+                                <p>
+                                    • 模块化设计<br>
+                                    • 易于添加新渠道类型<br>
+                                    • 插件式架构<br>
+                                    • 完整的 API 接口
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 可扩展架构<br>
+                                    • 支持自定义配置<br>
+                                    • API 扩展
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">性能优化</td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • Go 语言高性能<br>
+                                    • 连接池管理<br>
+                                    • 缓存机制<br>
+                                    • 批量更新优化<br>
+                                    • pprof 性能分析
+                                </p>
+                            </td>
+                            <td>
+                                <span class="tag tag-supported">✓ 支持</span>
+                                <p>
+                                    • 连接池<br>
+                                    • 缓存优化<br>
+                                    • 边缘计算性能<br>
+                                    • 代理优化
+                                </p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 适用场景对比 -->
+            <div class="section">
+                <h2>适用场景分析</h2>
+
+                <div class="project-card">
+                    <h3>🎯 New API 适用场景</h3>
+                    <ul class="feature-list">
+                        <li><strong>商业化运营</strong>：需要完整的用户系统、计费系统、额度管理的场景</li>
+                        <li><strong>多供应商管理</strong>：需要统一管理多个 AI 供应商 API 的企业或开发者</li>
+                        <li><strong>大规模部署</strong>：需要精细的调度策略、优先级管理、权重配置的大型系统</li>
+                        <li><strong>团队协作</strong>：多用户、多角色、分组管理的团队使用场景</li>
+                        <li><strong>数据分析</strong>：需要详细的统计报表、日志分析、成本核算的场景</li>
+                        <li><strong>高定制化</strong>：需要模型映射、参数覆盖、格式转换等高级功能的场景</li>
+                    </ul>
+                </div>
+
+                <div class="project-card">
+                    <h3>⚡ Claude Relay Service 适用场景</h3>
+                    <ul class="feature-list">
+                        <li><strong>Claude 专用</strong>：主要使用 Claude API，需要针对性防封策略的场景</li>
+                        <li><strong>个人或小团队</strong>：拼车共享 Claude 订阅，分摊成本的个人和小团队</li>
+                        <li><strong>Claude Code 镜像</strong>：搭建自己的 Claude Code 服务，实现更高效的使用</li>
+                        <li><strong>代理优化</strong>：需要为不同账户配置独立代理的场景</li>
+                        <li><strong>快速部署</strong>：需要快速搭建 Claude 中转服务，无需复杂配置</li>
+                        <li><strong>边缘计算</strong>：利用 Cloudflare Workers 实现全球分布式部署</li>
+                        <li><strong>粘性会话</strong>：需要保持会话上下文的应用场景</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 功能对比评分 -->
+            <div class="section">
+                <h2>综合评分对比</h2>
+
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th class="feature-col">评分维度</th>
+                            <th>New API</th>
+                            <th>Claude Relay Service</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="feature-col">功能完整性</td>
+                            <td><span class="score-badge score-high">9.5</span> 功能全面，覆盖商业化运营所需的所有模块</td>
+                            <td><span class="score-badge score-medium">7.5</span> 专注 Claude API，功能针对性强但相对简单</td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">防封能力</td>
+                            <td><span class="score-badge score-medium">7.5</span> 通用防封策略，依赖外部代理配置</td>
+                            <td><span class="score-badge score-high">9.0</span> 针对 Claude 优化，独立代理配置，防封策略更细致</td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">调度灵活性</td>
+                            <td><span class="score-badge score-high">9.5</span> 多维度调度（优先级、权重、分组），非常灵活</td>
+                            <td><span class="score-badge score-medium">7.0</span> 调度策略简单但实用，适合中小规模</td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">限流机制</td>
+                            <td><span class="score-badge score-high">9.0</span> 完整的限流和配额管理体系</td>
+                            <td><span class="score-badge score-medium">8.0</span> 实用的限流功能，包含并发控制</td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">监控管理</td>
+                            <td><span class="score-badge score-high">9.5</span> 完整的监控、日志、统计分析系统</td>
+                            <td><span class="score-badge score-medium">7.5</span> 基本的监控和统计功能</td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">部署便捷性</td>
+                            <td><span class="score-badge score-high">9.0</span> 多种部署方式，文档详细</td>
+                            <td><span class="score-badge score-high">9.0</span> Docker 和 Workers 部署，简单快捷</td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">学习成本</td>
+                            <td><span class="score-badge score-medium">7.0</span> 功能多，需要学习时间</td>
+                            <td><span class="score-badge score-high">8.5</span> 功能简洁，上手快</td>
+                        </tr>
+                        <tr>
+                            <td class="feature-col">社区活跃度</td>
+                            <td><span class="score-badge score-high">9.0</span> 活跃的社区，频繁更新</td>
+                            <td><span class="score-badge score-high">8.5</span> 活跃的社区，持续维护</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 总结与建议 -->
+            <div class="summary">
+                <h3>📊 总结与建议</h3>
+
+                <div style="margin-top: 25px;">
+                    <h4 style="color: #2d3436; margin-bottom: 15px;">🎯 选择建议</h4>
+
+                    <p style="margin-bottom: 20px;"><strong>选择 New API，如果你：</strong></p>
+                    <ul class="feature-list" style="margin-bottom: 25px;">
+                        <li>需要管理多个 AI 供应商的 API（OpenAI、Claude、Gemini、国产模型等）</li>
+                        <li>需要完整的商业化运营功能（用户系统、计费、充值、兑换码）</li>
+                        <li>需要精细的调度控制（优先级、权重、分组、多Key 轮询）</li>
+                        <li>需要详细的监控、日志和统计分析</li>
+                        <li>有大规模部署和高可用需求</li>
+                        <li>需要团队协作和多用户管理</li>
+                    </ul>
+
+                    <p style="margin-bottom: 20px;"><strong>选择 Claude Relay Service，如果你：</strong></p>
+                    <ul class="feature-list" style="margin-bottom: 25px;">
+                        <li>主要使用 Claude API，需要针对性的防封策略</li>
+                        <li>需要为不同账户配置独立的代理（HTTP/SOCKS5）</li>
+                        <li>个人或小团队拼车共享 Claude 订阅</li>
+                        <li>需要快速搭建 Claude Code 镜像服务</li>
+                        <li>偏好简单易用的解决方案</li>
+                        <li>需要粘性会话支持</li>
+                        <li>希望使用边缘计算部署（Cloudflare Workers）</li>
+                    </ul>
+
+                    <h4 style="color: #2d3436; margin-bottom: 15px;">💡 核心差异</h4>
+                    <ul class="feature-list">
+                        <li><strong>定位差异</strong>：New API 是通用型大模型网关，CRS 是 Claude 专用中转服务</li>
+                        <li><strong>功能范围</strong>：New API 功能更全面，CRS 功能更专注</li>
+                        <li><strong>防封策略</strong>：CRS 针对 Claude 的防封策略更细致，支持独立代理配置</li>
+                        <li><strong>调度复杂度</strong>：New API 提供更复杂灵活的调度策略</li>
+                        <li><strong>商业化</strong>：New API 提供完整的商业化运营功能，CRS 更适合个人和小团队</li>
+                        <li><strong>学习成本</strong>：CRS 更简单易用，New API 功能多但学习成本略高</li>
+                    </ul>
+
+                    <h4 style="color: #2d3436; margin-bottom: 15px; margin-top: 25px;">🔮 未来发展</h4>
+                    <p style="line-height: 1.8;">
+                        <strong>New API</strong> 作为通用型大模型网关，随着 AI 模型的不断增多，其价值会越来越大。适合需要统一管理多个 AI 服务的企业和开发者。<br><br>
+                        <strong>Claude Relay Service</strong> 作为 Claude 专用服务，随着 Claude 的普及和 Claude Code 的流行，在个人和小团队市场有很大潜力。
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p><strong>报告生成</strong>：Claude Code AI 分析系统</p>
+            <p>基于项目源码和文档综合分析</p>
+            <p style="margin-top: 10px;">
+                <a href="https://github.com/Calcium-Ion/new-api" target="_blank">New API GitHub</a> |
+                <a href="https://github.com/Wei-Shaw/claude-relay-service" target="_blank">Claude Relay Service GitHub</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
