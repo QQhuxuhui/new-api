@@ -97,7 +97,52 @@ func Distribute() func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 					}
 				}
-				channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, 0)
+
+				// Check if sticky session is enabled
+				stickySessionEnabled := common.GetContextKeyBool(c, constant.ContextKeyStickySession)
+
+				if stickySessionEnabled {
+					// Try to use sticky session
+					userId := getSessionUserId(c)
+					sessionManager := &service.SessionManager{}
+
+					// Try to get bound channel
+					if channelId, exists := sessionManager.GetBoundChannel(userId, modelRequest.Model, usingGroup); exists {
+						// Use bound channel
+						channel, err = model.GetChannelById(channelId, true)
+
+						if err == nil && channel.Status == common.ChannelStatusEnabled {
+							// Channel is healthy, use it
+							common.SetContextKey(c, constant.ContextKeyStickySessionUsed, true)
+							setAutoGroupContext(c, usingGroup, channel)
+
+							// Update last used time (extend TTL)
+							ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
+							sessionManager.UpdateLastUsed(userId, modelRequest.Model, usingGroup, channelId, time.Duration(ttl)*time.Second)
+						} else {
+							// Channel failed, unbind and re-select
+							sessionManager.UnbindChannel(userId, modelRequest.Model, usingGroup)
+							channel = nil
+						}
+					}
+
+					// No binding or channel failed, select new channel
+					if channel == nil {
+						channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, 0)
+						if err == nil && channel != nil {
+							// Bind new channel
+							ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
+							sessionManager.BindChannel(userId, modelRequest.Model, usingGroup, channel.Id, time.Duration(ttl)*time.Second)
+							common.SetContextKey(c, constant.ContextKeyStickySessionNew, true)
+						}
+					}
+				} else {
+					// Original logic: random selection
+					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, 0)
+				}
+				if channel != nil {
+					setAutoGroupContext(c, usingGroup, channel)
+				}
 				if err != nil {
 					showGroup := usingGroup
 					if usingGroup == "auto" {
@@ -122,6 +167,31 @@ func Distribute() func(c *gin.Context) {
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 		c.Next()
 	}
+}
+
+// getSessionUserId extracts session identifier from request
+// Priority: OpenAI API 'user' field > Token ID fallback
+func getSessionUserId(c *gin.Context) string {
+	// Try to get user field from request body
+	var request dto.GeneralOpenAIRequest
+	if err := common.UnmarshalBodyReusable(c, &request); err == nil && request.User != "" {
+		return request.User
+	}
+
+	// Fallback to token ID
+	tokenId := common.GetContextKeyInt(c, constant.ContextKeyTokenId)
+	return fmt.Sprintf("token_%d", tokenId)
+}
+
+// setAutoGroupContext ensures downstream pricing/quota logic knows the actual group when 'auto' was requested.
+func setAutoGroupContext(c *gin.Context, requestedGroup string, channel *model.Channel) {
+	if requestedGroup != "auto" || channel == nil {
+		return
+	}
+	if channel.Group == "" {
+		return
+	}
+	c.Set("auto_group", channel.Group)
 }
 
 // getModelFromRequest 从请求中读取模型信息
@@ -157,7 +227,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			}
 			midjourneyModel, mjErr, success := service.GetMjRequestModel(relayMode, &midjourneyRequest)
 			if mjErr != nil {
-				return nil, false, fmt.Errorf(mjErr.Description)
+				return nil, false, errors.New(mjErr.Description)
 			}
 			if midjourneyModel == "" {
 				if !success {
