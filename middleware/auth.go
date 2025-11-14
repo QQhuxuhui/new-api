@@ -249,6 +249,29 @@ func TokenAuth() func(c *gin.Context) {
 			}
 		}
 
+		// Check client restriction
+		if token.ClientRestrictionEnabled {
+			userAgent := c.Request.Header.Get("User-Agent")
+
+			if !token.IsClientAllowed(userAgent) {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "Client not allowed. This API key is restricted to specific clients.")
+				return
+			}
+
+			// Log User-Agent for monitoring
+			common.SetContextKey(c, constant.ContextKeyUserAgent, userAgent)
+		}
+
+		// Set sticky session config if enabled
+		if token.StickySession {
+			common.SetContextKey(c, constant.ContextKeyStickySession, true)
+			ttl := token.StickySessionTTL
+			if ttl <= 0 {
+				ttl = 3600 // Default to 1 hour
+			}
+			common.SetContextKey(c, constant.ContextKeyStickySessionTTL, ttl)
+		}
+
 		userCache, err := model.GetUserCache(token.UserId)
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusInternalServerError, err.Error())

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -105,7 +106,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 		return
 	}
 	if !sunoResponse.IsSuccess() {
-		taskErr = service.TaskErrorWrapper(fmt.Errorf(sunoResponse.Message), sunoResponse.Code, http.StatusInternalServerError)
+		taskErr = service.TaskErrorWrapper(errors.New(sunoResponse.Message), sunoResponse.Code, http.StatusInternalServerError)
 		return
 	}
 
