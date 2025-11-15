@@ -1,0 +1,1745 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New-API 请求流程完整分析</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .subtitle {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        h2 {
+            color: #667eea;
+            font-size: 2em;
+            margin: 40px 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        h3 {
+            color: #764ba2;
+            font-size: 1.5em;
+            margin: 30px 0 15px 0;
+        }
+
+        .flow-diagram {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            padding: 30px;
+            margin: 30px 0;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .flow-step {
+            background: white;
+            border-left: 5px solid #667eea;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+            position: relative;
+        }
+
+        .flow-step:hover {
+            transform: translateX(10px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .flow-step::before {
+            content: attr(data-step);
+            position: absolute;
+            left: -15px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #667eea;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+
+        .flow-step h4 {
+            color: #667eea;
+            font-size: 1.3em;
+            margin-bottom: 10px;
+        }
+
+        .flow-step-detail {
+            margin-left: 20px;
+            color: #555;
+        }
+
+        .flow-arrow {
+            text-align: center;
+            color: #667eea;
+            font-size: 2em;
+            margin: 10px 0;
+        }
+
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .config-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s;
+        }
+
+        .config-card:hover {
+            transform: translateY(-10px);
+        }
+
+        .config-card h4 {
+            font-size: 1.4em;
+            margin-bottom: 15px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+            padding-bottom: 10px;
+        }
+
+        .config-item {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px;
+            margin: 10px 0;
+            backdrop-filter: blur(10px);
+        }
+
+        .config-item strong {
+            color: #ffd700;
+        }
+
+        .feature-box {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            margin: 20px 0;
+            border: 2px solid #e9ecef;
+        }
+
+        .feature-box h4 {
+            color: #667eea;
+            font-size: 1.3em;
+            margin-bottom: 15px;
+        }
+
+        .highlight {
+            background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 5px solid #fdcb6e;
+        }
+
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 10px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+
+        .architecture-diagram {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin: 30px 0;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .layer {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 10px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+
+        .layer h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .component-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        .component {
+            background: white;
+            color: #667eea;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s;
+        }
+
+        .component:hover {
+            background: #667eea;
+            color: white;
+            transform: scale(1.05);
+        }
+
+        .middleware-chain {
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            margin: 30px 0;
+        }
+
+        .middleware-item {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 50px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            margin: 10px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .middleware-item:hover {
+            transform: scale(1.1);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .arrow-connector {
+            font-size: 2em;
+            color: #667eea;
+            margin: 0 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        .note {
+            background: #e7f3ff;
+            border-left: 5px solid #2196F3;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .warning {
+            background: #fff3e0;
+            border-left: 5px solid #ff9800;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .success {
+            background: #e8f5e9;
+            border-left: 5px solid #4caf50;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        footer {
+            background: #2d2d2d;
+            color: white;
+            text-align: center;
+            padding: 30px;
+            margin-top: 40px;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2em;
+            }
+
+            .config-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .middleware-chain {
+                flex-direction: column;
+            }
+
+            .arrow-connector {
+                transform: rotate(90deg);
+            }
+        }
+
+        .sticky-toc {
+            position: sticky;
+            top: 20px;
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .sticky-toc h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .sticky-toc ul {
+            list-style: none;
+        }
+
+        .sticky-toc li {
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .sticky-toc a {
+            color: #667eea;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .sticky-toc a:hover {
+            color: #764ba2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 New-API 请求流程完整分析</h1>
+            <p class="subtitle">从客户端到上游 API 的完整技术剖析</p>
+        </header>
+
+        <div class="content">
+            <!-- 目录 -->
+            <div class="sticky-toc">
+                <h3>📑 目录导航</h3>
+                <ul>
+                    <li><a href="#overview">1. 系统概览</a></li>
+                    <li><a href="#architecture">2. 架构层次</a></li>
+                    <li><a href="#flow">3. 请求处理流程</a></li>
+                    <li><a href="#middleware">4. 中间件链</a></li>
+                    <li><a href="#channel-config">5. 渠道配置</a></li>
+                    <li><a href="#token-config">6. Token 配置</a></li>
+                    <li><a href="#features">7. 核心特性</a></li>
+                    <li><a href="#best-practices">8. 最佳实践</a></li>
+                </ul>
+            </div>
+
+            <!-- 1. 系统概览 -->
+            <section id="overview">
+                <h2>🎯 1. 系统概览</h2>
+
+                <div class="highlight">
+                    <h4>📌 New-API 是什么？</h4>
+                    <p><strong>New-API</strong> 是一个强大的 AI API 代理和管理系统，支持多种 AI 服务提供商的统一接入和管理。它提供了完善的认证、限流、负载均衡、配额管理等功能。</p>
+                </div>
+
+                <div class="config-grid">
+                    <div class="config-card">
+                        <h4>🎨 核心功能</h4>
+                        <div class="config-item">✓ 多渠道管理（38+ AI 服务商）</div>
+                        <div class="config-item">✓ Token 认证与权限控制</div>
+                        <div class="config-item">✓ 智能负载均衡</div>
+                        <div class="config-item">✓ 配额管理与计费</div>
+                        <div class="config-item">✓ 请求限流与重试</div>
+                    </div>
+
+                    <div class="config-card">
+                        <h4>🔧 技术特点</h4>
+                        <div class="config-item">✓ 中间件架构设计</div>
+                        <div class="config-item">✓ 适配器模式支持多渠道</div>
+                        <div class="config-item">✓ Redis + 内存双层缓存</div>
+                        <div class="config-item">✓ 并发安全的多 Key 管理</div>
+                        <div class="config-item">✓ 粘性会话支持</div>
+                    </div>
+
+                    <div class="config-card">
+                        <h4>🌟 支持的服务商</h4>
+                        <div class="config-item">• OpenAI / Azure OpenAI</div>
+                        <div class="config-item">• Anthropic Claude</div>
+                        <div class="config-item">• Google Gemini</div>
+                        <div class="config-item">• 阿里云通义千问</div>
+                        <div class="config-item">• Midjourney / Suno</div>
+                        <div class="config-item">...及其他 30+ 服务商</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. 架构层次 -->
+            <section id="architecture">
+                <h2>🏗️ 2. 系统架构层次</h2>
+
+                <div class="architecture-diagram">
+                    <div class="layer">
+                        <h4>🌐 路由层 (Router Layer)</h4>
+                        <div class="component-list">
+                            <span class="component">relay-router.go</span>
+                            <span class="component">api-router.go</span>
+                        </div>
+                        <p style="margin-top: 15px; color: #666;">负责路由匹配、中间件注册和请求分发</p>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="layer">
+                        <h4>🛡️ 中间件层 (Middleware Layer)</h4>
+                        <div class="component-list">
+                            <span class="component">CORS</span>
+                            <span class="component">Stats</span>
+                            <span class="component">Auth</span>
+                            <span class="component">RateLimit</span>
+                            <span class="component">Distributor</span>
+                        </div>
+                        <p style="margin-top: 15px; color: #666;">认证、限流、统计、渠道分配</p>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="layer">
+                        <h4>🎮 控制器层 (Controller Layer)</h4>
+                        <div class="component-list">
+                            <span class="component">relay.go</span>
+                            <span class="component">channel.go</span>
+                            <span class="component">token.go</span>
+                        </div>
+                        <p style="margin-top: 15px; color: #666;">业务逻辑处理、请求验证、重试控制</p>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="layer">
+                        <h4>🔌 转发层 (Relay Layer)</h4>
+                        <div class="component-list">
+                            <span class="component">relay_adaptor.go</span>
+                            <span class="component">openai.Adaptor</span>
+                            <span class="component">claude.Adaptor</span>
+                            <span class="component">gemini.Adaptor</span>
+                        </div>
+                        <p style="margin-top: 15px; color: #666;">适配器模式实现多渠道支持</p>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="layer">
+                        <h4>💼 服务层 (Service Layer)</h4>
+                        <div class="component-list">
+                            <span class="component">channel_select.go</span>
+                            <span class="component">quota.go</span>
+                            <span class="component">session.go</span>
+                        </div>
+                        <p style="margin-top: 15px; color: #666;">渠道选择、配额管理、会话管理</p>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="layer">
+                        <h4>📊 数据层 (Model Layer)</h4>
+                        <div class="component-list">
+                            <span class="component">channel.go</span>
+                            <span class="component">token.go</span>
+                            <span class="component">user.go</span>
+                            <span class="component">log.go</span>
+                        </div>
+                        <p style="margin-top: 15px; color: #666;">数据模型、缓存管理、数据库操作</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. 请求处理流程 -->
+            <section id="flow">
+                <h2>🔄 3. 完整请求处理流程</h2>
+
+                <div class="flow-diagram">
+                    <div class="flow-step" data-step="1">
+                        <h4>客户端发起请求</h4>
+                        <div class="flow-step-detail">
+                            <p><strong>支持的协议：</strong>HTTP/HTTPS, WebSocket</p>
+                            <p><strong>请求格式：</strong></p>
+                            <ul>
+                                <li>OpenAI 格式：<code>/v1/chat/completions</code></li>
+                                <li>Claude 格式：<code>/v1/messages</code></li>
+                                <li>Gemini 格式：<code>/v1beta/models/xxx:generateContent</code></li>
+                                <li>实时 API：<code>/v1/realtime</code></li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="flow-step" data-step="2">
+                        <h4>路由层 - 路由匹配</h4>
+                        <div class="flow-step-detail">
+                            <p><strong>文件：</strong><code>router/relay-router.go</code></p>
+                            <p><strong>功能：</strong></p>
+                            <ul>
+                                <li>根据请求路径匹配对应的处理器</li>
+                                <li>区分不同的 API 格式（OpenAI/Claude/Gemini）</li>
+                                <li>应用全局中间件链</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="flow-step" data-step="3">
+                        <h4>中间件 - Token 认证 (TokenAuth)</h4>
+                        <div class="flow-step-detail">
+                            <p><strong>文件：</strong><code>middleware/auth.go</code></p>
+                            <p><strong>认证流程：</strong></p>
+                            <ol>
+                                <li>多协议提取 Token：
+                                    <ul>
+                                        <li>Bearer Token（HTTP Authorization header）</li>
+                                        <li>WebSocket（Sec-WebSocket-Protocol）</li>
+                                        <li>Anthropic（x-api-key header）</li>
+                                        <li>Gemini（query parameter 或 x-goog-api-key）</li>
+                                    </ul>
+                                </li>
+                                <li>Token 验证：
+                                    <ul>
+                                        <li>检查 Token 状态（enabled/exhausted/expired）</li>
+                                        <li>验证过期时间</li>
+                                        <li>验证剩余配额</li>
+                                    </ul>
+                                </li>
+                                <li>IP 白名单检查（如果配置）</li>
+                                <li><strong>客户端限制检查</strong>（新特性）：
+                                    <ul>
+                                        <li>提取 User-Agent</li>
+                                        <li>支持精确匹配、通配符、正则表达式</li>
+                                        <li>防止 API Key 滥用</li>
+                                    </ul>
+                                </li>
+                                <li><strong>粘性会话配置</strong>（新特性）：
+                                    <ul>
+                                        <li>如果 Token 启用粘性会话</li>
+                                        <li>设置粘性会话标志和 TTL</li>
+                                    </ul>
+                                </li>
+                                <li>用户权限验证</li>
+                                <li>设置请求上下文</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="flow-step" data-step="4">
+                        <h4>中间件 - 模型限流 (ModelRequestRateLimit)</h4>
+                        <div class="flow-step-detail">
+                            <p><strong>文件：</strong><code>middleware/model-rate-limit.go</code></p>
+                            <p><strong>功能：</strong></p>
+                            <ul>
+                                <li>基于模型的请求速率限制</li>
+                                <li>使用 Token Bucket 或 Leaky Bucket 算法</li>
+                                <li>防止单个用户过度消耗资源</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="flow-step" data-step="5">
+                        <h4>中间件 - 渠道分配 (Distribute)</h4>
+                        <div class="flow-step-detail">
+                            <p><strong>文件：</strong><code>middleware/distributor.go</code></p>
+                            <p><strong>分配逻辑：</strong></p>
+                            <ol>
+                                <li><strong>解析请求获取模型名称</strong></li>
+                                <li><strong>Token 模型权限验证</strong>（如果启用）</li>
+                                <li><strong>渠道选择策略：</strong>
+                                    <div style="margin-top: 10px; padding: 15px; background: rgba(255,255,255,0.5); border-radius: 5px;">
+                                        <p><strong>🔄 粘性会话模式（Sticky Session）：</strong></p>
+                                        <ul>
+                                            <li>获取会话用户 ID（userId/sessionId）</li>
+                                            <li>查询是否已绑定渠道：<code>Redis: sticky_session:{userId}:{model}:{group}</code></li>
+                                            <li>如果存在绑定：
+                                                <ul>
+                                                    <li>验证渠道健康状态</li>
+                                                    <li>健康 ✅ → 使用绑定渠道，更新 TTL</li>
+                                                    <li>失效 ❌ → 解绑，重新选择</li>
+                                                </ul>
+                                            </li>
+                                            <li>如果不存在绑定：
+                                                <ul>
+                                                    <li>调用渠道选择算法</li>
+                                                    <li>绑定新渠道到会话</li>
+                                                    <li>设置 TTL（默认 1 小时）</li>
+                                                </ul>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                    <div style="margin-top: 10px; padding: 15px; background: rgba(255,255,255,0.5); border-radius: 5px;">
+                                        <p><strong>🎲 普通模式（Random Selection）：</strong></p>
+                                        <ul>
+                                            <li>调用 <code>CacheGetRandomSatisfiedChannel(group, model, 0)</code></li>
+                                            <li>使用加权随机算法选择渠道</li>
+                                        </ul>
+                                    </div>
+                                </li>
+                                <li><strong>获取渠道 Key</strong>（支持多 Key 管理）：
+                                    <ul>
+                                        <li>Random 模式：随机选择可用 Key</li>
+                                        <li>Polling 模式：轮询选择可用 Key</li>
+                                        <li>使用渠道级别锁保证并发安全</li>
+                                    </ul>
+                                </li>
+                                <li><strong>设置渠道上下文</strong>到请求</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="flow-step" data-step="6">
+                        <h4>控制器 - 转发处理 (Relay)</h4>
+                        <div class="flow-step-detail">
+                            <p><strong>文件：</strong><code>controller/relay.go</code></p>
+                            <p><strong>处理流程：</strong></p>
+                            <ol>
+                                <li><strong>请求验证和解析</strong></li>
+                                <li><strong>敏感词检测</strong>（如果启用）</li>
+                                <li><strong>Token 计数</strong>（提示词 token 数）</li>
+                                <li><strong>价格计算</strong>（基于模型和 token 数）</li>
+                                <li><strong>预扣费</strong>（从用户配额中预扣）</li>
+                                <li><strong>重试循环</strong>（最多 RetryTimes 次）：
+                                    <ul>
+                                        <li>首次：使用 Distribute 选择的渠道</li>
+                                        <li>重试：重新选择渠道（降级到低优先级）</li>
+                                        <li>调用适配器处理请求</li>
+                                        <li>成功 → 返回响应</li>
+                                        <li>失败 → 错误处理，判断是否重试</li>
+                                    </ul>
+                                </li>
+                                <li><strong>配额结算</strong>（成功）或 <strong>退款</strong>（失败）</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="flow-step" data-step="7">
+                        <h4>转发层 - 适配器处理</h4>
+                        <div class="flow-step-detail">
+                            <p><strong>文件：</strong><code>relay/relay_adaptor.go</code></p>
+                            <p><strong>适配器流程：</strong></p>
+                            <ol>
+                                <li><strong>获取适配器</strong>：
+                                    <code>adaptor := GetAdaptor(channelType)</code>
+                                </li>
+                                <li><strong>初始化</strong>：
+                                    <code>adaptor.Init(relayInfo)</code>
+                                </li>
+                                <li><strong>请求转换</strong>：
+                                    <ul>
+                                        <li>模型映射（model_mapping）</li>
+                                        <li>参数覆盖（param_override）</li>
+                                        <li>格式转换（OpenAI ↔ Claude ↔ Gemini）</li>
+                                    </ul>
+                                </li>
+                                <li><strong>构建请求 URL</strong>（支持自定义 BaseURL）</li>
+                                <li><strong>设置请求头</strong>：
+                                    <ul>
+                                        <li>认证信息（API Key / Organization）</li>
+                                        <li>请求头覆盖（header_override）</li>
+                                    </ul>
+                                </li>
+                                <li><strong>发送请求</strong>到上游 API</li>
+                                <li><strong>处理响应</strong>（流式/非流式）</li>
+                                <li><strong>解析 usage</strong>（token 消耗统计）</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="flow-step" data-step="8">
+                        <h4>上游 API 服务商</h4>
+                        <div class="flow-step-detail">
+                            <p><strong>支持的服务商：</strong></p>
+                            <div class="component-list" style="justify-content: flex-start; margin-top: 10px;">
+                                <span class="component">OpenAI</span>
+                                <span class="component">Azure OpenAI</span>
+                                <span class="component">Anthropic Claude</span>
+                                <span class="component">Google Gemini</span>
+                                <span class="component">阿里通义</span>
+                                <span class="component">腾讯混元</span>
+                                <span class="component">百度文心</span>
+                                <span class="component">Midjourney</span>
+                                <span class="component">...更多</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="flow-step" data-step="9">
+                        <h4>响应处理与配额结算</h4>
+                        <div class="flow-step-detail">
+                            <p><strong>处理流程：</strong></p>
+                            <ol>
+                                <li><strong>响应返回</strong>（流式/非流式）</li>
+                                <li><strong>计算实际消耗</strong>（基于 usage）</li>
+                                <li><strong>配额结算</strong>：
+                                    <ul>
+                                        <li>扣除 Token 配额</li>
+                                        <li>扣除用户配额</li>
+                                        <li>更新渠道已用配额</li>
+                                    </ul>
+                                </li>
+                                <li><strong>记录日志</strong>（请求日志、错误日志）</li>
+                                <li><strong>更新统计</strong>（渠道响应时间等）</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow">⬇️</div>
+
+                    <div class="flow-step" data-step="10">
+                        <h4>客户端接收响应</h4>
+                        <div class="flow-step-detail">
+                            <p><strong>响应格式：</strong>统一的 OpenAI 格式（或原始格式）</p>
+                            <p><strong>响应类型：</strong></p>
+                            <ul>
+                                <li>流式响应（SSE: Server-Sent Events）</li>
+                                <li>非流式响应（JSON）</li>
+                                <li>WebSocket 响应（实时 API）</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. 中间件链 -->
+            <section id="middleware">
+                <h2>🛡️ 4. 中间件链详解</h2>
+
+                <div class="middleware-chain">
+                    <div class="middleware-item">CORS</div>
+                    <span class="arrow-connector">→</span>
+                    <div class="middleware-item">Decompress</div>
+                    <span class="arrow-connector">→</span>
+                    <div class="middleware-item">Stats</div>
+                    <span class="arrow-connector">→</span>
+                    <div class="middleware-item">TokenAuth</div>
+                    <span class="arrow-connector">→</span>
+                    <div class="middleware-item">RateLimit</div>
+                    <span class="arrow-connector">→</span>
+                    <div class="middleware-item">Distribute</div>
+                </div>
+
+                <div class="config-grid">
+                    <div class="config-card">
+                        <h4>🔐 TokenAuth 中间件</h4>
+                        <div class="config-item"><strong>文件：</strong> middleware/auth.go</div>
+                        <div class="config-item"><strong>功能：</strong>
+                            <ul style="margin-top: 10px;">
+                                <li>多协议 Token 提取</li>
+                                <li>Token 状态验证</li>
+                                <li>IP 白名单检查</li>
+                                <li>客户端限制（User-Agent）</li>
+                                <li>粘性会话配置</li>
+                                <li>用户权限验证</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="config-card">
+                        <h4>⚡ RateLimit 中间件</h4>
+                        <div class="config-item"><strong>文件：</strong> middleware/model-rate-limit.go</div>
+                        <div class="config-item"><strong>功能：</strong>
+                            <ul style="margin-top: 10px;">
+                                <li>模型级别请求限流</li>
+                                <li>基于 Token 的限流</li>
+                                <li>支持多种限流算法</li>
+                                <li>Redis 存储限流状态</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="config-card">
+                        <h4>🎯 Distribute 中间件</h4>
+                        <div class="config-item"><strong>文件：</strong> middleware/distributor.go</div>
+                        <div class="config-item"><strong>功能：</strong>
+                            <ul style="margin-top: 10px;">
+                                <li>解析请求模型</li>
+                                <li>模型权限验证</li>
+                                <li>渠道选择（粘性/随机）</li>
+                                <li>多 Key 管理</li>
+                                <li>设置渠道上下文</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 5. 渠道配置 -->
+            <section id="channel-config">
+                <h2>📡 5. 渠道配置详解</h2>
+
+                <div class="note">
+                    <strong>💡 提示：</strong> 渠道配置在管理后台的 "渠道管理" 页面进行设置，对应前端组件：<code>web/src/pages/Channel/</code>
+                </div>
+
+                <h3>📋 核心配置字段</h3>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>配置项</th>
+                            <th>类型</th>
+                            <th>说明</th>
+                            <th>作用</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Type</strong></td>
+                            <td>整数</td>
+                            <td>渠道类型 ID</td>
+                            <td>
+                                标识 AI 服务商类型：<br>
+                                1=OpenAI, 8=Claude, 15=Gemini, 等
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Key</strong></td>
+                            <td>字符串</td>
+                            <td>API Key（支持多 Key）</td>
+                            <td>
+                                认证凭证，支持两种格式：<br>
+                                • 换行分隔：<code>sk-xxx\nsk-yyy</code><br>
+                                • JSON 数组：<code>["sk-xxx", "sk-yyy"]</code>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Status</strong></td>
+                            <td>整数</td>
+                            <td>渠道状态</td>
+                            <td>
+                                1=启用, 2=手动禁用, 3=自动禁用
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Name</strong></td>
+                            <td>字符串</td>
+                            <td>渠道名称</td>
+                            <td>便于识别和管理</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Weight</strong></td>
+                            <td>整数</td>
+                            <td>权重（0-999）</td>
+                            <td>
+                                负载均衡权重，数字越大被选中概率越高。<br>
+                                <strong>算法：</strong>加权随机算法<br>
+                                如果所有权重为 0，每个渠道视为权重 100
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Priority</strong></td>
+                            <td>整数</td>
+                            <td>优先级</td>
+                            <td>
+                                优先级分层，数字越大优先级越高。<br>
+                                <strong>重试逻辑：</strong>失败后降级到低优先级渠道
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>BaseURL</strong></td>
+                            <td>字符串</td>
+                            <td>自定义 API 端点</td>
+                            <td>
+                                覆盖默认的上游 API 地址。<br>
+                                <strong>用途：</strong>支持中转节点、自建服务
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Models</strong></td>
+                            <td>字符串</td>
+                            <td>支持的模型列表</td>
+                            <td>
+                                逗号分隔的模型名称，例如：<br>
+                                <code>gpt-4,gpt-3.5-turbo,claude-3-opus</code>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Group</strong></td>
+                            <td>字符串</td>
+                            <td>渠道分组</td>
+                            <td>
+                                逗号分隔的分组名称，例如：<br>
+                                <code>default,premium,enterprise</code><br>
+                                <strong>用途：</strong>不同用户组使用不同渠道集合
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>ModelMapping</strong></td>
+                            <td>JSON</td>
+                            <td>模型映射</td>
+                            <td>
+                                将请求的模型名映射到上游模型：<br>
+                                <code>{"gpt-4": "gpt-4-turbo"}</code><br>
+                                <strong>用途：</strong>统一模型名称、兼容性处理
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>ParamOverride</strong></td>
+                            <td>JSON</td>
+                            <td>参数覆盖</td>
+                            <td>
+                                强制覆盖请求参数：<br>
+                                <code>{"temperature": 0.7, "max_tokens": 2000}</code><br>
+                                <strong>用途：</strong>限制用户参数、统一配置
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>HeaderOverride</strong></td>
+                            <td>JSON</td>
+                            <td>请求头覆盖</td>
+                            <td>
+                                添加或覆盖 HTTP 请求头：<br>
+                                <code>{"X-Custom-Header": "value"}</code><br>
+                                <strong>用途：</strong>中转节点认证、自定义标识
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>AutoBan</strong></td>
+                            <td>整数</td>
+                            <td>自动禁用开关</td>
+                            <td>
+                                启用后，渠道出现特定错误会自动禁用：<br>
+                                • 401 Unauthorized<br>
+                                • 429 Too Many Requests（配额耗尽）<br>
+                                • 其他致命错误
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Tag</strong></td>
+                            <td>字符串</td>
+                            <td>渠道标签</td>
+                            <td>
+                                用于批量管理渠道，例如：<br>
+                                <code>official, backup, testing</code>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>🔧 多 Key 管理配置</h3>
+
+                <div class="feature-box">
+                    <h4>多 Key 管理模式</h4>
+                    <p><strong>配置位置：</strong>渠道编辑 → 多 Key 设置</p>
+
+                    <table style="margin-top: 15px;">
+                        <thead>
+                            <tr>
+                                <th>配置项</th>
+                                <th>说明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>MultiKeyMode</strong></td>
+                                <td>
+                                    <strong>Random（随机）：</strong>随机选择可用 Key<br>
+                                    <strong>Polling（轮询）：</strong>顺序轮询可用 Key<br>
+                                    <strong>推荐：</strong>高并发场景使用 Random，顺序场景使用 Polling
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><strong>MultiKeyStatusList</strong></td>
+                                <td>
+                                    每个 Key 的状态映射：<br>
+                                    <code>{0: 1, 1: 1, 2: 3}</code><br>
+                                    （索引 → 状态，1=启用, 2=手动禁用, 3=自动禁用）
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><strong>MultiKeyDisabledReason</strong></td>
+                                <td>
+                                    禁用原因记录：<br>
+                                    <code>{2: "401 Unauthorized"}</code>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><strong>MultiKeyPollingIndex</strong></td>
+                                <td>
+                                    轮询模式下的当前索引位置
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="warning" style="margin-top: 15px;">
+                        <strong>⚠️ 并发安全：</strong> 多 Key 管理使用渠道级别的锁（<code>channelPollingLocks</code>）保证并发安全，防止同时读写状态列表。
+                    </div>
+                </div>
+
+                <h3>⚖️ 负载均衡算法</h3>
+
+                <div class="feature-box">
+                    <h4>加权随机算法</h4>
+                    <p><strong>实现文件：</strong><code>model/channel_cache.go::GetRandomSatisfiedChannel()</code></p>
+
+                    <div class="code-block">
+// 算法步骤：
+1. 从缓存获取可用渠道列表
+   channels := group2model2channels[group][model]
+
+2. 按优先级分组
+   uniquePriorities := getUniquePriorities(channels)
+   sortedPriorities := sortDescending(uniquePriorities)
+
+3. 根据 retry 次数选择优先级（重试时降级）
+   targetPriority := sortedPriorities[min(retry, len(sortedPriorities)-1)]
+
+4. 筛选目标优先级的渠道
+   targetChannels := filterByPriority(channels, targetPriority)
+
+5. 权重归一化
+   - 如果所有权重为 0: 每个渠道有效权重 = 100
+   - 如果平均权重 < 10: 应用平滑因子 100
+
+6. 加权随机选择
+   sumWeight := calculateTotalWeight(targetChannels)
+   randomWeight := rand.Intn(sumWeight)
+
+   for _, channel := range targetChannels {
+       randomWeight -= channel.Weight
+       if randomWeight < 0 {
+           return channel  // 选中
+       }
+   }
+                    </div>
+
+                    <div class="success" style="margin-top: 15px;">
+                        <strong>✅ 优势：</strong>
+                        <ul>
+                            <li>优先级分层：主渠道优先，失败后自动降级到备份渠道</li>
+                            <li>权重分配：灵活控制流量分布</li>
+                            <li>平滑处理：避免权重配置错误导致选择失败</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 6. Token 配置 -->
+            <section id="token-config">
+                <h2>🔑 6. Token 配置详解</h2>
+
+                <div class="note">
+                    <strong>💡 提示：</strong> Token 配置在管理后台的 "令牌管理" 页面进行设置，对应前端组件：<code>web/src/pages/Token/</code>
+                </div>
+
+                <h3>📋 核心配置字段</h3>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>配置项</th>
+                            <th>类型</th>
+                            <th>说明</th>
+                            <th>作用</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Key</strong></td>
+                            <td>字符串</td>
+                            <td>Token 密钥</td>
+                            <td>
+                                格式：<code>sk-xxxxxxxx</code><br>
+                                客户端使用此 Key 进行 API 调用
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Status</strong></td>
+                            <td>整数</td>
+                            <td>Token 状态</td>
+                            <td>
+                                1=启用, 2=耗尽, 3=过期<br>
+                                只有启用状态可以使用
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Name</strong></td>
+                            <td>字符串</td>
+                            <td>Token 名称</td>
+                            <td>便于识别和管理</td>
+                        </tr>
+                        <tr>
+                            <td><strong>RemainQuota</strong></td>
+                            <td>整数</td>
+                            <td>剩余配额</td>
+                            <td>
+                                可用的配额额度（单位：系统内部单位）<br>
+                                每次请求会扣除相应配额
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>UnlimitedQuota</strong></td>
+                            <td>布尔</td>
+                            <td>无限配额</td>
+                            <td>
+                                启用后，不检查配额限制<br>
+                                <strong>用途：</strong>内部 Token、测试 Token
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>ExpiredTime</strong></td>
+                            <td>时间戳</td>
+                            <td>过期时间</td>
+                            <td>
+                                -1 = 永不过期<br>
+                                其他值 = Unix 时间戳
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>ModelLimitsEnabled</strong></td>
+                            <td>布尔</td>
+                            <td>模型限制开关</td>
+                            <td>启用后，只能使用 ModelLimits 中指定的模型</td>
+                        </tr>
+                        <tr>
+                            <td><strong>ModelLimits</strong></td>
+                            <td>字符串</td>
+                            <td>允许的模型列表</td>
+                            <td>
+                                逗号分隔的模型名称：<br>
+                                <code>gpt-4,gpt-3.5-turbo,claude-3-opus</code><br>
+                                <strong>验证时机：</strong>Distribute 中间件
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>AllowIps</strong></td>
+                            <td>字符串</td>
+                            <td>IP 白名单</td>
+                            <td>
+                                逗号分隔的 IP 地址/CIDR：<br>
+                                <code>192.168.1.1,10.0.0.0/8</code><br>
+                                <strong>验证时机：</strong>TokenAuth 中间件
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Group</strong></td>
+                            <td>字符串</td>
+                            <td>强制使用的分组</td>
+                            <td>
+                                指定 Token 使用的渠道分组<br>
+                                留空则使用用户默认分组
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>StickySession</strong></td>
+                            <td>布尔</td>
+                            <td>启用粘性会话</td>
+                            <td>
+                                <strong>新特性！</strong><br>
+                                启用后，用户的请求会绑定到特定渠道，<br>
+                                减少渠道切换，提升体验
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>StickySessionTTL</strong></td>
+                            <td>整数</td>
+                            <td>粘性会话 TTL（秒）</td>
+                            <td>
+                                会话绑定的有效期，默认 3600 秒（1 小时）<br>
+                                超过时间后重新选择渠道
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>ClientRestrictionEnabled</strong></td>
+                            <td>布尔</td>
+                            <td>启用客户端限制</td>
+                            <td>
+                                <strong>新特性！</strong><br>
+                                启用后，只有指定的客户端（User-Agent）<br>
+                                可以使用此 Token
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>AllowedClients</strong></td>
+                            <td>字符串</td>
+                            <td>允许的客户端列表</td>
+                            <td>
+                                换行分隔，支持三种模式：<br>
+                                • <strong>精确匹配：</strong><code>Claude-Code-CLI/1.0.0</code><br>
+                                • <strong>通配符：</strong><code>VSCode/*</code><br>
+                                • <strong>正则：</strong><code>regex:^Postman/.*</code><br>
+                                <strong>验证时机：</strong>TokenAuth 中间件
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>🆕 新特性详解</h3>
+
+                <div class="config-grid">
+                    <div class="config-card">
+                        <h4>🔄 粘性会话（Sticky Session）</h4>
+                        <div class="config-item">
+                            <strong>实现文件：</strong><br>
+                            <code>service/session.go</code><br>
+                            <code>middleware/distributor.go</code>
+                        </div>
+                        <div class="config-item">
+                            <strong>工作原理：</strong><br>
+                            1. 首次请求：选择渠道并绑定<br>
+                            2. 存储：<code>Redis: sticky_session:{userId}:{model}:{group}</code><br>
+                            3. 后续请求：优先使用绑定渠道<br>
+                            4. 健康检查：渠道失效时自动重绑<br>
+                            5. TTL 过期：自动解绑，下次重新选择
+                        </div>
+                        <div class="config-item">
+                            <strong>优势：</strong><br>
+                            • 减少渠道切换<br>
+                            • 提升用户体验<br>
+                            • 避免上下文丢失<br>
+                            • 支持会话状态保持
+                        </div>
+                    </div>
+
+                    <div class="config-card">
+                        <h4>🛡️ 客户端限制（Client Restriction）</h4>
+                        <div class="config-item">
+                            <strong>实现文件：</strong><br>
+                            <code>middleware/auth.go::checkClientRestriction()</code>
+                        </div>
+                        <div class="config-item">
+                            <strong>匹配逻辑：</strong><br>
+                            1. 提取请求的 User-Agent<br>
+                            2. 遍历允许的客户端列表<br>
+                            3. 应用匹配规则：<br>
+                            &nbsp;&nbsp;• 精确匹配<br>
+                            &nbsp;&nbsp;• 通配符匹配（glob）<br>
+                            &nbsp;&nbsp;• 正则表达式匹配<br>
+                            4. 任意一条匹配成功 → 通过<br>
+                            5. 全部不匹配 → 拒绝（403）
+                        </div>
+                        <div class="config-item">
+                            <strong>应用场景：</strong><br>
+                            • 限制只允许特定应用访问<br>
+                            • 防止 API Key 泄露后被滥用<br>
+                            • 实现客户端级别的访问控制<br>
+                            • 区分不同客户端的使用权限
+                        </div>
+                    </div>
+                </div>
+
+                <div class="feature-box" style="margin-top: 30px;">
+                    <h4>📝 客户端限制配置示例</h4>
+                    <div class="code-block">
+# AllowedClients 配置示例（换行分隔）
+
+# 1. 精确匹配（完全一致才通过）
+Claude-Code-CLI/1.0.0
+PostmanRuntime/7.32.3
+
+# 2. 通配符匹配（* 匹配任意字符）
+VSCode/*
+Claude-Code-CLI/*
+curl/*
+
+# 3. 正则表达式匹配（以 regex: 开头）
+regex:^Postman/.*
+regex:^curl/[0-9]+\\..*
+regex:^Mozilla/5.0.*Chrome.*
+
+# 4. 组合使用
+Claude-Code-CLI/*
+VSCode/*
+regex:^Postman/.*
+                    </div>
+
+                    <div class="note" style="margin-top: 15px;">
+                        <strong>💡 提示：</strong>
+                        <ul>
+                            <li>每行一个规则</li>
+                            <li>精确匹配效率最高，优先使用</li>
+                            <li>通配符匹配简单场景</li>
+                            <li>正则表达式匹配复杂场景</li>
+                            <li>支持注释（以 # 开头的行会被忽略）</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 7. 核心特性 -->
+            <section id="features">
+                <h2>🌟 7. 核心特性总结</h2>
+
+                <div class="config-grid">
+                    <div class="config-card">
+                        <h4>🔄 智能负载均衡</h4>
+                        <div class="config-item">• 优先级分层</div>
+                        <div class="config-item">• 加权随机算法</div>
+                        <div class="config-item">• 失败自动重试</div>
+                        <div class="config-item">• 降级到低优先级</div>
+                        <div class="config-item">• 多 Key 轮询/随机</div>
+                    </div>
+
+                    <div class="config-card">
+                        <h4>🛡️ 完善的认证授权</h4>
+                        <div class="config-item">• 多协议 Token 提取</div>
+                        <div class="config-item">• IP 白名单</div>
+                        <div class="config-item">• 客户端限制（新）</div>
+                        <div class="config-item">• 模型权限控制</div>
+                        <div class="config-item">• 配额管理</div>
+                    </div>
+
+                    <div class="config-card">
+                        <h4>⚡ 高性能缓存</h4>
+                        <div class="config-item">• Redis 缓存</div>
+                        <div class="config-item">• 内存缓存</div>
+                        <div class="config-item">• 渠道缓存</div>
+                        <div class="config-item">• 用户缓存</div>
+                        <div class="config-item">• 批量更新</div>
+                    </div>
+
+                    <div class="config-card">
+                        <h4>🔒 并发安全</h4>
+                        <div class="config-item">• 渠道级别锁</div>
+                        <div class="config-item">• 多 Key 并发控制</div>
+                        <div class="config-item">• 配额原子操作</div>
+                        <div class="config-item">• 缓存同步锁</div>
+                        <div class="config-item">• 状态一致性保证</div>
+                    </div>
+
+                    <div class="config-card">
+                        <h4>🎯 粘性会话（新）</h4>
+                        <div class="config-item">• 用户-渠道绑定</div>
+                        <div class="config-item">• Redis 存储</div>
+                        <div class="config-item">• TTL 自动过期</div>
+                        <div class="config-item">• 健康检查</div>
+                        <div class="config-item">• 自动重绑定</div>
+                    </div>
+
+                    <div class="config-card">
+                        <h4>📊 完整的监控</h4>
+                        <div class="config-item">• 请求日志</div>
+                        <div class="config-item">• 错误日志</div>
+                        <div class="config-item">• 渠道统计</div>
+                        <div class="config-item">• 配额统计</div>
+                        <div class="config-item">• 响应时间统计</div>
+                    </div>
+                </div>
+
+                <h3>🔧 技术实现亮点</h3>
+
+                <div class="feature-box">
+                    <h4>1️⃣ 适配器模式（Adapter Pattern）</h4>
+                    <p><strong>实现文件：</strong><code>relay/relay_adaptor.go</code></p>
+                    <div class="code-block">
+// 适配器接口
+type Adaptor interface {
+    Init(info *RelayInfo)
+    GetRequestURL(info *RelayInfo) (string, error)
+    SetupRequestHeader(c *gin.Context, req *http.Header, info *RelayInfo) error
+    ConvertRequest(c *gin.Context, info *RelayInfo, request any) (any, error)
+    DoRequest(c *gin.Context, info *RelayInfo, requestBody io.Reader) (any, error)
+    DoResponse(c *gin.Context, resp *http.Response, info *RelayInfo) (usage any, err *NewAPIError)
+}
+
+// 支持 38+ 渠道类型，轻松扩展新渠道
+                    </div>
+                    <div class="success">
+                        <strong>✅ 优势：</strong> 统一接口、易于扩展、解耦实现
+                    </div>
+                </div>
+
+                <div class="feature-box">
+                    <h4>2️⃣ 中间件架构（Middleware Architecture）</h4>
+                    <p><strong>实现文件：</strong><code>router/relay-router.go</code></p>
+                    <div class="code-block">
+// 中间件链
+router.Use(middleware.CORS())
+router.Use(middleware.DecompressRequestMiddleware())
+router.Use(middleware.StatsMiddleware())
+router.Use(middleware.TokenAuth())
+router.Use(middleware.ModelRequestRateLimit())
+router.Use(middleware.Distribute())
+
+// 每个请求按序通过所有中间件
+                    </div>
+                    <div class="success">
+                        <strong>✅ 优势：</strong> 关注点分离、可插拔、易于维护
+                    </div>
+                </div>
+
+                <div class="feature-box">
+                    <h4>3️⃣ 多层缓存策略</h4>
+                    <p><strong>实现文件：</strong><code>model/channel_cache.go</code></p>
+                    <div class="code-block">
+// L1: 内存缓存（毫秒级）
+group2model2channels := map[string]map[string][]*Channel
+
+// L2: Redis 缓存（亚秒级）
+redis.Get("channel:" + channelId)
+
+// L3: 数据库（秒级）
+db.Query("SELECT * FROM channels WHERE id = ?", channelId)
+
+// 缓存同步：定时任务 + 手动刷新
+                    </div>
+                    <div class="success">
+                        <strong>✅ 优势：</strong> 极速响应、降低数据库压力、数据一致性
+                    </div>
+                </div>
+
+                <div class="feature-box">
+                    <h4>4️⃣ 自动重试机制</h4>
+                    <p><strong>实现文件：</strong><code>controller/relay.go::shouldRetry()</code></p>
+                    <div class="code-block">
+// 重试策略
+for retry := 0; retry <= RetryTimes; retry++ {
+    if retry > 0 {
+        // 重新选择渠道（降级到低优先级）
+        channel = CacheGetRandomSatisfiedChannel(group, model, retry)
+    }
+
+    err = relayHandler(c, relayInfo)
+
+    if err == nil {
+        return // 成功
+    }
+
+    if !shouldRetry(c, err, RetryTimes-retry) {
+        break // 不应该重试
+    }
+}
+
+// 重试条件：429, 307, 5xx (除超时)
+// 不重试：400, 408, 504, 524, 2xx, Skip Retry Error
+                    </div>
+                    <div class="success">
+                        <strong>✅ 优势：</strong> 提高成功率、自动降级、智能判断
+                    </div>
+                </div>
+            </section>
+
+            <!-- 8. 最佳实践 -->
+            <section id="best-practices">
+                <h2>💡 8. 配置最佳实践</h2>
+
+                <h3>🎯 渠道配置建议</h3>
+
+                <div class="feature-box">
+                    <h4>1. 优先级配置</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>场景</th>
+                                <th>优先级配置</th>
+                                <th>说明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>官方渠道</td>
+                                <td>优先级 = 100</td>
+                                <td>主要流量，优先使用</td>
+                            </tr>
+                            <tr>
+                                <td>备用渠道</td>
+                                <td>优先级 = 50</td>
+                                <td>官方失败时使用</td>
+                            </tr>
+                            <tr>
+                                <td>测试渠道</td>
+                                <td>优先级 = 10</td>
+                                <td>最低优先级，仅做备份</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="feature-box">
+                    <h4>2. 权重配置</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>场景</th>
+                                <th>权重配置</th>
+                                <th>流量分布</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>主渠道 A</td>
+                                <td>权重 = 70</td>
+                                <td>70% 流量</td>
+                            </tr>
+                            <tr>
+                                <td>备用渠道 B</td>
+                                <td>权重 = 20</td>
+                                <td>20% 流量</td>
+                            </tr>
+                            <tr>
+                                <td>备用渠道 C</td>
+                                <td>权重 = 10</td>
+                                <td>10% 流量</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div class="note" style="margin-top: 15px;">
+                        <strong>💡 提示：</strong> 同一优先级内的渠道使用权重分配流量
+                    </div>
+                </div>
+
+                <div class="feature-box">
+                    <h4>3. 多 Key 配置</h4>
+                    <ul>
+                        <li><strong>高并发场景：</strong>使用 Random 模式，分散请求压力</li>
+                        <li><strong>顺序访问：</strong>使用 Polling 模式，均匀分配</li>
+                        <li><strong>Key 数量：</strong>建议 3-5 个，过多管理复杂</li>
+                        <li><strong>监控：</strong>定期检查单个 Key 状态，及时处理禁用</li>
+                    </ul>
+                </div>
+
+                <h3>🔑 Token 配置建议</h3>
+
+                <div class="feature-box">
+                    <h4>1. 粘性会话配置</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>场景</th>
+                                <th>是否启用</th>
+                                <th>TTL 设置</th>
+                                <th>说明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>对话类应用</td>
+                                <td>✅ 启用</td>
+                                <td>3600 秒（1 小时）</td>
+                                <td>保持上下文，减少切换</td>
+                            </tr>
+                            <tr>
+                                <td>单次调用</td>
+                                <td>❌ 不启用</td>
+                                <td>-</td>
+                                <td>无需会话状态</td>
+                            </tr>
+                            <tr>
+                                <td>长时间会话</td>
+                                <td>✅ 启用</td>
+                                <td>7200 秒（2 小时）</td>
+                                <td>延长绑定时间</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="feature-box">
+                    <h4>2. 客户端限制配置</h4>
+                    <ul>
+                        <li><strong>生产环境：</strong>启用客户端限制，防止 Key 泄露</li>
+                        <li><strong>内部应用：</strong>精确匹配客户端名称</li>
+                        <li><strong>第三方集成：</strong>使用通配符匹配版本号</li>
+                        <li><strong>调试环境：</strong>可暂时禁用，便于测试</li>
+                    </ul>
+
+                    <div class="warning" style="margin-top: 15px;">
+                        <strong>⚠️ 安全提醒：</strong>
+                        <ul>
+                            <li>生产 Token 必须启用客户端限制或 IP 白名单</li>
+                            <li>定期轮换 Token，降低泄露风险</li>
+                            <li>监控异常 User-Agent，及时发现滥用</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="feature-box">
+                    <h4>3. 配额管理建议</h4>
+                    <ul>
+                        <li><strong>普通用户：</strong>设置合理配额，防止滥用</li>
+                        <li><strong>付费用户：</strong>提高配额或启用无限配额</li>
+                        <li><strong>内部 Token：</strong>无限配额，不过期</li>
+                        <li><strong>测试 Token：</strong>小额配额，短期过期</li>
+                    </ul>
+                </div>
+
+                <h3>⚙️ 系统配置建议</h3>
+
+                <div class="feature-box">
+                    <h4>环境变量优化</h4>
+                    <div class="code-block">
+# 缓存配置
+REDIS_ENABLED=true                    # 启用 Redis
+MEMORY_CACHE_ENABLED=true             # 启用内存缓存
+SYNC_FREQUENCY=60                     # 缓存同步频率（秒）
+
+# 批量更新（提升性能）
+BATCH_UPDATE_ENABLED=true             # 启用批量更新
+BATCH_UPDATE_INTERVAL=5               # 批量更新间隔（秒）
+
+# 重试配置
+RETRY_TIMES=2                         # 失败重试次数（建议 1-3）
+
+# 渠道更新
+CHANNEL_UPDATE_FREQUENCY=3600         # 渠道自动更新频率（秒）
+
+# 日志配置
+ERROR_LOG_ENABLED=true                # 错误日志记录
+                    </div>
+                </div>
+
+                <h3>📊 监控和运维</h3>
+
+                <div class="feature-box">
+                    <h4>关键指标监控</h4>
+                    <ul>
+                        <li><strong>渠道健康：</strong>响应时间、成功率、禁用状态</li>
+                        <li><strong>Token 使用：</strong>配额消耗、请求频率、异常调用</li>
+                        <li><strong>缓存命中率：</strong>内存缓存、Redis 缓存</li>
+                        <li><strong>错误日志：</strong>5xx 错误、超时、认证失败</li>
+                        <li><strong>负载均衡：</strong>渠道流量分布、重试次数</li>
+                    </ul>
+                </div>
+
+                <div class="feature-box">
+                    <h4>运维建议</h4>
+                    <ul>
+                        <li><strong>定期测试：</strong>使用渠道测试功能验证可用性</li>
+                        <li><strong>配额预警：</strong>设置配额阈值告警</li>
+                        <li><strong>日志分析：</strong>定期分析错误日志，优化配置</li>
+                        <li><strong>性能优化：</strong>调整缓存参数、批量更新间隔</li>
+                        <li><strong>安全审计：</strong>检查 Token 权限、IP 白名单配置</li>
+                    </ul>
+                </div>
+            </section>
+
+        </div>
+
+        <footer>
+            <h3>📚 New-API 请求流程完整分析</h3>
+            <p>从客户端到上游 API 的完整技术剖析</p>
+            <p style="margin-top: 20px; opacity: 0.8;">
+                项目地址: <a href="https://github.com/Calcium-Ion/new-api" style="color: #ffd700;">https://github.com/Calcium-Ion/new-api</a>
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        // 平滑滚动
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // 动画效果
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -100px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.flow-step, .config-card, .feature-box').forEach(el => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(20px)';
+            el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+            observer.observe(el);
+        });
+    </script>
+</body>
+</html>
