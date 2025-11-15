@@ -40,6 +40,41 @@ type testResult struct {
 	newAPIError *types.NewAPIError
 }
 
+// getTestUserAgentForChannel returns appropriate User-Agent for testing based on channel type
+// Mimics real client behavior to ensure accurate test results
+func getTestUserAgentForChannel(channelType int) string {
+	switch channelType {
+	case constant.ChannelTypeAnthropic:
+		// Claude channels should mimic Claude Code client
+		// Real pattern: claude-cli/x.x.x
+		return "claude-cli/1.0.0"
+
+	case constant.ChannelTypeOpenAI, constant.ChannelTypeAzure, constant.ChannelTypeOpenAIMax:
+		// OpenAI channels should mimic Codex CLI or OpenAI SDK
+		// Real patterns:
+		// - codex_cli_rs/x.x.x (Ubuntu x.x.x; arch) terminal
+		// - codex_vscode/x.x.x (Windows x.x.x; arch) unknown (Cursor; x.x.x)
+		return "codex_cli_rs/1.0.0 (Linux 5.15.0; x86_64) bash"
+
+	case constant.ChannelTypeGemini, constant.ChannelTypeVertexAi:
+		// Gemini channels should mimic Google's SDK
+		return "google-generativeai/1.0.0"
+
+	case constant.ChannelTypeCohere:
+		// Cohere channels
+		return "cohere-python/5.0.0"
+
+	case constant.ChannelTypeMistral:
+		// Mistral channels
+		return "mistral-client/1.0.0"
+
+	default:
+		// Generic fallback for other channel types
+		// Use a generic but legitimate-looking User-Agent
+		return "Mozilla/5.0 (compatible; new-api-channel-test/1.0)"
+	}
+}
+
 func testChannel(channel *model.Channel, testModel string, endpointType string) testResult {
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
@@ -117,6 +152,15 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 
 	//c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
+
+	// Set User-Agent for channel test to match real client behavior
+	// Priority: 1. Environment variable 2. Channel-specific client User-Agent
+	userAgent := common.DefaultUserAgent
+	if userAgent == "" {
+		userAgent = getTestUserAgentForChannel(channel.Type)
+	}
+	c.Request.Header.Set("User-Agent", userAgent)
+
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
 	group, _ := model.GetUserGroup(1, false)
@@ -128,6 +172,13 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 			context:     c,
 			localErr:    newAPIError,
 			newAPIError: newAPIError,
+		}
+	}
+
+	// Setup cleanup for concurrency tracking
+	if concurrencyKey, exists := c.Get("concurrency_key"); exists {
+		if key, ok := concurrencyKey.(string); ok {
+			defer service.DecrementConcurrency(key)
 		}
 	}
 

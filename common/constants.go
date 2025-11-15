@@ -126,6 +126,8 @@ var GeminiSafetySetting string
 // https://docs.cohere.com/docs/safety-modes Type; NONE/CONTEXTUAL/STRICT
 var CohereSafetySetting string
 
+var DefaultUserAgent string // Default User-Agent header when client doesn't provide one
+
 const (
 	RequestIdKey = "X-Oneapi-Request-Id"
 )

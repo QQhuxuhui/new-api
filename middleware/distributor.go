@@ -164,7 +164,30 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		newAPIError := SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		if newAPIError != nil {
+			// Channel setup failed (e.g., concurrency limit, no available key)
+			// Abort here to prevent half-initialized context from reaching controller
+			statusCode := newAPIError.StatusCode
+			if statusCode == 0 {
+				statusCode = http.StatusServiceUnavailable
+			}
+			abortWithOpenAiMessage(
+				c,
+				statusCode,
+				newAPIError.Error(),
+				string(newAPIError.GetErrorCode()),
+			)
+			return
+		}
+
+		// Setup cleanup for concurrency tracking
+		if concurrencyKey, exists := c.Get("concurrency_key"); exists {
+			if key, ok := concurrencyKey.(string); ok {
+				defer service.DecrementConcurrency(key)
+			}
+		}
+
 		c.Next()
 	}
 }
@@ -369,6 +392,13 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	if channel == nil {
 		return types.NewError(errors.New("channel is nil"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
+
+	// If this is a retry (old concurrency_key exists), cleanup the old counter first
+	if oldKey, exists := c.Get("concurrency_key"); exists {
+		if key, ok := oldKey.(string); ok {
+			service.DecrementConcurrency(key)
+		}
+	}
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
 	common.SetContextKey(c, constant.ContextKeyChannelName, channel.Name)
 	common.SetContextKey(c, constant.ContextKeyChannelType, channel.Type)
@@ -388,6 +418,29 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	if newAPIError != nil {
 		return newAPIError
 	}
+
+	// Check concurrency limit for the selected key
+	withinLimit, err := service.CheckAndIncrementConcurrency(channel, key, index)
+	if err != nil {
+		// Redis error, log but continue (fail-open)
+		if common.DebugEnabled {
+			common.SysLog(fmt.Sprintf("Concurrency check error: %v", err))
+		}
+	}
+	if !withinLimit {
+		// This key is at its concurrency limit
+		return types.NewErrorWithStatusCode(
+			errors.New("channel key at concurrency limit"),
+			types.ErrorCodeChannelKeyConcurrencyLimit,
+			http.StatusTooManyRequests, // 429
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+
+	// Register cleanup to decrement concurrency counter when request finishes
+	c.Set("concurrency_key", key)
+	// We'll add a defer in the relay controller to call DecrementConcurrency
+
 	if channel.ChannelInfo.IsMultiKey {
 		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
 		common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, index)

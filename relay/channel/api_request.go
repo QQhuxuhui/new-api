@@ -36,6 +36,15 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 			req.Set("Accept", "text/event-stream")
 		}
 	}
+
+	// Pass through User-Agent from client, or use default if not provided
+	userAgent := c.Request.Header.Get("User-Agent")
+	if userAgent == "" {
+		userAgent = common2.DefaultUserAgent
+	}
+	if userAgent != "" {
+		req.Set("User-Agent", userAgent)
+	}
 }
 
 // processHeaderOverride 处理请求头覆盖，支持变量替换

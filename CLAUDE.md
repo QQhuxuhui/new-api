@@ -16,3 +16,7 @@ Use `@/openspec/AGENTS.md` to learn:
 Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
+
+# 文档编写要求
+- 不要过多编写说明文档，只需要编写关键文档即可
+- 文档统一编写在docs目录下，可以按照文档分类自行创建子目录进行管理

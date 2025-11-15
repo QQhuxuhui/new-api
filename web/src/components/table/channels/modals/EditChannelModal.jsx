@@ -143,6 +143,7 @@ const EditChannelModal = (props) => {
     groups: ['default'],
     priority: 0,
     weight: 0,
+    max_concurrent_requests_per_key: 0,
     tag: '',
     multi_key_mode: 'random',
     // 渠道额外设置的默认值
@@ -2465,6 +2466,18 @@ const EditChannelModal = (props) => {
                         />
                       </Col>
                     </Row>
+
+                    <Form.InputNumber
+                      field='max_concurrent_requests_per_key'
+                      label={t('单Key最大并发数')}
+                      placeholder={t('0表示不限制')}
+                      min={0}
+                      onNumberChange={(value) =>
+                        handleInputChange('max_concurrent_requests_per_key', value)
+                      }
+                      style={{ width: '100%' }}
+                      extraText={t('设置每个API Key的最大并发请求数，0表示不限制')}
+                    />
 
                     <Form.Switch
                       field='auto_ban'
