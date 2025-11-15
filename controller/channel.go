@@ -445,6 +445,11 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
 	}
 
+	// 校验并发限制配置
+	if channel.MaxConcurrentRequestsPerKey != nil && *channel.MaxConcurrentRequestsPerKey < 0 {
+		return fmt.Errorf("每个Key的最大并发请求数不能为负数")
+	}
+
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
 		if channel == nil || channel.Key == "" {

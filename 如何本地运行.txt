@@ -1,0 +1,110 @@
+# ==================================================
+# New API 本地运行快速指南
+# ==================================================
+
+## 方式一：使用一键启动脚本（推荐）
+
+### 步骤：
+1. 打开终端，进入项目目录
+   cd /path/to/new-api
+
+2. 运行启动脚本
+   ./quick-start.sh
+
+3. 按照提示操作
+   - 脚本会自动检查环境
+   - 安装依赖
+   - 构建前端和后端
+   - 启动服务
+
+4. 访问应用
+   http://localhost:3000
+
+## 方式二：手动运行
+
+### 准备工作：
+
+1. 确保 Redis 运行
+   redis-cli ping
+   # 应返回: PONG
+
+2. 确认 .env 配置正确
+   cat .env
+   # 检查数据库连接配置
+
+### 构建和运行：
+
+# 1. 安装 Go 依赖
+go mod download
+
+# 2. 进入 web 目录，安装前端依赖
+cd web
+bun install        # 或 npm install
+cd ..
+
+# 3. 构建前端
+cd web
+bun run build      # 或 npm run build
+cd ..
+
+# 4. 运行后端（二选一）
+
+# 方式 A: 直接运行（开发模式）
+go run main.go
+
+# 方式 B: 编译后运行（生产模式）
+go build -o new-api main.go
+./new-api
+
+### 访问：
+浏览器打开: http://localhost:3000
+默认账号: root
+默认密码: 123456
+
+## 方式三：开发模式（前后端分离）
+
+### 终端 1 - 运行后端：
+go run main.go
+
+### 终端 2 - 运行前端开发服务器：
+cd web
+bun run dev        # 或 npm run dev
+
+前端开发地址: http://localhost:5173
+API 代理到: http://localhost:3000
+
+## 常见问题：
+
+### 1. Redis 连接失败
+# 启动 Redis
+redis-server
+
+### 2. 端口被占用
+# 修改 .env 中的端口
+PORT=3001
+
+### 3. 前端页面空白
+# 重新构建前端
+cd web
+rm -rf dist
+bun run build
+cd ..
+
+### 4. Go 依赖下载慢
+# 配置代理
+go env -w GOPROXY=https://goproxy.cn,direct
+go mod download
+
+## 详细文档：
+
+查看完整文档: 本地运行指南.md
+配置说明: LOCAL_DEV_SETUP.md
+
+## 需要帮助？
+
+1. 查看日志输出
+2. 检查 .env 配置
+3. 确认所有服务运行正常
+4. 查看项目 Issues
+
+==================================================

@@ -53,6 +53,8 @@ type Channel struct {
 
 	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
 
+	MaxConcurrentRequestsPerKey *int `json:"max_concurrent_requests_per_key" gorm:"default:0"` // 每个Key的最大并发请求数，0表示不限制
+
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
 }
