@@ -25,3 +25,5 @@ electron/dist
 
 *.log
 *.pid
+*.bak
+concurrency_translations.txt
