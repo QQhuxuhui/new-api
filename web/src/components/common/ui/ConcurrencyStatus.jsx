@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Tag, Tooltip } from '@douyinfe/semi-ui';
+import { Tag, Tooltip, Progress } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 
 /**
@@ -34,18 +34,32 @@ const getUsageColor = (usagePercent) => {
 };
 
 /**
+ * Get progress bar stroke color based on usage percentage
+ * @param {number} usagePercent - Usage percentage (0-100)
+ * @returns {string} - CSS color value
+ */
+const getProgressStroke = (usagePercent) => {
+  if (usagePercent < 0) return 'var(--semi-color-text-3)'; // Grey for unknown
+  if (usagePercent >= 80) return 'var(--semi-color-danger)'; // Red
+  if (usagePercent >= 50) return 'var(--semi-color-warning)'; // Orange
+  return 'var(--semi-color-success)'; // Green
+};
+
+/**
  * ConcurrencyStatus - Display concurrency information
  * @param {Object} props
  * @param {Object} props.concurrencyInfo - Concurrency info from API
  * @param {boolean} props.isMultiKey - Whether this is a multi-key channel
  * @param {boolean} props.compact - Compact display mode (default: true)
  * @param {boolean} props.showTooltip - Show detailed tooltip (default: true)
+ * @param {boolean} props.showProgress - Show progress bar (default: true)
  */
 const ConcurrencyStatus = ({
   concurrencyInfo,
   isMultiKey = false,
   compact = true,
   showTooltip = true,
+  showProgress = true,
 }) => {
   const { t } = useTranslation();
 
@@ -73,9 +87,20 @@ const ConcurrencyStatus = ({
     }
 
     const mainDisplay = (
-      <Tag color={color} size='small' shape='circle'>
-        {total_current}/{total_capacity}
-      </Tag>
+      <div className='flex flex-col gap-1' style={{ minWidth: '80px' }}>
+        <Tag color={color} size='small' shape='circle'>
+          {total_current}/{total_capacity}
+        </Tag>
+        {showProgress && usage_percent >= 0 && (
+          <Progress
+            percent={usage_percent}
+            stroke={getProgressStroke(usage_percent)}
+            size='small'
+            showInfo={false}
+            style={{ margin: 0 }}
+          />
+        )}
+      </div>
     );
 
     // Show tooltip with per-key breakdown
@@ -135,9 +160,20 @@ const ConcurrencyStatus = ({
   }
 
   const mainDisplay = (
-    <Tag color={color} size='small' shape='circle'>
-      {current}/{limit}
-    </Tag>
+    <div className='flex flex-col gap-1' style={{ minWidth: '80px' }}>
+      <Tag color={color} size='small' shape='circle'>
+        {current}/{limit}
+      </Tag>
+      {showProgress && usage_percent >= 0 && (
+        <Progress
+          percent={usage_percent}
+          stroke={getProgressStroke(usage_percent)}
+          size='small'
+          showInfo={false}
+          style={{ margin: 0 }}
+        />
+      )}
+    </div>
   );
 
   // Show tooltip with usage percentage

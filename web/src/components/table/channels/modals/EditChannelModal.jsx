@@ -2538,6 +2538,7 @@ const EditChannelModal = (props) => {
                                   <ConcurrencyStatus
                                     concurrencyInfo={concurrencyInfo}
                                     showTooltip={false}
+                                    showProgress={false}
                                   />
                                 </div>
                                 <Progress
