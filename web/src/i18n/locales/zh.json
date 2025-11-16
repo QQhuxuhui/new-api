@@ -2090,6 +2090,23 @@
     "密钥": "密钥",
     "已禁用": "已禁用",
     "已达上限": "已达上限",
-    "总使用率": "总使用率"
+    "总使用率": "总使用率",
+    "使用教程": "使用教程",
+    "tutorial": {
+      "title": "AI Code 使用教程",
+      "description": "跟着这个教程，你可以轻松在自己的电脑上安装并使用 Claude Code 和 OpenAI Codex。",
+      "step1": {
+        "title": "安装 Node.js 环境",
+        "description": "Claude Code 需要 Node.js 环境才能运行。"
+      },
+      "step2": {
+        "title": "安装 Claude Code",
+        "description": "使用 npm 全局安装 Claude Code"
+      },
+      "step3": {
+        "title": "配置 Claude Code",
+        "description": "配置 API 端点和密钥"
+      }
+    }
   }
 }

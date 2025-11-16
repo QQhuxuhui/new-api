@@ -2109,6 +2109,23 @@
     "请填写完整的产品信息": "Please fill in complete product information",
     "产品ID已存在": "Product ID already exists",
     "统一的": "The Unified",
-    "大模型接口网关": "LLM API Gateway"
+    "大模型接口网关": "LLM API Gateway",
+    "使用教程": "Tutorial",
+    "tutorial": {
+      "title": "AI Code Tutorial",
+      "description": "Follow this tutorial to easily install and use Claude Code and OpenAI Codex on your computer.",
+      "step1": {
+        "title": "Install Node.js Environment",
+        "description": "Claude Code requires Node.js environment to run."
+      },
+      "step2": {
+        "title": "Install Claude Code",
+        "description": "Install Claude Code globally using npm"
+      },
+      "step3": {
+        "title": "Configure Claude Code",
+        "description": "Configure API endpoint and credentials"
+      }
+    }
   }
 }
