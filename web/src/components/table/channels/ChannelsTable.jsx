@@ -60,6 +60,8 @@ const ChannelsTable = (channelsData) => {
     // Multi-key management
     setShowMultiKeyManageModal,
     setCurrentMultiKeyChannel,
+    // Concurrency info
+    concurrencyInfo,
   } = channelsData;
 
   // Get all columns
@@ -84,6 +86,7 @@ const ChannelsTable = (channelsData) => {
       channels,
       setShowMultiKeyManageModal,
       setCurrentMultiKeyChannel,
+      concurrencyInfo,
     });
   }, [
     t,
@@ -105,6 +108,7 @@ const ChannelsTable = (channelsData) => {
     channels,
     setShowMultiKeyManageModal,
     setCurrentMultiKeyChannel,
+    concurrencyInfo,
   ]);
 
   // Filter columns based on visibility settings

@@ -49,6 +49,7 @@ export const useChannelsData = () => {
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [channelCount, setChannelCount] = useState(0);
   const [groupOptions, setGroupOptions] = useState([]);
+  const [concurrencyInfo, setConcurrencyInfo] = useState({});
 
   // UI states
   const [showEdit, setShowEdit] = useState(false);
@@ -112,6 +113,7 @@ export const useChannelsData = () => {
     TYPE: 'type',
     STATUS: 'status',
     RESPONSE_TIME: 'response_time',
+    CONCURRENCY: 'concurrency',
     BALANCE: 'balance',
     PRIORITY: 'priority',
     WEIGHT: 'weight',
@@ -151,6 +153,7 @@ export const useChannelsData = () => {
       [COLUMN_KEYS.TYPE]: true,
       [COLUMN_KEYS.STATUS]: true,
       [COLUMN_KEYS.RESPONSE_TIME]: true,
+      [COLUMN_KEYS.CONCURRENCY]: true,
       [COLUMN_KEYS.BALANCE]: true,
       [COLUMN_KEYS.PRIORITY]: true,
       [COLUMN_KEYS.WEIGHT]: true,
@@ -327,13 +330,16 @@ export const useChannelsData = () => {
 
     const { success, message, data } = res.data;
     if (success) {
-      const { items, total, type_counts } = data;
+      const { items, total, type_counts, concurrency_info } = data;
       if (type_counts) {
         const sumAll = Object.values(type_counts).reduce(
           (acc, v) => acc + v,
           0,
         );
         setTypeCounts({ ...type_counts, all: sumAll });
+      }
+      if (concurrency_info) {
+        setConcurrencyInfo(concurrency_info);
       }
       setChannelFormat(items, enableTagMode);
       setChannelCount(total);
@@ -374,12 +380,15 @@ export const useChannelsData = () => {
       );
       const { success, message, data } = res.data;
       if (success) {
-        const { items = [], total = 0, type_counts = {} } = data;
+        const { items = [], total = 0, type_counts = {}, concurrency_info } = data;
         const sumAll = Object.values(type_counts).reduce(
           (acc, v) => acc + v,
           0,
         );
         setTypeCounts({ ...type_counts, all: sumAll });
+        if (concurrency_info) {
+          setConcurrencyInfo(concurrency_info);
+        }
         setChannelFormat(items, enableTagMode);
         setChannelCount(total);
         setActivePage(page);
@@ -407,6 +416,53 @@ export const useChannelsData = () => {
       );
     }
   };
+
+  // Refresh only concurrency info (lightweight update)
+  const refreshConcurrencyInfo = async () => {
+    try {
+      const typeParam = activeTypeKey !== 'all' ? `&type=${activeTypeKey}` : '';
+      const statusParam = statusFilter !== 'all' ? `&status=${statusFilter}` : '';
+      const { searchKeyword, searchGroup, searchModel } = getFormValues();
+
+      let res;
+      if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
+        // Normal channel list
+        res = await API.get(
+          `/api/channel/?p=${activePage}&page_size=${pageSize}&id_sort=${idSort}&tag_mode=${enableTagMode}${typeParam}${statusParam}`,
+        );
+      } else {
+        // Search mode - use GET with query parameters
+        const keywordParam = searchKeyword ? `&keyword=${encodeURIComponent(searchKeyword)}` : '';
+        const groupParam = searchGroup ? `&group=${encodeURIComponent(searchGroup)}` : '';
+        const modelParam = searchModel ? `&model=${encodeURIComponent(searchModel)}` : '';
+        res = await API.get(
+          `/api/channel/search?p=${activePage}&page_size=${pageSize}&id_sort=${idSort}&tag_mode=${enableTagMode}${typeParam}${statusParam}${keywordParam}${groupParam}${modelParam}`,
+        );
+      }
+
+      if (res === undefined) return;
+
+      const { success, data } = res.data;
+      if (success && data.concurrency_info) {
+        setConcurrencyInfo(data.concurrency_info);
+      }
+    } catch (error) {
+      // Silent failure for auto-refresh to avoid spamming user with errors
+      // Only log in development mode
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Failed to refresh concurrency info:', error);
+      }
+    }
+  };
+
+  // Auto-refresh concurrency info every 10 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshConcurrencyInfo();
+    }, 10000); // 10 seconds
+
+    return () => clearInterval(interval);
+  }, [activePage, pageSize, idSort, enableTagMode, activeTypeKey, statusFilter]);
 
   // Channel management
   const manageChannel = async (id, action, record, value) => {
@@ -1021,6 +1077,7 @@ export const useChannelsData = () => {
     pageSize,
     channelCount,
     groupOptions,
+    concurrencyInfo,
     idSort,
     enableTagMode,
     enableBatchDelete,
@@ -1093,6 +1150,7 @@ export const useChannelsData = () => {
     loadChannels,
     searchChannels,
     refresh,
+    refreshConcurrencyInfo,
     manageChannel,
     manageTag,
     handlePageChange,

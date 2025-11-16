@@ -41,6 +41,7 @@ import {
 import { CHANNEL_OPTIONS } from '../../../constants';
 import { IconTreeTriangleDown, IconMore } from '@douyinfe/semi-icons';
 import { FaRandom } from 'react-icons/fa';
+import ConcurrencyStatus from '../../common/ui/ConcurrencyStatus';
 
 // Render functions
 const renderType = (type, channelInfo = undefined, t) => {
@@ -207,6 +208,7 @@ export const getChannelsColumns = ({
   channels,
   setShowMultiKeyManageModal,
   setCurrentMultiKeyChannel,
+  concurrencyInfo,
 }) => {
   return [
     {
@@ -324,6 +326,23 @@ export const getChannelsColumns = ({
       title: t('响应时间'),
       dataIndex: 'response_time',
       render: (text, record, index) => <div>{renderResponseTime(text, t)}</div>,
+    },
+    {
+      key: COLUMN_KEYS.CONCURRENCY,
+      title: t('并发状态'),
+      dataIndex: 'id',
+      render: (text, record, index) => {
+        if (record.children !== undefined) {
+          return null; // Don't show for tag rows
+        }
+        const info = concurrencyInfo?.[record.id];
+        return (
+          <ConcurrencyStatus
+            concurrencyInfo={info}
+            isMultiKey={record.channel_info?.is_multi_key}
+          />
+        );
+      },
     },
     {
       key: COLUMN_KEYS.BALANCE,

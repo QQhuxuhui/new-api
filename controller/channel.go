@@ -140,6 +140,14 @@ func GetAllChannels(c *gin.Context) {
 		clearChannelInfo(datum)
 	}
 
+	// Get concurrency info for channels with limits configured
+	// Extract channel IDs to query with keys internally
+	channelIds := make([]int, len(channelData))
+	for i, ch := range channelData {
+		channelIds[i] = ch.Id
+	}
+	concurrencyMap := service.GetBatchChannelsConcurrencyByIds(channelIds)
+
 	countQuery := model.DB.Model(&model.Channel{})
 	if statusFilter == common.ChannelStatusEnabled {
 		countQuery = countQuery.Where("status = ?", common.ChannelStatusEnabled)
@@ -156,11 +164,12 @@ func GetAllChannels(c *gin.Context) {
 		typeCounts[r.Type] = r.Count
 	}
 	common.ApiSuccess(c, gin.H{
-		"items":       channelData,
-		"total":       total,
-		"page":        pageInfo.GetPage(),
-		"page_size":   pageInfo.GetPageSize(),
-		"type_counts": typeCounts,
+		"items":            channelData,
+		"total":            total,
+		"page":             pageInfo.GetPage(),
+		"page_size":        pageInfo.GetPageSize(),
+		"type_counts":      typeCounts,
+		"concurrency_info": concurrencyMap,
 	})
 	return
 }
@@ -352,13 +361,22 @@ func SearchChannels(c *gin.Context) {
 		clearChannelInfo(datum)
 	}
 
+	// Get concurrency info for channels with limits configured
+	// Extract channel IDs to query with keys internally
+	channelIds := make([]int, len(pagedData))
+	for i, ch := range pagedData {
+		channelIds[i] = ch.Id
+	}
+	concurrencyMap := service.GetBatchChannelsConcurrencyByIds(channelIds)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"items":       pagedData,
-			"total":       total,
-			"type_counts": typeCounts,
+			"items":            pagedData,
+			"total":            total,
+			"type_counts":      typeCounts,
+			"concurrency_info": concurrencyMap,
 		},
 	})
 	return
@@ -378,10 +396,45 @@ func GetChannel(c *gin.Context) {
 	if channel != nil {
 		clearChannelInfo(channel)
 	}
+
+	// Include concurrency info if requested
+	includeConcurrency, _ := strconv.ParseBool(c.Query("include_concurrency"))
+	var concurrencyInfo interface{}
+	if includeConcurrency && channel != nil {
+		// Need to get the full channel with key for concurrency check
+		fullChannel, err := model.GetChannelById(id, true)
+		if err == nil {
+			concurrencyInfo = service.GetChannelConcurrencyInfo(fullChannel)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":          true,
+		"message":          "",
+		"data":             channel,
+		"concurrency_info": concurrencyInfo,
+	})
+	return
+}
+
+func GetChannelConcurrency(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	channel, err := model.GetChannelById(id, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	concurrencyInfo := service.GetChannelConcurrencyInfo(channel)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    channel,
+		"data":    concurrencyInfo,
 	})
 	return
 }

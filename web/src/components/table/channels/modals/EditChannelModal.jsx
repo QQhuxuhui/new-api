@@ -46,6 +46,7 @@ import {
   Col,
   Highlight,
   Input,
+  Progress,
 } from '@douyinfe/semi-ui';
 import {
   getChannelModels,
@@ -58,6 +59,7 @@ import ModelSelectModal from './ModelSelectModal';
 import JSONEditor from '../../../common/ui/JSONEditor';
 import SecureVerificationModal from '../../../common/modals/SecureVerificationModal';
 import ChannelKeyDisplay from '../../../common/ui/ChannelKeyDisplay';
+import ConcurrencyStatus from '../../../common/ui/ConcurrencyStatus';
 import { useSecureVerification } from '../../../../hooks/common/useSecureVerification';
 import { createApiCalls } from '../../../../services/secureVerification';
 import {
@@ -190,6 +192,10 @@ const EditChannelModal = (props) => {
   const [useManualInput, setUseManualInput] = useState(false); // 是否使用手动输入模式
   const [keyMode, setKeyMode] = useState('append'); // 密钥模式：replace（覆盖）或 append（追加）
   const [isEnterpriseAccount, setIsEnterpriseAccount] = useState(false); // 是否为企业账户
+
+  // 并发状态
+  const [concurrencyInfo, setConcurrencyInfo] = useState(null);
+  const [concurrencyLoading, setConcurrencyLoading] = useState(false);
 
   // 密钥显示状态
   const [keyDisplayState, setKeyDisplayState] = useState({
@@ -807,6 +813,37 @@ const EditChannelModal = (props) => {
       resetModalState();
     }
   }, [props.visible, channelId]);
+
+  // 并发信息轮询（仅在编辑模式且渠道有并发限制时）
+  useEffect(() => {
+    if (!props.visible || !isEdit || !channelId) {
+      setConcurrencyInfo(null);
+      return;
+    }
+
+    // 获取并发信息
+    const fetchConcurrency = async () => {
+      setConcurrencyLoading(true);
+      try {
+        const res = await API.get(`/api/channel/${channelId}/concurrency`);
+        if (res?.data?.success) {
+          setConcurrencyInfo(res.data.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch concurrency info:', error);
+      } finally {
+        setConcurrencyLoading(false);
+      }
+    };
+
+    // 初次加载
+    fetchConcurrency();
+
+    // 设置轮询（5秒间隔）
+    const interval = setInterval(fetchConcurrency, 5000);
+
+    return () => clearInterval(interval);
+  }, [props.visible, isEdit, channelId]);
 
   // 统一的模态框重置函数
   const resetModalState = () => {
@@ -2478,6 +2515,157 @@ const EditChannelModal = (props) => {
                       style={{ width: '100%' }}
                       extraText={t('设置每个API Key的最大并发请求数，0表示不限制')}
                     />
+
+                    {/* 并发状态显示 - 仅在编辑模式且有并发限制时显示 */}
+                    {isEdit && inputs.max_concurrent_requests_per_key > 0 && (
+                      <Card
+                        title={
+                          <div className='flex items-center justify-between'>
+                            <span>{t('并发状态')}</span>
+                            {concurrencyLoading && <Spin size='small' />}
+                          </div>
+                        }
+                        bordered
+                        style={{ marginBottom: '16px' }}
+                      >
+                        {concurrencyInfo ? (
+                          <div className='flex flex-col gap-3'>
+                            {/* 单key渠道 */}
+                            {!concurrencyInfo.keys && (
+                              <div className='flex flex-col gap-2'>
+                                <div className='flex items-center justify-between'>
+                                  <Typography.Text>{t('当前/限制')}:</Typography.Text>
+                                  <ConcurrencyStatus
+                                    concurrencyInfo={concurrencyInfo}
+                                    showTooltip={false}
+                                  />
+                                </div>
+                                <Progress
+                                  percent={concurrencyInfo.usage_percent}
+                                  stroke={
+                                    concurrencyInfo.usage_percent >= 80
+                                      ? 'var(--semi-color-danger)'
+                                      : concurrencyInfo.usage_percent >= 50
+                                      ? 'var(--semi-color-warning)'
+                                      : 'var(--semi-color-success)'
+                                  }
+                                  showInfo
+                                  aria-label='concurrency usage'
+                                />
+                                {concurrencyInfo.usage_percent >= 80 && (
+                                  <Banner
+                                    type='warning'
+                                    description={t('高并发使用')}
+                                    closeIcon={null}
+                                  />
+                                )}
+                              </div>
+                            )}
+
+                            {/* 多key渠道 */}
+                            {concurrencyInfo.keys && (
+                              <div className='flex flex-col gap-3'>
+                                <div className='flex items-center justify-between'>
+                                  <Typography.Text strong>{t('总体状态')}:</Typography.Text>
+                                  <Tag
+                                    color={
+                                      concurrencyInfo.usage_percent >= 80
+                                        ? 'red'
+                                        : concurrencyInfo.usage_percent >= 50
+                                        ? 'orange'
+                                        : 'green'
+                                    }
+                                    size='large'
+                                  >
+                                    {concurrencyInfo.total_current}/{concurrencyInfo.total_capacity}
+                                  </Tag>
+                                </div>
+                                <Progress
+                                  percent={concurrencyInfo.usage_percent}
+                                  stroke={
+                                    concurrencyInfo.usage_percent >= 80
+                                      ? 'var(--semi-color-danger)'
+                                      : concurrencyInfo.usage_percent >= 50
+                                      ? 'var(--semi-color-warning)'
+                                      : 'var(--semi-color-success)'
+                                  }
+                                  showInfo
+                                  aria-label='total concurrency usage'
+                                />
+
+                                <Typography.Text strong className='mt-2'>
+                                  {t('密钥并发详情')}:
+                                </Typography.Text>
+                                {concurrencyInfo.keys.map((key) => (
+                                  <div key={key.key_index} className='flex flex-col gap-1'>
+                                    <div className='flex items-center justify-between'>
+                                      <Typography.Text>
+                                        {t('密钥')} #{key.key_index + 1}:
+                                      </Typography.Text>
+                                      <div className='flex items-center gap-2'>
+                                        <Tag
+                                          color={
+                                            key.usage_percent >= 80
+                                              ? 'red'
+                                              : key.usage_percent >= 50
+                                              ? 'orange'
+                                              : 'green'
+                                          }
+                                          size='small'
+                                        >
+                                          {key.current >= 0 ? `${key.current}/${key.limit}` : t('数据不可用')}
+                                        </Tag>
+                                        {key.status === 'disabled' && (
+                                          <Tag color='grey' size='small'>
+                                            {t('已禁用')}
+                                          </Tag>
+                                        )}
+                                        {key.status === 'at_limit' && (
+                                          <Tag color='red' size='small'>
+                                            {t('已达上限')}
+                                          </Tag>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {key.current >= 0 && (
+                                      <Progress
+                                        percent={key.usage_percent}
+                                        stroke={
+                                          key.usage_percent >= 80
+                                            ? 'var(--semi-color-danger)'
+                                            : key.usage_percent >= 50
+                                            ? 'var(--semi-color-warning)'
+                                            : 'var(--semi-color-success)'
+                                        }
+                                        showInfo={false}
+                                        size='small'
+                                        aria-label={`key ${key.key_index + 1} concurrency usage`}
+                                      />
+                                    )}
+                                  </div>
+                                ))}
+
+                                {concurrencyInfo.usage_percent >= 80 && (
+                                  <Banner
+                                    type='warning'
+                                    description={t('高并发使用')}
+                                    closeIcon={null}
+                                  />
+                                )}
+                              </div>
+                            )}
+
+                            <Typography.Text type='tertiary' size='small'>
+                              {t('最后更新')}: {new Date(concurrencyInfo.last_updated * 1000).toLocaleTimeString()}
+                            </Typography.Text>
+                          </div>
+                        ) : (
+                          <Typography.Text type='tertiary'>
+                            {concurrencyLoading ? t('加载中...') : t('数据不可用')}
+                          </Typography.Text>
+                        )}
+                      </Card>
+                    )}
 
                     <Form.Switch
                       field='auto_ban'

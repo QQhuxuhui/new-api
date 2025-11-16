@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Button,
   Dropdown,
@@ -25,7 +25,9 @@ import {
   Switch,
   Typography,
   Select,
+  Tooltip,
 } from '@douyinfe/semi-ui';
+import { IconRefresh } from '@douyinfe/semi-icons';
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
 
 const ChannelsActions = ({
@@ -52,8 +54,21 @@ const ChannelsActions = ({
   activePage,
   pageSize,
   setActivePage,
+  refreshConcurrencyInfo,
   t,
 }) => {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefreshConcurrency = async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshConcurrencyInfo();
+      setTimeout(() => setIsRefreshing(false), 500);
+    } catch (error) {
+      // Ensure loading state is cleared even if refresh fails
+      setIsRefreshing(false);
+    }
+  };
   return (
     <div className='flex flex-col gap-2'>
       {/* 第一行：批量操作按钮 + 设置开关 */}
@@ -182,6 +197,17 @@ const ChannelsActions = ({
             setCompactMode={setCompactMode}
             t={t}
           />
+
+          <Tooltip content={t('刷新并发数据')}>
+            <Button
+              size='small'
+              icon={<IconRefresh />}
+              type='tertiary'
+              loading={isRefreshing}
+              onClick={handleRefreshConcurrency}
+              className='w-full md:w-auto'
+            />
+          </Tooltip>
         </div>
 
         {/* 右侧：设置开关区域 */}
