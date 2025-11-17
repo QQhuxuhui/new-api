@@ -47,7 +47,7 @@ const CodeBlock = ({ code, language = 'bash' }) => {
 
   return (
     <div className="relative group">
-      <div className="overflow-x-auto rounded-lg bg-gray-900 dark:bg-gray-950 p-3 sm:p-4 font-mono text-xs sm:text-sm">
+      <div className="overflow-x-auto rounded-lg bg-gray-800 dark:bg-gray-900 p-3 sm:p-4 font-mono text-xs sm:text-sm border border-gray-700 dark:border-gray-600">
         <pre className="text-green-400">
           <code>{code}</code>
         </pre>
@@ -106,8 +106,8 @@ function Tutorial() {
   const [activeOS, setActiveOS] = useState('windows');
 
   const baseUrl = useMemo(() => getBaseUrl(), []);
-  const claudeApiUrl = useMemo(() => `${baseUrl}/v1`, [baseUrl]);
-  const openaiApiUrl = useMemo(() => `${baseUrl}/v1`, [baseUrl]);
+  const claudeApiUrl = useMemo(() => baseUrl, [baseUrl]); // Claude Code 不需要 /v1 后缀
+  const openaiApiUrl = useMemo(() => `${baseUrl}/v1`, [baseUrl]); // OpenAI Codex 需要 /v1 后缀
 
   const osSystems = [
     { key: 'windows', name: 'Windows', icon: '🪟' },
@@ -176,14 +176,22 @@ function Tutorial() {
                     <li>按照安装向导完成安装，保持默认设置即可</li>
                   </ol>
                   <p className="mt-3 mb-2">方法二：使用包管理器</p>
-                  <CodeBlock code="# 使用 Chocolatey\nchoco install nodejs\n\n# 或使用 Scoop\nscoop install nodejs" />
+                  <CodeBlock code={`# 使用 Chocolatey
+choco install nodejs
+
+# 或使用 Scoop
+scoop install nodejs`} />
                 </NoteBox>
               )}
 
               {activeOS === 'macos' && (
                 <NoteBox type="info" title="macOS 安装方法">
                   <p className="mb-2">方法一：使用 Homebrew（推荐）</p>
-                  <CodeBlock code={'# 如果未安装 Homebrew，先安装\n/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"\n\n# 安装 Node.js\nbrew install node'} />
+                  <CodeBlock code={`# 如果未安装 Homebrew，先安装
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 安装 Node.js
+brew install node`} />
                   <p className="mt-3 mb-2">方法二：官网下载</p>
                   <ol className="list-decimal ml-4 space-y-1">
                     <li>访问 https://nodejs.org/</li>
@@ -213,7 +221,8 @@ sudo pacman -S nodejs npm`}
               <div className="mt-4">
                 <NoteBox type="success" title="验证安装">
                   <p className="mb-2">安装完成后，打开终端输入以下命令验证：</p>
-                  <CodeBlock code="node --version\nnpm --version" />
+                  <CodeBlock code={`node --version
+npm --version`} />
                   <p className="mt-2">如果显示版本号，说明安装成功！</p>
                 </NoteBox>
               </div>
@@ -247,7 +256,8 @@ sudo pacman -S nodejs npm`}
                   <CodeBlock code="claude configure" />
                   <p className="my-3 text-sm">方法二：设置环境变量（PowerShell）</p>
                   <CodeBlock
-                    code={`$env:ANTHROPIC_BASE_URL="${claudeApiUrl}"\n$env:ANTHROPIC_API_KEY="YOUR_API_KEY"`}
+                    code={`$env:ANTHROPIC_BASE_URL="${claudeApiUrl}"
+$env:ANTHROPIC_API_KEY="YOUR_API_KEY"`}
                   />
                 </>
               )}
@@ -258,7 +268,8 @@ sudo pacman -S nodejs npm`}
                   <CodeBlock code="claude configure" />
                   <p className="my-3 text-sm">方法二：添加到 ~/.zshrc 或 ~/.bashrc</p>
                   <CodeBlock
-                    code={`export ANTHROPIC_BASE_URL="${claudeApiUrl}"\nexport ANTHROPIC_API_KEY="YOUR_API_KEY"`}
+                    code={`export ANTHROPIC_BASE_URL="${claudeApiUrl}"
+export ANTHROPIC_API_KEY="YOUR_API_KEY"`}
                   />
                   <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">添加后运行: source ~/.zshrc</p>
                 </>
@@ -270,7 +281,8 @@ sudo pacman -S nodejs npm`}
                   <CodeBlock code="claude configure" />
                   <p className="my-3 text-sm">方法二：添加到 ~/.bashrc 或 ~/.zshrc</p>
                   <CodeBlock
-                    code={`export ANTHROPIC_BASE_URL="${claudeApiUrl}"\nexport ANTHROPIC_API_KEY="YOUR_API_KEY"`}
+                    code={`export ANTHROPIC_BASE_URL="${claudeApiUrl}"
+export ANTHROPIC_API_KEY="YOUR_API_KEY"`}
                   />
                   <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">添加后运行: source ~/.bashrc</p>
                 </>
@@ -319,13 +331,20 @@ sudo pacman -S nodejs npm`}
 
               {activeOS === 'windows' && (
                 <CodeBlock
-                  code={`# 设置环境变量（PowerShell)\n$env:OPENAI_API_BASE="${openaiApiUrl}"\n$env:OPENAI_API_KEY="YOUR_API_KEY"`}
+                  code={`# 设置环境变量（PowerShell)
+$env:OPENAI_API_BASE="${openaiApiUrl}"
+$env:OPENAI_API_KEY="YOUR_API_KEY"`}
                 />
               )}
 
               {(activeOS === 'macos' || activeOS === 'linux') && (
                 <CodeBlock
-                  code={`# 添加到 ~/.zshrc 或 ~/.bashrc\nexport OPENAI_API_BASE="${openaiApiUrl}"\nexport OPENAI_API_KEY="YOUR_API_KEY"\n\n# 重新加载配置\nsource ~/.zshrc  # 或 source ~/.bashrc`}
+                  code={`# 添加到 ~/.zshrc 或 ~/.bashrc
+export OPENAI_API_BASE="${openaiApiUrl}"
+export OPENAI_API_KEY="YOUR_API_KEY"
+
+# 重新加载配置
+source ~/.zshrc  # 或 source ~/.bashrc`}
                 />
               )}
             </div>
