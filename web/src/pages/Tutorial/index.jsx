@@ -47,7 +47,7 @@ const CodeBlock = ({ code, language = 'bash' }) => {
 
   return (
     <div className="relative group">
-      <div className="overflow-x-auto rounded-lg bg-gray-800 dark:bg-gray-900 p-3 sm:p-4 font-mono text-xs sm:text-sm border border-gray-700 dark:border-gray-600">
+      <div className="overflow-x-auto rounded-lg bg-gray-900 dark:bg-black p-3 sm:p-4 font-mono text-xs sm:text-sm border border-gray-700 dark:border-gray-800">
         <pre className="text-green-400">
           <code>{code}</code>
         </pre>
@@ -246,50 +246,107 @@ npm --version`} />
             {/* 步骤 3: 配置 Claude Code */}
             <div className="mb-6 sm:mb-8">
               <StepTitle step={3} title={t('tutorial.step3.title', '配置 Claude Code')} />
-              <Paragraph className="mb-4 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-                配置 API 端点和密钥：
-              </Paragraph>
 
-              {activeOS === 'windows' && (
-                <>
-                  <p className="mb-2 text-sm">方法一：使用配置命令</p>
-                  <CodeBlock code="claude configure" />
-                  <p className="my-3 text-sm">方法二：设置环境变量（PowerShell）</p>
-                  <CodeBlock
-                    code={`$env:ANTHROPIC_BASE_URL="${claudeApiUrl}"
+              {/* 推荐方法 */}
+              <div className="mb-6">
+                <div className="flex items-center mb-3">
+                  <span className="bg-green-500 text-white text-xs font-bold px-2 py-1 rounded mr-2">推荐</span>
+                  <Text className="text-base sm:text-lg font-semibold">方法一：使用全局配置文件（推荐）</Text>
+                </div>
+                <Paragraph className="mb-3 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+                  在用户主目录创建配置文件，应用于所有项目，安全且便捷。
+                </Paragraph>
+
+                {activeOS === 'windows' && (
+                  <>
+                    <p className="mb-2 text-sm text-gray-600 dark:text-gray-400">
+                      创建文件：<code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">%USERPROFILE%\.claude\settings.json</code>
+                    </p>
+                    <CodeBlock code={`{
+  "apiConfiguration": {
+    "baseURL": "${claudeApiUrl}",
+    "apiKey": "YOUR_API_KEY"
+  }
+}`} language="json" />
+                  </>
+                )}
+
+                {(activeOS === 'macos' || activeOS === 'linux') && (
+                  <>
+                    <p className="mb-2 text-sm text-gray-600 dark:text-gray-400">
+                      创建文件：<code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">~/.claude/settings.json</code>
+                    </p>
+                    <CodeBlock code={`# 创建配置目录和文件
+mkdir -p ~/.claude
+cat > ~/.claude/settings.json << 'EOF'
+{
+  "apiConfiguration": {
+    "baseURL": "${claudeApiUrl}",
+    "apiKey": "YOUR_API_KEY"
+  }
+}
+EOF`} />
+                  </>
+                )}
+
+                <div className="mt-4">
+                  <NoteBox type="success" title="配置说明">
+                    <ul className="list-disc ml-4 space-y-1">
+                      <li>配置文件存储在用户主目录，不会被提交到 Git</li>
+                      <li>所有项目共享此配置，无需重复设置</li>
+                      <li>安全可靠，避免 API Key 泄露风险</li>
+                    </ul>
+                  </NoteBox>
+                </div>
+              </div>
+
+              {/* 其他方法 */}
+              <div className="mb-6">
+                <Text className="text-base sm:text-lg font-semibold mb-3 block">方法二：使用配置命令</Text>
+                <Paragraph className="mb-3 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+                  运行交互式配置向导：
+                </Paragraph>
+                <CodeBlock code="claude configure" />
+              </div>
+
+              <div className="mb-6">
+                <Text className="text-base sm:text-lg font-semibold mb-3 block">方法三：使用环境变量</Text>
+
+                {activeOS === 'windows' && (
+                  <>
+                    <p className="mb-2 text-sm">临时设置（PowerShell）：</p>
+                    <CodeBlock
+                      code={`$env:ANTHROPIC_BASE_URL="${claudeApiUrl}"
 $env:ANTHROPIC_API_KEY="YOUR_API_KEY"`}
-                  />
-                </>
-              )}
+                    />
+                  </>
+                )}
 
-              {activeOS === 'macos' && (
-                <>
-                  <p className="mb-2 text-sm">方法一：使用配置命令</p>
-                  <CodeBlock code="claude configure" />
-                  <p className="my-3 text-sm">方法二：添加到 ~/.zshrc 或 ~/.bashrc</p>
-                  <CodeBlock
-                    code={`export ANTHROPIC_BASE_URL="${claudeApiUrl}"
+                {activeOS === 'macos' && (
+                  <>
+                    <p className="mb-2 text-sm">添加到 ~/.zshrc 或 ~/.bashrc：</p>
+                    <CodeBlock
+                      code={`export ANTHROPIC_BASE_URL="${claudeApiUrl}"
 export ANTHROPIC_API_KEY="YOUR_API_KEY"`}
-                  />
-                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">添加后运行: source ~/.zshrc</p>
-                </>
-              )}
+                    />
+                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">添加后运行: source ~/.zshrc</p>
+                  </>
+                )}
 
-              {activeOS === 'linux' && (
-                <>
-                  <p className="mb-2 text-sm">方法一：使用配置命令</p>
-                  <CodeBlock code="claude configure" />
-                  <p className="my-3 text-sm">方法二：添加到 ~/.bashrc 或 ~/.zshrc</p>
-                  <CodeBlock
-                    code={`export ANTHROPIC_BASE_URL="${claudeApiUrl}"
+                {activeOS === 'linux' && (
+                  <>
+                    <p className="mb-2 text-sm">添加到 ~/.bashrc 或 ~/.zshrc：</p>
+                    <CodeBlock
+                      code={`export ANTHROPIC_BASE_URL="${claudeApiUrl}"
 export ANTHROPIC_API_KEY="YOUR_API_KEY"`}
-                  />
-                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">添加后运行: source ~/.bashrc</p>
-                </>
-              )}
+                    />
+                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">添加后运行: source ~/.bashrc</p>
+                  </>
+                )}
+              </div>
 
               <div className="mt-4">
-                <NoteBox type="info" title="配置说明">
+                <NoteBox type="info" title="API 信息">
                   <ul className="list-disc ml-4 space-y-1">
                     <li>
                       API Base URL: <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">{claudeApiUrl}</code>
@@ -310,43 +367,113 @@ export ANTHROPIC_API_KEY="YOUR_API_KEY"`}
             {/* Cursor 配置 */}
             <div className="mb-6 sm:mb-8">
               <StepTitle step={1} title="配置 Cursor 编辑器" />
-              <Paragraph className="mb-4 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-                在 Cursor 设置中配置自定义 API 端点：
-              </Paragraph>
-              <p className="mb-2 text-sm">打开 Cursor 设置 (Settings → Features → Override OpenAI Base URL)</p>
-              <NoteBox type="info">
-                <p className="mb-2">Base URL:</p>
-                <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded block">{openaiApiUrl}</code>
-                <p className="mt-3 mb-2">API Key:</p>
-                <p className="text-xs">在设置中输入您从平台获取的 API Key</p>
-              </NoteBox>
+
+              {/* 推荐方法 */}
+              <div className="mb-6">
+                <div className="flex items-center mb-3">
+                  <span className="bg-green-500 text-white text-xs font-bold px-2 py-1 rounded mr-2">推荐</span>
+                  <Text className="text-base sm:text-lg font-semibold">方法一：在设置中配置（推荐）</Text>
+                </div>
+                <Paragraph className="mb-3 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+                  在 Cursor 设置中配置自定义 API 端点，安全便捷：
+                </Paragraph>
+                <p className="mb-2 text-sm">打开 Cursor 设置 (Settings → Features → Override OpenAI Base URL)</p>
+                <NoteBox type="info">
+                  <p className="mb-2">Base URL:</p>
+                  <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded block">{openaiApiUrl}</code>
+                  <p className="mt-3 mb-2">API Key:</p>
+                  <p className="text-xs">在设置中输入您从平台获取的 API Key</p>
+                </NoteBox>
+                <div className="mt-4">
+                  <NoteBox type="success" title="配置说明">
+                    <ul className="list-disc ml-4 space-y-1">
+                      <li>配置存储在 Cursor 应用内部，不会暴露到项目文件</li>
+                      <li>所有项目共享此配置，无需重复设置</li>
+                      <li>安全可靠，避免 API Key 泄露风险</li>
+                    </ul>
+                  </NoteBox>
+                </div>
+              </div>
+
+              {/* 其他方法 */}
+              <div className="mb-6">
+                <Text className="text-base sm:text-lg font-semibold mb-3 block">方法二：使用环境变量</Text>
+                <Paragraph className="mb-3 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+                  在用户配置文件中设置环境变量：
+                </Paragraph>
+
+                {activeOS === 'windows' && (
+                  <>
+                    <p className="mb-2 text-sm">在 PowerShell 配置文件中添加：</p>
+                    <CodeBlock
+                      code={`$env:OPENAI_API_BASE="${openaiApiUrl}"
+$env:OPENAI_API_KEY="YOUR_API_KEY"`}
+                    />
+                  </>
+                )}
+
+                {(activeOS === 'macos' || activeOS === 'linux') && (
+                  <>
+                    <p className="mb-2 text-sm">添加到 ~/.zshrc 或 ~/.bashrc：</p>
+                    <CodeBlock
+                      code={`export OPENAI_API_BASE="${openaiApiUrl}"
+export OPENAI_API_KEY="YOUR_API_KEY"
+
+# 重新加载配置
+source ~/.zshrc  # 或 source ~/.bashrc`}
+                    />
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Windsurf 配置 */}
             <div className="mb-6 sm:mb-8">
               <StepTitle step={2} title="配置 Windsurf 编辑器" />
-              <Paragraph className="mb-4 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-                在 Windsurf 中配置环境变量：
-              </Paragraph>
 
-              {activeOS === 'windows' && (
-                <CodeBlock
-                  code={`# 设置环境变量（PowerShell)
-$env:OPENAI_API_BASE="${openaiApiUrl}"
+              {/* 推荐方法 */}
+              <div className="mb-6">
+                <div className="flex items-center mb-3">
+                  <span className="bg-green-500 text-white text-xs font-bold px-2 py-1 rounded mr-2">推荐</span>
+                  <Text className="text-base sm:text-lg font-semibold">方法一：使用环境变量（推荐）</Text>
+                </div>
+                <Paragraph className="mb-3 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+                  在用户配置文件中设置环境变量，安全且全局生效：
+                </Paragraph>
+
+                {activeOS === 'windows' && (
+                  <>
+                    <p className="mb-2 text-sm">在 PowerShell 配置文件中添加：</p>
+                    <CodeBlock
+                      code={`$env:OPENAI_API_BASE="${openaiApiUrl}"
 $env:OPENAI_API_KEY="YOUR_API_KEY"`}
-                />
-              )}
+                    />
+                  </>
+                )}
 
-              {(activeOS === 'macos' || activeOS === 'linux') && (
-                <CodeBlock
-                  code={`# 添加到 ~/.zshrc 或 ~/.bashrc
-export OPENAI_API_BASE="${openaiApiUrl}"
+                {(activeOS === 'macos' || activeOS === 'linux') && (
+                  <>
+                    <p className="mb-2 text-sm">添加到 ~/.zshrc 或 ~/.bashrc：</p>
+                    <CodeBlock
+                      code={`export OPENAI_API_BASE="${openaiApiUrl}"
 export OPENAI_API_KEY="YOUR_API_KEY"
 
 # 重新加载配置
 source ~/.zshrc  # 或 source ~/.bashrc`}
-                />
-              )}
+                    />
+                  </>
+                )}
+
+                <div className="mt-4">
+                  <NoteBox type="success" title="配置说明">
+                    <ul className="list-disc ml-4 space-y-1">
+                      <li>环境变量存储在用户主目录配置文件中，不会暴露到项目</li>
+                      <li>所有项目和终端会话共享此配置</li>
+                      <li>安全可靠，避免 API Key 泄露风险</li>
+                    </ul>
+                  </NoteBox>
+                </div>
+              </div>
             </div>
           </div>
 
