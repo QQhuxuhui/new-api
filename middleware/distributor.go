@@ -181,12 +181,18 @@ func Distribute() func(c *gin.Context) {
 			return
 		}
 
-		// Setup cleanup for concurrency tracking
-		if concurrencyKey, exists := c.Get("concurrency_key"); exists {
-			if key, ok := concurrencyKey.(string); ok {
-				defer service.DecrementConcurrency(key)
+		// Setup cleanup for concurrency tracking.
+		// Use a closure that reads the latest concurrency_key and channel_type
+		// at the end of the request, so that retries always clean up the
+		// final channel key instead of the first one.
+		defer func() {
+			if concurrencyKey, exists := c.Get("concurrency_key"); exists {
+				if key, ok := concurrencyKey.(string); ok {
+					channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
+					service.DecrementConcurrency(key, channelType)
+				}
 			}
-		}
+		}()
 
 		c.Next()
 	}
@@ -396,7 +402,9 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	// If this is a retry (old concurrency_key exists), cleanup the old counter first
 	if oldKey, exists := c.Get("concurrency_key"); exists {
 		if key, ok := oldKey.(string); ok {
-			service.DecrementConcurrency(key)
+			// Get the old channel type for proper cleanup
+			oldChannelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
+			service.DecrementConcurrency(key, oldChannelType)
 		}
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
@@ -419,27 +427,31 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 		return newAPIError
 	}
 
-	// Check concurrency limit for the selected key
-	withinLimit, err := service.CheckAndIncrementConcurrency(channel, key, index)
-	if err != nil {
-		// Redis error, log but continue (fail-open)
-		if common.DebugEnabled {
-			common.SysLog(fmt.Sprintf("Concurrency check error: %v", err))
+	// Only apply concurrency limit and tracking when explicitly configured.
+	hasConcurrencyLimit := channel.MaxConcurrentRequestsPerKey != nil && *channel.MaxConcurrentRequestsPerKey > 0
+	if hasConcurrencyLimit {
+		// Check concurrency limit for the selected key
+		withinLimit, err := service.CheckAndIncrementConcurrency(channel, key, index)
+		if err != nil {
+			// Redis error, log but continue (fail-open)
+			if common.DebugEnabled {
+				common.SysLog(fmt.Sprintf("Concurrency check error: %v", err))
+			}
 		}
-	}
-	if !withinLimit {
-		// This key is at its concurrency limit
-		return types.NewErrorWithStatusCode(
-			errors.New("channel key at concurrency limit"),
-			types.ErrorCodeChannelKeyConcurrencyLimit,
-			http.StatusTooManyRequests, // 429
-			types.ErrOptionWithSkipRetry(),
-		)
-	}
+		if !withinLimit {
+			// This key is at its concurrency limit
+			return types.NewErrorWithStatusCode(
+				errors.New("channel key at concurrency limit"),
+				types.ErrorCodeChannelKeyConcurrencyLimit,
+				http.StatusTooManyRequests, // 429
+				types.ErrOptionWithSkipRetry(),
+			)
+		}
 
-	// Register cleanup to decrement concurrency counter when request finishes
-	c.Set("concurrency_key", key)
-	// We'll add a defer in the relay controller to call DecrementConcurrency
+		// Register cleanup to decrement concurrency counter when request finishes
+		// (actual cleanup is triggered in the distributor middleware via defer).
+		c.Set("concurrency_key", key)
+	}
 
 	if channel.ChannelInfo.IsMultiKey {
 		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
