@@ -16,12 +16,13 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-// GetConcurrencyKey generates a Redis key for tracking concurrent requests for a specific API key
-func GetConcurrencyKey(apiKey string) string {
+// GetConcurrencyKey generates a Redis key for tracking concurrent requests for a specific API key and channel type
+// channelType is included to ensure the same key used across different channel types (e.g., Claude and OpenAI) has independent concurrency tracking
+func GetConcurrencyKey(apiKey string, channelType int) string {
 	// Hash the API key to avoid exposing sensitive information in Redis
 	hash := sha256.Sum256([]byte(apiKey))
 	keyHash := hex.EncodeToString(hash[:])
-	return fmt.Sprintf("channel:key:%s:concurrent", keyHash)
+	return fmt.Sprintf("channel:key:%s:type:%d:concurrent", keyHash, channelType)
 }
 
 // CheckAndIncrementConcurrency checks if adding a new request would exceed the limit,
@@ -41,7 +42,7 @@ func CheckAndIncrementConcurrency(channel *model.Channel, apiKey string, keyInde
 	}
 
 	limit := *channel.MaxConcurrentRequestsPerKey
-	redisKey := GetConcurrencyKey(apiKey)
+	redisKey := GetConcurrencyKey(apiKey, channel.Type)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -97,14 +98,14 @@ func CheckAndIncrementConcurrency(channel *model.Channel, apiKey string, keyInde
 	return true, nil
 }
 
-// DecrementConcurrency decrements the concurrent request counter for an API key
-func DecrementConcurrency(apiKey string) {
+// DecrementConcurrency decrements the concurrent request counter for an API key and channel type
+func DecrementConcurrency(apiKey string, channelType int) {
 	// If Redis is not enabled, nothing to do
 	if !common.RedisEnabled {
 		return
 	}
 
-	redisKey := GetConcurrencyKey(apiKey)
+	redisKey := GetConcurrencyKey(apiKey, channelType)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -128,13 +129,13 @@ func DecrementConcurrency(apiKey string) {
 	}
 }
 
-// GetCurrentConcurrency returns the current number of concurrent requests for an API key
-func GetCurrentConcurrency(apiKey string) (int, error) {
+// GetCurrentConcurrency returns the current number of concurrent requests for an API key and channel type
+func GetCurrentConcurrency(apiKey string, channelType int) (int, error) {
 	if !common.RedisEnabled {
 		return 0, nil
 	}
 
-	redisKey := GetConcurrencyKey(apiKey)
+	redisKey := GetConcurrencyKey(apiKey, channelType)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -207,7 +208,7 @@ func GetChannelConcurrencyInfo(channel *model.Channel) interface{} {
 			}
 
 			// Get current concurrency
-			current, err := GetCurrentConcurrency(key)
+			current, err := GetCurrentConcurrency(key, channel.Type)
 			if err != nil || !common.RedisEnabled {
 				current = -1 // Unknown
 				hasUnknown = true
@@ -266,7 +267,7 @@ func GetChannelConcurrencyInfo(channel *model.Channel) interface{} {
 
 	// Handle single-key channels
 	key := channel.Key
-	current, err := GetCurrentConcurrency(key)
+	current, err := GetCurrentConcurrency(key, channel.Type)
 	if err != nil || !common.RedisEnabled {
 		current = -1 // Unknown
 	}
@@ -320,7 +321,7 @@ func GetBatchChannelsConcurrencyByIds(channelIds []int) map[int]interface{} {
 
 	// Batch query channels with keys (only necessary fields to minimize overhead)
 	var channels []*model.Channel
-	err := model.DB.Select("id, key, channel_info, max_concurrent_requests_per_key").
+	err := model.DB.Select("id, type, key, channel_info, max_concurrent_requests_per_key").
 		Where("id IN ?", channelIds).
 		Where("max_concurrent_requests_per_key > 0").
 		Find(&channels).Error

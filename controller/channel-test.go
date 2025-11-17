@@ -178,7 +178,9 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	// Setup cleanup for concurrency tracking
 	if concurrencyKey, exists := c.Get("concurrency_key"); exists {
 		if key, ok := concurrencyKey.(string); ok {
-			defer service.DecrementConcurrency(key)
+			// Get channel type for independent concurrency tracking per type
+			channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
+			defer service.DecrementConcurrency(key, channelType)
 		}
 	}
 

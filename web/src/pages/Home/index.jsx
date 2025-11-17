@@ -224,31 +224,15 @@ const Home = () => {
                       {t('获取密钥')}
                     </Button>
                   </Link>
-                  {isDemoSiteMode && statusState?.status?.version ? (
+                  {docsLink && (
                     <Button
                       size={isMobile ? 'default' : 'large'}
                       className='flex items-center !rounded-3xl px-6 py-2'
-                      icon={<IconGithubLogo />}
-                      onClick={() =>
-                        window.open(
-                          'https://github.com/QuantumNous/new-api',
-                          '_blank',
-                        )
-                      }
+                      icon={<IconFile />}
+                      onClick={() => window.open(docsLink, '_blank')}
                     >
-                      {statusState.status.version}
+                      {t('文档')}
                     </Button>
-                  ) : (
-                    docsLink && (
-                      <Button
-                        size={isMobile ? 'default' : 'large'}
-                        className='flex items-center !rounded-3xl px-6 py-2'
-                        icon={<IconFile />}
-                        onClick={() => window.open(docsLink, '_blank')}
-                      >
-                        {t('文档')}
-                      </Button>
-                    )
                   )}
                 </div>
 
