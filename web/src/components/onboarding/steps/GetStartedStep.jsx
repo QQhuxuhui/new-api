@@ -30,6 +30,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { IconCheckCircleStroked, IconCopy } from '@douyinfe/semi-icons';
 import { copy } from '../../../helpers';
+import { OnboardingAnalytics } from '../../../helpers/analytics';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -113,10 +114,17 @@ main();`;
   /**
    * Handle copy code to clipboard
    */
-  const handleCopyCode = () => {
+  const handleCopyCode = async () => {
     const code = getCodeExample(activeTab);
-    copy(code);
-    Toast.success('代码已复制到剪贴板');
+    const success = await copy(code);
+
+    if (success) {
+      Toast.success('代码已复制到剪贴板');
+      // Track successful code copy
+      OnboardingAnalytics.trackCodeCopied(activeTab);
+    } else {
+      Toast.error('复制失败,请重试');
+    }
   };
 
   /**
@@ -131,11 +139,15 @@ main();`;
       {/* Success message */}
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <IconCheckCircleStroked
-          size="extra-large"
-          style={{ fontSize: 64, color: 'var(--semi-color-success)', marginBottom: 16 }}
+          size='extra-large'
+          style={{
+            fontSize: 64,
+            color: 'var(--semi-color-success)',
+            marginBottom: 16,
+          }}
         />
         <Title heading={4}>恭喜! 设置完成</Title>
-        <Paragraph type="tertiary" style={{ marginTop: 8 }}>
+        <Paragraph type='tertiary' style={{ marginTop: 8 }}>
           您已成功完成设置,现在可以开始使用 API 了
         </Paragraph>
       </div>
@@ -143,14 +155,16 @@ main();`;
       {/* Token info banner */}
       {createdToken && (
         <Banner
-          type="success"
+          type='success'
           description={
             <div>
               <Text strong>令牌名称: </Text>
               <Text>{createdToken.name}</Text>
               <br />
               <Text strong>令牌密钥: </Text>
-              <Text code copyable>sk-{createdToken.key}</Text>
+              <Text code copyable>
+                sk-{createdToken.key}
+              </Text>
             </div>
           }
           style={{ marginBottom: 24 }}
@@ -159,25 +173,21 @@ main();`;
 
       {/* Code examples */}
       <Card
-        title="快速开始示例代码"
+        title='快速开始示例代码'
         style={{ marginBottom: 24 }}
         headerExtraContent={
           <Button
             icon={<IconCopy />}
-            theme="borderless"
-            type="tertiary"
+            theme='borderless'
+            type='tertiary'
             onClick={handleCopyCode}
           >
             复制代码
           </Button>
         }
       >
-        <Tabs
-          type="line"
-          activeKey={activeTab}
-          onChange={setActiveTab}
-        >
-          <TabPane tab="Python" itemKey="python">
+        <Tabs type='line' activeKey={activeTab} onChange={setActiveTab}>
+          <TabPane tab='Python' itemKey='python'>
             <pre
               style={{
                 backgroundColor: 'var(--semi-color-fill-0)',
@@ -192,7 +202,7 @@ main();`;
             </pre>
           </TabPane>
 
-          <TabPane tab="Node.js" itemKey="nodejs">
+          <TabPane tab='Node.js' itemKey='nodejs'>
             <pre
               style={{
                 backgroundColor: 'var(--semi-color-fill-0)',
@@ -207,7 +217,7 @@ main();`;
             </pre>
           </TabPane>
 
-          <TabPane tab="cURL" itemKey="curl">
+          <TabPane tab='cURL' itemKey='curl'>
             <pre
               style={{
                 backgroundColor: 'var(--semi-color-fill-0)',
@@ -225,19 +235,19 @@ main();`;
       </Card>
 
       {/* Action buttons */}
-      <Space vertical spacing="medium" style={{ width: '100%' }}>
+      <Space vertical spacing='medium' style={{ width: '100%' }}>
         <Button
-          theme="solid"
-          type="primary"
-          size="large"
+          theme='solid'
+          type='primary'
+          size='large'
           onClick={handleFinish}
           block
         >
           完成设置
         </Button>
         <Button
-          theme="borderless"
-          type="tertiary"
+          theme='borderless'
+          type='tertiary'
           onClick={() => window.open('/docs', '_blank')}
           block
         >

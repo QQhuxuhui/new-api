@@ -42,7 +42,7 @@ import { useOnboarding } from '../../hooks/useOnboarding';
 const { Sider, Content, Header } = Layout;
 
 const PageLayout = () => {
-  const [userState, userDispatch] = useContext(UserContext);
+  const [, userDispatch] = useContext(UserContext);
   const [, statusDispatch] = useContext(StatusContext);
   const isMobile = useIsMobile();
   const [collapsed, , setCollapsed] = useSidebarCollapsed();

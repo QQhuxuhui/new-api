@@ -18,15 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState } from 'react';
-import {
-  Button,
-  Typography,
-  Space,
-  Card,
-} from '@douyinfe/semi-ui';
+import { Button, Typography, Space, Card } from '@douyinfe/semi-ui';
 import { IconCode, IconTerminal, IconSetting } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import QuickCreateTokenModal from '../../table/tokens/modals/QuickCreateTokenModal';
+import { OnboardingAnalytics } from '../../../helpers/analytics';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -51,6 +47,9 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
    * Handle successful token creation from quick create modal
    */
   const handleTokenCreated = (tokenData) => {
+    // Track token creation in onboarding
+    OnboardingAnalytics.trackTokenCreated();
+
     setShowQuickCreate(false);
     onNext({ createdToken: tokenData });
   };
@@ -83,14 +82,14 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
     {
       id: 'claude-code',
       name: 'Claude Code',
-      icon: <IconCode size="extra-large" />,
+      icon: <IconCode size='extra-large' />,
       description: '用于 Claude Code 开发工具',
       color: 'var(--semi-color-primary)',
     },
     {
       id: 'codex',
       name: 'Codex',
-      icon: <IconTerminal size="extra-large" />,
+      icon: <IconTerminal size='extra-large' />,
       description: '用于代码生成和补全',
       color: 'var(--semi-color-success)',
     },
@@ -101,17 +100,21 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
       {/* Title */}
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <Title heading={4}>创建 API 令牌</Title>
-        <Paragraph type="tertiary" style={{ marginTop: 8 }}>
+        <Paragraph type='tertiary' style={{ marginTop: 8 }}>
           选择一个令牌类型快速创建
         </Paragraph>
       </div>
 
       {/* Token type cards */}
-      <Space vertical spacing="medium" style={{ width: '100%', marginBottom: 24 }}>
+      <Space
+        vertical
+        spacing='medium'
+        style={{ width: '100%', marginBottom: 24 }}
+      >
         {tokenTypes.map((type) => (
           <Card
             key={type.id}
-            shadows="hover"
+            shadows='hover'
             style={{
               border: '1px solid var(--semi-color-border)',
               cursor: 'pointer',
@@ -121,18 +124,19 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
             onClick={() => handleTokenTypeClick(type.id)}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <div style={{ color: type.color }}>
-                {type.icon}
-              </div>
+              <div style={{ color: type.color }}>{type.icon}</div>
               <div style={{ flex: 1 }}>
-                <Text strong style={{ fontSize: 16, display: 'block', marginBottom: 4 }}>
+                <Text
+                  strong
+                  style={{ fontSize: 16, display: 'block', marginBottom: 4 }}
+                >
                   {type.name}
                 </Text>
-                <Text type="tertiary" size="small">
+                <Text type='tertiary' size='small'>
                   {type.description}
                 </Text>
               </div>
-              <Button theme="solid" type="primary">
+              <Button theme='solid' type='primary'>
                 创建
               </Button>
             </div>
@@ -143,8 +147,8 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
       {/* Advanced configuration link */}
       <div style={{ textAlign: 'center', marginBottom: 32 }}>
         <Button
-          theme="borderless"
-          type="tertiary"
+          theme='borderless'
+          type='tertiary'
           icon={<IconSetting />}
           onClick={() => {
             // Navigate to tokens page for advanced configuration
@@ -157,10 +161,10 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
 
       {/* Navigation buttons */}
       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-        <Button theme="borderless" type="tertiary" onClick={onPrev}>
+        <Button theme='borderless' type='tertiary' onClick={onPrev}>
           上一步
         </Button>
-        <Button theme="borderless" type="tertiary" onClick={handleSkip}>
+        <Button theme='borderless' type='tertiary' onClick={handleSkip}>
           跳过此步
         </Button>
       </Space>

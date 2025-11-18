@@ -34,14 +34,14 @@ const ProgressBar = ({ currentStep, totalSteps = 4, completedSteps = [] }) => {
     <div style={{ marginBottom: 24 }}>
       {/* Step indicator text */}
       <div style={{ textAlign: 'center', marginBottom: 16 }}>
-        <Text type="tertiary">
+        <Text type='tertiary'>
           步骤 {currentStep} / {totalSteps}
         </Text>
       </div>
 
       {/* Visual step indicators */}
       <Space
-        spacing="medium"
+        spacing='medium'
         style={{
           width: '100%',
           justifyContent: 'center',
@@ -66,7 +66,7 @@ const ProgressBar = ({ currentStep, totalSteps = 4, completedSteps = [] }) => {
               >
                 {isCompleted || isPast ? (
                   <IconTickCircle
-                    size="large"
+                    size='large'
                     style={{ color: 'var(--semi-color-success)' }}
                   />
                 ) : isCurrent ? (
@@ -76,7 +76,8 @@ const ProgressBar = ({ currentStep, totalSteps = 4, completedSteps = [] }) => {
                       height: 32,
                       borderRadius: '50%',
                       border: '2px solid var(--semi-color-primary)',
-                      backgroundColor: 'var(--semi-color-primary-light-default)',
+                      backgroundColor:
+                        'var(--semi-color-primary-light-default)',
                     }}
                   />
                 ) : (
@@ -90,8 +91,14 @@ const ProgressBar = ({ currentStep, totalSteps = 4, completedSteps = [] }) => {
                   />
                 )}
                 <Text
-                  size="small"
-                  type={isCurrent ? 'primary' : isPast || isCompleted ? 'secondary' : 'tertiary'}
+                  size='small'
+                  type={
+                    isCurrent
+                      ? 'primary'
+                      : isPast || isCompleted
+                        ? 'secondary'
+                        : 'tertiary'
+                  }
                   style={{ fontSize: 12 }}
                 >
                   {step}

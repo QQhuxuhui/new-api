@@ -67,7 +67,10 @@ export const useOnboarding = () => {
   const updateProgress = (newProgress) => {
     const updatedProgress = { ...progress, ...newProgress };
     setProgress(updatedProgress);
-    localStorage.setItem(STORAGE_KEYS.PROGRESS, JSON.stringify(updatedProgress));
+    localStorage.setItem(
+      STORAGE_KEYS.PROGRESS,
+      JSON.stringify(updatedProgress),
+    );
   };
 
   /**
@@ -118,7 +121,10 @@ export const useOnboarding = () => {
     }
 
     // Check if this is a first-time user
-    const loginCount = parseInt(localStorage.getItem(STORAGE_KEYS.LOGIN_COUNT) || '0', 10);
+    const loginCount = parseInt(
+      localStorage.getItem(STORAGE_KEYS.LOGIN_COUNT) || '0',
+      10,
+    );
 
     // Show if login count is 1 (first login) or if there's saved progress
     return loginCount === 1 || progress.startTime !== null;
@@ -128,7 +134,10 @@ export const useOnboarding = () => {
    * Increment login count (should be called on successful login)
    */
   const incrementLoginCount = () => {
-    const currentCount = parseInt(localStorage.getItem(STORAGE_KEYS.LOGIN_COUNT) || '0', 10);
+    const currentCount = parseInt(
+      localStorage.getItem(STORAGE_KEYS.LOGIN_COUNT) || '0',
+      10,
+    );
     const newCount = currentCount + 1;
     localStorage.setItem(STORAGE_KEYS.LOGIN_COUNT, newCount.toString());
   };
@@ -170,7 +179,7 @@ export const useOnboardingProgress = () => {
     if (!stepStartTime) return 0;
 
     const duration = (Date.now() - stepStartTime) / 1000; // Convert to seconds
-    setStepTimes(prev => ({
+    setStepTimes((prev) => ({
       ...prev,
       [step]: duration,
     }));

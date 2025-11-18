@@ -42,7 +42,10 @@ const WelcomeStep = ({ onNext, onSkip }) => {
     <div style={{ textAlign: 'center', padding: '20px 0' }}>
       {/* Icon */}
       <div style={{ marginBottom: 24 }}>
-        <IconPlay size="extra-large" style={{ fontSize: 64, color: 'var(--semi-color-primary)' }} />
+        <IconPlay
+          size='extra-large'
+          style={{ fontSize: 64, color: 'var(--semi-color-primary)' }}
+        />
       </div>
 
       {/* Title */}
@@ -51,13 +54,19 @@ const WelcomeStep = ({ onNext, onSkip }) => {
       </Title>
 
       {/* Description */}
-      <Paragraph style={{ fontSize: 16, marginBottom: 32, color: 'var(--semi-color-text-1)' }}>
+      <Paragraph
+        style={{
+          fontSize: 16,
+          marginBottom: 32,
+          color: 'var(--semi-color-text-1)',
+        }}
+      >
         让我们花 2 分钟时间,帮助您快速开始使用 API 服务
       </Paragraph>
 
       {/* Features list */}
       <Card
-        shadows="hover"
+        shadows='hover'
         style={{
           marginBottom: 32,
           textAlign: 'left',
@@ -65,21 +74,21 @@ const WelcomeStep = ({ onNext, onSkip }) => {
           border: '1px solid var(--semi-color-border)',
         }}
       >
-        <Space vertical align="start" spacing="medium">
+        <Space vertical align='start' spacing='medium'>
           <div>
             <Text strong style={{ fontSize: 15 }}>
               📋 完成以下 3 个简单步骤:
             </Text>
           </div>
           <div style={{ paddingLeft: 16 }}>
-            <Space vertical spacing="small" align="start">
-              <Text type="secondary">1. 充值账户 (可选)</Text>
-              <Text type="secondary">2. 创建 API 令牌</Text>
-              <Text type="secondary">3. 获取使用示例代码</Text>
+            <Space vertical spacing='small' align='start'>
+              <Text type='secondary'>1. 充值账户 (可选)</Text>
+              <Text type='secondary'>2. 创建 API 令牌</Text>
+              <Text type='secondary'>3. 获取使用示例代码</Text>
             </Space>
           </div>
           <div style={{ marginTop: 8 }}>
-            <Text type="tertiary" size="small">
+            <Text type='tertiary' size='small'>
               ⏱️ 预计耗时: 约 2 分钟
             </Text>
           </div>
@@ -87,22 +96,17 @@ const WelcomeStep = ({ onNext, onSkip }) => {
       </Card>
 
       {/* Action buttons */}
-      <Space vertical spacing="medium" style={{ width: '100%' }}>
+      <Space vertical spacing='medium' style={{ width: '100%' }}>
         <Button
-          theme="solid"
-          type="primary"
-          size="large"
+          theme='solid'
+          type='primary'
+          size='large'
           onClick={handleGetStarted}
           block
         >
           开始使用
         </Button>
-        <Button
-          theme="borderless"
-          type="tertiary"
-          onClick={handleSkip}
-          block
-        >
+        <Button theme='borderless' type='tertiary' onClick={handleSkip} block>
           稍后再说
         </Button>
       </Space>
@@ -113,7 +117,7 @@ const WelcomeStep = ({ onNext, onSkip }) => {
           checked={dontShowAgain}
           onChange={(e) => setDontShowAgain(e.target.checked)}
         >
-          <Text type="tertiary" size="small">
+          <Text type='tertiary' size='small'>
             不再显示此向导
           </Text>
         </Checkbox>

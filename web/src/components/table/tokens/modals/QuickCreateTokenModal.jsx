@@ -59,6 +59,7 @@ const QuickCreateTokenModal = ({
   onSuccess,
   onCancel,
   onSwitchMode,
+  initialTokenType,
   t,
 }) => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -71,13 +72,20 @@ const QuickCreateTokenModal = ({
   // Reset state when modal opens/closes
   useEffect(() => {
     if (visible) {
-      setCurrentStep(1);
-      setSelectedType(null);
+      // If initialTokenType is provided, skip step 1 and go directly to step 2
+      if (initialTokenType && TOKEN_TYPES[initialTokenType]) {
+        setCurrentStep(2);
+        setSelectedType(initialTokenType);
+        TokenAnalytics.trackTypeSelected(initialTokenType);
+      } else {
+        setCurrentStep(1);
+        setSelectedType(null);
+      }
       setTokenName('');
       setNameError('');
       setStartTime(Date.now()); // Track start time for analytics
     }
-  }, [visible]);
+  }, [visible, initialTokenType]);
 
   const handleTypeSelect = (typeId) => {
     TokenAnalytics.trackTypeSelected(typeId);

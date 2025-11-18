@@ -35,6 +35,7 @@ import {
 import { API, showError, showSuccess, renderQuota } from '../../../helpers';
 import { UserContext } from '../../../context/User';
 import { StatusContext } from '../../../context/Status';
+import { OnboardingAnalytics } from '../../../helpers/analytics';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -68,6 +69,9 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
       const { success, message, data } = res.data;
       if (success) {
         showSuccess('兑换成功! 获得额度: ' + renderQuota(data));
+
+        // Track redemption code usage in onboarding
+        OnboardingAnalytics.trackRedemptionCodeUsed();
 
         // Update user quota in context
         if (userState.user) {
@@ -124,35 +128,38 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
       {/* Title */}
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <Title heading={4}>充值账户</Title>
-        <Paragraph type="tertiary" style={{ marginTop: 8 }}>
+        <Paragraph type='tertiary' style={{ marginTop: 8 }}>
           选择一种方式为您的账户充值
         </Paragraph>
       </div>
 
       {/* Info banner */}
       <Banner
-        type="info"
-        description="新用户赠送的额度可以直接使用,无需充值"
+        type='info'
+        description='新用户赠送的额度可以直接使用,无需充值'
         style={{ marginBottom: 24 }}
       />
 
       {/* Redemption Code Option */}
       <Card
-        shadows="hover"
+        shadows='hover'
         style={{
           marginBottom: 16,
           border: '1px solid var(--semi-color-border)',
         }}
       >
-        <Space vertical spacing="medium" style={{ width: '100%' }}>
+        <Space vertical spacing='medium' style={{ width: '100%' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <IconTicketCodeStroked size="large" style={{ color: 'var(--semi-color-primary)' }} />
+            <IconTicketCodeStroked
+              size='large'
+              style={{ color: 'var(--semi-color-primary)' }}
+            />
             <div>
               <Text strong style={{ fontSize: 16 }}>
                 兑换码充值
               </Text>
               <br />
-              <Text type="tertiary" size="small">
+              <Text type='tertiary' size='small'>
                 输入兑换码即可快速充值
               </Text>
             </div>
@@ -160,7 +167,7 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
 
           <Space style={{ width: '100%' }}>
             <Input
-              placeholder="请输入兑换码"
+              placeholder='请输入兑换码'
               value={redemptionCode}
               onChange={setRedemptionCode}
               onEnterPress={handleRedeem}
@@ -168,8 +175,8 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
               style={{ flex: 1 }}
             />
             <Button
-              theme="solid"
-              type="primary"
+              theme='solid'
+              type='primary'
               onClick={handleRedeem}
               loading={isRedeeming}
               disabled={!redemptionCode.trim()}
@@ -182,41 +189,44 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
 
       {/* Online Payment Option */}
       <Card
-        shadows="hover"
+        shadows='hover'
         style={{
           marginBottom: 16,
           border: '1px solid var(--semi-color-border)',
         }}
       >
-        <Space vertical spacing="medium" style={{ width: '100%' }}>
+        <Space vertical spacing='medium' style={{ width: '100%' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <IconCreditCard size="large" style={{ color: 'var(--semi-color-success)' }} />
+            <IconCreditCard
+              size='large'
+              style={{ color: 'var(--semi-color-success)' }}
+            />
             <div>
               <Text strong style={{ fontSize: 16 }}>
                 在线支付
               </Text>
               <br />
-              <Text type="tertiary" size="small">
+              <Text type='tertiary' size='small'>
                 跳转到支付页面进行充值
               </Text>
             </div>
           </div>
 
-          <Space style={{ width: '100%' }} vertical spacing="small">
+          <Space style={{ width: '100%' }} vertical spacing='small'>
             <Button
-              theme="solid"
-              type="secondary"
+              theme='solid'
+              type='secondary'
               onClick={handleOnlinePayment}
               block
             >
               前往支付页面
             </Button>
             <Button
-              theme="borderless"
-              type="tertiary"
+              theme='borderless'
+              type='tertiary'
               onClick={handleTopupConfirmed}
               block
-              size="small"
+              size='small'
             >
               我已完成充值
             </Button>
@@ -226,20 +236,23 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
 
       {/* Contact Admin Option */}
       <Card
-        shadows="hover"
+        shadows='hover'
         style={{
           marginBottom: 32,
           border: '1px solid var(--semi-color-border)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <IconUserCardPhone size="large" style={{ color: 'var(--semi-color-warning)' }} />
+          <IconUserCardPhone
+            size='large'
+            style={{ color: 'var(--semi-color-warning)' }}
+          />
           <div>
             <Text strong style={{ fontSize: 16 }}>
               联系管理员
             </Text>
             <br />
-            <Text type="tertiary" size="small">
+            <Text type='tertiary' size='small'>
               如需帮助,请联系平台管理员
             </Text>
           </div>
@@ -248,10 +261,10 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
 
       {/* Navigation buttons */}
       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-        <Button theme="borderless" type="tertiary" onClick={onPrev}>
+        <Button theme='borderless' type='tertiary' onClick={onPrev}>
           上一步
         </Button>
-        <Button theme="borderless" type="tertiary" onClick={handleSkip}>
+        <Button theme='borderless' type='tertiary' onClick={handleSkip}>
           跳过此步
         </Button>
       </Space>

@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useState, useEffect } from 'react';
 import { Modal } from '@douyinfe/semi-ui';
-import { useOnboarding, useOnboardingProgress } from '../../hooks/useOnboarding';
+import {
+  useOnboarding,
+  useOnboardingProgress,
+} from '../../hooks/useOnboarding';
 import { trackEvent } from '../../helpers/analytics';
 import ProgressBar from './ProgressBar';
 import WelcomeStep from './steps/WelcomeStep';
@@ -32,23 +35,19 @@ import GetStartedStep from './steps/GetStartedStep';
  * Guides new users through account setup
  */
 const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
-  const {
-    progress,
-    updateProgress,
-    markComplete,
-    markDismissed,
-  } = useOnboarding();
+  const { progress, updateProgress, markComplete, markDismissed } =
+    useOnboarding();
 
-  const {
-    startStep,
-    endStep,
-    getCompletionRate,
-  } = useOnboardingProgress();
+  const { startStep, endStep, getCompletionRate } = useOnboardingProgress();
 
   const [currentStep, setCurrentStep] = useState(progress.currentStep || 1);
-  const [completedSteps, setCompletedSteps] = useState(progress.completedSteps || []);
+  const [completedSteps, setCompletedSteps] = useState(
+    progress.completedSteps || [],
+  );
   const [skippedSteps, setSkippedSteps] = useState(progress.skippedSteps || []);
-  const [createdToken, setCreatedToken] = useState(progress.createdToken || null);
+  const [createdToken, setCreatedToken] = useState(
+    progress.createdToken || null,
+  );
   const [topupData, setTopupData] = useState(progress.topupData || null);
 
   const totalSteps = 4;
@@ -75,19 +74,52 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
     }
   }, [visible, autoStart]);
 
-  // Save progress whenever state changes
+  // Initialize startTime on first display (only once)
   useEffect(() => {
-    if (visible) {
+    if (visible && !progress.startTime) {
+      // Double-check localStorage to avoid race condition with useOnboarding hook
+      const savedProgress = localStorage.getItem('onboarding_progress');
+      let hasExistingStartTime = false;
+
+      if (savedProgress) {
+        try {
+          const parsed = JSON.parse(savedProgress);
+          hasExistingStartTime = !!parsed.startTime;
+        } catch (error) {
+          // Ignore parse errors
+        }
+      }
+
+      // Set startTime only if it doesn't exist in both state and localStorage
+      if (!hasExistingStartTime) {
+        updateProgress({
+          startTime: new Date().toISOString(),
+        });
+      }
+    }
+  }, [visible]); // Only depend on visible, not progress
+
+  // Save progress whenever state changes (preserve existing startTime)
+  useEffect(() => {
+    if (visible && progress.startTime) {
+      // Only save if startTime has been initialized
       updateProgress({
         currentStep,
         completedSteps,
         skippedSteps,
         createdToken,
         topupData,
-        startTime: progress.startTime || new Date().toISOString(),
+        // Don't override startTime - keep the original
       });
     }
-  }, [currentStep, completedSteps, skippedSteps, createdToken, topupData]);
+  }, [
+    currentStep,
+    completedSteps,
+    skippedSteps,
+    createdToken,
+    topupData,
+    visible,
+  ]);
 
   /**
    * Handle moving to next step
@@ -184,7 +216,10 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
     // Track completion
     trackEvent('onboarding_completed', {
       time_spent: timeSpent,
-      completion_rate: getCompletionRate([...completedSteps, currentStep], totalSteps),
+      completion_rate: getCompletionRate(
+        [...completedSteps, currentStep],
+        totalSteps,
+      ),
       created_token: !!createdToken,
       topped_up: !!topupData,
     });
@@ -219,11 +254,28 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
       case 1:
         return <WelcomeStep onNext={handleNext} onSkip={handleSkip} />;
       case 2:
-        return <TopupStep onNext={handleNext} onPrev={handlePrev} onSkip={handleSkip} />;
+        return (
+          <TopupStep
+            onNext={handleNext}
+            onPrev={handlePrev}
+            onSkip={handleSkip}
+          />
+        );
       case 3:
-        return <CreateTokenStep onNext={handleNext} onPrev={handlePrev} onSkip={handleSkip} />;
+        return (
+          <CreateTokenStep
+            onNext={handleNext}
+            onPrev={handlePrev}
+            onSkip={handleSkip}
+          />
+        );
       case 4:
-        return <GetStartedStep createdToken={createdToken} onComplete={handleComplete} />;
+        return (
+          <GetStartedStep
+            createdToken={createdToken}
+            onComplete={handleComplete}
+          />
+        );
       default:
         return null;
     }
