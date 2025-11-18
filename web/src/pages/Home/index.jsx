@@ -27,6 +27,7 @@ import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { useTranslation } from 'react-i18next';
 import {
   IconPlay,
@@ -228,25 +229,25 @@ const Home = () => {
                           <div
                             className='text-semi-color-text-2'
                             dangerouslySetInnerHTML={{
-                              __html: marked.parse(faq.answer || ''),
+                              __html: DOMPurify.sanitize(marked.parse(faq.answer || '')),
                             }}
                           />
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
 
-                    {/* 外部文档链接（如果配置了的话） */}
-                    {docsLink && (
-                      <div className='mt-6 text-center'>
-                        <Button
-                          type='tertiary'
-                          size='small'
-                          onClick={() => window.open(docsLink, '_blank')}
-                        >
-                          {isChinese ? '查看更多外部文档 →' : 'View More External Docs →'}
-                        </Button>
-                      </div>
-                    )}
+                {/* 外部文档链接（独立于FAQ，只要配置了就显示） */}
+                {docsLink && (
+                  <div className='mt-12 md:mt-16 lg:mt-20 w-full px-4 text-center'>
+                    <Button
+                      type='tertiary'
+                      size='small'
+                      onClick={() => window.open(docsLink, '_blank')}
+                    >
+                      {t('查看更多外部文档')}
+                    </Button>
                   </div>
                 )}
               </div>
