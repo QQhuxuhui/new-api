@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -17,6 +18,32 @@ import (
 var group2model2channels map[string]map[string][]int // enabled channel
 var channelsIDM map[int]*Channel                     // all channels include disabled
 var channelSyncLock sync.RWMutex
+
+// IsChannelHealthy checks if channel is suspended using health tracking
+func IsChannelHealthy(channelID int) bool {
+	ctx := context.Background()
+	rdb := common.RDB
+
+	if rdb == nil {
+		return true // Fail open if Redis unavailable
+	}
+
+	// Check suspension key
+	suspendedKey := fmt.Sprintf("channel:health:%d:suspended", channelID)
+	suspended, err := rdb.Exists(ctx, suspendedKey).Result()
+	if err != nil {
+		// Redis error (network timeout, etc.) - fail open to avoid cascading failure
+		common.SysLog(fmt.Sprintf("Redis error checking channel %d health, failing open: %v", channelID, err))
+		return true
+	}
+
+	// Only return false if key exists (channel is actually suspended)
+	if suspended > 0 {
+		return false
+	}
+
+	return true
+}
 
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
@@ -147,6 +174,10 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
 			if channel.GetPriority() == targetPriority {
+				// Filter out suspended channels using health tracking
+				if !IsChannelHealthy(channelId) {
+					continue
+				}
 				sumWeight += channel.GetWeight()
 				targetChannels = append(targetChannels, channel)
 			}
@@ -156,7 +187,10 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 
 	if len(targetChannels) == 0 {
-		return nil, errors.New(fmt.Sprintf("no channel found, group: %s, model: %s, priority: %d", group, model, targetPriority))
+		// Return nil (not error) to allow retry with next priority
+		// Error would stop the retry loop in relay controller
+		common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (all suspended)", targetPriority, group, model))
+		return nil, nil
 	}
 
 	// smoothing factor and adjustment

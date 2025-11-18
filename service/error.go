@@ -56,11 +56,11 @@ func MidjourneyErrorWithStatusCodeWrapper(code int, desc string, statusCode int)
 //	return openaiErr
 //}
 
-// shouldTriggerChannelFailover determines if an upstream error should trigger channel failover
+// ShouldTriggerChannelFailover determines if an upstream error should trigger channel failover
 // This allows failover to work even when RetryTimes=0 for channel-level issues
 // Returns true for: 5xx errors (500-599 excl. 504/524), 401 auth failures, connection errors,
 // SSL/TLS issues, DNS failures, empty responses, and provider-specific errors
-func shouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
+func ShouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
 	errorMessageLower := strings.ToLower(errorMessage)
 
 	// TIER 1: HTTP Status Code Based (High Confidence)
@@ -210,7 +210,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
 		// Check if error should trigger channel failover
-		if shouldTriggerChannelFailover(resp.StatusCode, string(responseBody)) {
+		if ShouldTriggerChannelFailover(resp.StatusCode, string(responseBody)) {
 			newApiErr = types.NewError(newApiErr.Err, types.ErrorCodeChannelUpstreamError)
 			newApiErr.StatusCode = resp.StatusCode
 		}
@@ -225,7 +225,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 
 	// Check if error message indicates channel-level issues
 	errorMessage := strings.ToLower(newApiErr.Error())
-	if shouldTriggerChannelFailover(resp.StatusCode, errorMessage) {
+	if ShouldTriggerChannelFailover(resp.StatusCode, errorMessage) {
 		// Mark as channel error to trigger failover regardless of RetryTimes setting
 		newApiErr = types.NewError(newApiErr.Err, types.ErrorCodeChannelUpstreamError)
 		newApiErr.StatusCode = resp.StatusCode

@@ -62,6 +62,10 @@ const ChannelsTable = (channelsData) => {
     setCurrentMultiKeyChannel,
     // Concurrency info
     concurrencyInfo,
+    // Health info
+    healthInfo,
+    setShowHealthModal,
+    setCurrentHealthChannel,
   } = channelsData;
 
   // Get all columns
@@ -87,6 +91,9 @@ const ChannelsTable = (channelsData) => {
       setShowMultiKeyManageModal,
       setCurrentMultiKeyChannel,
       concurrencyInfo,
+      healthInfo,
+      setShowHealthModal,
+      setCurrentHealthChannel,
     });
   }, [
     t,
@@ -109,6 +116,9 @@ const ChannelsTable = (channelsData) => {
     setShowMultiKeyManageModal,
     setCurrentMultiKeyChannel,
     concurrencyInfo,
+    healthInfo,
+    setShowHealthModal,
+    setCurrentHealthChannel,
   ]);
 
   // Filter columns based on visibility settings

@@ -1649,3 +1649,83 @@ func ManageMultiKeys(c *gin.Context) {
 		return
 	}
 }
+
+// GetChannelHealth returns health state for a channel
+func GetChannelHealth(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "invalid channel id",
+		})
+		return
+	}
+
+	health, err := service.GetChannelHealth(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    health,
+	})
+}
+
+// GetAllChannelsHealth returns health state for all channels
+func GetAllChannelsHealth(c *gin.Context) {
+	// Get all channels from cache or database
+	channels, err := model.GetAllChannels(0, 0, true, false)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Collect health states for all channels
+	var healthStates []*service.ChannelHealth
+	for _, channel := range channels {
+		health, err := service.GetChannelHealth(channel.Id)
+		if err != nil {
+			continue // Skip channels with errors
+		}
+		healthStates = append(healthStates, health)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    healthStates,
+	})
+}
+
+// ResetChannelHealth manually resets channel health status (admin only)
+func ResetChannelHealth(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "invalid channel id",
+		})
+		return
+	}
+
+	err = service.ResetChannelHealth(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "渠道健康状态已重置",
+	})
+}

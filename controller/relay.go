@@ -162,7 +162,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if err != nil {
 			logger.LogError(c, err.Error())
 			newAPIError = err
-			break
+			// Check if this is a SkipRetry error (real failure)
+			// or a retriable error (no healthy channel at this priority)
+			if types.IsSkipRetryError(err) {
+				break
+			}
+			// Continue to next priority if available
+			continue
 		}
 
 		addUsedChannel(c, channel.Id)
@@ -180,8 +186,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = relayHandler(c, relayInfo)
 		}
 
+		// Record channel health based on result
 		if newAPIError == nil {
+			// Success - record to health tracker
+			service.RecordChannelSuccess(channel.Id)
 			return
+		}
+
+		// Error occurred - check if it should trigger health tracking
+		if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) {
+			service.RecordChannelFailure(channel.Id)
 		}
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
@@ -230,7 +244,9 @@ func getChannel(c *gin.Context, group, originalModel string, retryCount int) (*m
 		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, originalModel, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 	if channel == nil {
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, originalModel), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		// No healthy channel at this priority - allow retry with next priority
+		// Don't use SkipRetry so the loop can continue
+		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的优先级 %d 无健康渠道（retry）", selectGroup, originalModel, retryCount), types.ErrorCodeGetChannelFailed)
 	}
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, originalModel)
 	if newAPIError != nil {

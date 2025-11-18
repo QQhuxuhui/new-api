@@ -42,6 +42,8 @@ import { CHANNEL_OPTIONS } from '../../../constants';
 import { IconTreeTriangleDown, IconMore } from '@douyinfe/semi-icons';
 import { FaRandom } from 'react-icons/fa';
 import ConcurrencyStatus from '../../common/ui/ConcurrencyStatus';
+import ChannelHealthStatus from './ChannelHealthStatus';
+import ChannelHealthModal from './ChannelHealthModal';
 
 // Render functions
 const renderType = (type, channelInfo = undefined, t) => {
@@ -209,6 +211,9 @@ export const getChannelsColumns = ({
   setShowMultiKeyManageModal,
   setCurrentMultiKeyChannel,
   concurrencyInfo,
+  healthInfo,
+  setShowHealthModal,
+  setCurrentHealthChannel,
 }) => {
   return [
     {
@@ -319,6 +324,26 @@ export const getChannelsColumns = ({
         } else {
           return renderStatus(text, record.channel_info, t);
         }
+      },
+    },
+    {
+      key: 'health',
+      title: t('健康状态'),
+      dataIndex: 'id',
+      render: (text, record, index) => {
+        if (record.children !== undefined) {
+          return null; // Don't show for tag rows
+        }
+        const health = healthInfo?.[record.id];
+        return (
+          <ChannelHealthStatus
+            health={health}
+            onClick={() => {
+              setCurrentHealthChannel(record.id);
+              setShowHealthModal(true);
+            }}
+          />
+        );
       },
     },
     {

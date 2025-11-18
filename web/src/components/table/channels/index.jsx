@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import CardPro from '../../common/ui/CardPro';
 import ChannelsTable from './ChannelsTable';
 import ChannelsActions from './ChannelsActions';
@@ -31,11 +31,48 @@ import ColumnSelectorModal from './modals/ColumnSelectorModal';
 import EditChannelModal from './modals/EditChannelModal';
 import EditTagModal from './modals/EditTagModal';
 import MultiKeyManageModal from './modals/MultiKeyManageModal';
+import ChannelHealthModal from './ChannelHealthModal';
 import { createCardProPagination } from '../../../helpers/utils';
+import { API } from '../../../helpers';
 
 const ChannelsPage = () => {
   const channelsData = useChannelsData();
   const isMobile = useIsMobile();
+
+  // Health status states
+  const [healthInfo, setHealthInfo] = useState({});
+  const [showHealthModal, setShowHealthModal] = useState(false);
+  const [currentHealthChannel, setCurrentHealthChannel] = useState(null);
+
+  // Fetch health status for all channels
+  const fetchHealthInfo = async () => {
+    try {
+      const res = await API.get('/api/channel/health');
+      if (res.data.success && res.data.data) {
+        const healthMap = {};
+        res.data.data.forEach((health) => {
+          healthMap[health.channel_id] = health;
+        });
+        setHealthInfo(healthMap);
+      }
+    } catch (error) {
+      // Silently handle error - health status is optional
+      console.error('Failed to fetch health info:', error);
+    }
+  };
+
+  // Fetch health info on mount and refresh
+  useEffect(() => {
+    fetchHealthInfo();
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchHealthInfo, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Refresh health info when channels refresh
+  useEffect(() => {
+    fetchHealthInfo();
+  }, [channelsData.channels]);
 
   return (
     <>
@@ -61,6 +98,19 @@ const ChannelsPage = () => {
         channel={channelsData.currentMultiKeyChannel}
         onRefresh={channelsData.refresh}
       />
+      <ChannelHealthModal
+        visible={showHealthModal}
+        health={currentHealthChannel ? healthInfo[currentHealthChannel] : null}
+        channelId={currentHealthChannel}
+        onClose={() => {
+          setShowHealthModal(false);
+          setCurrentHealthChannel(null);
+        }}
+        onHealthReset={() => {
+          fetchHealthInfo();
+          channelsData.refresh();
+        }}
+      />
 
       {/* Main Content */}
       <CardPro
@@ -79,7 +129,12 @@ const ChannelsPage = () => {
         })}
         t={channelsData.t}
       >
-        <ChannelsTable {...channelsData} />
+        <ChannelsTable
+          {...channelsData}
+          healthInfo={healthInfo}
+          setShowHealthModal={setShowHealthModal}
+          setCurrentHealthChannel={setCurrentHealthChannel}
+        />
       </CardPro>
     </>
   );
