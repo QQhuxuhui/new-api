@@ -381,6 +381,7 @@ function TokensPage() {
               batchCopyTokens={batchCopyTokens}
               batchDeleteTokens={batchDeleteTokens}
               copyText={copyText}
+              refresh={refresh}
               t={t}
             />
 

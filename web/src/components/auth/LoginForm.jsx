@@ -37,7 +37,15 @@ import {
   isPasskeySupported,
 } from '../../helpers';
 import Turnstile from 'react-turnstile';
-import { Button, Card, Checkbox, Divider, Form, Icon, Modal } from '@douyinfe/semi-ui';
+import {
+  Button,
+  Card,
+  Checkbox,
+  Divider,
+  Form,
+  Icon,
+  Modal,
+} from '@douyinfe/semi-ui';
 import Title from '@douyinfe/semi-ui/lib/es/typography/title';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
 import TelegramLoginButton from 'react-telegram-login';
@@ -106,7 +114,7 @@ const LoginForm = () => {
       setTurnstileEnabled(true);
       setTurnstileSiteKey(status.turnstile_site_key);
     }
-    
+
     // 从 status 获取用户协议和隐私政策的启用状态
     setHasUserAgreement(status.user_agreement_enabled || false);
     setHasPrivacyPolicy(status.privacy_policy_enabled || false);
@@ -553,11 +561,11 @@ const LoginForm = () => {
                             {t('隐私政策')}
                           </a>
                         </>
-                        )}
-                      </Text>
-                    </Checkbox>
-                  </div>
-                )}
+                      )}
+                    </Text>
+                  </Checkbox>
+                </div>
+              )}
 
               {!status.self_use_mode_enabled && (
                 <div className='mt-6 text-center text-sm'>
@@ -673,7 +681,9 @@ const LoginForm = () => {
                     htmlType='submit'
                     onClick={handleSubmit}
                     loading={loginLoading}
-                    disabled={(hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms}
+                    disabled={
+                      (hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms
+                    }
                   >
                     {t('继续')}
                   </Button>

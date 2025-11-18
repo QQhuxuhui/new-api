@@ -380,7 +380,12 @@ export const useChannelsData = () => {
       );
       const { success, message, data } = res.data;
       if (success) {
-        const { items = [], total = 0, type_counts = {}, concurrency_info } = data;
+        const {
+          items = [],
+          total = 0,
+          type_counts = {},
+          concurrency_info,
+        } = data;
         const sumAll = Object.values(type_counts).reduce(
           (acc, v) => acc + v,
           0,
@@ -421,7 +426,8 @@ export const useChannelsData = () => {
   const refreshConcurrencyInfo = async () => {
     try {
       const typeParam = activeTypeKey !== 'all' ? `&type=${activeTypeKey}` : '';
-      const statusParam = statusFilter !== 'all' ? `&status=${statusFilter}` : '';
+      const statusParam =
+        statusFilter !== 'all' ? `&status=${statusFilter}` : '';
       const { searchKeyword, searchGroup, searchModel } = getFormValues();
 
       let res;
@@ -432,9 +438,15 @@ export const useChannelsData = () => {
         );
       } else {
         // Search mode - use GET with query parameters
-        const keywordParam = searchKeyword ? `&keyword=${encodeURIComponent(searchKeyword)}` : '';
-        const groupParam = searchGroup ? `&group=${encodeURIComponent(searchGroup)}` : '';
-        const modelParam = searchModel ? `&model=${encodeURIComponent(searchModel)}` : '';
+        const keywordParam = searchKeyword
+          ? `&keyword=${encodeURIComponent(searchKeyword)}`
+          : '';
+        const groupParam = searchGroup
+          ? `&group=${encodeURIComponent(searchGroup)}`
+          : '';
+        const modelParam = searchModel
+          ? `&model=${encodeURIComponent(searchModel)}`
+          : '';
         res = await API.get(
           `/api/channel/search?p=${activePage}&page_size=${pageSize}&id_sort=${idSort}&tag_mode=${enableTagMode}${typeParam}${statusParam}${keywordParam}${groupParam}${modelParam}`,
         );
@@ -462,7 +474,14 @@ export const useChannelsData = () => {
     }, 10000); // 10 seconds
 
     return () => clearInterval(interval);
-  }, [activePage, pageSize, idSort, enableTagMode, activeTypeKey, statusFilter]);
+  }, [
+    activePage,
+    pageSize,
+    idSort,
+    enableTagMode,
+    activeTypeKey,
+    statusFilter,
+  ]);
 
   // Channel management
   const manageChannel = async (id, action, record, value) => {

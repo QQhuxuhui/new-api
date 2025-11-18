@@ -110,7 +110,7 @@ function type2secretPrompt(type) {
     case 33:
       return '按照如下格式输入：Ak|Sk|Region';
     case 45:
-        return '请输入渠道对应的鉴权密钥, 豆包语音输入：AppId|AccessToken';
+      return '请输入渠道对应的鉴权密钥, 豆包语音输入：AppId|AccessToken';
     case 50:
       return '按照如下格式输入: AccessKey|SecretKey, 如果上游是New API，则直接输ApiKey';
     case 51:
@@ -1537,7 +1537,10 @@ const EditChannelModal = (props) => {
                           style={{ width: '100%' }}
                           value={inputs.aws_key_type || 'ak_sk'}
                           onChange={(value) => {
-                            handleChannelOtherSettingsChange('aws_key_type', value);
+                            handleChannelOtherSettingsChange(
+                              'aws_key_type',
+                              value,
+                            );
                           }}
                           extraText={t(
                             'AK/SK 模式：使用 AccessKey 和 SecretAccessKey；API Key 模式：使用 API Key',
@@ -1617,7 +1620,9 @@ const EditChannelModal = (props) => {
                           placeholder={
                             inputs.type === 33
                               ? inputs.aws_key_type === 'api_key'
-                                ? t('请输入 API Key，一行一个，格式：APIKey|Region')
+                                ? t(
+                                    '请输入 API Key，一行一个，格式：APIKey|Region',
+                                  )
                                 : t(
                                     '请输入密钥，一行一个，格式：AccessKey|SecretAccessKey|Region',
                                   )
@@ -1820,7 +1825,9 @@ const EditChannelModal = (props) => {
                               inputs.type === 33
                                 ? inputs.aws_key_type === 'api_key'
                                   ? t('请输入 API Key，格式：APIKey|Region')
-                                  : t('按照如下格式输入：AccessKey|SecretAccessKey|Region')
+                                  : t(
+                                      '按照如下格式输入：AccessKey|SecretAccessKey|Region',
+                                    )
                                 : t(type2secretPrompt(inputs.type))
                             }
                             rules={
@@ -2510,10 +2517,15 @@ const EditChannelModal = (props) => {
                       placeholder={t('0表示不限制')}
                       min={0}
                       onNumberChange={(value) =>
-                        handleInputChange('max_concurrent_requests_per_key', value)
+                        handleInputChange(
+                          'max_concurrent_requests_per_key',
+                          value,
+                        )
                       }
                       style={{ width: '100%' }}
-                      extraText={t('设置每个API Key的最大并发请求数，0表示不限制')}
+                      extraText={t(
+                        '设置每个API Key的最大并发请求数，0表示不限制',
+                      )}
                     />
 
                     {/* 并发状态显示 - 仅在编辑模式且有并发限制时显示 */}
@@ -2534,7 +2546,9 @@ const EditChannelModal = (props) => {
                             {!concurrencyInfo.keys && (
                               <div className='flex flex-col gap-2'>
                                 <div className='flex items-center justify-between'>
-                                  <Typography.Text>{t('当前/限制')}:</Typography.Text>
+                                  <Typography.Text>
+                                    {t('当前/限制')}:
+                                  </Typography.Text>
                                   <ConcurrencyStatus
                                     concurrencyInfo={concurrencyInfo}
                                     showTooltip={false}
@@ -2547,8 +2561,8 @@ const EditChannelModal = (props) => {
                                     concurrencyInfo.usage_percent >= 80
                                       ? 'var(--semi-color-danger)'
                                       : concurrencyInfo.usage_percent >= 50
-                                      ? 'var(--semi-color-warning)'
-                                      : 'var(--semi-color-success)'
+                                        ? 'var(--semi-color-warning)'
+                                        : 'var(--semi-color-success)'
                                   }
                                   showInfo
                                   aria-label='concurrency usage'
@@ -2567,18 +2581,21 @@ const EditChannelModal = (props) => {
                             {concurrencyInfo.keys && (
                               <div className='flex flex-col gap-3'>
                                 <div className='flex items-center justify-between'>
-                                  <Typography.Text strong>{t('总体状态')}:</Typography.Text>
+                                  <Typography.Text strong>
+                                    {t('总体状态')}:
+                                  </Typography.Text>
                                   <Tag
                                     color={
                                       concurrencyInfo.usage_percent >= 80
                                         ? 'red'
                                         : concurrencyInfo.usage_percent >= 50
-                                        ? 'orange'
-                                        : 'green'
+                                          ? 'orange'
+                                          : 'green'
                                     }
                                     size='large'
                                   >
-                                    {concurrencyInfo.total_current}/{concurrencyInfo.total_capacity}
+                                    {concurrencyInfo.total_current}/
+                                    {concurrencyInfo.total_capacity}
                                   </Tag>
                                 </div>
                                 <Progress
@@ -2587,8 +2604,8 @@ const EditChannelModal = (props) => {
                                     concurrencyInfo.usage_percent >= 80
                                       ? 'var(--semi-color-danger)'
                                       : concurrencyInfo.usage_percent >= 50
-                                      ? 'var(--semi-color-warning)'
-                                      : 'var(--semi-color-success)'
+                                        ? 'var(--semi-color-warning)'
+                                        : 'var(--semi-color-success)'
                                   }
                                   showInfo
                                   aria-label='total concurrency usage'
@@ -2598,7 +2615,10 @@ const EditChannelModal = (props) => {
                                   {t('密钥并发详情')}:
                                 </Typography.Text>
                                 {concurrencyInfo.keys.map((key) => (
-                                  <div key={key.key_index} className='flex flex-col gap-1'>
+                                  <div
+                                    key={key.key_index}
+                                    className='flex flex-col gap-1'
+                                  >
                                     <div className='flex items-center justify-between'>
                                       <Typography.Text>
                                         {t('密钥')} #{key.key_index + 1}:
@@ -2609,12 +2629,14 @@ const EditChannelModal = (props) => {
                                             key.usage_percent >= 80
                                               ? 'red'
                                               : key.usage_percent >= 50
-                                              ? 'orange'
-                                              : 'green'
+                                                ? 'orange'
+                                                : 'green'
                                           }
                                           size='small'
                                         >
-                                          {key.current >= 0 ? `${key.current}/${key.limit}` : t('数据不可用')}
+                                          {key.current >= 0
+                                            ? `${key.current}/${key.limit}`
+                                            : t('数据不可用')}
                                         </Tag>
                                         {key.status === 'disabled' && (
                                           <Tag color='grey' size='small'>
@@ -2635,8 +2657,8 @@ const EditChannelModal = (props) => {
                                           key.usage_percent >= 80
                                             ? 'var(--semi-color-danger)'
                                             : key.usage_percent >= 50
-                                            ? 'var(--semi-color-warning)'
-                                            : 'var(--semi-color-success)'
+                                              ? 'var(--semi-color-warning)'
+                                              : 'var(--semi-color-success)'
                                         }
                                         showInfo={false}
                                         size='small'
@@ -2657,12 +2679,17 @@ const EditChannelModal = (props) => {
                             )}
 
                             <Typography.Text type='tertiary' size='small'>
-                              {t('最后更新')}: {new Date(concurrencyInfo.last_updated * 1000).toLocaleTimeString()}
+                              {t('最后更新')}:{' '}
+                              {new Date(
+                                concurrencyInfo.last_updated * 1000,
+                              ).toLocaleTimeString()}
                             </Typography.Text>
                           </div>
                         ) : (
                           <Typography.Text type='tertiary'>
-                            {concurrencyLoading ? t('加载中...') : t('数据不可用')}
+                            {concurrencyLoading
+                              ? t('加载中...')
+                              : t('数据不可用')}
                           </Typography.Text>
                         )}
                       </Card>

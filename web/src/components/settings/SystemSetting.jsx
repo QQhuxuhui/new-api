@@ -720,8 +720,8 @@ const SystemSetting = () => {
                       rel='noreferrer'
                     >
                       new-api-worker
-                    </a>
-                    {' '}{t('或其兼容new-api-worker格式的其他版本')}
+                    </a>{' '}
+                    {t('或其兼容new-api-worker格式的其他版本')}
                   </Text>
                   <Row
                     gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}

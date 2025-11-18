@@ -57,6 +57,7 @@ const (
 	ErrorCodeChannelInvalidKey             ErrorCode = "channel:invalid_key"
 	ErrorCodeChannelResponseTimeExceeded   ErrorCode = "channel:response_time_exceeded"
 	ErrorCodeChannelKeyConcurrencyLimit    ErrorCode = "channel:key_concurrency_limit"
+	ErrorCodeChannelUpstreamError          ErrorCode = "channel:upstream_error" // Upstream service failures (5xx, connection errors, resource exhaustion)
 
 	// client request error
 	ErrorCodeReadRequestBodyFailed ErrorCode = "read_request_body_failed"
