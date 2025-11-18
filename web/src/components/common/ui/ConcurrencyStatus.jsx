@@ -109,7 +109,10 @@ const ConcurrencyStatus = ({
         <div className='flex flex-col gap-2' style={{ maxWidth: '300px' }}>
           <div className='font-semibold'>{t('密钥并发详情')}</div>
           {concurrencyInfo.keys.map((key) => (
-            <div key={key.key_index} className='flex justify-between items-center'>
+            <div
+              key={key.key_index}
+              className='flex justify-between items-center'
+            >
               <span>
                 {t('密钥')} #{key.key_index + 1}:
               </span>
@@ -119,7 +122,9 @@ const ConcurrencyStatus = ({
                   size='small'
                   shape='circle'
                 >
-                  {key.current >= 0 ? `${key.current}/${key.limit}` : t('数据不可用')}
+                  {key.current >= 0
+                    ? `${key.current}/${key.limit}`
+                    : t('数据不可用')}
                 </Tag>
                 {key.status === 'disabled' && (
                   <Tag color='grey' size='small' style={{ marginLeft: '4px' }}>

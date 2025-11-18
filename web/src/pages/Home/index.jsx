@@ -18,10 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useContext, useEffect, useState, useRef } from 'react';
-import {
-  Button,
-  Typography,
-} from '@douyinfe/semi-ui';
+import { Button, Typography } from '@douyinfe/semi-ui';
 import { API, showError } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { StatusContext } from '../../context/Status';
@@ -29,11 +26,7 @@ import { useActualTheme } from '../../context/Theme';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { useTranslation } from 'react-i18next';
-import {
-  IconPlay,
-  IconFile,
-  IconGithubLogo,
-} from '@douyinfe/semi-icons';
+import { IconPlay, IconFile, IconGithubLogo } from '@douyinfe/semi-icons';
 import { Link } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
 
@@ -83,7 +76,10 @@ const Home = () => {
   // 处理 iframe 消息发送
   const handleIframeLoad = () => {
     if (iframeRef.current?.contentWindow) {
-      iframeRef.current.contentWindow.postMessage({ themeMode: actualTheme }, '*');
+      iframeRef.current.contentWindow.postMessage(
+        { themeMode: actualTheme },
+        '*',
+      );
       iframeRef.current.contentWindow.postMessage({ lang: i18n.language }, '*');
     }
   };
@@ -114,10 +110,19 @@ const Home = () => {
 
   // 监听主题和语言变化，实时同步给 iframe
   useEffect(() => {
-    if (homePageContent.startsWith('https://') && iframeRef.current?.contentWindow) {
+    if (
+      homePageContent.startsWith('https://') &&
+      iframeRef.current?.contentWindow
+    ) {
       try {
-        iframeRef.current.contentWindow.postMessage({ themeMode: actualTheme }, '*');
-        iframeRef.current.contentWindow.postMessage({ lang: i18n.language }, '*');
+        iframeRef.current.contentWindow.postMessage(
+          { themeMode: actualTheme },
+          '*',
+        );
+        iframeRef.current.contentWindow.postMessage(
+          { lang: i18n.language },
+          '*',
+        );
       } catch (error) {
         // 忽略跨域错误
         console.debug('Cannot post message to iframe:', error);
@@ -229,7 +234,9 @@ const Home = () => {
                           <div
                             className='text-semi-color-text-2'
                             dangerouslySetInnerHTML={{
-                              __html: DOMPurify.sanitize(marked.parse(faq.answer || '')),
+                              __html: DOMPurify.sanitize(
+                                marked.parse(faq.answer || ''),
+                              ),
                             }}
                           />
                         </div>
