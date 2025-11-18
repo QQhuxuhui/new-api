@@ -56,6 +56,114 @@ func MidjourneyErrorWithStatusCodeWrapper(code int, desc string, statusCode int)
 //	return openaiErr
 //}
 
+// shouldTriggerChannelFailover determines if an upstream error should trigger channel failover
+// This allows failover to work even when RetryTimes=0 for channel-level issues
+// Returns true for: 5xx errors (500-599 excl. 504/524), 401 auth failures, connection errors,
+// SSL/TLS issues, DNS failures, empty responses, and provider-specific errors
+func shouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
+	errorMessageLower := strings.ToLower(errorMessage)
+
+	// TIER 1: HTTP Status Code Based (High Confidence)
+
+	// All 5xx errors (excluding timeouts)
+	if statusCode >= 500 && statusCode < 600 {
+		// Preserve timeout behavior (by design: timeouts should not retry)
+		if statusCode == 504 || statusCode == 524 {
+			return false
+		}
+		return true
+	}
+
+	// 401: Authentication failures (API key issues)
+	if statusCode == 401 {
+		// Only trigger failover if error indicates key problem
+		// (not client request formatting issues)
+		if strings.Contains(errorMessageLower, "invalid") ||
+			strings.Contains(errorMessageLower, "expired") ||
+			strings.Contains(errorMessageLower, "unauthorized") ||
+			strings.Contains(errorMessageLower, "api key") ||
+			strings.Contains(errorMessageLower, "authentication") {
+			return true
+		}
+	}
+
+	// 429: Rate limiting
+	if statusCode == 429 {
+		if strings.Contains(errorMessageLower, "rate limit") ||
+			strings.Contains(errorMessageLower, "quota") ||
+			strings.Contains(errorMessageLower, "too many requests") {
+			return true
+		}
+	}
+
+	// 403: Resource exhaustion
+	if statusCode == 403 {
+		if strings.Contains(errorMessageLower, "并发") ||
+			strings.Contains(errorMessageLower, "concurrency") ||
+			(strings.Contains(errorMessageLower, "session") && strings.Contains(errorMessageLower, "已满")) ||
+			strings.Contains(errorMessageLower, "overloaded") {
+			return true
+		}
+	}
+
+	// TIER 2: Message Pattern Matching (Medium Confidence)
+
+	// Connection/Network errors
+	if (strings.Contains(errorMessageLower, "连接") && strings.Contains(errorMessageLower, "失败")) ||
+		(strings.Contains(errorMessageLower, "连接") && strings.Contains(errorMessageLower, "服务失败")) ||
+		strings.Contains(errorMessageLower, "connection failed") ||
+		strings.Contains(errorMessageLower, "connection refused") ||
+		strings.Contains(errorMessageLower, "connection reset") ||
+		strings.Contains(errorMessageLower, "connection timeout") ||
+		strings.Contains(errorMessageLower, "network error") ||
+		strings.Contains(errorMessageLower, "upstream error") ||
+		strings.Contains(errorMessageLower, "service unavailable") ||
+		strings.Contains(errorMessageLower, "temporarily unavailable") {
+		return true
+	}
+
+	// SSL/TLS certificate errors
+	if strings.Contains(errorMessageLower, "certificate") ||
+		strings.Contains(errorMessageLower, "tls") ||
+		strings.Contains(errorMessageLower, "ssl") ||
+		strings.Contains(errorMessageLower, "handshake") {
+		return true
+	}
+
+	// DNS resolution failures
+	if strings.Contains(errorMessageLower, "dns") ||
+		strings.Contains(errorMessageLower, "resolve") ||
+		strings.Contains(errorMessageLower, "域名") {
+		return true
+	}
+
+	// Empty or malformed responses
+	if strings.Contains(errorMessageLower, "empty response") ||
+		strings.Contains(errorMessageLower, "no response") ||
+		strings.Contains(errorMessageLower, "响应为空") {
+		return true
+	}
+
+	// TIER 3: Provider-Specific (Vendor-Aware)
+
+	// Claude: overloaded_error, internal_error
+	// OpenAI: server_error, insufficient_quota
+	// Generic: proxy, gateway errors
+	if strings.Contains(errorMessageLower, "overloaded_error") ||
+		strings.Contains(errorMessageLower, "overloaded") ||
+		strings.Contains(errorMessageLower, "internal_error") ||
+		strings.Contains(errorMessageLower, "server_error") ||
+		strings.Contains(errorMessageLower, "insufficient_quota") ||
+		strings.Contains(errorMessageLower, "insufficient quota") ||
+		strings.Contains(errorMessageLower, "proxy") ||
+		strings.Contains(errorMessageLower, "gateway") ||
+		strings.Contains(errorMessageLower, "bad gateway") {
+		return true
+	}
+
+	return false
+}
+
 func ClaudeErrorWrapper(err error, code string, statusCode int) *dto.ClaudeErrorWithStatusCode {
 	text := err.Error()
 	lowerText := strings.ToLower(text)
@@ -101,6 +209,11 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 			}
 			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
+		// Check if error should trigger channel failover
+		if shouldTriggerChannelFailover(resp.StatusCode, string(responseBody)) {
+			newApiErr = types.NewError(newApiErr.Err, types.ErrorCodeChannelUpstreamError)
+			newApiErr.StatusCode = resp.StatusCode
+		}
 		return
 	}
 	if errResponse.Error.Message != "" {
@@ -109,6 +222,15 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 	} else {
 		newApiErr = types.NewOpenAIError(errors.New(errResponse.ToMessage()), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 	}
+
+	// Check if error message indicates channel-level issues
+	errorMessage := strings.ToLower(newApiErr.Error())
+	if shouldTriggerChannelFailover(resp.StatusCode, errorMessage) {
+		// Mark as channel error to trigger failover regardless of RetryTimes setting
+		newApiErr = types.NewError(newApiErr.Err, types.ErrorCodeChannelUpstreamError)
+		newApiErr.StatusCode = resp.StatusCode
+	}
+
 	return
 }
 
