@@ -27,7 +27,7 @@ import HeaderLogo from './HeaderLogo';
 import Navigation from './Navigation';
 import ActionButtons from './ActionButtons';
 
-const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
+const HeaderBar = ({ onMobileMenuToggle, drawerOpen, onOpenOnboarding }) => {
   const {
     userState,
     statusState,
@@ -122,6 +122,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
             logout={logout}
             navigate={navigate}
             t={t}
+            onOpenOnboarding={onOpenOnboarding}
           />
         </div>
       </div>

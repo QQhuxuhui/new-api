@@ -39,6 +39,7 @@ const ActionButtons = ({
   logout,
   navigate,
   t,
+  onOpenOnboarding,
 }) => {
   return (
     <div className='flex items-center gap-2 md:gap-3'>
@@ -66,6 +67,7 @@ const ActionButtons = ({
         logout={logout}
         navigate={navigate}
         t={t}
+        onOpenOnboarding={onOpenOnboarding}
       />
     </div>
   );

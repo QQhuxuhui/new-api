@@ -37,16 +37,22 @@ import {
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useLocation } from 'react-router-dom';
+import OnboardingWizard from '../onboarding/OnboardingWizard';
+import { useOnboarding } from '../../hooks/useOnboarding';
 const { Sider, Content, Header } = Layout;
 
 const PageLayout = () => {
-  const [, userDispatch] = useContext(UserContext);
+  const [userState, userDispatch] = useContext(UserContext);
   const [, statusDispatch] = useContext(StatusContext);
   const isMobile = useIsMobile();
   const [collapsed, , setCollapsed] = useSidebarCollapsed();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { i18n } = useTranslation();
   const location = useLocation();
+
+  // Onboarding wizard state
+  const { shouldShow, incrementLoginCount } = useOnboarding();
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const cardProPages = [
     '/console/channel',
@@ -81,6 +87,14 @@ const PageLayout = () => {
     if (user) {
       let data = JSON.parse(user);
       userDispatch({ type: 'login', payload: data });
+
+      // Check if we should show onboarding for this user
+      // Wait a moment for the page to render before showing onboarding
+      setTimeout(() => {
+        if (shouldShow()) {
+          setShowOnboarding(true);
+        }
+      }, 1000);
     }
   };
 
@@ -117,6 +131,9 @@ const PageLayout = () => {
     if (savedLang) {
       i18n.changeLanguage(savedLang);
     }
+
+    // Increment login count on mount (for tracking first-time users)
+    incrementLoginCount();
   }, [i18n]);
 
   return (
@@ -142,6 +159,7 @@ const PageLayout = () => {
         <HeaderBar
           onMobileMenuToggle={() => setDrawerOpen((prev) => !prev)}
           drawerOpen={drawerOpen}
+          onOpenOnboarding={() => setShowOnboarding(true)}
         />
       </Header>
       <Layout
@@ -207,6 +225,13 @@ const PageLayout = () => {
         </Layout>
       </Layout>
       <ToastContainer />
+
+      {/* Onboarding wizard */}
+      <OnboardingWizard
+        visible={showOnboarding}
+        onClose={() => setShowOnboarding(false)}
+        autoStart={true}
+      />
     </Layout>
   );
 };
