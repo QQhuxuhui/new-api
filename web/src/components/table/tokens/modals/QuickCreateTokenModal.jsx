@@ -111,13 +111,22 @@ const QuickCreateTokenModal = ({
   // Fetch available groups from API
   const fetchGroups = async () => {
     try {
-      const res = await API.get('/api/group/');
-      if (res && res.data && res.data.data) {
-        setAvailableGroups(res.data.data);
+      // Use user-accessible endpoint instead of admin-only /api/group/
+      const res = await API.get('/api/user/self/groups');
+      if (res && res.data && res.data.success && res.data.data) {
+        // GetUserGroups returns an object {groupName: {ratio, desc}}
+        // Extract the keys as group names
+        const groupNames = Object.keys(res.data.data);
+        setAvailableGroups(groupNames);
+      } else {
+        // If API call fails, fallback to empty array
+        console.warn('Failed to fetch user groups, using fallback');
+        setAvailableGroups([]);
       }
     } catch (error) {
-      console.error('Failed to fetch groups:', error);
-      // Continue with empty array, will fallback to 'default'
+      // Handle 401/403 or network errors gracefully
+      console.warn('Failed to fetch groups:', error);
+      // Fallback: use empty array, matching will use 'default'
       setAvailableGroups([]);
     }
   };
