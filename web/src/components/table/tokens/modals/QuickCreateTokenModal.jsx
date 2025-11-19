@@ -127,6 +127,14 @@ const QuickCreateTokenModal = ({
     fetchGroups();
   }, []);
 
+  // Re-calculate matched group when availableGroups changes and we have a selected type
+  useEffect(() => {
+    if (selectedType && availableGroups.length > 0) {
+      const group = findMatchingGroup(selectedType, availableGroups);
+      setMatchedGroup(group);
+    }
+  }, [availableGroups, selectedType]);
+
   // Reset state when modal opens/closes
   useEffect(() => {
     if (visible) {
@@ -147,7 +155,7 @@ const QuickCreateTokenModal = ({
       setNameError('');
       setStartTime(Date.now()); // Track start time for analytics
     }
-  }, [visible, initialTokenType, availableGroups]);
+  }, [visible, initialTokenType]);
 
   const handleTypeSelect = (typeId) => {
     TokenAnalytics.trackTypeSelected(typeId);
