@@ -35,14 +35,15 @@ import { TokenAnalytics } from '../../../../helpers/analytics';
 
 const { Title, Text } = Typography;
 
-const TOKEN_TYPES = {
+// Token type configurations with search keywords for group matching
+const TOKEN_TYPE_CONFIGS = {
   'claude-code': {
     id: 'claude-code',
     name: 'Claude Code',
     icon: <IconCode size='extra-large' />,
     description: '用于 Claude Code 开发',
     features: ['无限额度', '永不过期', '无访问限制'],
-    group: 'default',
+    groupKeywords: ['claude-code', 'claude', 'code'], // Search keywords in order of preference
   },
   codex: {
     id: 'codex',
@@ -50,8 +51,44 @@ const TOKEN_TYPES = {
     icon: <IconTerminal size='extra-large' />,
     description: '用于 Codex 开发',
     features: ['无限额度', '永不过期', '无访问限制'],
-    group: 'default',
+    groupKeywords: ['codex'], // Search keywords in order of preference
   },
+};
+
+/**
+ * Find the best matching group for a token type
+ * @param {string} tokenTypeId - Token type identifier
+ * @param {string[]} availableGroups - List of available groups from API
+ * @returns {string} - Best matching group name or 'default'
+ */
+const findMatchingGroup = (tokenTypeId, availableGroups) => {
+  const config = TOKEN_TYPE_CONFIGS[tokenTypeId];
+  if (!config || !availableGroups || availableGroups.length === 0) {
+    return 'default';
+  }
+
+  // Try to find exact or partial match based on keywords
+  for (const keyword of config.groupKeywords) {
+    const match = availableGroups.find(
+      (group) => group.toLowerCase() === keyword.toLowerCase()
+    );
+    if (match) {
+      return match;
+    }
+  }
+
+  // If no exact match, try partial match
+  for (const keyword of config.groupKeywords) {
+    const match = availableGroups.find((group) =>
+      group.toLowerCase().includes(keyword.toLowerCase())
+    );
+    if (match) {
+      return match;
+    }
+  }
+
+  // Fallback to 'default' if no match found
+  return 'default';
 };
 
 const QuickCreateTokenModal = ({
@@ -68,28 +105,56 @@ const QuickCreateTokenModal = ({
   const [loading, setLoading] = useState(false);
   const [nameError, setNameError] = useState('');
   const [startTime, setStartTime] = useState(null);
+  const [availableGroups, setAvailableGroups] = useState([]);
+  const [matchedGroup, setMatchedGroup] = useState('default');
+
+  // Fetch available groups from API
+  const fetchGroups = async () => {
+    try {
+      const res = await API.get('/api/group/');
+      if (res && res.data && res.data.data) {
+        setAvailableGroups(res.data.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch groups:', error);
+      // Continue with empty array, will fallback to 'default'
+      setAvailableGroups([]);
+    }
+  };
+
+  // Fetch groups on component mount
+  useEffect(() => {
+    fetchGroups();
+  }, []);
 
   // Reset state when modal opens/closes
   useEffect(() => {
     if (visible) {
       // If initialTokenType is provided, skip step 1 and go directly to step 2
-      if (initialTokenType && TOKEN_TYPES[initialTokenType]) {
+      if (initialTokenType && TOKEN_TYPE_CONFIGS[initialTokenType]) {
         setCurrentStep(2);
         setSelectedType(initialTokenType);
+        // Find matching group for this token type
+        const group = findMatchingGroup(initialTokenType, availableGroups);
+        setMatchedGroup(group);
         TokenAnalytics.trackTypeSelected(initialTokenType);
       } else {
         setCurrentStep(1);
         setSelectedType(null);
+        setMatchedGroup('default');
       }
       setTokenName('');
       setNameError('');
       setStartTime(Date.now()); // Track start time for analytics
     }
-  }, [visible, initialTokenType]);
+  }, [visible, initialTokenType, availableGroups]);
 
   const handleTypeSelect = (typeId) => {
     TokenAnalytics.trackTypeSelected(typeId);
     setSelectedType(typeId);
+    // Find and set matching group for this token type
+    const group = findMatchingGroup(typeId, availableGroups);
+    setMatchedGroup(group);
     setCurrentStep(2);
   };
 
@@ -118,11 +183,10 @@ const QuickCreateTokenModal = ({
     }
 
     setLoading(true);
-    const tokenType = TOKEN_TYPES[selectedType];
 
     const payload = {
       name: tokenName.trim(),
-      group: tokenType.group,
+      group: matchedGroup, // Use the dynamically matched group
       unlimited_quota: true,
       remain_quota: 0,
       expired_time: -1,
@@ -174,7 +238,7 @@ const QuickCreateTokenModal = ({
       </Title>
 
       <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-        {Object.values(TOKEN_TYPES).map((type) => (
+        {Object.values(TOKEN_TYPE_CONFIGS).map((type) => (
           <Card
             key={type.id}
             className='cursor-pointer transition-all hover:shadow-lg hover:border-blue-500'
@@ -206,7 +270,7 @@ const QuickCreateTokenModal = ({
   );
 
   const renderStep2 = () => {
-    const tokenType = TOKEN_TYPES[selectedType];
+    const tokenType = TOKEN_TYPE_CONFIGS[selectedType];
 
     return (
       <div>
@@ -235,7 +299,7 @@ const QuickCreateTokenModal = ({
               <div className='flex items-center'>
                 <Text type='tertiary'>• {t('分组')}:</Text>
                 <Tag color='blue' size='small' className='ml-2'>
-                  {tokenType.group}
+                  {matchedGroup}
                 </Tag>
               </div>
               <div className='flex items-center'>
