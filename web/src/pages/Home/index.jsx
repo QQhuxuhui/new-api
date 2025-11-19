@@ -27,8 +27,9 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { useTranslation } from 'react-i18next';
 import { IconPlay, IconFile, IconGithubLogo } from '@douyinfe/semi-icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
+import OnboardingWizard from '../../components/onboarding/OnboardingWizard';
 
 const { Text } = Typography;
 
@@ -39,11 +40,15 @@ const Home = () => {
   const [homePageContentLoaded, setHomePageContentLoaded] = useState(false);
   const [homePageContent, setHomePageContent] = useState('');
   const [noticeVisible, setNoticeVisible] = useState(false);
+  const [onboardingVisible, setOnboardingVisible] = useState(false);
   const iframeRef = useRef(null);
   const isMobile = useIsMobile();
   const isDemoSiteMode = statusState?.status?.demo_site_enabled || false;
   const docsLink = statusState?.status?.docs_link || '';
   const isChinese = i18n.language.startsWith('zh');
+
+  // Check if user is logged in
+  const isLoggedIn = !!localStorage.getItem('user');
 
   // FAQ data from admin-managed backend (console_setting.faq)
   const faqData = statusState?.status?.faq || [];
@@ -137,6 +142,10 @@ const Home = () => {
         onClose={() => setNoticeVisible(false)}
         isMobile={isMobile}
       />
+      <OnboardingWizard
+        visible={onboardingVisible}
+        onClose={() => setOnboardingVisible(false)}
+      />
       {homePageContentLoaded && homePageContent === '' ? (
         <div className='w-full overflow-x-hidden'>
           {/* Banner 部分 */}
@@ -164,7 +173,7 @@ const Home = () => {
                         theme='solid'
                         type='primary'
                         size='large'
-                        className='!rounded-3xl w-full sm:w-auto px-16 py-4 text-xl md:text-2xl font-semibold shadow-lg hover:shadow-xl transition-shadow'
+                        className='!rounded-3xl w-full sm:w-auto px-16 py-4 font-semibold shadow-lg hover:shadow-xl transition-shadow'
                       >
                         {t('快速开始')}
                       </Button>
@@ -183,15 +192,20 @@ const Home = () => {
                           {t('获取密钥')}
                         </Button>
                       </Link>
-                      <Link to='/tutorial'>
-                        <Button
-                          size={isMobile ? 'default' : 'large'}
-                          className='flex items-center !rounded-3xl px-6 py-2'
-                          icon={<IconFile />}
-                        >
-                          {t('使用教程')}
-                        </Button>
-                      </Link>
+                      <Button
+                        size={isMobile ? 'default' : 'large'}
+                        className='flex items-center !rounded-3xl px-6 py-2'
+                        icon={<IconFile />}
+                        onClick={() => {
+                          if (isLoggedIn) {
+                            setOnboardingVisible(true);
+                          } else {
+                            window.location.href = '/login';
+                          }
+                        }}
+                      >
+                        {t('使用教程')}
+                      </Button>
                       {isDemoSiteMode && statusState?.status?.version && (
                         <Button
                           size={isMobile ? 'default' : 'large'}
