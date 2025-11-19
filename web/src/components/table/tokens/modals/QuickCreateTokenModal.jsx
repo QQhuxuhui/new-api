@@ -43,7 +43,7 @@ const TOKEN_TYPE_CONFIGS = {
     icon: <IconCode size='extra-large' />,
     description: '用于 Claude Code 开发',
     features: ['无限额度', '永不过期', '无访问限制'],
-    groupKeywords: ['claude-code', 'claude', 'code'], // Search keywords in order of preference
+    groupKeywords: ['claude code', 'claude-code', 'claude', 'code'], // Search keywords in order of preference (space and hyphen variants)
   },
   codex: {
     id: 'codex',
