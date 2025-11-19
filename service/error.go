@@ -56,6 +56,37 @@ func MidjourneyErrorWithStatusCodeWrapper(code int, desc string, statusCode int)
 //	return openaiErr
 //}
 
+// ShouldImmediateFailover determines if an error should trigger immediate channel suspension
+// without waiting for statistical sample accumulation. This is for critical errors that indicate
+// the channel is definitely unavailable (concurrency limits, invalid keys, quota exhaustion).
+func ShouldImmediateFailover(statusCode int, errorMessage string) bool {
+	lowerMsg := strings.ToLower(errorMessage)
+
+	// 403: Concurrency/resource exhaustion
+	if statusCode == 403 && (strings.Contains(lowerMsg, "并发") ||
+		(strings.Contains(lowerMsg, "session") && strings.Contains(lowerMsg, "已满")) ||
+		strings.Contains(lowerMsg, "concurrency") ||
+		strings.Contains(lowerMsg, "overloaded")) {
+		return true
+	}
+
+	// 401: API key invalid/expired
+	if statusCode == 401 && (strings.Contains(lowerMsg, "invalid") ||
+		strings.Contains(lowerMsg, "expired") ||
+		strings.Contains(lowerMsg, "authentication")) {
+		return true
+	}
+
+	// Quota exhaustion (any status code)
+	if strings.Contains(lowerMsg, "insufficient_quota") ||
+		strings.Contains(lowerMsg, "quota exceeded") ||
+		strings.Contains(lowerMsg, "billing_not_active") {
+		return true
+	}
+
+	return false
+}
+
 // ShouldTriggerChannelFailover determines if an upstream error should trigger channel failover
 // This allows failover to work even when RetryTimes=0 for channel-level issues
 // Returns true for: 5xx errors (500-599 excl. 504/524), 401 auth failures, connection errors,

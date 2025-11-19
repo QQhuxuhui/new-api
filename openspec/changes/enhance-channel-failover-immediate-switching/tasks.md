@@ -19,9 +19,9 @@ This change implements 4 improvements to channel failover:
 
 ### Task 1.1: Add ShouldImmediateFailover function
 
-- [ ] **File**: `service/error.go`
-- [ ] **Action**: Add new function `ShouldImmediateFailover(statusCode int, errorMessage string) bool`
-- [ ] **Implementation**:
+- [x] **File**: `service/error.go`
+- [x] **Action**: Add new function `ShouldImmediateFailover(statusCode int, errorMessage string) bool`
+- [x] **Implementation**:
   ```go
   func ShouldImmediateFailover(statusCode int, errorMessage string) bool {
       lowerMsg := strings.ToLower(errorMessage)
@@ -53,8 +53,8 @@ This change implements 4 improvements to channel failover:
       return false
   }
   ```
-- [ ] **Validation**: Function compiles without errors
-- [ ] **Cross-reference**: `specs/immediate-failover-detection/spec.md`
+- [x] **Validation**: Function compiles without errors
+- [x] **Cross-reference**: `specs/immediate-failover-detection/spec.md`
 
 **Estimated Time**: 15 minutes
 
@@ -62,14 +62,14 @@ This change implements 4 improvements to channel failover:
 
 ### Task 1.2: Update RecordChannelFailure to check immediate failover
 
-- [ ] **File**: `service/channel_health.go`
-- [ ] **Action**: Modify `RecordChannelFailure` to call `ShouldImmediateFailover` before statistical check
-- [ ] **Changes**:
+- [x] **File**: `service/channel_health.go`
+- [x] **Action**: Modify `RecordChannelFailure` to call `ShouldImmediateFailover` before statistical check
+- [x] **Changes**:
   1. Add parameters to `RecordChannelFailure(channelID int, statusCode int, errorMessage string)`
   2. After recording to window, check `ShouldImmediateFailover`
   3. If true, suspend channel immediately and return
   4. If false, proceed with existing `IsHighFailureRate` logic
-- [ ] **Implementation**:
+- [x] **Implementation**:
   ```go
   func RecordChannelFailure(channelID int, statusCode int, errorMessage string) error {
       ctx := context.Background()
@@ -101,8 +101,8 @@ This change implements 4 improvements to channel failover:
       // ... existing logic
   }
   ```
-- [ ] **Validation**: Code compiles, existing tests pass
-- [ ] **Cross-reference**: `specs/immediate-failover-detection/spec.md`
+- [x] **Validation**: Code compiles, existing tests pass
+- [x] **Cross-reference**: `specs/immediate-failover-detection/spec.md`
 
 **Estimated Time**: 20 minutes
 
@@ -110,23 +110,23 @@ This change implements 4 improvements to channel failover:
 
 ### Task 1.3: Update RecordChannelFailure call sites
 
-- [ ] **File**: `controller/relay.go:197-199`
-- [ ] **Action**: Update call to `RecordChannelFailure` to include status code and error message
-- [ ] **Before**:
+- [x] **File**: `controller/relay.go:197-199`
+- [x] **Action**: Update call to `RecordChannelFailure` to include status code and error message
+- [x] **Before**:
   ```go
   if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) {
       service.RecordChannelFailure(channel.Id)
   }
   ```
-- [ ] **After**:
+- [x] **After**:
   ```go
   if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) {
       service.RecordChannelFailure(channel.Id, newAPIError.StatusCode, newAPIError.Error())
   }
   ```
-- [ ] **Search**: `rg "RecordChannelFailure\(" -g "*.go"` to find all call sites
-- [ ] **Update**: All call sites with new signature
-- [ ] **Validation**: All files compile without errors
+- [x] **Search**: `rg "RecordChannelFailure\(" -g "*.go"` to find all call sites
+- [x] **Update**: All call sites with new signature
+- [x] **Validation**: All files compile without errors
 
 **Estimated Time**: 10 minutes
 
@@ -163,18 +163,18 @@ This change implements 4 improvements to channel failover:
 
 ### Task 2.1: Change default RetryTimes value
 
-- [ ] **File**: `common/constants.go`
-- [ ] **Action**: Change default `RetryTimes` from 0 to 2
-- [ ] **Before**:
+- [x] **File**: `common/constants.go`
+- [x] **Action**: Change default `RetryTimes` from 0 to 2
+- [x] **Before**:
   ```go
   var RetryTimes = 0
   ```
-- [ ] **After**:
+- [x] **After**:
   ```go
   var RetryTimes = 2  // Enable basic failover by default
   ```
-- [ ] **Validation**: Code compiles
-- [ ] **Cross-reference**: `specs/default-retry-configuration/spec.md`
+- [x] **Validation**: Code compiles
+- [x] **Cross-reference**: `specs/default-retry-configuration/spec.md`
 
 **Estimated Time**: 2 minutes
 
@@ -209,9 +209,9 @@ This change implements 4 improvements to channel failover:
 
 ### Task 3.1: Reorder shouldRetry checks
 
-- [ ] **File**: `controller/relay.go`
-- [ ] **Action**: Move `retryTimes <= 0` check after status code checks
-- [ ] **Before**:
+- [x] **File**: `controller/relay.go`
+- [x] **Action**: Move `retryTimes <= 0` check after status code checks
+- [x] **Before**:
   ```go
   func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
       if openaiErr == nil { return false }
@@ -223,7 +223,7 @@ This change implements 4 improvements to channel failover:
       // ...
   }
   ```
-- [ ] **After**:
+- [x] **After**:
   ```go
   func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
       if openaiErr == nil {
@@ -278,8 +278,8 @@ This change implements 4 improvements to channel failover:
       return true
   }
   ```
-- [ ] **Validation**: Code compiles, logic tests pass
-- [ ] **Cross-reference**: `specs/optimized-retry-logic/spec.md`
+- [x] **Validation**: Code compiles, logic tests pass
+- [x] **Cross-reference**: `specs/optimized-retry-logic/spec.md`
 
 **Estimated Time**: 20 minutes
 
@@ -318,18 +318,18 @@ This change implements 4 improvements to channel failover:
 
 ### Task 4.1: Change MinSampleSize constant
 
-- [ ] **File**: `service/channel_health.go`
-- [ ] **Action**: Change `MinSampleSize` from 10 to 5
-- [ ] **Before**:
+- [x] **File**: `service/channel_health.go`
+- [x] **Action**: Change `MinSampleSize` from 10 to 5
+- [x] **Before**:
   ```go
   const MinSampleSize = 10
   ```
-- [ ] **After**:
+- [x] **After**:
   ```go
   const MinSampleSize = 5  // Faster detection, fewer user-impacting failures
   ```
-- [ ] **Validation**: Code compiles
-- [ ] **Cross-reference**: `specs/reduced-sample-threshold/spec.md`
+- [x] **Validation**: Code compiles
+- [x] **Cross-reference**: `specs/reduced-sample-threshold/spec.md`
 
 **Estimated Time**: 2 minutes
 
