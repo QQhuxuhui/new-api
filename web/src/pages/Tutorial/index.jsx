@@ -303,9 +303,9 @@ npm --version`}
                     </p>
                     <CodeBlock
                       code={`{
-  "apiConfiguration": {
-    "baseURL": "${claudeApiUrl}",
-    "apiKey": "YOUR_API_KEY"
+  "env": {
+    "ANTHROPIC_BASE_URL": "${claudeApiUrl}",
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_API_KEY"
   }
 }`}
                       language='json'
@@ -326,9 +326,9 @@ npm --version`}
 mkdir -p ~/.claude
 cat > ~/.claude/settings.json << 'EOF'
 {
-  "apiConfiguration": {
-    "baseURL": "${claudeApiUrl}",
-    "apiKey": "YOUR_API_KEY"
+  "env": {
+    "ANTHROPIC_BASE_URL": "${claudeApiUrl}",
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_API_KEY"
   }
 }
 EOF`}

@@ -45,6 +45,7 @@ export default function GeneralSettings(props) {
   const [showQuotaWarning, setShowQuotaWarning] = useState(false);
   const [inputs, setInputs] = useState({
     TopUpLink: '',
+    XianyuShopLink: '',
     'general_setting.docs_link': '',
     'general_setting.quota_display_type': 'USD',
     'general_setting.custom_currency_symbol': '¤',
@@ -154,9 +155,12 @@ export default function GeneralSettings(props) {
       currentInputs['general_setting.custom_currency_exchange_rate'] =
         props.options['general_setting.custom_currency_exchange_rate'];
     }
-    setInputs(currentInputs);
-    setInputsRow(structuredClone(currentInputs));
-    refForm.current.setValues(currentInputs);
+    // 合并默认字段，避免新字段（如 XianyuShopLink）在首次加载时被丢弃，
+    // 确保 compareObjects 能检测到“从默认值到用户填写值”的变化
+    const mergedInputs = { ...inputs, ...currentInputs };
+    setInputs(mergedInputs);
+    setInputsRow(structuredClone(mergedInputs));
+    refForm.current.setValues(mergedInputs);
   }, [props.options]);
 
   return (
@@ -176,6 +180,16 @@ export default function GeneralSettings(props) {
                   initValue={''}
                   placeholder={t('例如发卡网站的购买链接')}
                   onChange={handleFieldChange('TopUpLink')}
+                  showClear
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'XianyuShopLink'}
+                  label={t('闲鱼店铺链接')}
+                  initValue={''}
+                  placeholder={t('例如闲鱼店铺的购买链接（可选）')}
+                  onChange={handleFieldChange('XianyuShopLink')}
                   showClear
                 />
               </Col>

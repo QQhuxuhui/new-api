@@ -61,7 +61,7 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
           ]
         : []),
       {
-        text: t('使用教程'),
+        text: t('安装教程'),
         itemKey: 'tutorial',
         to: '/tutorial',
       },

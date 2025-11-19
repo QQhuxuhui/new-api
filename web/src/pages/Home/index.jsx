@@ -45,7 +45,9 @@ const Home = () => {
   const isMobile = useIsMobile();
   const isDemoSiteMode = statusState?.status?.demo_site_enabled || false;
   const docsLink = statusState?.status?.docs_link || '';
+  const xianyuShopLink = statusState?.status?.xianyu_shop_link || '';
   const isChinese = i18n.language.startsWith('zh');
+  const navigate = useNavigate();
 
   // Check if user is logged in
   const isLoggedIn = !!localStorage.getItem('user');
@@ -181,17 +183,22 @@ const Home = () => {
 
                     {/* 次要按钮组 - 水平排列 */}
                     <div className='flex flex-row gap-3 md:gap-4 justify-center items-center flex-wrap'>
-                      <Link to='/console'>
-                        <Button
-                          theme='solid'
-                          type='primary'
-                          size={isMobile ? 'default' : 'large'}
-                          className='!rounded-3xl px-6 md:px-8 py-2'
-                          icon={<IconPlay />}
-                        >
-                          {t('获取密钥')}
-                        </Button>
-                      </Link>
+                      <Button
+                        theme='solid'
+                        type='primary'
+                        size={isMobile ? 'default' : 'large'}
+                        className='!rounded-3xl px-6 md:px-8 py-2'
+                        icon={<IconPlay />}
+                        onClick={() => {
+                          if (xianyuShopLink) {
+                            window.open(xianyuShopLink, '_blank');
+                          } else {
+                            navigate('/console');
+                          }
+                        }}
+                      >
+                        {t('获取密钥')}
+                      </Button>
                       <Button
                         size={isMobile ? 'default' : 'large'}
                         className='flex items-center !rounded-3xl px-6 py-2'
