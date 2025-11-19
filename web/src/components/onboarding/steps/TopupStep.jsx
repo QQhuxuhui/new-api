@@ -159,12 +159,15 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
 
           <Space style={{ width: '100%' }}>
             <Input
+              id="onboarding-redemption-code"
+              name="redemptionCode"
               placeholder='请输入兑换码'
               value={redemptionCode}
               onChange={setRedemptionCode}
               onEnterPress={handleRedeem}
               disabled={isRedeeming}
               style={{ flex: 1 }}
+              autoComplete="off"
             />
             <Button
               theme='solid'

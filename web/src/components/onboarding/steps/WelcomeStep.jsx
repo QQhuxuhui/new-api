@@ -114,6 +114,7 @@ const WelcomeStep = ({ onNext, onSkip }) => {
       {/* Don't show again checkbox */}
       <div style={{ marginTop: 24 }}>
         <Checkbox
+          id="onboarding-dont-show-again"
           checked={dontShowAgain}
           onChange={(e) => setDontShowAgain(e.target.checked)}
         >

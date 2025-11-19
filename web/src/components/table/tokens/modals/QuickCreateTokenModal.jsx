@@ -346,6 +346,8 @@ const QuickCreateTokenModal = ({
             {t('令牌名称')} <Text type='danger'>*</Text>
           </Text>
           <Input
+            id="quick-create-token-name"
+            name="tokenName"
             placeholder={t('请输入令牌名称')}
             value={tokenName}
             onChange={(value) => {
@@ -358,6 +360,7 @@ const QuickCreateTokenModal = ({
             maxLength={30}
             showClear
             validateStatus={nameError ? 'error' : 'default'}
+            autoComplete="off"
           />
           {nameError && (
             <Text type='danger' size='small' className='mt-1 block'>

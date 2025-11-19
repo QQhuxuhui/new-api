@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '@douyinfe/semi-ui';
 import {
   useOnboarding,
@@ -50,29 +50,42 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
   );
   const [topupData, setTopupData] = useState(progress.topupData || null);
 
+  // Track if progress has been restored to prevent infinite loops
+  const hasRestoredProgress = useRef(false);
+
   const totalSteps = 4;
 
-  // Restore progress from localStorage when hook hydrates
+  // Restore progress from localStorage when hook hydrates (only once)
   useEffect(() => {
-    if (visible && progress.startTime) {
-      // Only restore if there's actual saved progress
-      setCurrentStep(progress.currentStep || 1);
+    if (visible && progress.startTime && !hasRestoredProgress.current) {
+      // Only restore if there's actual saved progress and we haven't restored yet
+      hasRestoredProgress.current = true;
+      const restoredStep = progress.currentStep || 1;
+      setCurrentStep(restoredStep);
       setCompletedSteps(progress.completedSteps || []);
       setSkippedSteps(progress.skippedSteps || []);
       setCreatedToken(progress.createdToken || null);
       setTopupData(progress.topupData || null);
-    }
-  }, [visible, progress]);
 
-  // Track wizard start
+      // Restart timing for the restored step to avoid measuring time while wizard was closed
+      startStep(restoredStep);
+    }
+
+    // Reset the flag when modal is closed
+    if (!visible) {
+      hasRestoredProgress.current = false;
+    }
+  }, [visible, progress.startTime]); // Only depend on startTime, not entire progress object
+
+  // Track wizard start (only on first open, not on progress restore)
   useEffect(() => {
-    if (visible) {
+    if (visible && !progress.startTime) {
       trackEvent('onboarding_started', {
         auto_start: autoStart,
       });
-      startStep(currentStep);
+      startStep(1); // Start timing for step 1 on fresh start
     }
-  }, [visible, autoStart]);
+  }, [visible, autoStart, progress.startTime]);
 
   // Initialize startTime on first display (only once)
   useEffect(() => {
