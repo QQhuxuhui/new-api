@@ -17,31 +17,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Modal,
   Button,
   Typography,
-  Space,
   Card,
-  Tabs,
-  TabPane,
   Toast,
-  Tag,
 } from '@douyinfe/semi-ui';
 import {
   IconTickCircle,
   IconCopy,
-  IconAlertTriangle,
 } from '@douyinfe/semi-icons';
 import { copy } from '../../../../helpers/utils';
 import { TokenAnalytics } from '../../../../helpers/analytics';
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
 const TokenCreatedSuccess = ({ visible, tokenData, onClose, t }) => {
-  const [activeTab, setActiveTab] = useState('python');
-
   if (!tokenData) return null;
 
   const tokenKey = tokenData.key ? `sk-${tokenData.key}` : '';
@@ -73,56 +66,9 @@ const TokenCreatedSuccess = ({ visible, tokenData, onClose, t }) => {
     }
   };
 
-  const codeSnippets = {
-    python: `import anthropic
-
-client = anthropic.Anthropic(
-    api_key="${tokenKey}",
-    base_url="${baseURL}/v1"
-)
-
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[
-        {"role": "user", "content": "Hello, Claude!"}
-    ]
-)
-print(message.content)`,
-
-    nodejs: `import Anthropic from "@anthropic-ai/sdk";
-
-const client = new Anthropic({
-  apiKey: "${tokenKey}",
-  baseURL: "${baseURL}/v1",
-});
-
-const message = await client.messages.create({
-  model: "claude-3-5-sonnet-20241022",
-  max_tokens: 1024,
-  messages: [
-    { role: "user", content: "Hello, Claude!" }
-  ],
-});
-
-console.log(message.content);`,
-
-    curl: `curl ${baseURL}/v1/messages \\
-  -H "Content-Type: application/json" \\
-  -H "x-api-key: ${tokenKey}" \\
-  -H "anthropic-version: 2023-06-01" \\
-  -d '{
-    "model": "claude-3-5-sonnet-20241022",
-    "max_tokens": 1024,
-    "messages": [
-      {"role": "user", "content": "Hello, Claude!"}
-    ]
-  }'`,
-  };
-
   const envConfig = `# 环境变量配置
 ANTHROPIC_API_KEY=${tokenKey}
-ANTHROPIC_BASE_URL=${baseURL}/v1`;
+ANTHROPIC_BASE_URL=${baseURL}`;
 
   return (
     <Modal
@@ -136,7 +82,7 @@ ANTHROPIC_BASE_URL=${baseURL}/v1`;
         </div>
       }
       closeOnEsc
-      width={700}
+      width={600}
       bodyStyle={{ padding: '24px' }}
     >
       <div className='text-center mb-6'>
@@ -148,12 +94,6 @@ ANTHROPIC_BASE_URL=${baseURL}/v1`;
         <Title heading={3} className='mb-2'>
           {t('令牌创建成功！')}
         </Title>
-        <div className='flex items-center justify-center gap-2 bg-yellow-50 border border-yellow-200 rounded p-3 mb-4'>
-          <IconAlertTriangle className='text-yellow-600' />
-          <Text type='warning' strong>
-            {t('此令牌密钥仅显示一次，请妥善保存')}
-          </Text>
-        </div>
       </div>
 
       {/* Token Information */}
@@ -187,7 +127,7 @@ ANTHROPIC_BASE_URL=${baseURL}/v1`;
       </Card>
 
       {/* Environment Variables */}
-      <Card className='mb-4'>
+      <Card>
         <div className='flex items-center justify-between mb-2'>
           <Text strong>{t('环境变量配置')}</Text>
           <Button
@@ -201,45 +141,6 @@ ANTHROPIC_BASE_URL=${baseURL}/v1`;
         <pre className='bg-gray-50 p-3 rounded text-sm overflow-x-auto'>
           <code>{envConfig}</code>
         </pre>
-      </Card>
-
-      {/* Code Examples */}
-      <Card>
-        <Text strong className='block mb-3'>
-          {t('代码示例')}:
-        </Text>
-        <Tabs
-          type='line'
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          tabBarExtraContent={
-            <Button
-              icon={<IconCopy />}
-              size='small'
-              onClick={() =>
-                handleCopy(codeSnippets[activeTab], '代码示例已复制')
-              }
-            >
-              {t('复制代码')}
-            </Button>
-          }
-        >
-          <TabPane tab='Python' itemKey='python'>
-            <pre className='bg-gray-50 p-3 rounded text-sm overflow-x-auto'>
-              <code>{codeSnippets.python}</code>
-            </pre>
-          </TabPane>
-          <TabPane tab='Node.js' itemKey='nodejs'>
-            <pre className='bg-gray-50 p-3 rounded text-sm overflow-x-auto'>
-              <code>{codeSnippets.nodejs}</code>
-            </pre>
-          </TabPane>
-          <TabPane tab='cURL' itemKey='curl'>
-            <pre className='bg-gray-50 p-3 rounded text-sm overflow-x-auto'>
-              <code>{codeSnippets.curl}</code>
-            </pre>
-          </TabPane>
-        </Tabs>
       </Card>
     </Modal>
   );

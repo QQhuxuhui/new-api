@@ -18,7 +18,7 @@ const (
 	// Failure Rate Thresholds
 	FailureRateThreshold     = 0.30 // 30% failure rate for standard traffic
 	FailureRateThresholdHigh = 0.50 // 50% for low-traffic channels
-	MinSampleSize            = 10   // minimum requests before evaluation
+	MinSampleSize            = 5    // minimum requests before evaluation (faster detection)
 	LowTrafficThreshold      = 30   // requests/min threshold for "low traffic"
 	LowTrafficMinFailures    = 5    // minimum failures for low-traffic handling
 	LowTrafficFailureRate    = 0.80 // 80% failure rate for low-traffic suspension
@@ -147,8 +147,8 @@ func IsHighFailureRate(channelID int) (isHigh bool, failureRate float64, reason 
 		failureRate*100, totalCount)
 }
 
-// RecordChannelFailure increments failure counter ONLY if current window shows high failure rate
-func RecordChannelFailure(channelID int) error {
+// RecordChannelFailure increments failure counter, with immediate failover for critical errors
+func RecordChannelFailure(channelID int, statusCode int, errorMessage string) error {
 	ctx := context.Background()
 	rdb := common.RDB
 
@@ -160,7 +160,13 @@ func RecordChannelFailure(channelID int) error {
 	// 1. Record this failure to sliding window
 	RecordChannelRequest(channelID, false)
 
-	// 2. Check if current window shows high failure rate
+	// 2. Check for immediate failover errors (bypass sample collection)
+	if ShouldImmediateFailover(statusCode, errorMessage) {
+		common.SysLog(fmt.Sprintf("Channel %d immediate failover triggered: %s", channelID, errorMessage))
+		return suspendChannel(channelID)
+	}
+
+	// 3. Check if current window shows high failure rate
 	isHigh, rate, reason := IsHighFailureRate(channelID)
 
 	if !isHigh {

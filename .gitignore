@@ -27,3 +27,6 @@ electron/dist
 *.pid
 *.bak
 concurrency_translations.txt
+
+.cache*
+.gomod*

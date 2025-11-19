@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Tag, Tooltip } from '@douyinfe/semi-ui';
-import { IconCheckCircle, IconClock, IconAlertTriangle } from '@douyinfe/semi-icons';
+import { IconTickCircle, IconClock, IconAlertTriangle } from '@douyinfe/semi-icons';
 
 /**
  * 通道健康状态指示器组件
@@ -77,7 +77,7 @@ const ChannelHealthStatus = ({ health, onClick }) => {
       <Tag
         color="green"
         size="small"
-        prefixIcon={<IconCheckCircle />}
+        prefixIcon={<IconTickCircle />}
         onClick={onClick}
         style={{ cursor: 'pointer' }}
       >

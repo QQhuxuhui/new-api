@@ -15,6 +15,7 @@ var SystemName = "New API"
 var Footer = ""
 var Logo = ""
 var TopUpLink = ""
+var XianyuShopLink = ""
 
 // var ChatLink = ""
 // var ChatLink2 = ""
@@ -105,7 +106,7 @@ var AutomaticEnableChannelEnabled = false
 var QuotaRemindThreshold = 1000
 var PreConsumedQuota = 500
 
-var RetryTimes = 0
+var RetryTimes = 2 // Enable basic failover by default
 
 //var RootUserEmail = ""
 

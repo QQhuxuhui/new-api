@@ -29,7 +29,6 @@ import {
 } from '@douyinfe/semi-ui';
 import {
   IconTicketCodeStroked,
-  IconCreditCard,
   IconUserCardPhone,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess, renderQuota } from '../../../helpers';
@@ -50,7 +49,7 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
   const [redemptionCode, setRedemptionCode] = useState('');
   const [isRedeeming, setIsRedeeming] = useState(false);
 
-  const topUpLink = statusState?.status?.top_up_link || '';
+  const xianyuShopLink = statusState?.status?.xianyu_shop_link || '';
 
   /**
    * Handle redemption code submission
@@ -99,17 +98,6 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
   };
 
   /**
-   * Open payment page in new tab
-   */
-  const handleOnlinePayment = () => {
-    if (!topUpLink) {
-      showError('管理员未设置充值链接');
-      return;
-    }
-    window.open(topUpLink, '_blank');
-  };
-
-  /**
    * Handle skip step
    */
   const handleSkip = () => {
@@ -117,10 +105,14 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
   };
 
   /**
-   * Handle manual confirmation that user topped up
+   * Open Xianyu shop in new tab
    */
-  const handleTopupConfirmed = () => {
-    onNext({ topupAmount: 0, method: 'online_payment' });
+  const handleXianyuShop = () => {
+    if (!xianyuShopLink) {
+      showError('管理员未设置闲鱼店铺链接');
+      return;
+    }
+    window.open(xianyuShopLink, '_blank');
   };
 
   return (
@@ -187,54 +179,7 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
         </Space>
       </Card>
 
-      {/* Online Payment Option */}
-      <Card
-        shadows='hover'
-        style={{
-          marginBottom: 16,
-          border: '1px solid var(--semi-color-border)',
-        }}
-      >
-        <Space vertical spacing='medium' style={{ width: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <IconCreditCard
-              size='large'
-              style={{ color: 'var(--semi-color-success)' }}
-            />
-            <div>
-              <Text strong style={{ fontSize: 16 }}>
-                在线支付
-              </Text>
-              <br />
-              <Text type='tertiary' size='small'>
-                跳转到支付页面进行充值
-              </Text>
-            </div>
-          </div>
-
-          <Space style={{ width: '100%' }} vertical spacing='small'>
-            <Button
-              theme='solid'
-              type='secondary'
-              onClick={handleOnlinePayment}
-              block
-            >
-              前往支付页面
-            </Button>
-            <Button
-              theme='borderless'
-              type='tertiary'
-              onClick={handleTopupConfirmed}
-              block
-              size='small'
-            >
-              我已完成充值
-            </Button>
-          </Space>
-        </Space>
-      </Card>
-
-      {/* Contact Admin Option */}
+      {/* Contact Admin or Xianyu Shop Option */}
       <Card
         shadows='hover'
         style={{
@@ -242,21 +187,39 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
           border: '1px solid var(--semi-color-border)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <IconUserCardPhone
-            size='large'
-            style={{ color: 'var(--semi-color-warning)' }}
-          />
-          <div>
-            <Text strong style={{ fontSize: 16 }}>
-              联系管理员
-            </Text>
-            <br />
-            <Text type='tertiary' size='small'>
-              如需帮助,请联系平台管理员
-            </Text>
+        <Space vertical spacing='medium' style={{ width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <IconUserCardPhone
+              size='large'
+              style={{ color: 'var(--semi-color-warning)' }}
+            />
+            <div>
+              <Text strong style={{ fontSize: 16 }}>
+                联系管理员或闲鱼店铺购买
+              </Text>
+              <br />
+              <Text type='tertiary' size='small'>
+                如需帮助，请联系平台管理员或访问闲鱼店铺购买
+              </Text>
+            </div>
           </div>
-        </div>
+
+          <Space style={{ width: '100%' }}>
+            <Button theme='solid' type='secondary' block>
+              联系管理员
+            </Button>
+            {xianyuShopLink && (
+              <Button
+                theme='solid'
+                type='secondary'
+                onClick={handleXianyuShop}
+                block
+              >
+                闲鱼店铺
+              </Button>
+            )}
+          </Space>
+        </Space>
       </Card>
 
       {/* Navigation buttons */}

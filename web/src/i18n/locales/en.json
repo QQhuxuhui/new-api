@@ -2110,6 +2110,13 @@
     "产品ID已存在": "Product ID already exists",
     "大模型接口网关": "LLM API Gateway",
     "使用教程": "Tutorial",
+    "安装教程": "Installation Tutorial",
+    "新手指引": "Newbie Guide",
+    "联系管理员或闲鱼店铺购买": "Contact Admin or Xianyu Shop",
+    "如需帮助，请联系平台管理员或访问闲鱼店铺购买": "For assistance, please contact admin or visit Xianyu shop",
+    "闲鱼店铺": "Xianyu Shop",
+    "闲鱼店铺链接": "Xianyu Shop Link",
+    "例如闲鱼店铺的购买链接（可选）": "E.g., Xianyu shop purchase link (optional)",
     "tutorial": {
       "title": "AI Code Tutorial",
       "description": "Follow this tutorial to easily install and use Claude Code and OpenAI Codex on your computer.",

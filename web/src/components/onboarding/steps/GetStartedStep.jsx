@@ -17,121 +17,39 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Button,
   Typography,
   Space,
-  Tabs,
-  TabPane,
-  Card,
-  Toast,
   Banner,
 } from '@douyinfe/semi-ui';
-import { IconCheckCircleStroked, IconCopy } from '@douyinfe/semi-icons';
-import { copy } from '../../../helpers';
-import { OnboardingAnalytics } from '../../../helpers/analytics';
+import { IconCheckCircleStroked } from '@douyinfe/semi-icons';
+import { useNavigate } from 'react-router-dom';
 
 const { Title, Text, Paragraph } = Typography;
 
 /**
  * Get started step of onboarding wizard
- * Shows code examples and completion message
+ * Shows completion message and login button
  */
 const GetStartedStep = ({ createdToken, onComplete }) => {
-  const [activeTab, setActiveTab] = useState('python');
+  const navigate = useNavigate();
 
-  // Get the base URL for API
-  const baseURL = window.location.origin;
-  const apiKey = createdToken?.key ? `sk-${createdToken.key}` : 'YOUR_API_KEY';
-
-  /**
-   * Generate code example based on language
-   */
-  const getCodeExample = (language) => {
-    switch (language) {
-      case 'python':
-        return `from openai import OpenAI
-
-# 初始化客户端
-client = OpenAI(
-    api_key="${apiKey}",
-    base_url="${baseURL}/v1"
-)
-
-# 发送请求
-response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-        {"role": "user", "content": "Hello, how are you?"}
-    ]
-)
-
-print(response.choices[0].message.content)`;
-
-      case 'nodejs':
-        return `import OpenAI from 'openai';
-
-// 初始化客户端
-const client = new OpenAI({
-  apiKey: '${apiKey}',
-  baseURL: '${baseURL}/v1'
-});
-
-// 发送请求
-async function main() {
-  const response = await client.chat.completions.create({
-    model: 'gpt-3.5-turbo',
-    messages: [
-      { role: 'user', content: 'Hello, how are you?' }
-    ]
-  });
-
-  console.log(response.choices[0].message.content);
-}
-
-main();`;
-
-      case 'curl':
-        return `curl ${baseURL}/v1/chat/completions \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer ${apiKey}" \\
-  -d '{
-    "model": "gpt-3.5-turbo",
-    "messages": [
-      {
-        "role": "user",
-        "content": "Hello, how are you?"
-      }
-    ]
-  }'`;
-
-      default:
-        return '';
-    }
-  };
+  // Check if user is logged in
+  const isLoggedIn = !!localStorage.getItem('user');
 
   /**
-   * Handle copy code to clipboard
+   * Handle login button click
    */
-  const handleCopyCode = async () => {
-    const code = getCodeExample(activeTab);
-    const success = await copy(code);
-
-    if (success) {
-      Toast.success('代码已复制到剪贴板');
-      // Track successful code copy
-      OnboardingAnalytics.trackCodeCopied(activeTab);
-    } else {
-      Toast.error('复制失败,请重试');
-    }
-  };
-
-  /**
-   * Handle finish button click
-   */
-  const handleFinish = () => {
+  const handleLogin = () => {
     onComplete();
+
+    // Only navigate to login if user is not logged in
+    if (!isLoggedIn) {
+      navigate('/login');
+    }
+    // If already logged in, just close the wizard (via onComplete)
   };
 
   return (
@@ -171,89 +89,16 @@ main();`;
         />
       )}
 
-      {/* Code examples */}
-      <Card
-        title='快速开始示例代码'
-        style={{ marginBottom: 24 }}
-        headerExtraContent={
-          <Button
-            icon={<IconCopy />}
-            theme='borderless'
-            type='tertiary'
-            onClick={handleCopyCode}
-          >
-            复制代码
-          </Button>
-        }
+      {/* Action button */}
+      <Button
+        theme='solid'
+        type='primary'
+        size='large'
+        onClick={handleLogin}
+        block
       >
-        <Tabs type='line' activeKey={activeTab} onChange={setActiveTab}>
-          <TabPane tab='Python' itemKey='python'>
-            <pre
-              style={{
-                backgroundColor: 'var(--semi-color-fill-0)',
-                padding: 16,
-                borderRadius: 6,
-                overflow: 'auto',
-                fontSize: 13,
-                fontFamily: 'monospace',
-              }}
-            >
-              <code>{getCodeExample('python')}</code>
-            </pre>
-          </TabPane>
-
-          <TabPane tab='Node.js' itemKey='nodejs'>
-            <pre
-              style={{
-                backgroundColor: 'var(--semi-color-fill-0)',
-                padding: 16,
-                borderRadius: 6,
-                overflow: 'auto',
-                fontSize: 13,
-                fontFamily: 'monospace',
-              }}
-            >
-              <code>{getCodeExample('nodejs')}</code>
-            </pre>
-          </TabPane>
-
-          <TabPane tab='cURL' itemKey='curl'>
-            <pre
-              style={{
-                backgroundColor: 'var(--semi-color-fill-0)',
-                padding: 16,
-                borderRadius: 6,
-                overflow: 'auto',
-                fontSize: 13,
-                fontFamily: 'monospace',
-              }}
-            >
-              <code>{getCodeExample('curl')}</code>
-            </pre>
-          </TabPane>
-        </Tabs>
-      </Card>
-
-      {/* Action buttons */}
-      <Space vertical spacing='medium' style={{ width: '100%' }}>
-        <Button
-          theme='solid'
-          type='primary'
-          size='large'
-          onClick={handleFinish}
-          block
-        >
-          完成设置
-        </Button>
-        <Button
-          theme='borderless'
-          type='tertiary'
-          onClick={() => window.open('/docs', '_blank')}
-          block
-        >
-          查看完整文档
-        </Button>
-      </Space>
+        {isLoggedIn ? '完成' : '登录系统'}
+      </Button>
     </div>
   );
 };

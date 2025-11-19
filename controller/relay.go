@@ -195,7 +195,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		// Error occurred - check if it should trigger health tracking
 		if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) {
-			service.RecordChannelFailure(channel.Id)
+			service.RecordChannelFailure(channel.Id, newAPIError.StatusCode, newAPIError.Error())
 		}
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
@@ -259,18 +259,23 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr == nil {
 		return false
 	}
-	if types.IsChannelError(openaiErr) {
-		return true
-	}
+
+	// Priority 1: Explicit skip
 	if types.IsSkipRetryError(openaiErr) {
 		return false
 	}
-	if retryTimes <= 0 {
-		return false
+
+	// Priority 2: Channel errors (bypass RetryTimes)
+	if types.IsChannelError(openaiErr) {
+		return true
 	}
+
+	// Priority 3: Specific channel selection (no retry)
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
 	}
+
+	// Priority 4: Status code checks (before RetryTimes check)
 	if openaiErr.StatusCode == http.StatusTooManyRequests {
 		return true
 	}
@@ -284,6 +289,13 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		}
 		return true
 	}
+
+	// Priority 5: RetryTimes limit (moved down)
+	if retryTimes <= 0 {
+		return false
+	}
+
+	// Priority 6: Client errors
 	if openaiErr.StatusCode == http.StatusBadRequest {
 		return false
 	}

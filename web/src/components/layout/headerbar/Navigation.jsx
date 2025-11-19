@@ -18,8 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { Button } from '@douyinfe/semi-ui';
+import { IconBook } from '@douyinfe/semi-icons';
 import SkeletonWrapper from '../components/SkeletonWrapper';
+import { useTranslation } from 'react-i18next';
 
 const Navigation = ({
   mainNavLinks,
@@ -27,7 +30,19 @@ const Navigation = ({
   isLoading,
   userState,
   pricingRequireAuth,
+  onOpenOnboarding,
 }) => {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+
+  const handleNewbieGuideClick = () => {
+    if (userState.user) {
+      onOpenOnboarding?.();
+    } else {
+      navigate('/login');
+    }
+  };
+
   const renderNavLinks = () => {
     const baseClasses =
       'flex-shrink-0 flex items-center gap-1 font-semibold rounded-md transition-all duration-200 ease-in-out';
@@ -81,6 +96,18 @@ const Navigation = ({
       >
         {renderNavLinks()}
       </SkeletonWrapper>
+
+      {!isLoading && (
+        <Button
+          theme='borderless'
+          icon={<IconBook />}
+          size='small'
+          onClick={handleNewbieGuideClick}
+          className='flex-shrink-0'
+        >
+          {!isMobile && t('新手指引')}
+        </Button>
+      )}
     </nav>
   );
 };

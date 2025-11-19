@@ -105,6 +105,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen, onOpenOnboarding }) => {
             isLoading={isLoading}
             userState={userState}
             pricingRequireAuth={pricingRequireAuth}
+            onOpenOnboarding={onOpenOnboarding}
           />
 
           <ActionButtons
