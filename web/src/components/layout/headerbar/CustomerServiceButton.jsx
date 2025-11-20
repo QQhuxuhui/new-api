@@ -36,12 +36,12 @@ const CustomerServiceButton = ({ customerServiceQRCode, isMobile, t }) => {
       <Image
         src={customerServiceQRCode}
         width={200}
-        height={200}
+        height={400}
         preview={{
           src: customerServiceQRCode,
         }}
         alt={t('客服二维码')}
-        style={{ borderRadius: 4 }}
+        style={{ borderRadius: 4, objectFit: 'contain' }}
       />
     </div>
   );
