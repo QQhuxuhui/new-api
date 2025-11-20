@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useState } from 'react';
 import { Button, Popover, Modal, Image } from '@douyinfe/semi-ui';
-import { Headset } from 'lucide-react';
 
 const CustomerServiceButton = ({ customerServiceQRCode, isMobile, t }) => {
   const [modalVisible, setModalVisible] = useState(false);
@@ -48,19 +47,25 @@ const CustomerServiceButton = ({ customerServiceQRCode, isMobile, t }) => {
   );
 
   const buttonProps = {
-    icon: <Headset size={18} />,
     'aria-label': t('联系客服'),
-    theme: 'borderless',
-    type: 'tertiary',
-    className:
-      '!p-1.5 !text-current focus:!bg-semi-color-fill-1 dark:focus:!bg-gray-700 !rounded-full !bg-semi-color-fill-0 dark:!bg-semi-color-fill-1 hover:!bg-semi-color-fill-1 dark:hover:!bg-semi-color-fill-2',
+    theme: 'solid',
+    type: 'primary',
+    size: 'small',
+    style: {
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      border: 'none',
+      fontWeight: 500,
+    },
+    className: '!shadow-sm hover:!shadow-md transition-shadow',
   };
 
   // Mobile: use modal on click
   if (isMobile) {
     return (
       <>
-        <Button {...buttonProps} onClick={() => setModalVisible(true)} />
+        <Button {...buttonProps} onClick={() => setModalVisible(true)}>
+          {t('联系客服')}
+        </Button>
         <Modal
           title={t('联系客服')}
           visible={modalVisible}
@@ -82,7 +87,9 @@ const CustomerServiceButton = ({ customerServiceQRCode, isMobile, t }) => {
       trigger='hover'
       showArrow
     >
-      <Button {...buttonProps} />
+      <Button {...buttonProps}>
+        {t('联系客服')}
+      </Button>
     </Popover>
   );
 };
