@@ -164,7 +164,106 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		newAPIError := SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+
+		// Check if this is a specific channel request (admin diagnostic/testing)
+		// Specific channel requests should not failover to other channels
+		_, isSpecificChannel := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
+
+		var newAPIError *types.NewAPIError
+		if isSpecificChannel {
+			// For specific channel requests, do not retry on concurrency limit
+			// Respect the admin's intention to test/diagnose a specific channel
+			newAPIError = SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		} else {
+			// Retry loop for concurrency limit errors
+			// Note: This bypasses RetryTimes configuration (similar to controller's channel error handling)
+			// to ensure concurrency failover works even when RetryTimes=0
+
+			// First attempt: use the already-selected channel (respects sticky session, priority, etc.)
+			newAPIError = SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+
+			// If first attempt hits concurrency limit, retry from highest priority
+			if newAPIError != nil && newAPIError.GetErrorCode() == types.ErrorCodeChannelKeyConcurrencyLimit {
+				// Track tried channels to ensure all channels at same priority are attempted
+				// before moving to next priority level (Issue 7 fix)
+				triedChannelIds := make(map[int]bool)
+				triedChannelIds[channel.Id] = true // Mark initial channel as tried
+
+				// Start from retry=0 (highest priority) to ensure we don't skip high-priority channels
+				// Note: Priority field is bigint with no constraints, so we cannot hard-code a limit
+				// Instead, we iterate until no more channels are available (Issue 9 fix)
+				retryGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+
+				// Safety limit to prevent infinite loops (e.g., if there's a bug in channel selection)
+				// Set to 1000 to accommodate large priority ranges (e.g., 1000/900/800...)
+				const maxRetryAttempts = 1000
+				consecutiveNilCount := 0 // Track consecutive nil returns to detect exhaustion
+
+			retryLoop:
+				for retry := 0; retry < maxRetryAttempts; retry++ {
+					// Try all channels at this priority level before moving to next
+					channelFoundAtThisPriority := false
+					for {
+						// Select from priority level, excluding already tried channels
+						var retryErr error
+						channel, _, retryErr = service.CacheGetRandomSatisfiedChannelExcluding(c, retryGroup, modelRequest.Model, retry, triedChannelIds)
+
+						// Issue 8 fix: Handle system errors properly instead of masking them
+						if retryErr != nil {
+							// System error (e.g., database inconsistency, auto group config error)
+							// Log and return the real error instead of masking as 429
+							common.SysError(fmt.Sprintf("Channel selection error during concurrency retry: %v", retryErr))
+							newAPIError = types.NewError(retryErr, types.ErrorCodeGetChannelFailed)
+							break retryLoop
+						}
+
+						if channel == nil {
+							// No more untried channels at this priority level
+							// Move to next priority level
+							break
+						}
+
+						// Found a channel at this priority level
+						channelFoundAtThisPriority = true
+						consecutiveNilCount = 0 // Reset counter
+
+						// Mark this channel as tried
+						triedChannelIds[channel.Id] = true
+
+						// Update context for the new channel (for auto group handling)
+						if retryGroup == "auto" {
+							setAutoGroupContext(c, retryGroup, channel)
+						}
+
+						newAPIError = SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+						if newAPIError == nil {
+							// Success, exit all loops
+							break retryLoop
+						}
+
+						// Only continue retrying for concurrency limit errors
+						if newAPIError.GetErrorCode() != types.ErrorCodeChannelKeyConcurrencyLimit {
+							// Not a concurrency limit error, don't retry in distributor
+							// Let the controller handle other retryable errors
+							break retryLoop
+						}
+						// Concurrency limit error, continue trying other channels at same priority
+					}
+
+					// If no channels found at this priority level, increment nil counter
+					if !channelFoundAtThisPriority {
+						consecutiveNilCount++
+						// If we've tried 3 consecutive priority levels with no channels,
+						// we've likely exhausted all priorities (Issue 9 fix)
+						if consecutiveNilCount >= 3 {
+							break retryLoop
+						}
+					}
+				}
+			}
+		}
+
+
 		if newAPIError != nil {
 			// Channel setup failed (e.g., concurrency limit, no available key)
 			// Abort here to prevent half-initialized context from reaching controller
@@ -187,7 +286,7 @@ func Distribute() func(c *gin.Context) {
 		// final channel key instead of the first one.
 		defer func() {
 			if concurrencyKey, exists := c.Get("concurrency_key"); exists {
-				if key, ok := concurrencyKey.(string); ok {
+				if key, ok := concurrencyKey.(string); ok && key != "" {
 					channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 					service.DecrementConcurrency(key, channelType)
 				}
@@ -401,10 +500,12 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 
 	// If this is a retry (old concurrency_key exists), cleanup the old counter first
 	if oldKey, exists := c.Get("concurrency_key"); exists {
-		if key, ok := oldKey.(string); ok {
+		if key, ok := oldKey.(string); ok && key != "" {
 			// Get the old channel type for proper cleanup
 			oldChannelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 			service.DecrementConcurrency(key, oldChannelType)
+			// Clear the old key immediately to prevent double-decrement on subsequent retries
+			c.Set("concurrency_key", "")
 		}
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
@@ -440,11 +541,11 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 		}
 		if !withinLimit {
 			// This key is at its concurrency limit
+			// Concurrency limit is temporary; allow retry to other channels
 			return types.NewErrorWithStatusCode(
 				errors.New("channel key at concurrency limit"),
 				types.ErrorCodeChannelKeyConcurrencyLimit,
 				http.StatusTooManyRequests, // 429
-				types.ErrOptionWithSkipRetry(),
 			)
 		}
 

@@ -25,6 +25,11 @@ func GetConcurrencyKey(apiKey string, channelType int) string {
 	return fmt.Sprintf("channel:key:%s:type:%d:concurrent", keyHash, channelType)
 }
 
+// GetConcurrencyTimestampKey generates the timestamp tracking key for a concurrency key
+func GetConcurrencyTimestampKey(concurrencyKey string) string {
+	return concurrencyKey + ":timestamp"
+}
+
 // CheckAndIncrementConcurrency checks if adding a new request would exceed the limit,
 // and increments the counter if within limit
 func CheckAndIncrementConcurrency(channel *model.Channel, apiKey string, keyIndex int) (bool, error) {
@@ -43,6 +48,7 @@ func CheckAndIncrementConcurrency(channel *model.Channel, apiKey string, keyInde
 
 	limit := *channel.MaxConcurrentRequestsPerKey
 	redisKey := GetConcurrencyKey(apiKey, channel.Type)
+	timestampKey := GetConcurrencyTimestampKey(redisKey)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -67,11 +73,16 @@ func CheckAndIncrementConcurrency(channel *model.Channel, apiKey string, keyInde
 			return fmt.Errorf("concurrency limit exceeded: current=%d, limit=%d", current, limit)
 		}
 
-		// Increment counter using pipeline
+		// Increment counter and update timestamp using pipeline
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 			pipe.Incr(ctx, redisKey)
 			// Set TTL to prevent stale data (1 hour)
 			pipe.Expire(ctx, redisKey, 1*time.Hour)
+
+			// Update timestamp to current time (last activity time)
+			// Use Set instead of SetNX to ensure the timestamp reflects the most recent activity
+			// This prevents long-running requests from being mistakenly cleaned up as "leaked"
+			pipe.Set(ctx, timestampKey, time.Now().Unix(), 1*time.Hour)
 			return nil
 		})
 		return err
@@ -106,6 +117,7 @@ func DecrementConcurrency(apiKey string, channelType int) {
 	}
 
 	redisKey := GetConcurrencyKey(apiKey, channelType)
+	timestampKey := GetConcurrencyTimestampKey(redisKey)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -119,9 +131,10 @@ func DecrementConcurrency(apiKey string, channelType int) {
 		return
 	}
 
-	// If counter goes negative, reset to 0
-	if val < 0 {
-		common.RDB.Set(ctx, redisKey, 0, 1*time.Hour)
+	// If counter goes to 0 or negative, clean up
+	if val <= 0 {
+		// Delete both the counter and timestamp keys
+		common.RDB.Del(ctx, redisKey, timestampKey)
 	}
 
 	if common.DebugEnabled {
