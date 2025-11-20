@@ -49,7 +49,8 @@ const QRCodeSection = ({ customerServiceQRCode, xianyuQRCode, t }) => {
                 src: customerServiceQRCode,
               }}
               alt={t('扫描二维码联系客服')}
-              style={{ borderRadius: 8, margin: '0 auto', objectFit: 'contain' }}
+              style={{ margin: '0 auto' }}
+              imgStyle={{ objectFit: 'contain', borderRadius: 8 }}
             />
             <div className='mt-3 text-sm text-semi-color-text-2'>
               {t('扫描二维码联系客服')}
@@ -74,7 +75,8 @@ const QRCodeSection = ({ customerServiceQRCode, xianyuQRCode, t }) => {
                 src: xianyuQRCode,
               }}
               alt={t('扫描二维码访问闲鱼店铺')}
-              style={{ borderRadius: 8, margin: '0 auto', objectFit: 'contain' }}
+              style={{ margin: '0 auto' }}
+              imgStyle={{ objectFit: 'contain', borderRadius: 8 }}
             />
             <div className='mt-3 text-sm text-semi-color-text-2'>
               {t('扫描二维码访问闲鱼店铺')}
