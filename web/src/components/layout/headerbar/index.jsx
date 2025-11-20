@@ -124,6 +124,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen, onOpenOnboarding }) => {
             navigate={navigate}
             t={t}
             onOpenOnboarding={onOpenOnboarding}
+            customerServiceQRCode={statusState?.status?.CustomerServiceQRCode}
           />
         </div>
       </div>

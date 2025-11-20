@@ -34,6 +34,7 @@ import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 
 import RechargeCard from './RechargeCard';
+import QRCodeSection from './QRCodeSection';
 import InvitationCard from './InvitationCard';
 import TransferModal from './modals/TransferModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
@@ -717,6 +718,15 @@ const TopUp = () => {
               handleAffLinkClick={handleAffLinkClick}
             />
           </div>
+        </div>
+
+        {/* QR Code Section - Full Width */}
+        <div className='mt-6'>
+          <QRCodeSection
+            customerServiceQRCode={statusState?.status?.CustomerServiceQRCode}
+            xianyuQRCode={statusState?.status?.XianyuQRCode}
+            t={t}
+          />
         </div>
       </div>
     </div>

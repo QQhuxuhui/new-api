@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import NewYearButton from './NewYearButton';
+import CustomerServiceButton from './CustomerServiceButton';
 import NotificationButton from './NotificationButton';
 import ThemeToggle from './ThemeToggle';
 import LanguageSelector from './LanguageSelector';
@@ -40,10 +41,17 @@ const ActionButtons = ({
   navigate,
   t,
   onOpenOnboarding,
+  customerServiceQRCode,
 }) => {
   return (
     <div className='flex items-center gap-2 md:gap-3'>
       <NewYearButton isNewYear={isNewYear} />
+
+      <CustomerServiceButton
+        customerServiceQRCode={customerServiceQRCode}
+        isMobile={isMobile}
+        t={t}
+      />
 
       <NotificationButton
         unreadCount={unreadCount}

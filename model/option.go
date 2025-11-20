@@ -123,6 +123,8 @@ func InitOptionMap() {
 	common.OptionMap["AudioCompletionRatio"] = ratio_setting.AudioCompletionRatio2JSONString()
 	common.OptionMap["TopUpLink"] = common.TopUpLink
 	common.OptionMap["XianyuShopLink"] = common.XianyuShopLink
+	common.OptionMap["CustomerServiceQRCode"] = common.CustomerServiceQRCode
+	common.OptionMap["XianyuQRCode"] = common.XianyuQRCode
 	//common.OptionMap["ChatLink"] = common.ChatLink
 	//common.OptionMap["ChatLink2"] = common.ChatLink2
 	common.OptionMap["QuotaPerUnit"] = strconv.FormatFloat(common.QuotaPerUnit, 'f', -1, 64)
@@ -435,6 +437,10 @@ func updateOptionMap(key string, value string) (err error) {
 		common.TopUpLink = value
 	case "XianyuShopLink":
 		common.XianyuShopLink = value
+	case "CustomerServiceQRCode":
+		common.CustomerServiceQRCode = value
+	case "XianyuQRCode":
+		common.XianyuQRCode = value
 	//case "ChatLink":
 	//	common.ChatLink = value
 	//case "ChatLink2":

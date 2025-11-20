@@ -29,6 +29,7 @@ import {
   Select,
   InputGroup,
   Input,
+  Image,
 } from '@douyinfe/semi-ui';
 import {
   compareObjects,
@@ -43,9 +44,15 @@ export default function GeneralSettings(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [showQuotaWarning, setShowQuotaWarning] = useState(false);
+  const [imageLoadErrors, setImageLoadErrors] = useState({
+    CustomerServiceQRCode: false,
+    XianyuQRCode: false,
+  });
   const [inputs, setInputs] = useState({
     TopUpLink: '',
     XianyuShopLink: '',
+    CustomerServiceQRCode: '',
+    XianyuQRCode: '',
     'general_setting.docs_link': '',
     'general_setting.quota_display_type': 'USD',
     'general_setting.custom_currency_symbol': '¤',
@@ -64,6 +71,10 @@ export default function GeneralSettings(props) {
   function handleFieldChange(fieldName) {
     return (value) => {
       setInputs((inputs) => ({ ...inputs, [fieldName]: value }));
+      // Reset image load error when URL changes
+      if (fieldName === 'CustomerServiceQRCode' || fieldName === 'XianyuQRCode') {
+        setImageLoadErrors((errors) => ({ ...errors, [fieldName]: false }));
+      }
     };
   }
 
@@ -192,6 +203,66 @@ export default function GeneralSettings(props) {
                   onChange={handleFieldChange('XianyuShopLink')}
                   showClear
                 />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'CustomerServiceQRCode'}
+                  label={t('客服二维码URL')}
+                  initValue={''}
+                  placeholder={t('客服二维码图片地址')}
+                  onChange={handleFieldChange('CustomerServiceQRCode')}
+                  showClear
+                />
+                {inputs.CustomerServiceQRCode && !imageLoadErrors.CustomerServiceQRCode && (
+                  <div style={{ marginTop: 8 }}>
+                    <Image
+                      src={inputs.CustomerServiceQRCode}
+                      width={100}
+                      height={100}
+                      preview={{
+                        src: inputs.CustomerServiceQRCode,
+                      }}
+                      alt={t('客服二维码预览')}
+                      style={{ borderRadius: 4 }}
+                      onError={() => {
+                        setImageLoadErrors((errors) => ({
+                          ...errors,
+                          CustomerServiceQRCode: true,
+                        }));
+                      }}
+                    />
+                  </div>
+                )}
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'XianyuQRCode'}
+                  label={t('闲鱼店铺二维码URL')}
+                  initValue={''}
+                  placeholder={t('闲鱼店铺二维码图片地址')}
+                  onChange={handleFieldChange('XianyuQRCode')}
+                  showClear
+                />
+                {inputs.XianyuQRCode && !imageLoadErrors.XianyuQRCode && (
+                  <div style={{ marginTop: 8 }}>
+                    <Image
+                      src={inputs.XianyuQRCode}
+                      width={100}
+                      height={100}
+                      preview={{
+                        src: inputs.XianyuQRCode,
+                      }}
+                      alt={t('闲鱼店铺二维码预览')}
+                      style={{ borderRadius: 4 }}
+                      onError={() => {
+                        setImageLoadErrors((errors) => ({
+                          ...errors,
+                          XianyuQRCode: true,
+                        }));
+                      }}
+                    />
+                  </div>
+                )}
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Input

@@ -16,6 +16,8 @@ var Footer = ""
 var Logo = ""
 var TopUpLink = ""
 var XianyuShopLink = ""
+var CustomerServiceQRCode = ""
+var XianyuQRCode = ""
 
 // var ChatLink = ""
 // var ChatLink2 = ""
