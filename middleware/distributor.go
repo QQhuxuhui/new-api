@@ -286,7 +286,7 @@ func Distribute() func(c *gin.Context) {
 		// final channel key instead of the first one.
 		defer func() {
 			if concurrencyKey, exists := c.Get("concurrency_key"); exists {
-				if key, ok := concurrencyKey.(string); ok {
+				if key, ok := concurrencyKey.(string); ok && key != "" {
 					channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 					service.DecrementConcurrency(key, channelType)
 				}
