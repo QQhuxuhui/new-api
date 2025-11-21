@@ -64,12 +64,7 @@ const ChannelHealthModal = ({
   const [countdown, setCountdown] = useState('');
   const [cooldownComplete, setCooldownComplete] = useState(false);
 
-  // No data, nothing to render — bail out early to skip unnecessary work
-  if (!health) {
-    return null;
-  }
-
-  // Extract health data with defaults
+  // Extract health data with defaults (use empty object if health is null/undefined)
   const {
     consecutive_failures = 0,
     current_failure_rate = 0,
@@ -82,7 +77,7 @@ const ChannelHealthModal = ({
     total_successes = 0,
     window_total_requests = 0,
     window_failure_count = 0,
-  } = health;
+  } = health || {};
 
   // 计算总请求数和成功率
   const totalRequests = total_failures + total_successes;
@@ -184,6 +179,11 @@ const ChannelHealthModal = ({
 
     return () => clearInterval(interval);
   }, [is_suspended, suspended_until, visible]);
+
+  // No data, nothing to render — bail out early after all hooks
+  if (!health) {
+    return null;
+  }
 
   // 手动重置处理函数
   const handleReset = async () => {
