@@ -7,13 +7,12 @@ type ConsoleSetting struct {
 	UptimeKumaGroups     string `json:"uptime_kuma_groups"`    // Uptime Kuma 分组配置 (JSON 数组字符串)
 	Announcements        string `json:"announcements"`         // 系统公告 (JSON 数组字符串)
 	FAQ                  string `json:"faq"`                   // 常见问题 (JSON 数组字符串)
-	TutorialContent      string `json:"tutorial_content"`      // 教程内容 (Markdown 或 HTML)
-	TutorialFormat       string `json:"tutorial_format"`       // 教程内容格式 (markdown 或 html)
+	Tutorial             string `json:"tutorial"`              // 教程内容 (JSON 数组字符串)
 	ApiInfoEnabled       bool   `json:"api_info_enabled"`      // 是否启用 API 信息面板
 	UptimeKumaEnabled    bool   `json:"uptime_kuma_enabled"`   // 是否启用 Uptime Kuma 面板
 	AnnouncementsEnabled bool   `json:"announcements_enabled"` // 是否启用系统公告面板
 	FAQEnabled           bool   `json:"faq_enabled"`           // 是否启用常见问答面板
-	TutorialEnabled      bool   `json:"tutorial_enabled"`      // 是否启用自定义教程内容
+	TutorialEnabled      bool   `json:"tutorial_enabled"`      // 是否启用教程面板
 }
 
 // 默认配置
@@ -22,13 +21,12 @@ var defaultConsoleSetting = ConsoleSetting{
 	UptimeKumaGroups:     "",
 	Announcements:        "",
 	FAQ:                  "",
-	TutorialContent:      "",
-	TutorialFormat:       "markdown",
+	Tutorial:             "",
 	ApiInfoEnabled:       true,
 	UptimeKumaEnabled:    true,
 	AnnouncementsEnabled: true,
 	FAQEnabled:           true,
-	TutorialEnabled:      false,
+	TutorialEnabled:      true,
 }
 
 // 全局实例

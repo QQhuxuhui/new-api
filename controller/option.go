@@ -201,14 +201,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
-	case "console_setting.tutorial_content":
-		// Get the current tutorial format to determine if sanitization is needed
-		tutorialFormat := common.OptionMap["console_setting.tutorial_format"]
-		if tutorialFormat == "html" {
-			// Sanitize HTML content to prevent XSS
-			option.Value = common.SanitizeHTML(option.Value.(string))
+	case "console_setting.tutorial":
+		err = console_setting.ValidateConsoleSettings(option.Value.(string), "Tutorial")
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "教程内容设置失败: " + err.Error(),
+			})
+			return
 		}
-		// Note: Markdown content doesn't need sanitization as it will be rendered safely
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {

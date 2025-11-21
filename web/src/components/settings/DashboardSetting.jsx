@@ -23,6 +23,7 @@ import { API, showError, showSuccess, toBoolean } from '../../helpers';
 import SettingsAPIInfo from '../../pages/Setting/Dashboard/SettingsAPIInfo';
 import SettingsAnnouncements from '../../pages/Setting/Dashboard/SettingsAnnouncements';
 import SettingsFAQ from '../../pages/Setting/Dashboard/SettingsFAQ';
+import SettingsTutorial from '../../pages/Setting/Dashboard/SettingsTutorial';
 import SettingsUptimeKuma from '../../pages/Setting/Dashboard/SettingsUptimeKuma';
 import SettingsDataDashboard from '../../pages/Setting/Dashboard/SettingsDataDashboard';
 import SettingsTutorial from '../../pages/Setting/Dashboard/SettingsTutorial';
@@ -32,10 +33,12 @@ const DashboardSetting = () => {
     'console_setting.api_info': '',
     'console_setting.announcements': '',
     'console_setting.faq': '',
+    'console_setting.tutorial': '',
     'console_setting.uptime_kuma_groups': '',
     'console_setting.api_info_enabled': '',
     'console_setting.announcements_enabled': '',
     'console_setting.faq_enabled': '',
+    'console_setting.tutorial_enabled': '',
     'console_setting.uptime_kuma_enabled': '',
     'console_setting.tutorial_content': '',
     'console_setting.tutorial_format': '',
@@ -163,6 +166,11 @@ const DashboardSetting = () => {
         {/* 常见问答管理 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsFAQ options={inputs} refresh={onRefresh} />
+        </Card>
+
+        {/* 教程内容管理 */}
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsTutorial options={inputs} refresh={onRefresh} />
         </Card>
 
         {/* Uptime Kuma 监控设置 */}
