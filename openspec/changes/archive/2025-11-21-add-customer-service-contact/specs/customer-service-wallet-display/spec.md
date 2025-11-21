@@ -121,12 +121,10 @@ The QR code section text SHALL support Chinese and English internationalization.
 
 ---
 
-## MODIFIED Requirements
-
 ### Requirement: Wallet page layout includes QR code section
 **Priority**: Low
 
-The wallet page layout MUST be adjusted to include the QR code section between the recharge area and invitation link area.
+The wallet page layout SHALL be adjusted to include the QR code section between the recharge area and invitation link area.
 
 #### Scenario: QR code section positioned correctly in page flow
 **Given** 用户访问钱包充值页面
@@ -138,8 +136,3 @@ The wallet page layout MUST be adjusted to include the QR code section between t
 4. **二维码展示区域(新增)**
 5. 邀请链接区域(InvitationCard 组件)
 **And** 各区域之间应有合适的垂直间距(如 24-32px)
-
----
-
-## REMOVED Requirements
-N/A - 无需移除现有需求

@@ -1,11 +1,9 @@
 # Capability: Customer Service Header Button
 
-## Capability Overview
+## Purpose
 在页面顶部导航栏增加"联系客服"按钮,用户通过鼠标悬浮或点击查看管理员配置的客服二维码,提供快速便捷的客服联系入口。
 
----
-
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Display customer service button in header navigation
 **Priority**: High
@@ -75,11 +73,3 @@ The customer service button and related UI text SHALL support Chinese and Englis
 **And** 浮层标题应更新为"Customer Service QR Code" 或 "Scan to Contact"
 
 ---
-
-## MODIFIED Requirements
-N/A - 这是新增功能,无需修改现有需求
-
----
-
-## REMOVED Requirements
-N/A - 无需移除现有需求
