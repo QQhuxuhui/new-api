@@ -92,6 +92,9 @@ func main() {
 	// 数据看板
 	go model.UpdateQuotaData()
 
+	// 启动并发计数清理任务（防止因服务崩溃导致的并发泄漏）
+	service.StartConcurrencyCleanupTask()
+
 	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
 		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
 		if err != nil {

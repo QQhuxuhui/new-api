@@ -194,7 +194,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		// Error occurred - check if it should trigger health tracking
-		if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) {
+		// Record timeout errors (504/524) to health tracker for statistical analysis
+		// Timeouts won't trigger immediate retry but will accumulate in health stats
+		// If timeouts occur frequently (>30% failure rate), the channel will be suspended
+		if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) ||
+			newAPIError.StatusCode == 504 || newAPIError.StatusCode == 524 {
 			service.RecordChannelFailure(channel.Id, newAPIError.StatusCode, newAPIError.Error())
 		}
 
@@ -362,6 +366,7 @@ func RelayMidjourney(c *gin.Context) {
 		return
 	}
 
+	channelId := c.GetInt("channel_id")
 	var mjErr *dto.MidjourneyResponse
 	switch relayInfo.RelayMode {
 	case relayconstant.RelayModeMidjourneyNotify:
@@ -383,13 +388,23 @@ func RelayMidjourney(c *gin.Context) {
 			mjErr.Result = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
 			statusCode = http.StatusTooManyRequests
 		}
+
+		// Record channel health on failure
+		errorMessage := fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)
+		// For Midjourney errors, record to health tracker if it's a server/upstream error
+		if statusCode >= 500 || statusCode == http.StatusTooManyRequests || statusCode == 504 || statusCode == 524 {
+			service.RecordChannelFailure(channelId, statusCode, errorMessage)
+		}
+
 		c.JSON(statusCode, gin.H{
-			"description": fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result),
+			"description": errorMessage,
 			"type":        "upstream_error",
 			"code":        mjErr.Code,
 		})
-		channelId := c.GetInt("channel_id")
-		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
+		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, errorMessage))
+	} else {
+		// Record channel success
+		service.RecordChannelSuccess(channelId)
 	}
 }
 
@@ -428,9 +443,21 @@ func RelayTask(c *gin.Context) {
 		return
 	}
 	taskErr := taskRelayHandler(c, relayInfo)
+
+	// Record channel health based on result
 	if taskErr == nil {
+		// Success - record to health tracker
+		service.RecordChannelSuccess(channelId)
 		retryTimes = 0
+	} else {
+		// Error occurred - check if it should trigger health tracking
+		// Record timeout errors (504/524) and other upstream errors to health tracker
+		if service.ShouldTriggerChannelFailover(taskErr.StatusCode, taskErr.Message) ||
+			taskErr.StatusCode == 504 || taskErr.StatusCode == 524 {
+			service.RecordChannelFailure(channelId, taskErr.StatusCode, taskErr.Message)
+		}
 	}
+
 	for i := 0; shouldRetryTaskRelay(c, channelId, taskErr, retryTimes) && i < retryTimes; i++ {
 		channel, newAPIError := getChannel(c, group, originalModel, i)
 		if newAPIError != nil {
@@ -448,6 +475,19 @@ func RelayTask(c *gin.Context) {
 		requestBody, _ := common.GetRequestBody(c)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 		taskErr = taskRelayHandler(c, relayInfo)
+
+		// Record channel health based on retry result
+		if taskErr == nil {
+			// Success - record to health tracker
+			service.RecordChannelSuccess(channelId)
+			return // Exit immediately on success
+		}
+
+		// Error occurred - check if it should trigger health tracking
+		if service.ShouldTriggerChannelFailover(taskErr.StatusCode, taskErr.Message) ||
+			taskErr.StatusCode == 504 || taskErr.StatusCode == 524 {
+			service.RecordChannelFailure(channelId, taskErr.StatusCode, taskErr.Message)
+		}
 	}
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {
