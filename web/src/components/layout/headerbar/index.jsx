@@ -46,6 +46,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen, onOpenOnboarding }) => {
     theme,
     headerNavModules,
     pricingRequireAuth,
+    tutorialEnabled,
     logout,
     handleLanguageChange,
     handleThemeToggle,
@@ -62,7 +63,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen, onOpenOnboarding }) => {
     getUnreadKeys,
   } = useNotifications(statusState);
 
-  const { mainNavLinks } = useNavigation(t, docsLink, headerNavModules);
+  const { mainNavLinks } = useNavigation(t, docsLink, headerNavModules, tutorialEnabled);
 
   return (
     <header className='text-semi-color-text-0 sticky top-0 z-50 transition-colors duration-300 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-lg'>
