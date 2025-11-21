@@ -64,20 +64,24 @@ const ChannelHealthModal = ({
   const [countdown, setCountdown] = useState('');
   const [cooldownComplete, setCooldownComplete] = useState(false);
 
-  if (!health) return null;
+  // No data, nothing to render — bail out early to skip unnecessary work
+  if (!health) {
+    return null;
+  }
 
+  // Extract health data with defaults
   const {
-    consecutive_failures,
-    current_failure_rate,
-    is_suspended,
-    suspended_until,
-    suspension_count,
-    last_failure_time,
-    last_success_time,
-    total_failures,
-    total_successes,
-    window_total_requests,
-    window_failure_count,
+    consecutive_failures = 0,
+    current_failure_rate = 0,
+    is_suspended = false,
+    suspended_until = null,
+    suspension_count = 0,
+    last_failure_time = null,
+    last_success_time = null,
+    total_failures = 0,
+    total_successes = 0,
+    window_total_requests = 0,
+    window_failure_count = 0,
   } = health;
 
   // 计算总请求数和成功率
