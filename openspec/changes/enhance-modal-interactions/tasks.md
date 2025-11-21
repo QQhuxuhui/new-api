@@ -19,10 +19,11 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
   - Preserve `completedSteps`, `createdToken`, `topupData`, `startTime`
   - Verification: Inspect localStorage after closing wizard at step 3 → currentStep should be 1
 
-- [ ] **Add resetOnReopen flag to useOnboarding hook (optional)**
+- [x] **Add resetOnReopen flag to useOnboarding hook (optional)**
   - File: `web/src/hooks/useOnboarding.js`
-  - Add `resetOnReopen` function that clears UI state but preserves analytics
-  - Verification: Call `resetOnReopen()` → UI state resets, analytics preserved
+  - Fixed `updateProgress` to read from localStorage avoiding stale closure
+  - Added try/catch protection to prevent crash from corrupted localStorage
+  - Verification: Sequential calls merge correctly, corrupted data doesn't crash
 
 ### Phase 2: Analytics Enhancement (1-2 hours)
 
