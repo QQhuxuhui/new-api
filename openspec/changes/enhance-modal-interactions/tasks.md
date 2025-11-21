@@ -7,13 +7,13 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
 
 ### Phase 1: Core Reset Logic (2-3 hours)
 
-- [ ] **Remove progress restoration logic from OnboardingWizard.jsx**
+- [x] **Remove progress restoration logic from OnboardingWizard.jsx**
   - File: `web/src/components/onboarding/OnboardingWizard.jsx`
   - Remove `hasRestoredProgress` ref and associated logic (lines 54, 60-78)
   - Update `visible` useEffect to always set `currentStep = 1`
   - Verification: Open wizard, close at step 3, reopen → shows step 1
 
-- [ ] **Update handleClose to reset currentStep in localStorage**
+- [x] **Update handleClose to reset currentStep in localStorage**
   - File: `web/src/components/onboarding/OnboardingWizard.jsx`
   - In `handleClose()` function (line 250), call `updateProgress({ currentStep: 1 })`
   - Preserve `completedSteps`, `createdToken`, `topupData`, `startTime`
@@ -26,19 +26,19 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
 
 ### Phase 2: Analytics Enhancement (1-2 hours)
 
-- [ ] **Add session tracking to analytics**
+- [x] **Add session tracking to analytics**
   - File: `web/src/components/onboarding/OnboardingWizard.jsx`
   - Track `onboarding_reopened` event in `useEffect` when `visible` changes to true
   - Add `session` counter to localStorage (increment on each reopen)
   - Verification: Open/close wizard 3 times → analytics shows sessions 1, 2, 3
 
-- [ ] **Track repeat step completions**
+- [x] **Track repeat step completions**
   - File: `web/src/components/onboarding/OnboardingWizard.jsx`
   - In `handleNext()`, check if `currentStep` exists in `completedSteps`
   - Add `is_repeat: true` to `onboarding_step_completed` event if step was done before
   - Verification: Complete step 1 twice → second event has `is_repeat: true`
 
-- [ ] **Update completion event with total sessions**
+- [x] **Update completion event with total sessions**
   - File: `web/src/components/onboarding/OnboardingWizard.jsx`
   - In `handleComplete()`, include `total_sessions` from localStorage
   - Verification: Complete wizard after 2 reopens → event shows `total_sessions: 2`
@@ -67,29 +67,29 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
 
 ### Phase 1: Component Structure Refactor (3-4 hours)
 
-- [ ] **Create StatusCard component for top section**
+- [x] **Create StatusCard component for top section**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
   - Replace `Descriptions` with custom Card layout
   - Include: Status badge, large failure rate display, consecutive failures progress bar
   - Use Semi Design `Card`, `Badge`, `Progress` components
   - Verification: Modal shows status card with correct layout
 
-- [ ] **Create SuspensionBanner component for alert**
+- [x] **Create SuspensionBanner component for alert**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
   - Add `Banner` component with countdown timer (conditional render if `is_suspended`)
   - Display cooldown progress bar
   - Show estimated recovery time
   - Verification: Suspended channel shows orange banner with countdown
 
-- [ ] **Create MetricsGrid component for statistics**
+- [x] **Create MetricsGrid component for statistics**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
-  - Use `Row` + `Col` grid with 3 `Statistic` components
+  - Use `Row` + `Col` grid with 3 custom metric cards (using Title and Typography)
   - Show: Success count, Failure count, Success rate
   - Add icons: `IconTickCircle`, `IconAlertTriangle`, `IconActivity`
   - Format numbers with thousand separators using `.toLocaleString()`
   - Verification: Metrics display in 3-column grid with correct formatting
 
-- [ ] **Create CollapsibleDetails component for detailed stats**
+- [x] **Create CollapsibleDetails component for detailed stats**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
   - Use `Collapse` + `Panel` components
   - Two panels: "窗口统计 (最近 100 次请求)", "历史统计"
@@ -98,7 +98,7 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
 
 ### Phase 2: Color Coding & Visual Hierarchy (2-3 hours)
 
-- [ ] **Implement failure rate color thresholds**
+- [x] **Implement failure rate color thresholds**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
   - Add helper function `getFailureRateColor(rate)`:
     - `< 0.10` → `var(--semi-color-success)` (green)
@@ -107,7 +107,7 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
   - Apply color to failure rate text using `style={{ color: ... }}`
   - Verification: Test with 5%, 20%, 40% rates → colors match spec
 
-- [ ] **Implement consecutive failures progress bar colors**
+- [x] **Implement consecutive failures progress bar colors**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
   - Add helper function `getConsecutiveFailuresColor(count)`:
     - `0` → green
@@ -116,14 +116,14 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
   - Apply to `Progress` component's `stroke` prop
   - Verification: Test with 0, 3, 7 failures → bar colors match spec
 
-- [ ] **Add status badge color and icons**
+- [x] **Add status badge color and icons**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
   - Healthy: Green badge with ✅ icon
   - Warning: Orange badge with ⚠️ icon
   - Suspended: Red badge with 🔴 icon
   - Verification: Visual inspection matches design spec
 
-- [ ] **Style metrics cards with color accents**
+- [x] **Style metrics cards with color accents**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
   - Success count: Green accent
   - Failure count: Red accent (only if above threshold)
@@ -132,7 +132,7 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
 
 ### Phase 3: Countdown Timer Implementation (2-3 hours)
 
-- [ ] **Create CountdownTimer component**
+- [x] **Create CountdownTimer component**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx` (or separate file)
   - Accept `targetTime` prop (ISO string)
   - Use `setInterval` to update every 1 second
@@ -140,7 +140,7 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
   - Format: "还剩 X 分钟 Y 秒"
   - Verification: Timer updates every second
 
-- [ ] **Calculate and display cooldown progress**
+- [x] **Calculate and display cooldown progress**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
   - Calculate total cooldown duration from `suspension_count`:
     - Formula: `min(5 * 2^(suspension_count - 1), 60)` minutes
@@ -149,7 +149,7 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
   - Update progress bar in real-time
   - Verification: Progress bar animates smoothly from 0% to 100%
 
-- [ ] **Handle countdown completion**
+- [x] **Handle countdown completion**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
   - When countdown reaches zero:
     - Show "冷却完成" message
@@ -157,7 +157,7 @@ Implementation tasks for enhancing modal UX in two areas: onboarding wizard rest
     - Display "✅ 渠道已恢复,可以重新使用"
   - Verification: Wait for countdown to complete → success message appears
 
-- [ ] **Clean up interval on modal close**
+- [x] **Clean up interval on modal close**
   - File: `web/src/components/table/channels/ChannelHealthModal.jsx`
   - Use `useEffect` cleanup function to call `clearInterval`
   - Prevent memory leaks

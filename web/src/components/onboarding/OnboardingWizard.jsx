@@ -50,46 +50,27 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
   );
   const [topupData, setTopupData] = useState(progress.topupData || null);
 
-  // Track if progress has been restored to prevent infinite loops
-  const hasRestoredProgress = useRef(false);
+  // Track session number for analytics
+  const sessionCountRef = useRef(progress.sessionCount || 1);
 
   const totalSteps = 4;
 
-  // Restore progress from localStorage when hook hydrates (only once)
+  // Handle all initialization when modal opens (single effect to avoid race conditions)
   useEffect(() => {
-    if (visible && progress.startTime && !hasRestoredProgress.current) {
-      // Only restore if there's actual saved progress and we haven't restored yet
-      hasRestoredProgress.current = true;
-      const restoredStep = progress.currentStep || 1;
-      setCurrentStep(restoredStep);
-      setCompletedSteps(progress.completedSteps || []);
-      setSkippedSteps(progress.skippedSteps || []);
-      setCreatedToken(progress.createdToken || null);
-      setTopupData(progress.topupData || null);
+    if (visible) {
+      // Reset UI state only (do not touch localStorage analytics data)
+      setCurrentStep(1);
+      setCompletedSteps([]); // UI shows fresh progress bar
+      setSkippedSteps([]);   // UI resets skipped state
+      setCreatedToken(null); // UI resets token display
+      setTopupData(null);    // UI resets topup display
 
-      // Restart timing for the restored step to avoid measuring time while wizard was closed
-      startStep(restoredStep);
-    }
+      // Prepare batch update for localStorage
+      const progressUpdates = {
+        currentStep: 1,
+      };
 
-    // Reset the flag when modal is closed
-    if (!visible) {
-      hasRestoredProgress.current = false;
-    }
-  }, [visible, progress.startTime]); // Only depend on startTime, not entire progress object
-
-  // Track wizard start (only on first open, not on progress restore)
-  useEffect(() => {
-    if (visible && !progress.startTime) {
-      trackEvent('onboarding_started', {
-        auto_start: autoStart,
-      });
-      startStep(1); // Start timing for step 1 on fresh start
-    }
-  }, [visible, autoStart, progress.startTime]);
-
-  // Initialize startTime on first display (only once)
-  useEffect(() => {
-    if (visible && !progress.startTime) {
+      // Check if this is first open or reopen
       // Double-check localStorage to avoid race condition with useOnboarding hook
       const savedProgress = localStorage.getItem('onboarding_progress');
       let hasExistingStartTime = false;
@@ -103,36 +84,35 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
         }
       }
 
-      // Set startTime only if it doesn't exist in both state and localStorage
-      if (!hasExistingStartTime) {
-        updateProgress({
-          startTime: new Date().toISOString(),
+      if (!hasExistingStartTime && !progress.startTime) {
+        // First open: initialize startTime
+        progressUpdates.startTime = new Date().toISOString();
+        progressUpdates.sessionCount = 1;
+        sessionCountRef.current = 1;
+
+        // Track wizard start
+        trackEvent('onboarding_started', {
+          auto_start: autoStart,
+        });
+      } else {
+        // Reopen: increment session count
+        sessionCountRef.current = (progress.sessionCount || 1) + 1;
+        progressUpdates.sessionCount = sessionCountRef.current;
+
+        // Track reopen event
+        trackEvent('onboarding_reopened', {
+          session: sessionCountRef.current,
+          previous_step: progress.currentStep || 1,
         });
       }
-    }
-  }, [visible]); // Only depend on visible, not progress
 
-  // Save progress whenever state changes (preserve existing startTime)
-  useEffect(() => {
-    if (visible && progress.startTime) {
-      // Only save if startTime has been initialized
-      updateProgress({
-        currentStep,
-        completedSteps,
-        skippedSteps,
-        createdToken,
-        topupData,
-        // Don't override startTime - keep the original
-      });
+      // Single batch update to localStorage
+      updateProgress(progressUpdates);
+
+      // Start timing for step 1
+      startStep(1);
     }
-  }, [
-    currentStep,
-    completedSteps,
-    skippedSteps,
-    createdToken,
-    topupData,
-    visible,
-  ]);
+  }, [visible]);
 
   /**
    * Handle moving to next step
@@ -140,10 +120,15 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
   const handleNext = (data = {}) => {
     const timeSpent = endStep(currentStep);
 
+    // Check if this step was completed before (for analytics)
+    // Use progress.completedSteps from localStorage (not component state)
+    const isRepeat = (progress.completedSteps || []).includes(currentStep);
+
     // Track step completion
     trackEvent('onboarding_step_completed', {
       step: currentStep,
       time_spent: timeSpent,
+      is_repeat: isRepeat,
       ...data,
     });
 
@@ -151,23 +136,52 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
     if (currentStep === 1 && data.dontShowAgain) {
       markDismissed();
     }
+
+    // Prepare updates for localStorage (single batch update)
+    const progressUpdates = {};
+
+    // Handle step 2: topup data
     if (currentStep === 2 && data.method) {
-      // Record topup data if user used any topup method
-      setTopupData(data);
-    }
-    if (currentStep === 3 && data.createdToken) {
-      setCreatedToken(data.createdToken);
+      const newTopupData = data;
+      setTopupData(newTopupData);
+      progressUpdates.topupData = newTopupData;
     }
 
-    // Mark current step as completed
-    if (!completedSteps.includes(currentStep)) {
-      setCompletedSteps([...completedSteps, currentStep]);
+    // Handle step 3: created token
+    if (currentStep === 3 && data.createdToken) {
+      const newToken = data.createdToken;
+      setCreatedToken(newToken);
+      progressUpdates.createdToken = newToken;
     }
+
+    // Mark current step as completed in component state (for UI)
+    const newCompletedSteps = completedSteps.includes(currentStep)
+      ? completedSteps
+      : [...completedSteps, currentStep];
+    setCompletedSteps(newCompletedSteps);
+
+    // Update localStorage completedSteps for analytics persistence
+    const updatedCompletedSteps = [...(progress.completedSteps || [])];
+    if (!updatedCompletedSteps.includes(currentStep)) {
+      updatedCompletedSteps.push(currentStep);
+    }
+    progressUpdates.completedSteps = updatedCompletedSteps;
 
     // Move to next step
     if (currentStep < totalSteps) {
-      setCurrentStep(currentStep + 1);
-      startStep(currentStep + 1);
+      const nextStep = currentStep + 1;
+      setCurrentStep(nextStep);
+
+      // Update currentStep in localStorage for analytics and recovery
+      progressUpdates.currentStep = nextStep;
+
+      // Single batch update to localStorage
+      updateProgress(progressUpdates);
+
+      startStep(nextStep);
+    } else {
+      // Single batch update to localStorage (no currentStep change)
+      updateProgress(progressUpdates);
     }
   };
 
@@ -177,8 +191,15 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
   const handlePrev = () => {
     if (currentStep > 1) {
       endStep(currentStep);
-      setCurrentStep(currentStep - 1);
-      startStep(currentStep - 1);
+      const prevStep = currentStep - 1;
+      setCurrentStep(prevStep);
+
+      // Update currentStep in localStorage
+      updateProgress({
+        currentStep: prevStep,
+      });
+
+      startStep(prevStep);
     }
   };
 
@@ -194,23 +215,49 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
       time_spent: timeSpent,
     });
 
-    // Mark as skipped
-    if (!skippedSteps.includes(currentStep)) {
-      setSkippedSteps([...skippedSteps, currentStep]);
+    // Mark as skipped in component state (for UI)
+    const newSkippedSteps = skippedSteps.includes(currentStep)
+      ? skippedSteps
+      : [...skippedSteps, currentStep];
+    setSkippedSteps(newSkippedSteps);
+
+    // Update localStorage skippedSteps for analytics persistence
+    const updatedSkippedSteps = [...(progress.skippedSteps || [])];
+    if (!updatedSkippedSteps.includes(currentStep)) {
+      updatedSkippedSteps.push(currentStep);
     }
 
     // Handle "don't show again" on welcome step
     if (currentStep === 1 && data.dontShowAgain) {
       markDismissed();
+
+      // Single batch update to localStorage (keep current step)
+      updateProgress({
+        skippedSteps: updatedSkippedSteps,
+      });
+
       handleClose();
       return;
     }
 
     // Move to next step
     if (currentStep < totalSteps) {
-      setCurrentStep(currentStep + 1);
-      startStep(currentStep + 1);
+      const nextStep = currentStep + 1;
+      setCurrentStep(nextStep);
+
+      // Single batch update to localStorage
+      updateProgress({
+        skippedSteps: updatedSkippedSteps,
+        currentStep: nextStep,
+      });
+
+      startStep(nextStep);
     } else {
+      // Single batch update to localStorage (no currentStep change)
+      updateProgress({
+        skippedSteps: updatedSkippedSteps,
+      });
+
       handleClose();
     }
   };
@@ -221,20 +268,37 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
   const handleComplete = () => {
     const timeSpent = endStep(currentStep);
 
-    // Mark final step as completed
-    if (!completedSteps.includes(currentStep)) {
-      setCompletedSteps([...completedSteps, currentStep]);
+    // Mark final step as completed in component state
+    const finalCompletedSteps = completedSteps.includes(currentStep)
+      ? completedSteps
+      : [...completedSteps, currentStep];
+    setCompletedSteps(finalCompletedSteps);
+
+    // Update localStorage for the final step
+    const updatedCompletedSteps = [...(progress.completedSteps || [])];
+    if (!updatedCompletedSteps.includes(currentStep)) {
+      updatedCompletedSteps.push(currentStep);
     }
+
+    // Single batch update to localStorage
+    updateProgress({
+      completedSteps: updatedCompletedSteps,
+    });
+
+    // Combine current session state with persisted analytics data
+    const hasCreatedToken = createdToken || progress.createdToken;
+    const hasTopupData = topupData || progress.topupData;
 
     // Track completion
     trackEvent('onboarding_completed', {
       time_spent: timeSpent,
       completion_rate: getCompletionRate(
-        [...completedSteps, currentStep],
+        finalCompletedSteps,
         totalSteps,
       ),
-      created_token: !!createdToken,
-      topped_up: !!topupData,
+      created_token: !!hasCreatedToken,
+      topped_up: !!hasTopupData,
+      total_sessions: sessionCountRef.current,
     });
 
     // Mark onboarding as complete
@@ -254,6 +318,12 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
     trackEvent('onboarding_closed', {
       step: currentStep,
       completion_rate: completionRate,
+    });
+
+    // Only reset currentStep in localStorage to avoid flash on refresh
+    // Preserve analytics data for is_repeat tracking
+    updateProgress({
+      currentStep: 1,
     });
 
     onClose();

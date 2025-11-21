@@ -65,7 +65,18 @@ export const useOnboarding = () => {
    * @param {object} newProgress - New progress data to merge
    */
   const updateProgress = (newProgress) => {
-    const updatedProgress = { ...progress, ...newProgress };
+    // Read latest from localStorage to avoid stale closure issues
+    let currentProgress = progress;
+    const savedProgress = localStorage.getItem(STORAGE_KEYS.PROGRESS);
+    if (savedProgress) {
+      try {
+        currentProgress = JSON.parse(savedProgress);
+      } catch (error) {
+        console.error('Failed to parse onboarding progress during update, using in-memory state:', error);
+        // Fall back to in-memory progress state if localStorage is corrupted
+      }
+    }
+    const updatedProgress = { ...currentProgress, ...newProgress };
     setProgress(updatedProgress);
     localStorage.setItem(
       STORAGE_KEYS.PROGRESS,
