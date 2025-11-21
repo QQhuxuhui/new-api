@@ -287,9 +287,10 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return true
 	}
 	if openaiErr.StatusCode/100 == 5 {
-		// 超时不重试
+		// 超时允许有限的渠道切换重试（改善低流量用户体验）
 		if openaiErr.StatusCode == 504 || openaiErr.StatusCode == 524 {
-			return false
+			// 只在首次失败时允许重试1次（retryTimes == common.RetryTimes表示首次失败）
+			return retryTimes == common.RetryTimes
 		}
 		return true
 	}

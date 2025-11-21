@@ -118,6 +118,15 @@ func IsHighFailureRate(channelID int) (isHigh bool, failureRate float64, reason 
 
 	// Insufficient sample size
 	if totalCount < MinSampleSize {
+		// 🆕 Low-traffic adaptive detection: Quick response for 2+ samples with 80%+ failure
+		if totalCount >= 2 && failureCount >= 2 {
+			rate := float64(failureCount) / float64(totalCount)
+			if rate >= 0.8 { // 80% threshold for accuracy
+				return true, rate, fmt.Sprintf("低流量高失败率: %d/%d=%.2f%% (快速识别)",
+					failureCount, totalCount, rate*100)
+			}
+		}
+
 		// Special handling for low-traffic channels with significant failures
 		if failureCount >= LowTrafficMinFailures && totalCount > 0 {
 			rate := float64(failureCount) / float64(totalCount)
