@@ -54,6 +54,7 @@ const About = lazy(() => import('./pages/About'));
 const UserAgreement = lazy(() => import('./pages/UserAgreement'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const Tutorial = lazy(() => import('./pages/Tutorial'));
+const Analytics = lazy(() => import('./pages/Analytics'));
 
 function App() {
   const location = useLocation();
@@ -215,6 +216,16 @@ function App() {
             <AdminRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <Setting />
+              </Suspense>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/analytics'
+          element={
+            <AdminRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <Analytics />
               </Suspense>
             </AdminRoute>
           }

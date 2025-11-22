@@ -1,0 +1,258 @@
+package controller
+
+import (
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/service"
+
+	"github.com/gin-gonic/gin"
+)
+
+// GetUserOverview returns user overview metrics
+func GetUserOverview(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+	startTime, endTime := service.ParseTimeRange(timeRange)
+
+	// Allow custom date range with validation
+	if startDate := c.Query("start_date"); startDate != "" {
+		if t, err := time.Parse(time.RFC3339, startDate); err == nil {
+			startTime = t.Unix()
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Invalid start_date format. Expected RFC3339 format.",
+			})
+			return
+		}
+	}
+	if endDate := c.Query("end_date"); endDate != "" {
+		if t, err := time.Parse(time.RFC3339, endDate); err == nil {
+			endTime = t.Unix()
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Invalid end_date format. Expected RFC3339 format.",
+			})
+			return
+		}
+	}
+
+	// Validate date range
+	if startTime > endTime {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "start_date must be before or equal to end_date",
+		})
+		return
+	}
+
+	// Validate max range (365 days)
+	maxDuration := int64(365 * 24 * 60 * 60) // 365 days in seconds
+	if endTime-startTime > maxDuration {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Date range cannot exceed 365 days",
+		})
+		return
+	}
+
+	result, err := service.GetUserOverview(startTime, endTime)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, result)
+}
+
+// GetActiveUsers returns top active users ranking
+func GetActiveUsers(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	result, err := service.GetActiveUsersRanking(timeRange, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, result)
+}
+
+// GetConsumptionRanking returns top spenders
+func GetConsumptionRanking(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	result, err := service.GetTopSpenders(timeRange, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, result)
+}
+
+// GetConsumptionTrend returns daily consumption trends
+func GetConsumptionTrend(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+
+	result, err := service.GetConsumptionTrend(timeRange)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, result)
+}
+
+// GetModelUsage returns model usage statistics
+func GetModelUsage(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+
+	result, err := service.GetModelUsageStats(timeRange)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, result)
+}
+
+// GetBehaviorPatterns returns user behavior patterns
+func GetBehaviorPatterns(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+
+	result, err := service.GetBehaviorPatterns(timeRange)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, result)
+}
+
+// GetRiskIndicators returns risk alerts
+func GetRiskIndicators(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "1d")
+
+	result, err := service.GetRiskIndicators(timeRange)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, result)
+}
+
+// ExportAnalyticsData exports analytics data in CSV or JSON format
+func ExportAnalyticsData(c *gin.Context) {
+	format := c.DefaultQuery("format", "json")
+	dataType := c.Query("type") // "active_users", "consumption", "models"
+	timeRange := c.DefaultQuery("time_range", "7d")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+
+	var data interface{}
+	var err error
+	var filename string
+
+	switch dataType {
+	case "active_users":
+		data, err = service.GetActiveUsersRanking(timeRange, limit)
+		filename = "active_users"
+	case "consumption":
+		data, err = service.GetTopSpenders(timeRange, limit)
+		filename = "top_spenders"
+	case "consumption_trend":
+		data, err = service.GetConsumptionTrend(timeRange)
+		filename = "consumption_trend"
+	case "models":
+		data, err = service.GetModelUsageStats(timeRange)
+		filename = "model_usage"
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid export type. Supported: active_users, consumption, consumption_trend, models",
+		})
+		return
+	}
+
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	timestamp := time.Now().Format("20060102_150405")
+	filename = fmt.Sprintf("%s_%s_%s", filename, timeRange, timestamp)
+
+	if format == "csv" {
+		c.Header("Content-Type", "text/csv")
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.csv", filename))
+
+		writer := csv.NewWriter(c.Writer)
+		defer writer.Flush()
+
+		switch v := data.(type) {
+		case []dto.ActiveUserRank:
+			writer.Write([]string{"user_id", "username", "request_count", "last_active_at"})
+			for _, item := range v {
+				writer.Write([]string{
+					strconv.Itoa(item.UserId),
+					item.Username,
+					strconv.Itoa(item.RequestCount),
+					strconv.FormatInt(item.LastActiveAt, 10),
+				})
+			}
+		case []dto.TopSpender:
+			writer.Write([]string{"user_id", "username", "total_quota", "request_count"})
+			for _, item := range v {
+				writer.Write([]string{
+					strconv.Itoa(item.UserId),
+					item.Username,
+					strconv.Itoa(item.TotalQuota),
+					strconv.Itoa(item.RequestCount),
+				})
+			}
+		case []dto.ConsumptionTrend:
+			writer.Write([]string{"date", "total_quota", "request_count", "user_count", "arpu"})
+			for _, item := range v {
+				writer.Write([]string{
+					item.Date,
+					strconv.Itoa(item.TotalQuota),
+					strconv.Itoa(item.RequestCount),
+					strconv.Itoa(item.UserCount),
+					fmt.Sprintf("%.2f", item.ARPU),
+				})
+			}
+		case []dto.ModelUsageStats:
+			writer.Write([]string{"model_name", "request_count", "total_quota", "unique_users", "avg_tokens", "success_rate"})
+			for _, item := range v {
+				writer.Write([]string{
+					item.ModelName,
+					strconv.Itoa(item.RequestCount),
+					strconv.Itoa(item.TotalQuota),
+					strconv.Itoa(item.UniqueUsers),
+					strconv.Itoa(item.AvgTokens),
+					fmt.Sprintf("%.2f", item.SuccessRate),
+				})
+			}
+		}
+	} else {
+		c.Header("Content-Type", "application/json")
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.json", filename))
+
+		jsonData, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		c.Writer.Write(jsonData)
+	}
+}

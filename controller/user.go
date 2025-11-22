@@ -331,6 +331,50 @@ func GetUser(c *gin.Context) {
 	return
 }
 
+func GetUserByUsername(c *gin.Context) {
+	username := c.Query("username")
+	if username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "用户名不能为空",
+		})
+		return
+	}
+
+	user, err := model.GetUserByUsername(username, false)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "用户不存在",
+		})
+		return
+	}
+
+	// Permission check: prevent querying users with same or higher role (unless root)
+	myRole := c.GetInt("role")
+	if myRole <= user.Role && myRole != common.RoleRootUser {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "无权获取同级或更高等级用户的信息",
+		})
+		return
+	}
+
+	// Sanitize response: remove all sensitive fields
+	user.Password = ""
+	user.Remark = ""
+	user.AccessToken = nil
+	user.StripeCustomer = ""
+	user.AffCode = ""
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    user,
+	})
+	return
+}
+
 func GenerateAccessToken(c *gin.Context) {
 	id := c.GetInt("id")
 	user, err := model.GetUserById(id, true)

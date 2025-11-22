@@ -43,9 +43,8 @@ function Tutorial() {
         setLoading(true);
         const res = await API.get('/api/status');
         if (res.data.success && res.data.data) {
-          const tutorialStr = res.data.data['console_setting.tutorial'];
-          const tutorialEnabledStr =
-            res.data.data['console_setting.tutorial_enabled'];
+          const tutorialStr = res.data.data.tutorial;
+          const tutorialEnabledVal = res.data.data.tutorial_enabled;
 
           if (tutorialStr) {
             try {
@@ -55,9 +54,7 @@ function Tutorial() {
               console.error('Failed to parse tutorial data:', err);
             }
           }
-          setTutorialEnabled(
-            tutorialEnabledStr === 'true' || tutorialEnabledStr === true,
-          );
+          setTutorialEnabled(tutorialEnabledVal === true);
         }
       } catch (err) {
         console.error('Failed to fetch tutorial data:', err);

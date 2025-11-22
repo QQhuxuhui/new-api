@@ -101,6 +101,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/topup", controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
 				adminRoute.GET("/search", controller.SearchUsers)
+				adminRoute.GET("/by-username", controller.GetUserByUsername)
 				adminRoute.GET("/:id", controller.GetUser)
 				adminRoute.POST("/", controller.CreateUser)
 				adminRoute.POST("/manage", controller.ManageUser)
@@ -205,6 +206,20 @@ func SetApiRouter(router *gin.Engine) {
 		dataRoute := apiRouter.Group("/data")
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
 		dataRoute.GET("/self", middleware.UserAuth(), controller.GetUserQuotaDates)
+
+		// Analytics routes (admin only)
+		analyticsRoute := apiRouter.Group("/admin/analytics")
+		analyticsRoute.Use(middleware.AdminAuth())
+		{
+			analyticsRoute.GET("/user-overview", controller.GetUserOverview)
+			analyticsRoute.GET("/active-users", controller.GetActiveUsers)
+			analyticsRoute.GET("/consumption-ranking", controller.GetConsumptionRanking)
+			analyticsRoute.GET("/consumption-trend", controller.GetConsumptionTrend)
+			analyticsRoute.GET("/model-usage", controller.GetModelUsage)
+			analyticsRoute.GET("/behavior-patterns", controller.GetBehaviorPatterns)
+			analyticsRoute.GET("/risk-indicators", controller.GetRiskIndicators)
+			analyticsRoute.GET("/export", controller.ExportAnalyticsData)
+		}
 
 		logRoute.Use(middleware.CORS())
 		{
