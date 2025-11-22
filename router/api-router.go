@@ -207,6 +207,20 @@ func SetApiRouter(router *gin.Engine) {
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
 		dataRoute.GET("/self", middleware.UserAuth(), controller.GetUserQuotaDates)
 
+		// Analytics routes (admin only)
+		analyticsRoute := apiRouter.Group("/admin/analytics")
+		analyticsRoute.Use(middleware.AdminAuth())
+		{
+			analyticsRoute.GET("/user-overview", controller.GetUserOverview)
+			analyticsRoute.GET("/active-users", controller.GetActiveUsers)
+			analyticsRoute.GET("/consumption-ranking", controller.GetConsumptionRanking)
+			analyticsRoute.GET("/consumption-trend", controller.GetConsumptionTrend)
+			analyticsRoute.GET("/model-usage", controller.GetModelUsage)
+			analyticsRoute.GET("/behavior-patterns", controller.GetBehaviorPatterns)
+			analyticsRoute.GET("/risk-indicators", controller.GetRiskIndicators)
+			analyticsRoute.GET("/export", controller.ExportAnalyticsData)
+		}
+
 		logRoute.Use(middleware.CORS())
 		{
 			logRoute.GET("/token", controller.GetLogByKey)
