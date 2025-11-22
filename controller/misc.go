@@ -43,12 +43,6 @@ func GetStatus(c *gin.Context) {
 	common.OptionMapRWMutex.RLock()
 	defer common.OptionMapRWMutex.RUnlock()
 
-	// Sanitize HTML tutorial content when returning to client
-	tutorialContent := cs.TutorialContent
-	if cs.TutorialFormat == "html" && tutorialContent != "" {
-		tutorialContent = common.SanitizeHTML(tutorialContent)
-	}
-
 	passkeySetting := system_setting.GetPasskeySettings()
 	legalSetting := system_setting.GetLegalSettings()
 
@@ -104,8 +98,7 @@ func GetStatus(c *gin.Context) {
 		"announcements_enabled": cs.AnnouncementsEnabled,
 		"faq_enabled":           cs.FAQEnabled,
 		"tutorial_enabled":      cs.TutorialEnabled,
-		"tutorial_content":      tutorialContent, // Use sanitized content
-		"tutorial_format":       cs.TutorialFormat,
+		"tutorial":              cs.Tutorial,
 
 		// 模块管理配置
 		"HeaderNavModules":    common.OptionMap["HeaderNavModules"],
