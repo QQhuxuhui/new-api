@@ -1,30 +1,11 @@
 FROM oven/bun:latest AS builder
 
 WORKDIR /build
-
-# 先复制依赖文件
 COPY web/package.json .
 COPY web/bun.lock .
-
-# 安装依赖
 RUN bun install
-
-# 复制配置文件
-COPY web/vite.config.js .
-COPY web/postcss.config.js .
-COPY web/tailwind.config.js .
-COPY web/i18next.config.js .
-COPY web/jsconfig.json .
-COPY web/index.html .
-
-# 复制源代码目录
-COPY web/src ./src
-COPY web/public ./public
-
-# 复制版本文件
+COPY ./web .
 COPY ./VERSION .
-
-# 构建
 RUN DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
 
 FROM golang:alpine AS builder2
