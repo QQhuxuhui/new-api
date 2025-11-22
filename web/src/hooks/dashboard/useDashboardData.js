@@ -60,6 +60,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [pieData, setPieData] = useState([{ type: 'null', value: '0' }]);
   const [lineData, setLineData] = useState([]);
   const [modelColors, setModelColors] = useState({});
+  const [queriedUserData, setQueriedUserData] = useState(null);
 
   // ========== 图表状态 ==========
   const [activeChartTab, setActiveChartTab] = useState('1');
@@ -151,16 +152,29 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     setSearchModalVisible(true);
   }, []);
 
-  const handleCloseModal = useCallback(() => {
+  const handleCloseModal = useCallback(async () => {
     setSearchModalVisible(false);
-  }, []);
+    // Clear username filter and queried user data when modal is closed
+    const hadUsername = inputs.username && inputs.username.trim() !== '';
+
+    if (hadUsername) {
+      // Clear states
+      setInputs((inputs) => ({ ...inputs, username: '' }));
+      setQueriedUserData(null);
+
+      // Reload data with empty username override to restore admin's own data
+      await loadQuotaData({ username: '' });
+    }
+  }, [inputs.username, loadQuotaData]);
 
   // ========== API 调用函数 ==========
-  const loadQuotaData = useCallback(async () => {
+  const loadQuotaData = useCallback(async (overrideInputs = {}) => {
     setLoading(true);
     try {
       let url = '';
-      const { start_timestamp, end_timestamp, username } = inputs;
+      // Merge current inputs with any overrides
+      const effectiveInputs = { ...inputs, ...overrideInputs };
+      const { start_timestamp, end_timestamp, username } = effectiveInputs;
       let localStartTimestamp = Date.parse(start_timestamp) / 1000;
       let localEndTimestamp = Date.parse(end_timestamp) / 1000;
 
@@ -183,9 +197,31 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
           });
         }
         data.sort((a, b) => a.created_at - b.created_at);
+
+        // Fetch queried user data if username is provided (admin only)
+        if (isAdminUser && username && username.trim() !== '') {
+          try {
+            const userRes = await API.get(`/api/user/by-username?username=${username}`);
+            if (userRes.data.success) {
+              setQueriedUserData(userRes.data.data);
+            } else {
+              showError(userRes.data.message);
+              setQueriedUserData(null);
+            }
+          } catch (err) {
+            console.error('Failed to fetch queried user data:', err);
+            setQueriedUserData(null);
+          }
+        } else {
+          // Clear queried user data if no username filter
+          setQueriedUserData(null);
+        }
+
         return data;
       } else {
         showError(message);
+        // Clear queried user data on error
+        setQueriedUserData(null);
         return [];
       }
     } finally {
@@ -279,6 +315,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     setLineData,
     modelColors,
     setModelColors,
+    queriedUserData,
 
     // 图表状态
     activeChartTab,

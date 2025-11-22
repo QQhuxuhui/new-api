@@ -76,6 +76,7 @@ const Dashboard = () => {
   // ========== 统计数据 ==========
   const { groupedStatsData } = useDashboardStats(
     userState,
+    dashboardData.queriedUserData,
     dashboardData.consumeQuota,
     dashboardData.consumeTokens,
     dashboardData.times,

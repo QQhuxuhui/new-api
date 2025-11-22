@@ -34,6 +34,7 @@ import { createSectionTitle } from '../../helpers/dashboard';
 
 export const useDashboardStats = (
   userState,
+  queriedUserData,
   consumeQuota,
   consumeTokens,
   times,
@@ -50,7 +51,7 @@ export const useDashboardStats = (
         items: [
           {
             title: t('当前余额'),
-            value: renderQuota(userState?.user?.quota),
+            value: renderQuota(queriedUserData?.quota ?? userState?.user?.quota),
             icon: <IconMoneyExchangeStroked />,
             avatarColor: 'blue',
             trendData: [],
@@ -58,7 +59,7 @@ export const useDashboardStats = (
           },
           {
             title: t('历史消耗'),
-            value: renderQuota(userState?.user?.used_quota),
+            value: renderQuota(queriedUserData?.used_quota ?? userState?.user?.used_quota),
             icon: <IconHistogram />,
             avatarColor: 'purple',
             trendData: [],
@@ -72,7 +73,7 @@ export const useDashboardStats = (
         items: [
           {
             title: t('请求次数'),
-            value: userState.user?.request_count,
+            value: queriedUserData?.request_count ?? userState.user?.request_count,
             icon: <IconSend />,
             avatarColor: 'green',
             trendData: [],
@@ -134,6 +135,7 @@ export const useDashboardStats = (
       },
     ],
     [
+      queriedUserData,
       userState?.user?.quota,
       userState?.user?.used_quota,
       userState?.user?.request_count,
