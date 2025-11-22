@@ -47,16 +47,34 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
 fi
 
+# 询问是否使用缓存
+read -p "是否使用 Docker 缓存加速构建? (y/n, 默认 y): " -n 1 -r
+echo
+USE_CACHE=true
+if [[ $REPLY =~ ^[Nn]$ ]]; then
+    USE_CACHE=false
+    echo -e "${YELLOW}将不使用缓存构建（可能需要较长时间）${NC}"
+else
+    echo -e "${GREEN}将使用缓存加速构建${NC}"
+fi
+
 # 更新 VERSION 文件（供 Dockerfile 使用）
 echo "v${NEW_VERSION}" > VERSION
 
 # 构建镜像
 echo ""
 echo -e "${GREEN}[1/3] 正在构建镜像...${NC}"
-docker build \
-    -t ${FULL_IMAGE}:v${NEW_VERSION} \
-    -t ${FULL_IMAGE}:latest \
-    .
+if [ "$USE_CACHE" = false ]; then
+    docker build --no-cache \
+        -t ${FULL_IMAGE}:v${NEW_VERSION} \
+        -t ${FULL_IMAGE}:latest \
+        .
+else
+    docker build \
+        -t ${FULL_IMAGE}:v${NEW_VERSION} \
+        -t ${FULL_IMAGE}:latest \
+        .
+fi
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}构建失败！${NC}"
