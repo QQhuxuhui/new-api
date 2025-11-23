@@ -64,6 +64,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       models: true,
       redemption: true,
       user: true,
+      analytics: true,
       setting: true,
     },
   });
@@ -123,6 +124,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         models: true,
         redemption: true,
         user: true,
+        analytics: true,
         setting: true,
       },
     };
@@ -190,6 +192,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             models: true,
             redemption: true,
             user: true,
+            analytics: true,
             setting: true,
           },
         };
@@ -255,6 +258,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           description: t('兑换码生成管理'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
+        {
+          key: 'analytics',
+          title: t('用户分析'),
+          description: t('用户行为数据分析'),
+        },
         {
           key: 'setting',
           title: t('系统设置'),
