@@ -299,20 +299,6 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 	return &user, err
 }
 
-func GetUserByUsername(username string, selectAll bool) (*User, error) {
-	if username == "" {
-		return nil, errors.New("username 为空！")
-	}
-	user := User{}
-	var err error = nil
-	if selectAll {
-		err = DB.Where("username = ?", username).First(&user).Error
-	} else {
-		err = DB.Omit("password").Where("username = ?", username).First(&user).Error
-	}
-	return &user, err
-}
-
 func GetUserIdByAffCode(affCode string) (int, error) {
 	if affCode == "" {
 		return 0, errors.New("affCode 为空！")
