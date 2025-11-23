@@ -26,7 +26,6 @@ import SettingsFAQ from '../../pages/Setting/Dashboard/SettingsFAQ';
 import SettingsTutorial from '../../pages/Setting/Dashboard/SettingsTutorial';
 import SettingsUptimeKuma from '../../pages/Setting/Dashboard/SettingsUptimeKuma';
 import SettingsDataDashboard from '../../pages/Setting/Dashboard/SettingsDataDashboard';
-import SettingsTutorial from '../../pages/Setting/Dashboard/SettingsTutorial';
 
 const DashboardSetting = () => {
   let [inputs, setInputs] = useState({
@@ -42,7 +41,6 @@ const DashboardSetting = () => {
     'console_setting.uptime_kuma_enabled': '',
     'console_setting.tutorial_content': '',
     'console_setting.tutorial_format': '',
-    'console_setting.tutorial_enabled': '',
 
     // 用于迁移检测的旧键，下个版本会删除
     ApiInfo: '',
@@ -176,11 +174,6 @@ const DashboardSetting = () => {
         {/* Uptime Kuma 监控设置 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsUptimeKuma options={inputs} refresh={onRefresh} />
-        </Card>
-
-        {/* 教程内容管理 */}
-        <Card style={{ marginTop: '10px' }}>
-          <SettingsTutorial options={inputs} refresh={onRefresh} />
         </Card>
       </Spin>
     </>

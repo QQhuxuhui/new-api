@@ -26,6 +26,8 @@ import {
   TabPane,
   Tag,
   Empty,
+  Progress,
+  Divider,
 } from '@douyinfe/semi-ui';
 import { Gauge, RefreshCw } from 'lucide-react';
 import {
@@ -33,6 +35,8 @@ import {
   IllustrationConstructionDark,
 } from '@douyinfe/semi-illustrations';
 import ScrollableContainer from '../common/ui/ScrollableContainer';
+import { getUptimeStatusColor, getUptimeStatusText } from '../../helpers/dashboard';
+import { UPTIME_STATUS_MAP } from '../../constants/dashboard.constants';
 
 const UptimePanel = ({
   uptimeData,
@@ -41,11 +45,80 @@ const UptimePanel = ({
   setActiveUptimeTab,
   loadUptimeData,
   uptimeLegendData,
-  renderMonitorList,
   CARD_PROPS,
   ILLUSTRATION_SIZE,
   t,
 }) => {
+  // Render monitor list function moved from helpers to component
+  const renderMonitorList = (monitors) => {
+    if (!monitors || monitors.length === 0) {
+      return (
+        <div className='flex justify-center items-center py-4'>
+          <Empty
+            image={<IllustrationConstruction style={ILLUSTRATION_SIZE} />}
+            darkModeImage={
+              <IllustrationConstructionDark style={ILLUSTRATION_SIZE} />
+            }
+            title={t('暂无监控数据')}
+          />
+        </div>
+      );
+    }
+
+    const grouped = {};
+    monitors.forEach((m) => {
+      const g = m.group || '';
+      if (!grouped[g]) grouped[g] = [];
+      grouped[g].push(m);
+    });
+
+    const renderItem = (monitor, idx) => (
+      <div key={idx} className='p-2 hover:bg-white rounded-lg transition-colors'>
+        <div className='flex items-center justify-between mb-1'>
+          <div className='flex items-center gap-2'>
+            <div
+              className='w-2 h-2 rounded-full flex-shrink-0'
+              style={{ backgroundColor: getUptimeStatusColor(monitor.status, UPTIME_STATUS_MAP) }}
+            />
+            <span className='text-sm font-medium text-gray-900'>
+              {monitor.name}
+            </span>
+          </div>
+          <span className='text-xs text-gray-500'>
+            {((monitor.uptime || 0) * 100).toFixed(2)}%
+          </span>
+        </div>
+        <div className='flex items-center gap-2'>
+          <span className='text-xs text-gray-500'>
+            {getUptimeStatusText(monitor.status, UPTIME_STATUS_MAP, t)}
+          </span>
+          <div className='flex-1'>
+            <Progress
+              percent={(monitor.uptime || 0) * 100}
+              showInfo={false}
+              aria-label={`${monitor.name} uptime`}
+              stroke={getUptimeStatusColor(monitor.status, UPTIME_STATUS_MAP)}
+            />
+          </div>
+        </div>
+      </div>
+    );
+
+    return Object.entries(grouped).map(([gname, list]) => (
+      <div key={gname || 'default'} className='mb-2'>
+        {gname && (
+          <>
+            <div className='text-md font-semibold text-gray-500 px-2 py-1'>
+              {gname}
+            </div>
+            <Divider />
+          </>
+        )}
+        {list.map(renderItem)}
+      </div>
+    ));
+  };
+
   return (
     <Card
       {...CARD_PROPS}

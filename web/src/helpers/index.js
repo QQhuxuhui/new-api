@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 export * from './history';
-export * from './auth';
+export { authHeader, AuthRedirect, PrivateRoute, AdminRoute } from './auth';
 export * from './utils';
 export * from './base64';
 export * from './api';
@@ -27,5 +27,5 @@ export * from './log';
 export * from './data';
 export * from './token';
 export * from './boolean';
-export * from './dashboard';
 export * from './passkey';
+export * from './dashboard';

@@ -1,0 +1,119 @@
+<!-- Claude Code 安装配置教程 -->
+<div class="tutorial-section">
+  <h3>🤖 Claude Code 安装与配置</h3>
+
+  <!-- 第一步：安装 -->
+  <div class="step">
+    <h4>步骤 1: 安装 Claude Code</h4>
+
+    <div class="os-tabs">
+      <!-- Windows -->
+      <div class="os-tab" data-os="windows">
+        <p><strong>Windows 安装方式：</strong></p>
+        <p>打开 PowerShell，执行以下命令：</p>
+        <pre><code>irm https://claude.ai/install.ps1 | iex</code></pre>
+        <p class="tip">💡 提示：安装完成后重启终端</p>
+      </div>
+
+      <!-- macOS -->
+      <div class="os-tab" data-os="macos">
+        <p><strong>macOS 安装方式（二选一）：</strong></p>
+
+        <p>方式 1：使用官方脚本</p>
+        <pre><code>curl -fsSL https://claude.ai/install.sh | bash</code></pre>
+
+        <p>方式 2：使用 Homebrew（推荐）</p>
+        <pre><code>brew install --cask claude-code</code></pre>
+      </div>
+
+      <!-- Linux -->
+      <div class="os-tab" data-os="linux">
+        <p><strong>Linux / WSL2 安装方式：</strong></p>
+        <pre><code>curl -fsSL https://claude.ai/install.sh | bash</code></pre>
+        <p class="tip">💡 安装后可能需要重启终端或执行 <code>source ~/.bashrc</code></p>
+      </div>
+    </div>
+
+    <p><strong>验证安装：</strong></p>
+    <pre><code>claude --version</code></pre>
+    <p>显示版本号即表示安装成功</p>
+  </div>
+
+  <!-- 第二步：配置中转 API -->
+  <div class="step">
+    <h4>步骤 2: 配置中转 API</h4>
+
+    <p><strong>推荐方式：全局配置文件</strong></p>
+
+    <div class="os-tabs">
+      <!-- Windows 配置 -->
+      <div class="os-tab" data-os="windows">
+        <p>创建配置文件：<code>%USERPROFILE%\.claude\settings.json</code></p>
+        <p>使用以下内容：</p>
+        <pre><code>{
+  "env": {
+    "ANTHROPIC_BASE_URL": "{{CLAUDE_API_URL}}",
+    "ANTHROPIC_API_KEY": "YOUR_API_KEY"
+  }
+}</code></pre>
+      </div>
+
+      <!-- macOS/Linux 配置 -->
+      <div class="os-tab" data-os="macos">
+        <p>创建配置目录和文件：</p>
+        <pre><code>mkdir -p ~/.claude
+cat > ~/.claude/settings.json &lt;&lt; 'EOF'
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "{{CLAUDE_API_URL}}",
+    "ANTHROPIC_API_KEY": "YOUR_API_KEY"
+  }
+}
+EOF</code></pre>
+      </div>
+
+      <div class="os-tab" data-os="linux">
+        <p>创建配置目录和文件：</p>
+        <pre><code>mkdir -p ~/.claude
+cat > ~/.claude/settings.json &lt;&lt; 'EOF'
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "{{CLAUDE_API_URL}}",
+    "ANTHROPIC_API_KEY": "YOUR_API_KEY"
+  }
+}
+EOF</code></pre>
+      </div>
+    </div>
+
+    <div class="info-box">
+      <p><strong>📝 配置说明：</strong></p>
+      <ul>
+        <li>API Base URL: <code>{{CLAUDE_API_URL}}</code></li>
+        <li>API Key: 从您的账户获取（通常以 sk- 开头）</li>
+        <li>配置文件存储在用户目录，安全且所有项目共享</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 第三步：开始使用 -->
+  <div class="step">
+    <h4>步骤 3: 开始使用</h4>
+    <p>进入项目目录，运行：</p>
+    <pre><code>cd your-project
+claude</code></pre>
+    <p>现在可以通过自然语言与 Claude Code 交互了！</p>
+  </div>
+</div>
+
+<style>
+.tutorial-section { margin: 20px 0; }
+.step { margin: 20px 0; padding: 15px; border-left: 3px solid #0066cc; }
+.step h4 { color: #0066cc; margin-bottom: 10px; }
+pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; }
+code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+pre code { background: none; padding: 0; }
+.tip { background: #e7f3ff; padding: 10px; border-radius: 4px; color: #0066cc; }
+.info-box { background: #f0f8ff; padding: 15px; border-radius: 4px; margin-top: 10px; }
+.info-box ul { margin: 10px 0; padding-left: 20px; }
+</style>

@@ -47,9 +47,6 @@ import {
   getTrendSpec,
   handleCopyUrl,
   handleSpeedTest,
-  getUptimeStatusColor,
-  getUptimeStatusText,
-  renderMonitorList,
 } from '../../helpers/dashboard';
 
 const Dashboard = () => {
@@ -244,19 +241,6 @@ const Dashboard = () => {
                 setActiveUptimeTab={dashboardData.setActiveUptimeTab}
                 loadUptimeData={dashboardData.loadUptimeData}
                 uptimeLegendData={uptimeLegendData}
-                renderMonitorList={(monitors) =>
-                  renderMonitorList(
-                    monitors,
-                    (status) => getUptimeStatusColor(status, UPTIME_STATUS_MAP),
-                    (status) =>
-                      getUptimeStatusText(
-                        status,
-                        UPTIME_STATUS_MAP,
-                        dashboardData.t,
-                      ),
-                    dashboardData.t,
-                  )
-                }
                 CARD_PROPS={CARD_PROPS}
                 ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}
                 t={dashboardData.t}

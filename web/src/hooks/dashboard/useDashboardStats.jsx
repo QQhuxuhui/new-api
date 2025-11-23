@@ -30,7 +30,14 @@ import {
   IconSend,
 } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../helpers';
-import { createSectionTitle } from '../../helpers/dashboard';
+
+// Helper function to create section title with icon
+const createSectionTitle = (Icon, text) => (
+  <div className='flex items-center gap-2'>
+    <Icon size={16} />
+    {text}
+  </div>
+);
 
 export const useDashboardStats = (
   userState,

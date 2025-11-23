@@ -28,7 +28,6 @@ import {
   Typography,
   Row,
   Col,
-  Statistic,
   Table,
   Tag,
   Dropdown,
@@ -47,6 +46,22 @@ import {
 import { useAnalyticsData } from '../../hooks/analytics/useAnalyticsData';
 
 const { Title, Text } = Typography;
+
+// Custom Statistic component to replace removed semi-ui Statistic
+const Statistic = ({ title, value, prefix, suffix }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <Text type="tertiary" style={{ fontSize: '14px' }}>
+      {title}
+    </Text>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {prefix && <span style={{ fontSize: '24px' }}>{prefix}</span>}
+      <Text strong style={{ fontSize: '24px' }}>
+        {value || 0}
+      </Text>
+      {suffix && <span>{suffix}</span>}
+    </div>
+  </div>
+);
 
 const Analytics = () => {
   const {

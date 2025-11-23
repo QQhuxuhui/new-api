@@ -20,7 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@douyinfe/semi-ui';
-import { IconBook } from '@douyinfe/semi-icons';
+import { IconHelpCircle } from '@douyinfe/semi-icons';
 import SkeletonWrapper from '../components/SkeletonWrapper';
 import { useTranslation } from 'react-i18next';
 
@@ -100,7 +100,7 @@ const Navigation = ({
       {!isLoading && (
         <Button
           theme='borderless'
-          icon={<IconBook />}
+          icon={<IconHelpCircle />}
           size='small'
           onClick={handleNewbieGuideClick}
           className='flex-shrink-0'

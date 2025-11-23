@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { Toast, Pagination } from '@douyinfe/semi-ui';
 import { toastConstants } from '../constants';
-import React from 'react';
 import { toast } from 'react-toastify';
 import {
   THINK_TAG_REGEX,
@@ -28,10 +27,7 @@ import {
 import { TABLE_COMPACT_MODES_KEY } from '../constants';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 
-const HTMLToastContent = ({ htmlContent }) => {
-  return <div dangerouslySetInnerHTML={{ __html: htmlContent }} />;
-};
-export default HTMLToastContent;
+// HTMLToastContent moved to components/common/HTMLToastContent.jsx
 export function isAdmin() {
   let user = localStorage.getItem('user');
   if (!user) return false;

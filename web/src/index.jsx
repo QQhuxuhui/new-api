@@ -61,7 +61,10 @@ root.render(
       <UserProvider>
         <BrowserRouter
           future={{
-            v7_startTransition: true,
+            // React Router's startTransition integration is causing a runtime
+            // ReferenceError in our current React build (react-core chunk).
+            // Disable it until we upgrade React / react-router with a fix.
+            v7_startTransition: false,
             v7_relativeSplatPath: true,
           }}
         >
