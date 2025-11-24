@@ -20,9 +20,14 @@ func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 		if len(setting.GetAutoGroups()) == 0 {
 			return nil, selectGroup, errors.New("auto groups is not enabled")
 		}
+		var lastErr error
 		for _, autoGroup := range GetUserAutoGroup(userGroup) {
 			logger.LogDebug(c, "Auto selecting group:", autoGroup)
-			channel, _ = model.GetRandomSatisfiedChannel(autoGroup, modelName, retry)
+			channel, lastErr = model.GetRandomSatisfiedChannel(autoGroup, modelName, retry)
+			// If we hit priority exhaustion, track it but continue checking other auto groups
+			if lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
+				continue
+			}
 			if channel == nil {
 				continue
 			} else {
@@ -31,6 +36,10 @@ func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 				logger.LogDebug(c, "Auto selected group:", autoGroup)
 				break
 			}
+		}
+		// If no channel found and we saw exhausted error, return it
+		if channel == nil && lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
+			return nil, selectGroup, lastErr
 		}
 	} else {
 		channel, err = model.GetRandomSatisfiedChannel(group, modelName, retry)
@@ -53,9 +62,14 @@ func CacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 		if len(setting.GetAutoGroups()) == 0 {
 			return nil, selectGroup, errors.New("auto groups is not enabled")
 		}
+		var lastErr error
 		for _, autoGroup := range GetUserAutoGroup(userGroup) {
 			logger.LogDebug(c, "Auto selecting group (excluding tried):", autoGroup)
-			channel, _ = model.GetRandomSatisfiedChannelExcluding(autoGroup, modelName, retry, excludeIds)
+			channel, lastErr = model.GetRandomSatisfiedChannelExcluding(autoGroup, modelName, retry, excludeIds)
+			// If we hit priority exhaustion, track it but continue checking other auto groups
+			if lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
+				continue
+			}
 			if channel == nil {
 				continue
 			} else {
@@ -64,6 +78,10 @@ func CacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 				logger.LogDebug(c, "Auto selected group:", autoGroup)
 				break
 			}
+		}
+		// If no channel found and we saw exhausted error, return it
+		if channel == nil && lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
+			return nil, selectGroup, lastErr
 		}
 	} else {
 		channel, err = model.GetRandomSatisfiedChannelExcluding(group, modelName, retry, excludeIds)

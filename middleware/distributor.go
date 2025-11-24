@@ -126,19 +126,63 @@ func Distribute() func(c *gin.Context) {
 						}
 					}
 
-					// No binding or channel failed, select new channel
+					// No binding or channel failed, select new channel with priority iteration
 					if channel == nil {
-						channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, 0)
-						if err == nil && channel != nil {
-							// Bind new channel
-							ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
-							sessionManager.BindChannel(userId, modelRequest.Model, usingGroup, channel.Id, time.Duration(ttl)*time.Second)
-							common.SetContextKey(c, constant.ContextKeyStickySessionNew, true)
+						// Safety limit to prevent infinite loops
+						// Loop exits when: channel found, error occurs, or all priorities exhausted
+						const maxPriorityLevels = 1000
+
+						for retry := 0; retry < maxPriorityLevels; retry++ {
+							channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, retry)
+
+							// ErrPriorityExhausted is expected when all priorities are tried - clear it
+							if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
+								err = nil // Let channel == nil check handle the user message
+								break
+							}
+
+							if err != nil {
+								// System error, stop trying
+								break
+							}
+
+							if channel != nil {
+								// Found healthy channel, bind it
+								ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
+								sessionManager.BindChannel(userId, modelRequest.Model, usingGroup, channel.Id, time.Duration(ttl)*time.Second)
+								common.SetContextKey(c, constant.ContextKeyStickySessionNew, true)
+								break
+							}
+							// channel == nil means no healthy channels at this priority, continue to next
 						}
 					}
 				} else {
-					// Original logic: random selection
-					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, 0)
+					// Original logic: random selection with priority iteration
+					// Try each priority level until finding healthy channel
+					// Safety limit to prevent infinite loops
+					// Loop exits when: channel found, error occurs, or all priorities exhausted
+					const maxPriorityLevels = 1000
+
+					for retry := 0; retry < maxPriorityLevels; retry++ {
+						channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, retry)
+
+						// ErrPriorityExhausted is expected when all priorities are tried - clear it
+						if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
+							err = nil // Let channel == nil check handle the user message
+							break
+						}
+
+						if err != nil {
+							// System error, stop trying
+							break
+						}
+
+						if channel != nil {
+							// Found healthy channel
+							break
+						}
+						// channel == nil means no healthy channels at this priority, continue to next
+					}
 				}
 				if channel != nil {
 					setAutoGroupContext(c, usingGroup, channel)
@@ -158,7 +202,7 @@ func Distribute() func(c *gin.Context) {
 					return
 				}
 				if channel == nil {
-					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（distributor）", usingGroup, modelRequest.Model), string(types.ErrorCodeModelNotFound))
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", usingGroup, modelRequest.Model), string(types.ErrorCodeModelNotFound))
 					return
 				}
 			}
@@ -197,7 +241,6 @@ func Distribute() func(c *gin.Context) {
 				// Safety limit to prevent infinite loops (e.g., if there's a bug in channel selection)
 				// Set to 1000 to accommodate large priority ranges (e.g., 1000/900/800...)
 				const maxRetryAttempts = 1000
-				consecutiveNilCount := 0 // Track consecutive nil returns to detect exhaustion
 
 			retryLoop:
 				for retry := 0; retry < maxRetryAttempts; retry++ {
@@ -207,6 +250,13 @@ func Distribute() func(c *gin.Context) {
 						// Select from priority level, excluding already tried channels
 						var retryErr error
 						channel, _, retryErr = service.CacheGetRandomSatisfiedChannelExcluding(c, retryGroup, modelRequest.Model, retry, triedChannelIds)
+
+						// Handle priority exhaustion: not a system error, just means all priorities tried
+						if retryErr != nil && errors.Is(retryErr, model.ErrPriorityExhausted) {
+							// All priorities exhausted, exit loop normally
+							// The existing logic will preserve the original concurrency limit error
+							break retryLoop
+						}
 
 						// Issue 8 fix: Handle system errors properly instead of masking them
 						if retryErr != nil {
@@ -225,7 +275,6 @@ func Distribute() func(c *gin.Context) {
 
 						// Found a channel at this priority level
 						channelFoundAtThisPriority = true
-						consecutiveNilCount = 0 // Reset counter
 
 						// Mark this channel as tried
 						triedChannelIds[channel.Id] = true
@@ -249,20 +298,10 @@ func Distribute() func(c *gin.Context) {
 						}
 						// Concurrency limit error, continue trying other channels at same priority
 					}
-
-					// If no channels found at this priority level, increment nil counter
-					if !channelFoundAtThisPriority {
-						consecutiveNilCount++
-						// If we've tried 3 consecutive priority levels with no channels,
-						// we've likely exhausted all priorities (Issue 9 fix)
-						if consecutiveNilCount >= 3 {
-							break retryLoop
-						}
-					}
+					// No channels found at this priority level, move to next priority
 				}
 			}
 		}
-
 
 		if newAPIError != nil {
 			// Channel setup failed (e.g., concurrency limit, no available key)
