@@ -245,7 +245,6 @@ func Distribute() func(c *gin.Context) {
 			retryLoop:
 				for retry := 0; retry < maxRetryAttempts; retry++ {
 					// Try all channels at this priority level before moving to next
-					channelFoundAtThisPriority := false
 					for {
 						// Select from priority level, excluding already tried channels
 						var retryErr error
@@ -272,9 +271,6 @@ func Distribute() func(c *gin.Context) {
 							// Move to next priority level
 							break
 						}
-
-						// Found a channel at this priority level
-						channelFoundAtThisPriority = true
 
 						// Mark this channel as tried
 						triedChannelIds[channel.Id] = true
