@@ -19,6 +19,10 @@ var group2model2channels map[string]map[string][]int // enabled channel
 var channelsIDM map[int]*Channel                     // all channels include disabled
 var channelSyncLock sync.RWMutex
 
+// ErrPriorityExhausted is returned when all priority levels have been tried
+// and no healthy channels are available. This signals the caller to stop retrying.
+var ErrPriorityExhausted = errors.New("all priority levels exhausted")
+
 // IsChannelHealthy checks if channel is suspended using health tracking
 func IsChannelHealthy(channelID int) bool {
 	ctx := context.Background()
@@ -167,8 +171,9 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(sortedUniquePriorities)))
 
+	// If retry exceeds available priority levels, all priorities have been tried
 	if retry >= len(uniquePriorities) {
-		retry = len(uniquePriorities) - 1
+		return nil, ErrPriorityExhausted
 	}
 	targetPriority := int64(sortedUniquePriorities[retry])
 
@@ -279,8 +284,9 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(sortedUniquePriorities)))
 
+	// If retry exceeds available priority levels, all priorities have been tried
 	if retry >= len(uniquePriorities) {
-		retry = len(uniquePriorities) - 1
+		return nil, ErrPriorityExhausted
 	}
 	targetPriority := int64(sortedUniquePriorities[retry])
 
