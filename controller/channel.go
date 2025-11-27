@@ -503,6 +503,14 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		return fmt.Errorf("每个Key的最大并发请求数不能为负数")
 	}
 
+	// 校验渠道倍率配置
+	if channel.Ratio != nil {
+		ratio := *channel.Ratio
+		if ratio < 0.0001 || ratio > 100 {
+			return fmt.Errorf("渠道倍率必须在 0.0001 ~ 100 之间")
+		}
+	}
+
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
 		if channel == nil || channel.Key == "" {

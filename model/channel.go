@@ -55,6 +55,8 @@ type Channel struct {
 
 	MaxConcurrentRequestsPerKey *int `json:"max_concurrent_requests_per_key" gorm:"default:0"` // 每个Key的最大并发请求数，0表示不限制
 
+	Ratio *float64 `json:"ratio" gorm:"type:decimal(10,4);default:1.0"` // 渠道倍率，默认为1.0
+
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
 }
@@ -413,6 +415,13 @@ func (channel *Channel) GetWeight() int {
 		return 0
 	}
 	return int(*channel.Weight)
+}
+
+func (channel *Channel) GetRatio() float64 {
+	if channel.Ratio == nil {
+		return 1.0
+	}
+	return *channel.Ratio
 }
 
 func (channel *Channel) GetBaseURL() string {
