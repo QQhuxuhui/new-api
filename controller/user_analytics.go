@@ -256,3 +256,26 @@ func ExportAnalyticsData(c *gin.Context) {
 		c.Writer.Write(jsonData)
 	}
 }
+
+// GetUserBalanceAnalysis returns complete user balance analysis including overview, distribution, and rankings
+func GetUserBalanceAnalysis(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "30d")
+	limitStr := c.DefaultQuery("limit", "20")
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	result, err := service.GetUserBalanceAnalysis(timeRange, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    result,
+	})
+}

@@ -217,6 +217,7 @@ func SetApiRouter(router *gin.Engine) {
 			analyticsRoute.GET("/model-usage", controller.GetModelUsage)
 			analyticsRoute.GET("/behavior-patterns", controller.GetBehaviorPatterns)
 			analyticsRoute.GET("/risk-indicators", controller.GetRiskIndicators)
+			analyticsRoute.GET("/user-balance-analysis", controller.GetUserBalanceAnalysis)
 			analyticsRoute.GET("/export", controller.ExportAnalyticsData)
 		}
 

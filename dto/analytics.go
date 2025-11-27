@@ -22,6 +22,7 @@ type ActiveUserRank struct {
 type ConsumptionTrend struct {
 	Date         string  `json:"date"` // YYYY-MM-DD
 	TotalQuota   int     `json:"total_quota"`
+	TotalUSD     float64 `json:"total_usd"` // Total consumption in USD
 	RequestCount int     `json:"request_count"`
 	UserCount    int     `json:"user_count"`
 	ARPU         float64 `json:"arpu"` // Average Revenue Per User
@@ -29,10 +30,11 @@ type ConsumptionTrend struct {
 
 // TopSpender represents high spending users
 type TopSpender struct {
-	UserId       int    `json:"user_id"`
-	Username     string `json:"username"`
-	TotalQuota   int    `json:"total_quota"`
-	RequestCount int    `json:"request_count"`
+	UserId       int     `json:"user_id"`
+	Username     string  `json:"username"`
+	TotalQuota   int     `json:"total_quota"`
+	TotalUSD     float64 `json:"total_usd"` // Total spent in USD
+	RequestCount int     `json:"request_count"`
 }
 
 // ModelUsageStats represents model usage statistics
@@ -40,6 +42,7 @@ type ModelUsageStats struct {
 	ModelName    string  `json:"model_name"`
 	RequestCount int     `json:"request_count"`
 	TotalQuota   int     `json:"total_quota"`
+	TotalUSD     float64 `json:"total_usd"` // Total cost in USD
 	UniqueUsers  int     `json:"unique_users"`
 	AvgTokens    int     `json:"avg_tokens"`
 	SuccessRate  float64 `json:"success_rate"`
@@ -106,4 +109,38 @@ type AnalyticsRequest struct {
 // ExportFormat represents export format options
 type ExportFormat struct {
 	Format string `form:"format"` // "csv", "json"
+}
+
+// BalanceOverview represents aggregate balance statistics
+type BalanceOverview struct {
+	TotalBalance    float64 `json:"total_balance_usd"`   // Sum of all user balances in USD
+	AverageBalance  float64 `json:"average_balance_usd"` // Mean balance across all users
+	MedianBalance   float64 `json:"median_balance_usd"`  // Median balance
+	UserCount       int     `json:"user_count"`          // Total users analyzed
+	LowBalanceCount int     `json:"low_balance_count"`   // Users with balance < $5
+}
+
+// BalanceDistribution represents balance range groupings
+type BalanceDistribution struct {
+	RangeLabel string  `json:"range_label"` // "$0-$10", "$10-$50", etc.
+	UserCount  int     `json:"user_count"`  // Number of users in this range
+	Percentage float64 `json:"percentage"`  // % of total users
+	MinUSD     float64 `json:"min_usd"`     // Range minimum
+	MaxUSD     float64 `json:"max_usd"`     // Range maximum (0 = unlimited)
+}
+
+// BalanceRanking represents top users by balance
+type BalanceRanking struct {
+	UserId         int     `json:"user_id"`
+	Username       string  `json:"username"`
+	BalanceUSD     float64 `json:"balance_usd"`
+	QuotaRemaining int     `json:"quota_remaining"` // Original quota value
+	LastActivity   int64   `json:"last_activity"`   // Unix timestamp
+}
+
+// UserBalanceAnalysisResponse represents the complete balance analysis response
+type UserBalanceAnalysisResponse struct {
+	Overview     BalanceOverview       `json:"overview"`
+	Distribution []BalanceDistribution `json:"distribution"`
+	Rankings     []BalanceRanking      `json:"rankings"`
 }
