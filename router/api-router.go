@@ -273,5 +273,56 @@ func SetApiRouter(router *gin.Engine) {
 			modelsRoute.PUT("/", controller.UpdateModelMeta)
 			modelsRoute.DELETE("/:id", controller.DeleteModelMeta)
 		}
+
+		// Plan management routes (admin)
+		planRoute := apiRouter.Group("/plan")
+		planRoute.Use(middleware.AdminAuth())
+		{
+			planRoute.GET("/", controller.GetAllPlans)
+			planRoute.GET("/search", controller.SearchPlans)
+			planRoute.GET("/enabled", controller.GetEnabledPlans)
+			planRoute.GET("/:id", controller.GetPlan)
+			planRoute.POST("/", controller.AddPlan)
+			planRoute.PUT("/", controller.UpdatePlan)
+			planRoute.DELETE("/:id", controller.DeletePlan)
+			planRoute.PUT("/:id/status", controller.UpdatePlanStatus)
+		}
+
+		// User plan management routes (admin)
+		userPlanAdminRoute := apiRouter.Group("/user_plan")
+		userPlanAdminRoute.Use(middleware.AdminAuth())
+		{
+			userPlanAdminRoute.GET("/", controller.GetAllUserPlans)
+			userPlanAdminRoute.GET("/plan/:plan_id", controller.GetUserPlansByPlan)
+			userPlanAdminRoute.GET("/user/:user_id", controller.GetUserPlansForUser)
+			userPlanAdminRoute.GET("/:id", controller.GetUserPlan)
+			userPlanAdminRoute.POST("/assign", controller.AdminAssignPlan)
+			userPlanAdminRoute.POST("/remove", controller.AdminRemovePlan)
+			userPlanAdminRoute.PUT("/:id/permissions", controller.AdminUpdateUserPlanPermissions)
+			userPlanAdminRoute.POST("/force_switch", controller.AdminForceSwitch)
+			userPlanAdminRoute.POST("/:id/lock", controller.AdminLockUserPlan)
+			userPlanAdminRoute.POST("/:id/unlock", controller.AdminUnlockUserPlan)
+			userPlanAdminRoute.PUT("/:id/quota", controller.AdminAdjustQuota)
+			userPlanAdminRoute.POST("/:id/add_quota", controller.AdminAddQuota)
+		}
+
+		// User plan routes (user)
+		userPlanRoute := apiRouter.Group("/my_plans")
+		userPlanRoute.Use(middleware.UserAuth())
+		{
+			userPlanRoute.GET("/", controller.GetMyPlans)
+			userPlanRoute.POST("/switch", controller.UserSwitchPlan)
+			userPlanRoute.PUT("/:id/auto_switch", controller.UserToggleAutoSwitch)
+		}
+
+		// Plan migration routes (root admin only)
+		migrationRoute := apiRouter.Group("/plan_migration")
+		migrationRoute.Use(middleware.RootAuth())
+		{
+			migrationRoute.GET("/status", controller.GetMigrationStatus)
+			migrationRoute.POST("/run", controller.RunMigration)
+			migrationRoute.POST("/rollback", controller.RollbackMigration)
+			migrationRoute.POST("/user", controller.MigrateSingleUser)
+		}
 	}
 }

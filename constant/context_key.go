@@ -56,4 +56,11 @@ const (
 
 	/* client restriction keys */
 	ContextKeyUserAgent ContextKey = "user_agent" // string: client User-Agent
+
+	/* plan related keys */
+	ContextKeyPlanId         ContextKey = "plan_id"          // int: selected plan ID
+	ContextKeyUserPlanId     ContextKey = "user_plan_id"     // int: user plan assignment ID
+	ContextKeyPlanGroup      ContextKey = "plan_group"       // string: channel group from plan
+	ContextKeyPlanName       ContextKey = "plan_name"        // string: plan name for logging
+	ContextKeyPlanAutoSwitch ContextKey = "plan_auto_switch" // bool: if auto-switch occurred
 )

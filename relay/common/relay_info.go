@@ -110,6 +110,10 @@ type RelayInfo struct {
 	FinalPreConsumedQuota  int  // 最终预消耗的配额
 	IsClaudeBetaQuery      bool // /v1/messages?beta=true
 
+	// Plan-related fields
+	UserPlanId int // User's current plan assignment ID for quota tracking
+	PlanId     int // Plan ID for logging
+
 	PriceData types.PriceData
 
 	Request dto.Request
@@ -396,6 +400,10 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
 		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+
+		// Plan-related fields
+		UserPlanId: common.GetContextKeyInt(c, constant.ContextKeyUserPlanId),
+		PlanId:     common.GetContextKeyInt(c, constant.ContextKeyPlanId),
 
 		isFirstResponse: true,
 		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),

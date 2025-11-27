@@ -1,0 +1,321 @@
+package model
+
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/bytedance/gopkg/util/gopool"
+)
+
+// UserPlanCacheEntry represents cached user plan data
+type UserPlanCacheEntry struct {
+	Id              int    `json:"id"`
+	UserId          int    `json:"user_id"`
+	PlanId          int    `json:"plan_id"`
+	Quota           int64  `json:"quota"`
+	UsedQuota       int64  `json:"used_quota"`
+	IsCurrent       int    `json:"is_current"`
+	AutoSwitch      int    `json:"auto_switch"`
+	AllowUserSwitch int    `json:"allow_user_switch"`
+	AllowUserToggle int    `json:"allow_user_toggle"`
+	Locked          int    `json:"locked"`
+	LockedReason    string `json:"locked_reason"`
+	StartedAt       int64  `json:"started_at"`
+	ExpiresAt       int64  `json:"expires_at"`
+	Status          int    `json:"status"`
+
+	// Embedded plan info for routing
+	PlanName         string `json:"plan_name"`
+	PlanPriority     int    `json:"plan_priority"`
+	PlanChannelGroup string `json:"plan_channel_group"`
+	PlanStatus       int    `json:"plan_status"`
+}
+
+// ToUserPlan converts cache entry back to UserPlan with embedded Plan
+func (e *UserPlanCacheEntry) ToUserPlan() *UserPlan {
+	return &UserPlan{
+		Id:              e.Id,
+		UserId:          e.UserId,
+		PlanId:          e.PlanId,
+		Quota:           e.Quota,
+		UsedQuota:       e.UsedQuota,
+		IsCurrent:       e.IsCurrent,
+		AutoSwitch:      e.AutoSwitch,
+		AllowUserSwitch: e.AllowUserSwitch,
+		AllowUserToggle: e.AllowUserToggle,
+		Locked:          e.Locked,
+		LockedReason:    e.LockedReason,
+		StartedAt:       e.StartedAt,
+		ExpiresAt:       e.ExpiresAt,
+		Status:          e.Status,
+		Plan: &Plan{
+			Id:           e.PlanId,
+			Name:         e.PlanName,
+			Priority:     e.PlanPriority,
+			ChannelGroup: e.PlanChannelGroup,
+			Status:       e.PlanStatus,
+		},
+	}
+}
+
+// FromUserPlan creates a cache entry from UserPlan
+func FromUserPlan(up *UserPlan) *UserPlanCacheEntry {
+	entry := &UserPlanCacheEntry{
+		Id:              up.Id,
+		UserId:          up.UserId,
+		PlanId:          up.PlanId,
+		Quota:           up.Quota,
+		UsedQuota:       up.UsedQuota,
+		IsCurrent:       up.IsCurrent,
+		AutoSwitch:      up.AutoSwitch,
+		AllowUserSwitch: up.AllowUserSwitch,
+		AllowUserToggle: up.AllowUserToggle,
+		Locked:          up.Locked,
+		LockedReason:    up.LockedReason,
+		StartedAt:       up.StartedAt,
+		ExpiresAt:       up.ExpiresAt,
+		Status:          up.Status,
+	}
+
+	if up.Plan != nil {
+		entry.PlanName = up.Plan.Name
+		entry.PlanPriority = up.Plan.Priority
+		entry.PlanChannelGroup = up.Plan.ChannelGroup
+		entry.PlanStatus = up.Plan.Status
+	}
+
+	return entry
+}
+
+// Cache key formats
+const (
+	userValidPlansKeyFmt   = "user_valid_plans:%d"
+	userCurrentPlanKeyFmt  = "user_current_plan:%d"
+	userPlanCacheTTLSec    = 60 // 1 minute cache TTL
+)
+
+// getUserValidPlansCacheKey returns the cache key for user's valid plans
+func getUserValidPlansCacheKey(userId int) string {
+	return fmt.Sprintf(userValidPlansKeyFmt, userId)
+}
+
+// getUserCurrentPlanCacheKey returns the cache key for user's current plan
+func getUserCurrentPlanCacheKey(userId int) string {
+	return fmt.Sprintf(userCurrentPlanKeyFmt, userId)
+}
+
+// InvalidateUserPlanCache clears all plan-related cache for a user
+func InvalidateUserPlanCache(userId int) error {
+	if !common.RedisEnabled {
+		return nil
+	}
+
+	// Delete both cache keys
+	validPlansKey := getUserValidPlansCacheKey(userId)
+	currentPlanKey := getUserCurrentPlanCacheKey(userId)
+
+	if err := common.RedisDel(validPlansKey); err != nil {
+		common.SysLog(fmt.Sprintf("failed to delete valid plans cache: %v", err))
+	}
+	if err := common.RedisDel(currentPlanKey); err != nil {
+		common.SysLog(fmt.Sprintf("failed to delete current plan cache: %v", err))
+	}
+
+	return nil
+}
+
+// cacheSetUserValidPlans stores user's valid plans in cache
+func cacheSetUserValidPlans(userId int, plans []*UserPlan) error {
+	if !common.RedisEnabled || len(plans) == 0 {
+		return nil
+	}
+
+	entries := make([]*UserPlanCacheEntry, len(plans))
+	for i, plan := range plans {
+		entries[i] = FromUserPlan(plan)
+	}
+
+	data, err := json.Marshal(entries)
+	if err != nil {
+		return fmt.Errorf("failed to marshal plans: %w", err)
+	}
+
+	return common.RedisSet(
+		getUserValidPlansCacheKey(userId),
+		string(data),
+		time.Duration(userPlanCacheTTLSec)*time.Second,
+	)
+}
+
+// cacheGetUserValidPlans retrieves user's valid plans from cache
+func cacheGetUserValidPlans(userId int) ([]*UserPlan, error) {
+	if !common.RedisEnabled {
+		return nil, fmt.Errorf("redis is not enabled")
+	}
+
+	data, err := common.RedisGet(getUserValidPlansCacheKey(userId))
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []*UserPlanCacheEntry
+	if err := json.Unmarshal([]byte(data), &entries); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal plans: %w", err)
+	}
+
+	plans := make([]*UserPlan, len(entries))
+	for i, entry := range entries {
+		plans[i] = entry.ToUserPlan()
+	}
+
+	return plans, nil
+}
+
+// cacheSetUserCurrentPlan stores user's current plan in cache
+func cacheSetUserCurrentPlan(userId int, plan *UserPlan) error {
+	if !common.RedisEnabled || plan == nil {
+		return nil
+	}
+
+	entry := FromUserPlan(plan)
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("failed to marshal plan: %w", err)
+	}
+
+	return common.RedisSet(
+		getUserCurrentPlanCacheKey(userId),
+		string(data),
+		time.Duration(userPlanCacheTTLSec)*time.Second,
+	)
+}
+
+// cacheGetUserCurrentPlan retrieves user's current plan from cache
+func cacheGetUserCurrentPlan(userId int) (*UserPlan, error) {
+	if !common.RedisEnabled {
+		return nil, fmt.Errorf("redis is not enabled")
+	}
+
+	data, err := common.RedisGet(getUserCurrentPlanCacheKey(userId))
+	if err != nil {
+		return nil, err
+	}
+
+	var entry UserPlanCacheEntry
+	if err := json.Unmarshal([]byte(data), &entry); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal plan: %w", err)
+	}
+
+	return entry.ToUserPlan(), nil
+}
+
+// CachedGetUserValidPlans gets valid plans with cache
+func CachedGetUserValidPlans(userId int) ([]*UserPlan, error) {
+	// Try cache first
+	plans, err := cacheGetUserValidPlans(userId)
+	if err == nil && len(plans) > 0 {
+		return plans, nil
+	}
+
+	// Cache miss, fetch from DB
+	plans, err = GetUserValidPlans(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update cache asynchronously
+	if len(plans) > 0 {
+		gopool.Go(func() {
+			if err := cacheSetUserValidPlans(userId, plans); err != nil {
+				common.SysLog(fmt.Sprintf("failed to cache valid plans: %v", err))
+			}
+		})
+	}
+
+	return plans, nil
+}
+
+// CachedGetUserCurrentPlan gets current plan with cache
+func CachedGetUserCurrentPlan(userId int) (*UserPlan, error) {
+	// Try cache first
+	plan, err := cacheGetUserCurrentPlan(userId)
+	if err == nil && plan != nil {
+		return plan, nil
+	}
+
+	// Cache miss, fetch from DB
+	plan, err = GetUserCurrentPlan(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update cache asynchronously
+	if plan != nil {
+		gopool.Go(func() {
+			if err := cacheSetUserCurrentPlan(userId, plan); err != nil {
+				common.SysLog(fmt.Sprintf("failed to cache current plan: %v", err))
+			}
+		})
+	}
+
+	return plan, nil
+}
+
+// cacheDecrUserPlanQuota decrements quota in cache
+func cacheDecrUserPlanQuota(userId int, userPlanId int, amount int64) {
+	if !common.RedisEnabled {
+		return
+	}
+
+	// Invalidate cache to force refresh on next read
+	// This is simpler and safer than trying to update cached JSON
+	gopool.Go(func() {
+		InvalidateUserPlanCache(userId)
+	})
+}
+
+// cacheIncrUserPlanQuota increments quota in cache
+func cacheIncrUserPlanQuota(userId int, userPlanId int, amount int64) {
+	if !common.RedisEnabled {
+		return
+	}
+
+	// Invalidate cache to force refresh on next read
+	gopool.Go(func() {
+		InvalidateUserPlanCache(userId)
+	})
+}
+
+// InvalidateUserPlanCacheByPlanId invalidates cache for all users who have a specific plan
+// This should be called when a Plan is modified (status, priority, etc.) or deleted
+func InvalidateUserPlanCacheByPlanId(planId int) error {
+	if !common.RedisEnabled {
+		return nil
+	}
+
+	// Query all user_ids that have this plan
+	var userIds []int
+	err := DB.Model(&UserPlan{}).
+		Where("plan_id = ?", planId).
+		Distinct("user_id").
+		Pluck("user_id", &userIds).Error
+	if err != nil {
+		common.SysLog(fmt.Sprintf("failed to get users for plan %d: %v", planId, err))
+		return err
+	}
+
+	// Invalidate cache for each user asynchronously
+	for _, userId := range userIds {
+		uid := userId // capture for goroutine
+		gopool.Go(func() {
+			if err := InvalidateUserPlanCache(uid); err != nil {
+				common.SysLog(fmt.Sprintf("failed to invalidate cache for user %d: %v", uid, err))
+			}
+		})
+	}
+
+	common.SysLog(fmt.Sprintf("invalidated plan cache for %d users (plan_id=%d)", len(userIds), planId))
+	return nil
+}
