@@ -59,6 +59,7 @@ type ChannelMeta struct {
 	ChannelIsMultiKey    bool
 	ChannelMultiKeyIndex int
 	ChannelBaseUrl       string
+	ChannelRatio         float64
 	ApiType              int
 	ApiVersion           string
 	ApiKey               string
@@ -133,6 +134,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		ChannelIsMultiKey:    common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey),
 		ChannelMultiKeyIndex: common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex),
 		ChannelBaseUrl:       common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl),
+		ChannelRatio:         common.GetContextKeyFloat64(c, constant.ContextKeyChannelRatio),
 		ApiType:              apiType,
 		ApiVersion:           c.GetString("api_version"),
 		ApiKey:               common.GetContextKeyString(c, constant.ContextKeyChannelKey),

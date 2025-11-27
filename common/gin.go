@@ -89,6 +89,10 @@ func GetContextKeyTime(c *gin.Context, key constant.ContextKey) time.Time {
 	return c.GetTime(string(key))
 }
 
+func GetContextKeyFloat64(c *gin.Context, key constant.ContextKey) float64 {
+	return c.GetFloat64(string(key))
+}
+
 func GetContextKeyType[T any](c *gin.Context, key constant.ContextKey) (T, bool) {
 	if value, ok := c.Get(string(key)); ok {
 		if v, ok := value.(T); ok {

@@ -145,6 +145,7 @@ const EditChannelModal = (props) => {
     groups: ['default'],
     priority: 0,
     weight: 0,
+    ratio: 1.0,
     max_concurrent_requests_per_key: 0,
     tag: '',
     multi_key_mode: 'random',
@@ -2510,6 +2511,22 @@ const EditChannelModal = (props) => {
                         />
                       </Col>
                     </Row>
+
+                    <Form.InputNumber
+                      field='ratio'
+                      label={t('渠道倍率')}
+                      placeholder={t('默认为1.0')}
+                      min={0.0001}
+                      max={100}
+                      step={0.1}
+                      onNumberChange={(value) =>
+                        handleInputChange('ratio', value)
+                      }
+                      style={{ width: '100%' }}
+                      extraText={t(
+                        '渠道倍率用于调整该渠道的计费，范围0.0001~100，默认为1.0。最终费用 = Token × 模型倍率 × 分组倍率 × 渠道倍率',
+                      )}
+                    />
 
                     <Form.InputNumber
                       field='max_concurrent_requests_per_key'

@@ -62,6 +62,12 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 		adminInfo["is_multi_key"] = true
 		adminInfo["multi_key_index"] = common.GetContextKeyInt(ctx, constant.ContextKeyChannelMultiKeyIndex)
 	}
+	// 渠道倍率仅管理员可见
+	channelRatio := common.GetContextKeyFloat64(ctx, constant.ContextKeyChannelRatio)
+	if channelRatio == 0 {
+		channelRatio = 1.0
+	}
+	adminInfo["channel_ratio"] = channelRatio
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)
 	return other
@@ -112,13 +118,30 @@ func GenerateClaudeOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	return info
 }
 
-func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.PerCallPriceData) map[string]interface{} {
+func GenerateMjOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, priceData types.PerCallPriceData) map[string]interface{} {
 	other := make(map[string]interface{})
 	other["model_price"] = priceData.ModelPrice
 	other["group_ratio"] = priceData.GroupRatioInfo.GroupRatio
 	if priceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = priceData.GroupRatioInfo.GroupSpecialRatio
 	}
-	appendRequestPath(nil, relayInfo, other)
+	// 添加管理员信息（包含渠道倍率）
+	adminInfo := make(map[string]interface{})
+	if ctx != nil {
+		adminInfo["use_channel"] = ctx.GetStringSlice("use_channel")
+		isMultiKey := common.GetContextKeyBool(ctx, constant.ContextKeyChannelIsMultiKey)
+		if isMultiKey {
+			adminInfo["is_multi_key"] = true
+			adminInfo["multi_key_index"] = common.GetContextKeyInt(ctx, constant.ContextKeyChannelMultiKeyIndex)
+		}
+		// 渠道倍率仅管理员可见
+		channelRatio := common.GetContextKeyFloat64(ctx, constant.ContextKeyChannelRatio)
+		if channelRatio == 0 {
+			channelRatio = 1.0
+		}
+		adminInfo["channel_ratio"] = channelRatio
+	}
+	other["admin_info"] = adminInfo
+	appendRequestPath(ctx, relayInfo, other)
 	return other
 }
