@@ -74,6 +74,7 @@ import {
   CircleUser,
   Package,
   Activity,
+  CalendarDays,
 } from 'lucide-react';
 
 // 获取侧边栏Lucide图标组件
@@ -110,10 +111,14 @@ export function getLucideIcon(key, selected = false) {
       return <Layers {...commonProps} color={iconColor} />;
     case 'redemption':
       return <Gift {...commonProps} color={iconColor} />;
+    case 'plan':
+      return <CalendarDays {...commonProps} color={iconColor} />;
     case 'user':
     case 'personal':
       return <User {...commonProps} color={iconColor} />;
     case 'models':
+      return <Package {...commonProps} color={iconColor} />;
+    case 'myplans':
       return <Package {...commonProps} color={iconColor} />;
     case 'setting':
       return <Settings {...commonProps} color={iconColor} />;

@@ -236,6 +236,9 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
+	// Note: Plan quota consumption is handled in PreWssConsumeQuota -> PostConsumeQuota
+	// Do NOT call PostConsumePlanQuota here to avoid double deduction
+
 	logModel := modelName
 	if extraContent != "" {
 		logContent += ", " + extraContent
@@ -359,6 +362,9 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 			logger.LogError(ctx, "error consuming token remain quota: "+err.Error())
 		}
 	}
+
+	// Note: Plan quota consumption is handled in PostConsumeQuota (line ~547-558)
+	// Do NOT call PostConsumePlanQuota here to avoid double deduction
 
 	other := GenerateClaudeOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio,
 		cacheTokens, cacheRatio,
@@ -491,6 +497,9 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		}
 	}
 
+	// Note: Plan quota consumption is handled in PostConsumeQuota
+	// Do NOT call PostConsumePlanQuota here to avoid double deduction
+
 	logModel := relayInfo.OriginModelName
 	if extraContent != "" {
 		logContent += ", " + extraContent
@@ -556,6 +565,19 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 		}
 		if err != nil {
 			return err
+		}
+	}
+
+	// Consume from user plan if one was selected
+	if relayInfo.UserPlanId > 0 && quota > 0 {
+		if err := model.DecreaseUserPlanQuota(relayInfo.UserPlanId, int64(quota)); err != nil {
+			// Log error but don't fail the request - user quota already consumed
+			common.SysLog(fmt.Sprintf("failed to consume plan quota for user_plan %d: %v", relayInfo.UserPlanId, err))
+		}
+	} else if relayInfo.UserPlanId > 0 && quota < 0 {
+		// Refund to plan
+		if err := model.IncreaseUserPlanQuota(relayInfo.UserPlanId, int64(-quota)); err != nil {
+			common.SysLog(fmt.Sprintf("failed to refund plan quota for user_plan %d: %v", relayInfo.UserPlanId, err))
 		}
 	}
 

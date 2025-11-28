@@ -1,0 +1,371 @@
+package controller
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
+
+	"github.com/gin-gonic/gin"
+)
+
+// ==================== Admin Endpoints ====================
+
+// GetAllUserPlans returns all user plans with pagination (admin)
+func GetAllUserPlans(c *gin.Context) {
+	userId, _ := strconv.Atoi(c.Query("user_id"))
+	pageInfo := common.GetPageQuery(c)
+	userPlans, total, err := model.GetUserPlansAdmin(userId, pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(userPlans)
+	common.ApiSuccess(c, pageInfo)
+}
+
+// GetUserPlansByPlan returns all user plans for a specific plan (admin)
+func GetUserPlansByPlan(c *gin.Context) {
+	planId, err := strconv.Atoi(c.Param("plan_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo := common.GetPageQuery(c)
+	userPlans, total, err := model.GetUserPlansByPlanId(planId, pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(userPlans)
+	common.ApiSuccess(c, pageInfo)
+}
+
+// GetUserPlan returns a single user plan by ID (admin)
+func GetUserPlan(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	userPlan, err := model.GetUserPlanById(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    userPlan,
+	})
+}
+
+// AssignPlanToUserRequest is the request body for assigning a plan to a user
+type AssignPlanToUserRequest struct {
+	UserId    int   `json:"user_id" binding:"required"`
+	PlanId    int   `json:"plan_id" binding:"required"`
+	Quota     int64 `json:"quota"`
+	ExpiresAt int64 `json:"expires_at"`
+}
+
+// AdminAssignPlan assigns a plan to a user (admin)
+func AdminAssignPlan(c *gin.Context) {
+	var req AssignPlanToUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	userPlan, err := model.AssignPlanToUser(req.UserId, req.PlanId, req.Quota, req.ExpiresAt)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "套餐分配成功",
+		"data":    userPlan,
+	})
+}
+
+// AdminRemovePlan removes a plan from a user (admin)
+func AdminRemovePlan(c *gin.Context) {
+	var req struct {
+		UserId int `json:"user_id" binding:"required"`
+		PlanId int `json:"plan_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err := model.RemovePlanFromUser(req.UserId, req.PlanId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "套餐移除成功",
+	})
+}
+
+// AdminUpdateUserPlanPermissions updates permissions for a user plan (admin)
+func AdminUpdateUserPlanPermissions(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		AllowUserSwitch int `json:"allow_user_switch"`
+		AllowUserToggle int `json:"allow_user_toggle"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = model.UpdateUserPlanPermissions(id, req.AllowUserSwitch, req.AllowUserToggle)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "权限更新成功",
+	})
+}
+
+// AdminForceSwitch forces a user to switch to a specific plan (admin)
+func AdminForceSwitch(c *gin.Context) {
+	var req struct {
+		UserId int `json:"user_id" binding:"required"`
+		PlanId int `json:"plan_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err := model.SwitchUserCurrentPlan(req.UserId, req.PlanId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "套餐切换成功",
+	})
+}
+
+// AdminLockUserPlan locks a user plan (admin)
+func AdminLockUserPlan(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = model.LockUserPlan(id, req.Reason)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "套餐已锁定",
+	})
+}
+
+// AdminUnlockUserPlan unlocks a user plan (admin)
+func AdminUnlockUserPlan(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = model.UnlockUserPlan(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "套餐已解锁",
+	})
+}
+
+// AdminAdjustQuota adjusts the quota for a user plan (admin)
+func AdminAdjustQuota(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		Quota int64 `json:"quota" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = model.SetUserPlanQuota(id, req.Quota)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "额度调整成功",
+	})
+}
+
+// AdminAddQuota adds quota to a user plan (admin)
+func AdminAddQuota(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		Amount int64 `json:"amount" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	if req.Amount <= 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "增加额度必须大于0",
+		})
+		return
+	}
+
+	err = model.IncreaseUserPlanQuota(id, req.Amount)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "额度添加成功",
+	})
+}
+
+// ==================== User Endpoints ====================
+
+// GetMyPlans returns the current user's plans
+func GetMyPlans(c *gin.Context) {
+	userId := c.GetInt("id")
+	summary, err := service.GetUserPlanSummary(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    summary,
+	})
+}
+
+// UserSwitchPlan allows user to switch their current plan
+func UserSwitchPlan(c *gin.Context) {
+	userId := c.GetInt("id")
+	var req struct {
+		PlanId int `json:"plan_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err := service.UserSwitchPlan(userId, req.PlanId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "套餐切换成功",
+	})
+}
+
+// UserToggleAutoSwitch allows user to toggle auto-switch for their plan
+func UserToggleAutoSwitch(c *gin.Context) {
+	userId := c.GetInt("id")
+	userPlanId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = service.UserToggleAutoSwitch(userId, userPlanId, req.Enabled)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "设置已更新",
+	})
+}
+
+// GetUserPlansForUser returns all plans for a specific user (admin viewing user details)
+func GetUserPlansForUser(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	plans, err := model.GetAllUserPlans(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    plans,
+	})
+}
