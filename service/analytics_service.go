@@ -278,6 +278,7 @@ func GetConsumptionTrend(timeRange string) ([]dto.ConsumptionTrend, error) {
 		result[i] = dto.ConsumptionTrend{
 			Date:         t.Date,
 			TotalQuota:   int(t.TotalQuota),
+			TotalUSD:     common.QuotaToUSD(int(t.TotalQuota)),
 			RequestCount: int(t.RequestCount),
 			UserCount:    int(t.UserCount),
 			ARPU:         arpu,
@@ -345,6 +346,7 @@ func GetTopSpenders(timeRange string, limit int) ([]dto.TopSpender, error) {
 			UserId:       s.UserId,
 			Username:     userMap[s.UserId],
 			TotalQuota:   int(s.TotalQuota),
+			TotalUSD:     common.QuotaToUSD(int(s.TotalQuota)),
 			RequestCount: int(s.RequestCount),
 		}
 	}
@@ -421,6 +423,7 @@ func GetModelUsageStats(timeRange string) ([]dto.ModelUsageStats, error) {
 			ModelName:    m.ModelName,
 			RequestCount: int(m.RequestCount),
 			TotalQuota:   int(m.TotalQuota),
+			TotalUSD:     common.QuotaToUSD(int(m.TotalQuota)),
 			UniqueUsers:  int(m.UniqueUsers),
 			AvgTokens:    avgTokens,
 			SuccessRate:  successRate,
@@ -712,4 +715,219 @@ func GetRiskIndicators(timeRange string) ([]dto.RiskAlert, error) {
 
 	setCachedData(cacheKey, result, analyticsCacheTTLShort)
 	return result, nil
+}
+
+// GetBalanceOverview returns aggregate balance statistics for all active users
+func GetBalanceOverview(timeRange string) (*dto.BalanceOverview, error) {
+	cacheKey := fmt.Sprintf("%sbalance:overview:%s", analyticsCachePrefix, timeRange)
+
+	var result dto.BalanceOverview
+	if getCachedData(cacheKey, &result) {
+		return &result, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Query active users (status = 1)
+	type BalanceQuery struct {
+		TotalBalance int64
+		UserCount    int64
+	}
+
+	var balanceData BalanceQuery
+	if err := model.DB.WithContext(ctx).Model(&model.User{}).
+		Select("SUM(quota) as total_balance, COUNT(*) as user_count").
+		Where("status = ?", common.UserStatusEnabled).
+		Scan(&balanceData).Error; err != nil {
+		return nil, err
+	}
+
+	result.TotalBalance = common.QuotaToUSD(int(balanceData.TotalBalance))
+	result.UserCount = int(balanceData.UserCount)
+
+	if result.UserCount > 0 {
+		result.AverageBalance = result.TotalBalance / float64(result.UserCount)
+	}
+
+	// Calculate median balance
+	var medianQuota int
+	offset := result.UserCount / 2
+	if err := model.DB.WithContext(ctx).Model(&model.User{}).
+		Select("quota").
+		Where("status = ?", common.UserStatusEnabled).
+		Order("quota ASC").
+		Offset(offset).
+		Limit(1).
+		Pluck("quota", &medianQuota).Error; err == nil {
+		result.MedianBalance = common.QuotaToUSD(medianQuota)
+	}
+
+	// Count users with balance < $5 (2,500,000 quota)
+	var lowBalanceCount int64
+	lowBalanceThreshold := int(5.0 * common.QuotaPerUnit)
+	if err := model.DB.WithContext(ctx).Model(&model.User{}).
+		Where("status = ? AND quota < ?", common.UserStatusEnabled, lowBalanceThreshold).
+		Count(&lowBalanceCount).Error; err != nil {
+		return nil, err
+	}
+	result.LowBalanceCount = int(lowBalanceCount)
+
+	setCachedData(cacheKey, result, analyticsCacheTTLShort)
+	return &result, nil
+}
+
+// GetBalanceDistribution returns balance distribution grouped by ranges
+func GetBalanceDistribution(timeRange string) ([]dto.BalanceDistribution, error) {
+	cacheKey := fmt.Sprintf("%sbalance:distribution:%s", analyticsCachePrefix, timeRange)
+
+	var result []dto.BalanceDistribution
+	if getCachedData(cacheKey, &result) {
+		return result, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get total user count for percentage calculation
+	var totalUsers int64
+	if err := model.DB.WithContext(ctx).Model(&model.User{}).
+		Where("status = ?", common.UserStatusEnabled).
+		Count(&totalUsers).Error; err != nil {
+		return nil, err
+	}
+
+	// Define balance ranges in quota units
+	ranges := []struct {
+		Label  string
+		MinUSD float64
+		MaxUSD float64
+	}{
+		{"$0-$10", 0, 10},
+		{"$10-$50", 10, 50},
+		{"$50-$100", 50, 100},
+		{"$100-$500", 100, 500},
+		{"$500+", 500, 0}, // 0 means unlimited
+	}
+
+	result = make([]dto.BalanceDistribution, 0, len(ranges))
+
+	for _, r := range ranges {
+		minQuota := int(r.MinUSD * common.QuotaPerUnit)
+		var count int64
+
+		query := model.DB.WithContext(ctx).Model(&model.User{}).
+			Where("status = ? AND quota >= ?", common.UserStatusEnabled, minQuota)
+
+		if r.MaxUSD > 0 {
+			maxQuota := int(r.MaxUSD * common.QuotaPerUnit)
+			query = query.Where("quota < ?", maxQuota)
+		}
+
+		if err := query.Count(&count).Error; err != nil {
+			return nil, err
+		}
+
+		percentage := 0.0
+		if totalUsers > 0 {
+			percentage = float64(count) / float64(totalUsers) * 100
+		}
+
+		result = append(result, dto.BalanceDistribution{
+			RangeLabel: r.Label,
+			UserCount:  int(count),
+			Percentage: percentage,
+			MinUSD:     r.MinUSD,
+			MaxUSD:     r.MaxUSD,
+		})
+	}
+
+	setCachedData(cacheKey, result, analyticsCacheTTLShort)
+	return result, nil
+}
+
+// GetBalanceRankings returns top users by remaining balance
+func GetBalanceRankings(timeRange string, limit int) ([]dto.BalanceRanking, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	cacheKey := fmt.Sprintf("%sbalance:rankings:%s:%d", analyticsCachePrefix, timeRange, limit)
+
+	var result []dto.BalanceRanking
+	if getCachedData(cacheKey, &result) {
+		return result, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	startTime, endTime := ParseTimeRange(timeRange)
+
+	type RankingQuery struct {
+		UserId       int
+		Username     string
+		Quota        int
+		LastActivity int64
+	}
+
+	var rankings []RankingQuery
+
+	// Subquery to get last activity per user
+	subQuery := model.LOG_DB.WithContext(ctx).Model(&model.Log{}).
+		Select("user_id, MAX(created_at) as last_activity").
+		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+		Group("user_id")
+
+	// Join users with their last activity
+	err := model.DB.WithContext(ctx).
+		Table("users").
+		Select("users.id as user_id, users.username, users.quota, COALESCE(last_logs.last_activity, 0) as last_activity").
+		Joins("LEFT JOIN (?) as last_logs ON users.id = last_logs.user_id", subQuery).
+		Where("users.status = ?", common.UserStatusEnabled).
+		Order("users.quota DESC").
+		Limit(limit).
+		Scan(&rankings).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	result = make([]dto.BalanceRanking, 0, len(rankings))
+	for _, r := range rankings {
+		result = append(result, dto.BalanceRanking{
+			UserId:         r.UserId,
+			Username:       r.Username,
+			BalanceUSD:     common.QuotaToUSD(r.Quota),
+			QuotaRemaining: r.Quota,
+			LastActivity:   r.LastActivity,
+		})
+	}
+
+	setCachedData(cacheKey, result, analyticsCacheTTLShort)
+	return result, nil
+}
+
+// GetUserBalanceAnalysis returns complete balance analysis including overview, distribution, and rankings
+func GetUserBalanceAnalysis(timeRange string, limit int) (*dto.UserBalanceAnalysisResponse, error) {
+	overview, err := GetBalanceOverview(timeRange)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get balance overview: %w", err)
+	}
+
+	distribution, err := GetBalanceDistribution(timeRange)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get balance distribution: %w", err)
+	}
+
+	rankings, err := GetBalanceRankings(timeRange, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get balance rankings: %w", err)
+	}
+
+	return &dto.UserBalanceAnalysisResponse{
+		Overview:     *overview,
+		Distribution: distribution,
+		Rankings:     rankings,
+	}, nil
 }

@@ -168,6 +168,29 @@ export const AnalyticsAPI = {
   },
 
   /**
+   * Fetch user balance analysis (overview, distribution, rankings)
+   * @param {string} timeRange - Time range
+   * @param {number} limit - Number of rankings to return
+   * @returns {Promise<Object>}
+   */
+  async fetchUserBalanceAnalysis(timeRange = '30d', limit = 20) {
+    try {
+      const response = await API.get(`${BASE_URL}/user-balance-analysis`, {
+        params: { time_range: timeRange, limit },
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(
+        response.data.message || 'Failed to fetch balance analysis'
+      );
+    } catch (error) {
+      showError(error.message || 'Failed to fetch balance analysis');
+      throw error;
+    }
+  },
+
+  /**
    * Export analytics data
    * @param {string} type - Data type to export
    * @param {string} format - Export format: 'csv' or 'json'

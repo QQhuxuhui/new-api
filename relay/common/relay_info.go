@@ -59,6 +59,7 @@ type ChannelMeta struct {
 	ChannelIsMultiKey    bool
 	ChannelMultiKeyIndex int
 	ChannelBaseUrl       string
+	ChannelRatio         float64
 	ApiType              int
 	ApiVersion           string
 	ApiKey               string
@@ -110,6 +111,10 @@ type RelayInfo struct {
 	FinalPreConsumedQuota  int  // 最终预消耗的配额
 	IsClaudeBetaQuery      bool // /v1/messages?beta=true
 
+	// Plan-related fields
+	UserPlanId int // User's current plan assignment ID for quota tracking
+	PlanId     int // Plan ID for logging
+
 	PriceData types.PriceData
 
 	Request dto.Request
@@ -133,6 +138,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		ChannelIsMultiKey:    common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey),
 		ChannelMultiKeyIndex: common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex),
 		ChannelBaseUrl:       common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl),
+		ChannelRatio:         common.GetContextKeyFloat64(c, constant.ContextKeyChannelRatio),
 		ApiType:              apiType,
 		ApiVersion:           c.GetString("api_version"),
 		ApiKey:               common.GetContextKeyString(c, constant.ContextKeyChannelKey),
@@ -396,6 +402,10 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
 		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+
+		// Plan-related fields
+		UserPlanId: common.GetContextKeyInt(c, constant.ContextKeyUserPlanId),
+		PlanId:     common.GetContextKeyInt(c, constant.ContextKeyPlanId),
 
 		isFirstResponse: true,
 		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),

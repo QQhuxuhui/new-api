@@ -267,9 +267,15 @@ func migrateDB() error {
 		&Setup{},
 		&TwoFA{},
 		&TwoFABackupCode{},
+		&Plan{},
+		&UserPlan{},
 	)
 	if err != nil {
 		return err
+	}
+	// Seed default plans after migration
+	if err := SeedDefaultPlans(); err != nil {
+		common.SysLog("failed to seed default plans: " + err.Error())
 	}
 	return nil
 }
@@ -300,6 +306,8 @@ func migrateDBFast() error {
 		{&Setup{}, "Setup"},
 		{&TwoFA{}, "TwoFA"},
 		{&TwoFABackupCode{}, "TwoFABackupCode"},
+		{&Plan{}, "Plan"},
+		{&UserPlan{}, "UserPlan"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

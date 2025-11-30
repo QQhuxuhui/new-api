@@ -520,6 +520,25 @@ export const getChannelsColumns = ({
       },
     },
     {
+      key: COLUMN_KEYS.RATIO,
+      title: t('倍率'),
+      dataIndex: 'ratio',
+      render: (text, record, index) => {
+        if (record.children === undefined) {
+          const ratioValue = text !== undefined && text !== null ? text : 1.0;
+          return (
+            <Tooltip content={t('渠道倍率，用于调整该渠道的计费')}>
+              <Tag color={ratioValue === 1.0 ? 'grey' : 'blue'} shape='circle'>
+                {ratioValue.toFixed(2)}
+              </Tag>
+            </Tooltip>
+          );
+        } else {
+          return null;
+        }
+      },
+    },
+    {
       key: COLUMN_KEYS.OPERATE,
       title: '',
       dataIndex: 'operate',

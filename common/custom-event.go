@@ -57,25 +57,29 @@ type CustomEvent struct {
 	Mutex sync.Mutex
 }
 
-func encode(writer io.Writer, event CustomEvent) error {
+func encode(writer io.Writer, event *CustomEvent) error {
 	w := checkWriter(writer)
 	return writeData(w, event.Data)
 }
 
 func writeData(w stringWriter, data interface{}) error {
-	dataReplacer.WriteString(w, fmt.Sprint(data))
-	if strings.HasPrefix(data.(string), "data") {
+	dataStr := fmt.Sprint(data)
+	dataReplacer.WriteString(w, dataStr)
+	// Safe type check instead of direct type assertion
+	if str, ok := data.(string); ok && strings.HasPrefix(str, "data") {
 		w.writeString("\n\n")
 	}
 	return nil
 }
 
-func (r CustomEvent) Render(w http.ResponseWriter) error {
+// Use pointer receiver to avoid copying the mutex
+func (r *CustomEvent) Render(w http.ResponseWriter) error {
 	r.WriteContentType(w)
 	return encode(w, r)
 }
 
-func (r CustomEvent) WriteContentType(w http.ResponseWriter) {
+// Use pointer receiver to avoid copying the mutex
+func (r *CustomEvent) WriteContentType(w http.ResponseWriter) {
 	r.Mutex.Lock()
 	defer r.Mutex.Unlock()
 	header := w.Header()

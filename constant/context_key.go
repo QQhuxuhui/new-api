@@ -35,6 +35,7 @@ const (
 	ContextKeyChannelIsMultiKey        ContextKey = "channel_is_multi_key"
 	ContextKeyChannelMultiKeyIndex     ContextKey = "channel_multi_key_index"
 	ContextKeyChannelKey               ContextKey = "channel_key"
+	ContextKeyChannelRatio             ContextKey = "channel_ratio"
 
 	/* user related keys */
 	ContextKeyUserId      ContextKey = "id"
@@ -56,4 +57,11 @@ const (
 
 	/* client restriction keys */
 	ContextKeyUserAgent ContextKey = "user_agent" // string: client User-Agent
+
+	/* plan related keys */
+	ContextKeyPlanId         ContextKey = "plan_id"          // int: selected plan ID
+	ContextKeyUserPlanId     ContextKey = "user_plan_id"     // int: user plan assignment ID
+	ContextKeyPlanGroup      ContextKey = "plan_group"       // string: channel group from plan
+	ContextKeyPlanName       ContextKey = "plan_name"        // string: plan name for logging
+	ContextKeyPlanAutoSwitch ContextKey = "plan_auto_switch" // bool: if auto-switch occurred
 )

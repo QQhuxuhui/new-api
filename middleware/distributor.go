@@ -80,6 +80,36 @@ func Distribute() func(c *gin.Context) {
 				}
 				var selectGroup string
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+
+				// Try to select a plan for this request (only if plan system is enabled)
+				userId := common.GetContextKeyInt(c, constant.ContextKeyUserId)
+				if common.PlanSystemEnabled && userId > 0 {
+					planResult, planErr := service.SelectPlanForRequest(userId, modelRequest.Model)
+					if planErr != nil {
+						// Plan selection failed - check if it's a critical error
+						// If user has plans configured, this is an error
+						// If user has no plans, fall through to use default group
+						if !errors.Is(planErr, service.ErrNoPlanAvailable) {
+							abortWithOpenAiMessage(c, http.StatusForbidden, "套餐选择失败: "+planErr.Error())
+							return
+						}
+						// ErrNoPlanAvailable - user has no plans, use default group
+					} else if planResult != nil {
+						// Plan selected successfully
+						common.SetContextKey(c, constant.ContextKeyPlanId, planResult.PlanId)
+						common.SetContextKey(c, constant.ContextKeyUserPlanId, planResult.UserPlanId)
+						common.SetContextKey(c, constant.ContextKeyPlanName, planResult.PlanName)
+						common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, planResult.AutoSwitched)
+
+						// Use plan's channel group if specified
+						if planResult.ChannelGroup != "" {
+							common.SetContextKey(c, constant.ContextKeyPlanGroup, planResult.ChannelGroup)
+							usingGroup = planResult.ChannelGroup
+							common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+						}
+					}
+				}
+
 				// check path is /pg/chat/completions
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
 					playgroundRequest := &dto.PlayGroundRequest{}
@@ -599,6 +629,7 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	// c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", key))
 	common.SetContextKey(c, constant.ContextKeyChannelKey, key)
 	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, channel.GetBaseURL())
+	common.SetContextKey(c, constant.ContextKeyChannelRatio, channel.GetRatio())
 
 	common.SetContextKey(c, constant.ContextKeySystemPromptOverride, false)
 
