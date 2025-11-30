@@ -35,6 +35,7 @@ const routerMap = {
   channel: '/console/channel',
   token: '/console/token',
   redemption: '/console/redemption',
+  plan: '/console/plan',
   topup: '/console/topup',
   user: '/console/user',
   log: '/console/log',
@@ -47,6 +48,7 @@ const routerMap = {
   models: '/console/models',
   playground: '/console/playground',
   personal: '/console/personal',
+  myplans: '/console/myplans',
   analytics: '/console/analytics',
 };
 
@@ -129,6 +131,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/topup',
       },
       {
+        text: t('我的套餐'),
+        itemKey: 'myplans',
+        to: '/myplans',
+      },
+      {
         text: t('个人设置'),
         itemKey: 'personal',
         to: '/personal',
@@ -156,6 +163,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('模型管理'),
         itemKey: 'models',
         to: '/console/models',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('套餐管理'),
+        itemKey: 'plan',
+        to: '/console/plan',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

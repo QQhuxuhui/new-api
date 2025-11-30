@@ -218,10 +218,10 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 			Type:    "message_start",
 			Message: msg,
 		})
-		claudeResponses = append(claudeResponses)
-		//claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
-		//	Type: "ping",
-		//})
+		// Send a ping event to keep the connection alive and signal ready state
+		claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
+			Type: "ping",
+		})
 		if openAIResponse.IsToolCall() {
 			info.ClaudeConvertInfo.LastMessagesType = relaycommon.LastMessageTypeTools
 			resp := &dto.ClaudeResponse{
