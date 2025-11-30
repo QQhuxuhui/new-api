@@ -307,15 +307,148 @@ func GetChannelConcurrencyInfo(channel *model.Channel) interface{} {
 }
 
 // GetBatchChannelsConcurrency returns concurrency info for multiple channels efficiently
+// Optimized with Redis Pipeline to reduce N Redis GET calls to 1
 func GetBatchChannelsConcurrency(channels []*model.Channel) map[int]interface{} {
 	result := make(map[int]interface{})
 
-	// Process each channel
+	if len(channels) == 0 {
+		return result
+	}
+
+	// Check cache first and collect channels needing Redis lookup
+	type channelLookup struct {
+		channel *model.Channel
+		keys    []string
+	}
+	needLookup := make([]channelLookup, 0)
+
+	now := time.Now()
 	for _, channel := range channels {
-		if channel.MaxConcurrentRequestsPerKey != nil && *channel.MaxConcurrentRequestsPerKey > 0 {
-			info := GetChannelConcurrencyInfo(channel)
-			if info != nil {
+		if channel.MaxConcurrentRequestsPerKey == nil || *channel.MaxConcurrentRequestsPerKey <= 0 {
+			continue
+		}
+
+		// Check cache
+		if cached, ok := concurrencyCache.Load(channel.Id); ok {
+			entry := cached.(concurrencyCacheEntry)
+			if now.Before(entry.expiresAt) {
+				result[channel.Id] = entry.info
+				continue
+			}
+		}
+
+		// Need Redis lookup
+		keys := channel.GetKeys()
+		if len(keys) > 0 {
+			needLookup = append(needLookup, channelLookup{channel: channel, keys: keys})
+		}
+	}
+
+	// If all channels were cached, return early
+	if len(needLookup) == 0 {
+		return result
+	}
+
+	// Use Pipeline to batch all Redis GET operations
+	if common.RedisEnabled && common.RDB != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		pipe := common.RDB.Pipeline()
+		type redisCmds struct {
+			channel *model.Channel
+			keys    []string
+			cmds    []*redis.StringCmd
+		}
+		cmdsList := make([]redisCmds, 0, len(needLookup))
+
+		for _, lookup := range needLookup {
+			cmds := make([]*redis.StringCmd, len(lookup.keys))
+			for i, key := range lookup.keys {
+				redisKey := GetConcurrencyKey(key, lookup.channel.Type)
+				cmds[i] = pipe.Get(ctx, redisKey)
+			}
+			cmdsList = append(cmdsList, redisCmds{
+				channel: lookup.channel,
+				keys:    lookup.keys,
+				cmds:    cmds,
+			})
+		}
+
+		// Execute all Redis operations in single round trip
+		_, _ = pipe.Exec(ctx)
+
+		// Parse results and build response
+		for _, rc := range cmdsList {
+			channel := rc.channel
+			limit := *channel.MaxConcurrentRequestsPerKey
+
+			if channel.ChannelInfo.IsMultiKey {
+				// Multi-key channel
+				keyInfos := make([]dto.KeyConcurrencyInfo, len(rc.keys))
+				totalCurrent := 0
+				totalCapacity := 0
+
+				for i, cmd := range rc.cmds {
+					current := 0
+					if val, err := cmd.Int(); err == nil {
+						current = val
+					}
+					keyInfos[i] = dto.KeyConcurrencyInfo{
+						KeyIndex: i,
+						Current:  current,
+						Limit:    limit,
+					}
+					totalCurrent += current
+					totalCapacity += limit
+				}
+
+				usagePercent := 0.0
+				if totalCapacity > 0 && totalCurrent >= 0 {
+					usagePercent = float64(totalCurrent) / float64(totalCapacity) * 100
+				}
+
+				info := dto.MultiKeyConcurrencyInfo{
+					Keys:          keyInfos,
+					TotalCurrent:  totalCurrent,
+					TotalCapacity: totalCapacity,
+					UsagePercent:  usagePercent,
+					LastUpdated:   now.Unix(),
+				}
+
 				result[channel.Id] = info
+				concurrencyCache.Store(channel.Id, concurrencyCacheEntry{
+					info:      info,
+					expiresAt: time.Now().Add(cacheTTL),
+				})
+			} else {
+				// Single-key channel
+				current := -1
+				if len(rc.cmds) > 0 {
+					if val, err := rc.cmds[0].Int(); err == nil {
+						current = val
+					} else if err == redis.Nil {
+						current = 0
+					}
+				}
+
+				usagePercent := 0.0
+				if current >= 0 && limit > 0 {
+					usagePercent = float64(current) / float64(limit) * 100
+				}
+
+				info := dto.ConcurrencyInfo{
+					Current:      current,
+					Limit:        limit,
+					UsagePercent: usagePercent,
+					LastUpdated:  now.Unix(),
+				}
+
+				result[channel.Id] = info
+				concurrencyCache.Store(channel.Id, concurrencyCacheEntry{
+					info:      info,
+					expiresAt: time.Now().Add(cacheTTL),
+				})
 			}
 		}
 	}

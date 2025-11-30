@@ -286,6 +286,47 @@ func GetChannelsByTag(tag string, idSort bool) ([]*Channel, error) {
 	return channels, err
 }
 
+// GetChannelsByTags batch query optimization - returns map[tag][]*Channel
+func GetChannelsByTags(tags []*string, idSort bool) (map[string][]*Channel, error) {
+	if len(tags) == 0 {
+		return make(map[string][]*Channel), nil
+	}
+
+	// Extract non-nil tag values
+	tagValues := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if tag != nil && *tag != "" {
+			tagValues = append(tagValues, *tag)
+		}
+	}
+
+	if len(tagValues) == 0 {
+		return make(map[string][]*Channel), nil
+	}
+
+	var channels []*Channel
+	order := "priority desc"
+	if idSort {
+		order = "id desc"
+	}
+
+	// Single query to get all channels with matching tags
+	err := DB.Where("tag IN ?", tagValues).Order(order).Omit("key").Find(&channels).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Group channels by tag in memory
+	result := make(map[string][]*Channel)
+	for _, ch := range channels {
+		if ch.Tag != nil && *ch.Tag != "" {
+			result[*ch.Tag] = append(result[*ch.Tag], ch)
+		}
+	}
+
+	return result, nil
+}
+
 func SearchChannels(keyword string, group string, model string, idSort bool) ([]*Channel, error) {
 	var channels []*Channel
 	modelsCol := "`models`"
@@ -1009,4 +1050,29 @@ func CountChannelsGroupByType() (map[int64]int64, error) {
 		counts[r.Type] = r.Count
 	}
 	return counts, nil
+}
+
+// GetDistinctChannelGroups returns all distinct channel groups from enabled channels
+func GetDistinctChannelGroups() ([]string, error) {
+	var groups []string
+	err := DB.Model(&Channel{}).
+		Where("status = ?", common.ChannelStatusEnabled).
+		Where("`group` IS NOT NULL AND `group` != ''").
+		Distinct("`group`").
+		Pluck("`group`", &groups).Error
+	if err != nil {
+		return nil, err
+	}
+	// Add "default" if not present (channels without group use default)
+	hasDefault := false
+	for _, g := range groups {
+		if g == "default" {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault {
+		groups = append([]string{"default"}, groups...)
+	}
+	return groups, nil
 }

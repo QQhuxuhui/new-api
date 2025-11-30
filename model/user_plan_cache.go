@@ -27,10 +27,14 @@ type UserPlanCacheEntry struct {
 	Status          int    `json:"status"`
 
 	// Embedded plan info for routing
-	PlanName         string `json:"plan_name"`
-	PlanPriority     int    `json:"plan_priority"`
-	PlanChannelGroup string `json:"plan_channel_group"`
-	PlanStatus       int    `json:"plan_status"`
+	PlanName           string `json:"plan_name"`
+	PlanType           string `json:"plan_type"`
+	PlanPriority       int    `json:"plan_priority"`
+	PlanChannelGroup   string `json:"plan_channel_group"`   // Deprecated: use PlanChannelGroups
+	PlanChannelGroups  string `json:"plan_channel_groups"`  // JSON array of channel groups
+	PlanDailyQuotaLimit int64  `json:"plan_daily_quota_limit"`
+	PlanRateLimitRules string `json:"plan_rate_limit_rules"` // JSON array of rate limit rules
+	PlanStatus         int    `json:"plan_status"`
 }
 
 // ToUserPlan converts cache entry back to UserPlan with embedded Plan
@@ -51,11 +55,15 @@ func (e *UserPlanCacheEntry) ToUserPlan() *UserPlan {
 		ExpiresAt:       e.ExpiresAt,
 		Status:          e.Status,
 		Plan: &Plan{
-			Id:           e.PlanId,
-			Name:         e.PlanName,
-			Priority:     e.PlanPriority,
-			ChannelGroup: e.PlanChannelGroup,
-			Status:       e.PlanStatus,
+			Id:              e.PlanId,
+			Name:            e.PlanName,
+			Type:            e.PlanType,
+			Priority:        e.PlanPriority,
+			ChannelGroup:    e.PlanChannelGroup,
+			ChannelGroups:   e.PlanChannelGroups,
+			DailyQuotaLimit: e.PlanDailyQuotaLimit,
+			RateLimitRules:  e.PlanRateLimitRules,
+			Status:          e.PlanStatus,
 		},
 	}
 }
@@ -81,8 +89,12 @@ func FromUserPlan(up *UserPlan) *UserPlanCacheEntry {
 
 	if up.Plan != nil {
 		entry.PlanName = up.Plan.Name
+		entry.PlanType = up.Plan.Type
 		entry.PlanPriority = up.Plan.Priority
 		entry.PlanChannelGroup = up.Plan.ChannelGroup
+		entry.PlanChannelGroups = up.Plan.ChannelGroups
+		entry.PlanDailyQuotaLimit = up.Plan.DailyQuotaLimit
+		entry.PlanRateLimitRules = up.Plan.RateLimitRules
 		entry.PlanStatus = up.Plan.Status
 	}
 
@@ -93,7 +105,8 @@ func FromUserPlan(up *UserPlan) *UserPlanCacheEntry {
 const (
 	userValidPlansKeyFmt   = "user_valid_plans:%d"
 	userCurrentPlanKeyFmt  = "user_current_plan:%d"
-	userPlanCacheTTLSec    = 60 // 1 minute cache TTL
+	userPlanCacheTTLSec    = 300 // 5 minutes cache TTL (optimized from 60s)
+	userPlanCacheLockKeyFmt = "lock:user_plans:%d" // distributed lock key format
 )
 
 // getUserValidPlansCacheKey returns the cache key for user's valid plans
@@ -211,56 +224,88 @@ func cacheGetUserCurrentPlan(userId int) (*UserPlan, error) {
 	return entry.ToUserPlan(), nil
 }
 
-// CachedGetUserValidPlans gets valid plans with cache
+// CachedGetUserValidPlans gets valid plans with cache and distributed lock to prevent cache stampede
 func CachedGetUserValidPlans(userId int) ([]*UserPlan, error) {
-	// Try cache first
+	// 1. Try cache first
 	plans, err := cacheGetUserValidPlans(userId)
 	if err == nil && len(plans) > 0 {
 		return plans, nil
 	}
 
-	// Cache miss, fetch from DB
-	plans, err = GetUserValidPlans(userId)
-	if err != nil {
-		return nil, err
-	}
+	// 2. Cache miss - try to acquire distributed lock
+	lockKey := fmt.Sprintf(userPlanCacheLockKeyFmt, userId)
+	acquired := common.RedisSetNX(lockKey, "1", 10*time.Second)
 
-	// Update cache asynchronously
-	if len(plans) > 0 {
-		gopool.Go(func() {
+	if acquired {
+		// Got the lock - we're responsible for loading from DB
+		defer common.RedisDel(lockKey)
+
+		plans, err = GetUserValidPlans(userId)
+		if err != nil {
+			return nil, err
+		}
+
+		// Synchronously update cache before returning
+		if len(plans) > 0 {
 			if err := cacheSetUserValidPlans(userId, plans); err != nil {
 				common.SysLog(fmt.Sprintf("failed to cache valid plans: %v", err))
 			}
-		})
+		}
+
+		return plans, nil
 	}
 
-	return plans, nil
+	// 3. Didn't get lock - wait briefly and retry cache
+	time.Sleep(50 * time.Millisecond)
+	plans, err = cacheGetUserValidPlans(userId)
+	if err == nil && len(plans) > 0 {
+		return plans, nil
+	}
+
+	// 4. Still no cache - fallback to DB query (the lock holder may have failed)
+	return GetUserValidPlans(userId)
 }
 
-// CachedGetUserCurrentPlan gets current plan with cache
+// CachedGetUserCurrentPlan gets current plan with cache and distributed lock to prevent cache stampede
 func CachedGetUserCurrentPlan(userId int) (*UserPlan, error) {
-	// Try cache first
+	// 1. Try cache first
 	plan, err := cacheGetUserCurrentPlan(userId)
 	if err == nil && plan != nil {
 		return plan, nil
 	}
 
-	// Cache miss, fetch from DB
-	plan, err = GetUserCurrentPlan(userId)
-	if err != nil {
-		return nil, err
-	}
+	// 2. Cache miss - try to acquire distributed lock
+	lockKey := fmt.Sprintf(userPlanCacheLockKeyFmt, userId)
+	acquired := common.RedisSetNX(lockKey, "1", 10*time.Second)
 
-	// Update cache asynchronously
-	if plan != nil {
-		gopool.Go(func() {
+	if acquired {
+		// Got the lock - we're responsible for loading from DB
+		defer common.RedisDel(lockKey)
+
+		plan, err = GetUserCurrentPlan(userId)
+		if err != nil {
+			return nil, err
+		}
+
+		// Synchronously update cache before returning
+		if plan != nil {
 			if err := cacheSetUserCurrentPlan(userId, plan); err != nil {
 				common.SysLog(fmt.Sprintf("failed to cache current plan: %v", err))
 			}
-		})
+		}
+
+		return plan, nil
 	}
 
-	return plan, nil
+	// 3. Didn't get lock - wait briefly and retry cache
+	time.Sleep(50 * time.Millisecond)
+	plan, err = cacheGetUserCurrentPlan(userId)
+	if err == nil && plan != nil {
+		return plan, nil
+	}
+
+	// 4. Still no cache - fallback to DB query (the lock holder may have failed)
+	return GetUserCurrentPlan(userId)
 }
 
 // cacheDecrUserPlanQuota decrements quota in cache

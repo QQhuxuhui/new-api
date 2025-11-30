@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/go-redis/redis/v8"
 )
 
-// ConcurrencyLeakThreshold 并发泄漏判断阈值（默认 2 分钟）
-// 如果并发计数存在超过此时间，认为是泄漏
-var ConcurrencyLeakThreshold = 2 * time.Minute
+// ConcurrencyLeakThreshold 并发泄漏判断阈值
+// 默认为 StreamingTimeout + 60秒缓冲，确保长时间流式请求不会被误清理
+var ConcurrencyLeakThreshold time.Duration
 
 // loadLeakThresholdFromEnv 从环境变量加载阈值配置
 // 必须在 .env 加载后调用，因此放在 StartConcurrencyCleanupTask 中而非 init()
@@ -22,8 +23,13 @@ func loadLeakThresholdFromEnv() {
 	if thresholdStr := os.Getenv("CONCURRENCY_LEAK_THRESHOLD"); thresholdStr != "" {
 		if seconds, err := strconv.Atoi(thresholdStr); err == nil && seconds > 0 {
 			ConcurrencyLeakThreshold = time.Duration(seconds) * time.Second
+			return
 		}
 	}
+
+	// 默认值：StreamingTimeout + 60秒缓冲
+	// 确保长时间流式请求（最长 StreamingTimeout）不会被误判为泄漏
+	ConcurrencyLeakThreshold = time.Duration(constant.StreamingTimeout+60) * time.Second
 }
 
 // StartConcurrencyCleanupTask 启动定期清理任务，清理可能泄漏的并发计数

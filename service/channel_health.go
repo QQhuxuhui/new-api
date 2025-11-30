@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/go-redis/redis/v8"
 )
 
 const (
@@ -85,6 +86,7 @@ func RecordChannelRequest(channelID int, isSuccess bool) error {
 }
 
 // GetWindowStats retrieves statistics for the current 60-second sliding window
+// Optimized with Redis Pipeline to reduce round trips from 12 to 1
 func GetWindowStats(channelID int) (totalCount int64, failureCount int64) {
 	ctx := context.Background()
 	rdb := common.RDB
@@ -95,21 +97,94 @@ func GetWindowStats(channelID int) (totalCount int64, failureCount int64) {
 
 	currentBucket := time.Now().Unix() / int64(BucketSize.Seconds())
 
-	// Sum last 6 buckets (covering 60 seconds)
+	// Use Pipeline to batch all GET operations into single network round trip
+	pipe := rdb.Pipeline()
+	totalCmds := make([]*redis.StringCmd, BucketCount)
+	failureCmds := make([]*redis.StringCmd, BucketCount)
+
+	// Queue all GET commands
 	for i := int64(0); i < BucketCount; i++ {
 		bucket := currentBucket - i
-
 		totalKey := fmt.Sprintf(keyBucketTotal, channelID, bucket)
 		failureKey := fmt.Sprintf(keyBucketFailures, channelID, bucket)
 
-		total, _ := rdb.Get(ctx, totalKey).Int64()
-		failures, _ := rdb.Get(ctx, failureKey).Int64()
+		totalCmds[i] = pipe.Get(ctx, totalKey)
+		failureCmds[i] = pipe.Get(ctx, failureKey)
+	}
 
-		totalCount += total
-		failureCount += failures
+	// Execute all commands in single round trip
+	_, _ = pipe.Exec(ctx)
+
+	// Parse results
+	for i := int64(0); i < BucketCount; i++ {
+		if total, err := totalCmds[i].Int64(); err == nil {
+			totalCount += total
+		}
+		if failures, err := failureCmds[i].Int64(); err == nil {
+			failureCount += failures
+		}
 	}
 
 	return totalCount, failureCount
+}
+
+// WindowStats holds statistics for a single channel's window
+type WindowStats struct {
+	TotalCount   int64
+	FailureCount int64
+}
+
+// GetBatchWindowStats retrieves statistics for multiple channels in a single Pipeline operation
+// Reduces N Redis operations to 1 for N channels
+func GetBatchWindowStats(channelIDs []int) map[int]*WindowStats {
+	ctx := context.Background()
+	rdb := common.RDB
+
+	if rdb == nil || len(channelIDs) == 0 {
+		return make(map[int]*WindowStats)
+	}
+
+	currentBucket := time.Now().Unix() / int64(BucketSize.Seconds())
+
+	// Use Pipeline to batch all GET operations for all channels
+	pipe := rdb.Pipeline()
+	cmdMap := make(map[int][]*redis.StringCmd) // channelID -> [total0, fail0, total1, fail1, ...]
+
+	for _, channelID := range channelIDs {
+		cmds := make([]*redis.StringCmd, BucketCount*2)
+		for i := int64(0); i < BucketCount; i++ {
+			bucket := currentBucket - i
+			totalKey := fmt.Sprintf(keyBucketTotal, channelID, bucket)
+			failureKey := fmt.Sprintf(keyBucketFailures, channelID, bucket)
+
+			cmds[i*2] = pipe.Get(ctx, totalKey)
+			cmds[i*2+1] = pipe.Get(ctx, failureKey)
+		}
+		cmdMap[channelID] = cmds
+	}
+
+	// Execute all commands in single round trip
+	_, _ = pipe.Exec(ctx)
+
+	// Parse results
+	result := make(map[int]*WindowStats)
+	for channelID, cmds := range cmdMap {
+		var totalCount, failureCount int64
+		for i := int64(0); i < BucketCount; i++ {
+			if total, err := cmds[i*2].Int64(); err == nil {
+				totalCount += total
+			}
+			if failures, err := cmds[i*2+1].Int64(); err == nil {
+				failureCount += failures
+			}
+		}
+		result[channelID] = &WindowStats{
+			TotalCount:   totalCount,
+			FailureCount: failureCount,
+		}
+	}
+
+	return result
 }
 
 // IsHighFailureRate determines if current window is in high-failure-rate state
@@ -342,6 +417,105 @@ func GetChannelHealth(channelID int) (*ChannelHealth, error) {
 	}
 
 	return health, nil
+}
+
+// GetBatchChannelHealth retrieves full health state for multiple channels using Pipeline
+// Optimized to reduce Redis operations from ~7N to 1 for N channels
+func GetBatchChannelHealth(channelIDs []int) ([]*ChannelHealth, error) {
+	ctx := context.Background()
+	rdb := common.RDB
+
+	if rdb == nil {
+		return nil, fmt.Errorf("redis not available")
+	}
+
+	if len(channelIDs) == 0 {
+		return []*ChannelHealth{}, nil
+	}
+
+	// First, get batch window stats (already optimized with Pipeline)
+	windowStatsMap := GetBatchWindowStats(channelIDs)
+
+	// Use Pipeline to batch all remaining Redis GET operations
+	pipe := rdb.Pipeline()
+	type channelCmds struct {
+		failures       *redis.StringCmd
+		suspendedTTL   *redis.DurationCmd
+		suspensionCount *redis.StringCmd
+		lastFailure    *redis.StringCmd
+		lastSuccess    *redis.StringCmd
+		totalFailures  *redis.StringCmd
+		totalSuccesses *redis.StringCmd
+	}
+	cmdMap := make(map[int]*channelCmds)
+
+	for _, channelID := range channelIDs {
+		cmds := &channelCmds{
+			failures:       pipe.Get(ctx, fmt.Sprintf(keyFailures, channelID)),
+			suspendedTTL:   pipe.TTL(ctx, fmt.Sprintf(keySuspended, channelID)),
+			suspensionCount: pipe.Get(ctx, fmt.Sprintf(keySuspensionCount, channelID)),
+			lastFailure:    pipe.Get(ctx, fmt.Sprintf(keyLastFailure, channelID)),
+			lastSuccess:    pipe.Get(ctx, fmt.Sprintf(keyLastSuccess, channelID)),
+			totalFailures:  pipe.Get(ctx, fmt.Sprintf(keyTotalFailures, channelID)),
+			totalSuccesses: pipe.Get(ctx, fmt.Sprintf(keyTotalSuccesses, channelID)),
+		}
+		cmdMap[channelID] = cmds
+	}
+
+	// Execute all Redis commands in single round trip
+	_, _ = pipe.Exec(ctx)
+
+	// Build results
+	results := make([]*ChannelHealth, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		health := &ChannelHealth{
+			ChannelID: channelID,
+		}
+
+		// Get window stats from batch result
+		if stats, ok := windowStatsMap[channelID]; ok {
+			health.WindowTotalRequests = stats.TotalCount
+			health.WindowFailureCount = stats.FailureCount
+			if stats.TotalCount > 0 {
+				health.CurrentFailureRate = float64(stats.FailureCount) / float64(stats.TotalCount)
+			}
+		}
+
+		// Parse Pipeline results
+		cmds := cmdMap[channelID]
+		if failures, err := cmds.failures.Int(); err == nil {
+			health.ConsecutiveFailures = failures
+		}
+
+		if ttl, err := cmds.suspendedTTL.Result(); err == nil && ttl > 0 {
+			health.IsSuspended = true
+			health.SuspendedUntil = time.Now().Add(ttl)
+		}
+
+		if count, err := cmds.suspensionCount.Int(); err == nil {
+			health.SuspensionCount = count
+		}
+
+		if ts, err := cmds.lastFailure.Int64(); err == nil {
+			health.LastFailureTime = time.Unix(ts, 0)
+		}
+
+		if ts, err := cmds.lastSuccess.Int64(); err == nil {
+			health.LastSuccessTime = time.Unix(ts, 0)
+		}
+
+		if total, err := cmds.totalFailures.Int64(); err == nil {
+			health.TotalFailures = total
+		}
+
+		if total, err := cmds.totalSuccesses.Int64(); err == nil {
+			health.TotalSuccesses = total
+		}
+
+		results = append(results, health)
+	}
+
+	return results, nil
 }
 
 // suspendChannel temporarily suspends channel with exponential backoff

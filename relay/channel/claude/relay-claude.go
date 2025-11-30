@@ -610,12 +610,14 @@ func FormatClaudeResponseInfo(requestMode int, claudeResponse *dto.ClaudeRespons
 			}
 		} else if claudeResponse.Type == "message_delta" {
 			// 最终的usage获取
-			if claudeResponse.Usage.InputTokens > 0 {
-				// 不叠加，只取最新的
-				claudeInfo.Usage.PromptTokens = claudeResponse.Usage.InputTokens
+			if claudeResponse.Usage != nil {
+				if claudeResponse.Usage.InputTokens > 0 {
+					// 不叠加，只取最新的
+					claudeInfo.Usage.PromptTokens = claudeResponse.Usage.InputTokens
+				}
+				claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
+				claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
 			}
-			claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
-			claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
 
 			// 判断是否完整
 			claudeInfo.Done = true
@@ -739,13 +741,16 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		claudeInfo.Usage.CompletionTokens = completionTokens
 		claudeInfo.Usage.TotalTokens = info.PromptTokens + completionTokens
 	} else {
-		claudeInfo.Usage.PromptTokens = claudeResponse.Usage.InputTokens
-		claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
-		claudeInfo.Usage.TotalTokens = claudeResponse.Usage.InputTokens + claudeResponse.Usage.OutputTokens
-		claudeInfo.Usage.PromptTokensDetails.CachedTokens = claudeResponse.Usage.CacheReadInputTokens
-		claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens = claudeResponse.Usage.CacheCreationInputTokens
-		claudeInfo.Usage.ClaudeCacheCreation5mTokens = claudeResponse.Usage.GetCacheCreation5mTokens()
-		claudeInfo.Usage.ClaudeCacheCreation1hTokens = claudeResponse.Usage.GetCacheCreation1hTokens()
+		// 防止 nil pointer dereference：某些 Claude 响应可能不包含 usage 字段
+		if claudeResponse.Usage != nil {
+			claudeInfo.Usage.PromptTokens = claudeResponse.Usage.InputTokens
+			claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
+			claudeInfo.Usage.TotalTokens = claudeResponse.Usage.InputTokens + claudeResponse.Usage.OutputTokens
+			claudeInfo.Usage.PromptTokensDetails.CachedTokens = claudeResponse.Usage.CacheReadInputTokens
+			claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens = claudeResponse.Usage.CacheCreationInputTokens
+			claudeInfo.Usage.ClaudeCacheCreation5mTokens = claudeResponse.Usage.GetCacheCreation5mTokens()
+			claudeInfo.Usage.ClaudeCacheCreation1hTokens = claudeResponse.Usage.GetCacheCreation1hTokens()
+		}
 	}
 	var responseData []byte
 	switch info.RelayFormat {
@@ -760,7 +765,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		responseData = data
 	}
 
-	if claudeResponse.Usage.ServerToolUse != nil && claudeResponse.Usage.ServerToolUse.WebSearchRequests > 0 {
+	if claudeResponse.Usage != nil && claudeResponse.Usage.ServerToolUse != nil && claudeResponse.Usage.ServerToolUse.WebSearchRequests > 0 {
 		c.Set("claude_web_search_requests", claudeResponse.Usage.ServerToolUse.WebSearchRequests)
 	}
 

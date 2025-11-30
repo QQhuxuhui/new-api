@@ -1,11 +1,18 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 )
+
+// RateLimitRule defines a rate limit rule for a plan
+type RateLimitRule struct {
+	WindowHours int     `json:"window_hours"` // Time window in hours
+	MaxAmount   float64 `json:"max_amount"`   // Maximum amount in USD
+}
 
 // Plan represents a plan template (admin-managed)
 type Plan struct {
@@ -15,9 +22,12 @@ type Plan struct {
 	Description          string `json:"description" gorm:"type:text"`
 	Type                 string `json:"type" gorm:"type:varchar(32);not null"`    // 'subscription', 'consumption', 'trial'
 	Priority             int    `json:"priority" gorm:"default:0"`                // Higher = preferred
-	ChannelGroup         string `json:"channel_group" gorm:"type:varchar(64)"`    // Maps to Channel.Group
+	ChannelGroup         string `json:"channel_group" gorm:"type:varchar(64)"`    // Maps to Channel.Group (deprecated, use ChannelGroups)
+	ChannelGroups        string `json:"channel_groups" gorm:"type:text"`          // JSON array of channel groups, e.g., ["group1", "group2"]
 	DefaultQuota         int64  `json:"default_quota" gorm:"default:0"`           // Default quota for new assignments
 	ValidityDays         int    `json:"validity_days" gorm:"default:0"`           // 0 = permanent
+	DailyQuotaLimit      int64  `json:"daily_quota_limit" gorm:"default:0"`       // Daily quota limit for subscription plans (0 = no limit)
+	RateLimitRules       string `json:"rate_limit_rules" gorm:"type:text"`        // JSON array of rate limit rules
 	DefaultAllowSwitch   int    `json:"default_allow_switch" gorm:"default:0"`    // Default permission for user to switch
 	DefaultAllowToggle   int    `json:"default_allow_toggle" gorm:"default:1"`    // Default permission for user to toggle auto-switch
 	Settings             string `json:"settings" gorm:"type:text"`                // JSON for extensibility
@@ -42,6 +52,89 @@ const (
 
 func (p *Plan) TableName() string {
 	return "plans"
+}
+
+// GetChannelGroupsList returns the list of channel groups for the plan
+// It prefers ChannelGroups (new) over ChannelGroup (deprecated)
+func (p *Plan) GetChannelGroupsList() []string {
+	// Try new ChannelGroups field first
+	if p.ChannelGroups != "" {
+		var groups []string
+		if err := json.Unmarshal([]byte(p.ChannelGroups), &groups); err == nil && len(groups) > 0 {
+			return groups
+		}
+	}
+	// Fallback to deprecated ChannelGroup field
+	if p.ChannelGroup != "" {
+		return []string{p.ChannelGroup}
+	}
+	return []string{}
+}
+
+// SetChannelGroupsList sets the channel groups for the plan
+func (p *Plan) SetChannelGroupsList(groups []string) error {
+	if len(groups) == 0 {
+		p.ChannelGroups = ""
+		return nil
+	}
+	data, err := json.Marshal(groups)
+	if err != nil {
+		return err
+	}
+	p.ChannelGroups = string(data)
+	// Also set ChannelGroup for backward compatibility
+	if len(groups) > 0 {
+		p.ChannelGroup = groups[0]
+	}
+	return nil
+}
+
+// HasChannelGroup checks if the plan has the specified channel group
+func (p *Plan) HasChannelGroup(group string) bool {
+	groups := p.GetChannelGroupsList()
+	for _, g := range groups {
+		if g == group {
+			return true
+		}
+	}
+	return false
+}
+
+// GetRateLimitRules returns the rate limit rules for the plan
+func (p *Plan) GetRateLimitRules() []RateLimitRule {
+	if p.RateLimitRules == "" {
+		return []RateLimitRule{}
+	}
+	var rules []RateLimitRule
+	if err := json.Unmarshal([]byte(p.RateLimitRules), &rules); err != nil {
+		return []RateLimitRule{}
+	}
+	return rules
+}
+
+// SetRateLimitRules sets the rate limit rules for the plan
+func (p *Plan) SetRateLimitRules(rules []RateLimitRule) error {
+	if len(rules) == 0 {
+		p.RateLimitRules = ""
+		return nil
+	}
+	data, err := json.Marshal(rules)
+	if err != nil {
+		return err
+	}
+	p.RateLimitRules = string(data)
+	return nil
+}
+
+// HasDailyQuotaLimit checks if the plan has a daily quota limit
+// Daily quota limit only applies to subscription plans
+func (p *Plan) HasDailyQuotaLimit() bool {
+	return p.Type == PlanTypeSubscription && p.DailyQuotaLimit > 0
+}
+
+// HasRateLimits checks if the plan has any rate limit rules
+func (p *Plan) HasRateLimits() bool {
+	return len(p.GetRateLimitRules()) > 0
 }
 
 // Insert creates a new plan

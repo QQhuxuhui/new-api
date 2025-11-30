@@ -373,6 +373,23 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		if !ratio.IsZero() && quota == 0 {
 			quota = 1
 		}
+
+		// Check daily quota limit before updating stats (prevents excessive over-quota)
+		// Note: Request has already been served, but we can prevent recording excessive usage
+		// IMPORTANT: Use actualQuota for daily limit check
+		if relayInfo.UserPlanId > 0 {
+			actualQuota := int64(quota + relayInfo.FinalPreConsumedQuota)
+			if actualQuota > 0 {
+				if err := service.CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, actualQuota); err != nil {
+					// Daily quota would be exceeded - skip quota consumption and log error
+					// Request has already succeeded, but we won't charge the user
+					logger.LogError(ctx, fmt.Sprintf("daily quota check failed, skipping quota consumption: %v", err))
+					service.ReturnPreConsumedQuota(ctx, relayInfo)
+					return
+				}
+			}
+		}
+
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
