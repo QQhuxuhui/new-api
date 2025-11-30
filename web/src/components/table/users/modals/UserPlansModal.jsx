@@ -94,7 +94,8 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
       const res = await API.get('/api/plan/');
       const { success, data } = res.data;
       if (success) {
-        setAllPlans(data || []);
+        // API returns paginated data, extract items array
+        setAllPlans(data?.items || []);
       }
     } catch (e) {
       // Silent fail for plan list

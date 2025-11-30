@@ -55,12 +55,14 @@ export const useSidebar = () => {
     personal: {
       enabled: true,
       topup: true,
+      myplans: true,
       personal: true,
     },
     admin: {
       enabled: true,
       channel: true,
       models: true,
+      plan: true,
       redemption: true,
       user: true,
       setting: true,
@@ -68,12 +70,31 @@ export const useSidebar = () => {
     },
   };
 
+  // 深度合并配置，确保缺失的键使用默认值
+  const mergeWithDefaults = (config, defaults) => {
+    const result = {};
+    Object.keys(defaults).forEach((sectionKey) => {
+      const defaultSection = defaults[sectionKey];
+      const configSection = config?.[sectionKey] || {};
+      result[sectionKey] = {};
+      Object.keys(defaultSection).forEach((moduleKey) => {
+        // 如果配置中存在该键，使用配置值；否则使用默认值
+        result[sectionKey][moduleKey] =
+          configSection[moduleKey] !== undefined
+            ? configSection[moduleKey]
+            : defaultSection[moduleKey];
+      });
+    });
+    return result;
+  };
+
   // 获取管理员配置
   const adminConfig = useMemo(() => {
     if (statusState?.status?.SidebarModulesAdmin) {
       try {
         const config = JSON.parse(statusState.status.SidebarModulesAdmin);
-        return config;
+        // 与默认配置合并，确保新增的模块有默认值
+        return mergeWithDefaults(config, defaultAdminConfig);
       } catch (error) {
         return defaultAdminConfig;
       }

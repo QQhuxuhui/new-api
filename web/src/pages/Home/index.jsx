@@ -162,10 +162,10 @@ const Home = () => {
                   <h1
                     className={`text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold text-semi-color-text-0 leading-tight ${isChinese ? 'tracking-wide md:tracking-wider' : ''}`}
                   >
-                    <span className='shine-text'>Claude Code/Codex中转</span>
+                    <span className='shine-text'>Spark Code</span>
                   </h1>
                   <p className='text-base md:text-lg lg:text-xl text-semi-color-text-1 mt-4 md:mt-6 max-w-xl'>
-                    {t('更好的价格，更好的稳定性')}
+                    {t('Claude Code/Codex中转，更好的价格，更好的稳定性')}
                   </p>
                   {/* 主要操作按钮组 */}
                   <div className='flex flex-col items-center justify-center gap-6 mt-8 md:mt-10 w-full max-w-2xl'>

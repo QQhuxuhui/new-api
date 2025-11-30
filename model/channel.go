@@ -1057,9 +1057,9 @@ func GetDistinctChannelGroups() ([]string, error) {
 	var groups []string
 	err := DB.Model(&Channel{}).
 		Where("status = ?", common.ChannelStatusEnabled).
-		Where("`group` IS NOT NULL AND `group` != ''").
-		Distinct("`group`").
-		Pluck("`group`", &groups).Error
+		Where("\"group\" IS NOT NULL AND \"group\" != ''").
+		Distinct("\"group\"").
+		Pluck("\"group\"", &groups).Error
 	if err != nil {
 		return nil, err
 	}

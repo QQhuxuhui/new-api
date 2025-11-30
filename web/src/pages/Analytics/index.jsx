@@ -42,7 +42,7 @@ import {
   IconPriceTag,
   IconServer,
   IconAlertTriangle,
-  IconDollarStroked,
+  IconCoinMoneyStroked,
 } from '@douyinfe/semi-icons';
 import { useAnalyticsData } from '../../hooks/analytics/useAnalyticsData';
 import BalanceAnalysisTab from './components/BalanceAnalysisTab';
@@ -448,7 +448,7 @@ const Analytics = () => {
           </TabPane>
 
           <TabPane
-            tab={<span><IconDollarStroked className="mr-1" />余额分析</span>}
+            tab={<span><IconCoinMoneyStroked className="mr-1" />余额分析</span>}
             itemKey="balance"
           >
             <BalanceAnalysisTab timeRange={timeRange} />

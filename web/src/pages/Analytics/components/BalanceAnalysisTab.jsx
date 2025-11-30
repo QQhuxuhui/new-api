@@ -29,7 +29,7 @@ import {
   Spin,
 } from '@douyinfe/semi-ui';
 import {
-  IconDollarStroked,
+  IconCoinMoneyStroked,
   IconUserCircle,
   IconAlertTriangle,
 } from '@douyinfe/semi-icons';
@@ -201,7 +201,7 @@ const BalanceAnalysisTab = ({ timeRange }) => {
             <Statistic
               title='Total Balance'
               value={formatUSDAmount(overview.total_balance_usd)}
-              prefix={<IconDollarStroked />}
+              prefix={<IconCoinMoneyStroked />}
               valueColor='#52c41a'
             />
           </Card>
