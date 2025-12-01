@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 
@@ -1054,15 +1055,38 @@ func CountChannelsGroupByType() (map[int64]int64, error) {
 
 // GetDistinctChannelGroups returns all distinct channel groups from enabled channels
 func GetDistinctChannelGroups() ([]string, error) {
-	var groups []string
+	var rawGroups []string
 	err := DB.Model(&Channel{}).
 		Where("status = ?", common.ChannelStatusEnabled).
 		Where("\"group\" IS NOT NULL AND \"group\" != ''").
 		Distinct("\"group\"").
-		Pluck("\"group\"", &groups).Error
+		Pluck("\"group\"", &rawGroups).Error
 	if err != nil {
 		return nil, err
 	}
+
+	// Split comma-separated groups and deduplicate
+	groupSet := make(map[string]bool)
+	for _, rawGroup := range rawGroups {
+		// Split by comma in case a channel belongs to multiple groups
+		parts := strings.Split(rawGroup, ",")
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				groupSet[trimmed] = true
+			}
+		}
+	}
+
+	// Convert map to slice
+	groups := make([]string, 0, len(groupSet))
+	for g := range groupSet {
+		groups = append(groups, g)
+	}
+
+	// Sort for consistent ordering
+	sort.Strings(groups)
+
 	// Add "default" if not present (channels without group use default)
 	hasDefault := false
 	for _, g := range groups {
