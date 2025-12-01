@@ -210,6 +210,75 @@ export const AnalyticsAPI = {
       throw error;
     }
   },
+
+  /**
+   * Fetch channel cost analysis
+   * @param {string} timeRange - Time range: '1d', '7d', '30d', '90d'
+   * @param {number|null} channelId - Optional channel ID filter
+   * @returns {Promise<Object>}
+   */
+  async fetchChannelCostAnalysis(timeRange = '7d', channelId = null) {
+    try {
+      const params = { time_range: timeRange };
+      if (channelId !== null) {
+        params.channel_id = channelId;
+      }
+      const response = await API.get(`${BASE_URL}/channel-cost-analysis`, {
+        params,
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(
+        response.data.message || 'Failed to fetch channel cost analysis'
+      );
+    } catch (error) {
+      showError(error.message || 'Failed to fetch channel cost analysis');
+      throw error;
+    }
+  },
+
+  /**
+   * Fetch cost trend (daily revenue/cost/profit)
+   * @param {string} timeRange - Time range
+   * @returns {Promise<Object>}
+   */
+  async fetchCostTrend(timeRange = '7d') {
+    try {
+      const response = await API.get(`${BASE_URL}/cost-trend`, {
+        params: { time_range: timeRange },
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data.message || 'Failed to fetch cost trend');
+    } catch (error) {
+      showError(error.message || 'Failed to fetch cost trend');
+      throw error;
+    }
+  },
+
+  /**
+   * Fetch model profitability analysis
+   * @param {string} timeRange - Time range
+   * @returns {Promise<Array>}
+   */
+  async fetchModelProfitability(timeRange = '7d') {
+    try {
+      const response = await API.get(`${BASE_URL}/model-cost-analysis`, {
+        params: { time_range: timeRange },
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(
+        response.data.message || 'Failed to fetch model profitability'
+      );
+    } catch (error) {
+      showError(error.message || 'Failed to fetch model profitability');
+      throw error;
+    }
+  },
 };
 
 export default AnalyticsAPI;
