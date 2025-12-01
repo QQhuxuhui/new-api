@@ -13,14 +13,15 @@ import (
 
 // PlanSelectionResult contains the result of plan selection
 type PlanSelectionResult struct {
-	UserPlan     *model.UserPlan
-	Plan         *model.Plan
-	PlanId       int    // Plan ID for context
-	UserPlanId   int    // UserPlan ID for context
-	PlanName     string // Plan name for logging
-	ChannelGroup string
-	Switched     bool // True if auto-switched to a higher priority plan
-	AutoSwitched bool // Alias for Switched, for clearer context key
+	UserPlan       *model.UserPlan
+	Plan           *model.Plan
+	PlanId         int      // Plan ID for context
+	UserPlanId     int      // UserPlan ID for context
+	PlanName       string   // Plan name for logging
+	ChannelGroup   string   // Deprecated: use ChannelGroups
+	ChannelGroups  []string // List of allowed channel groups
+	Switched       bool     // True if auto-switched to a higher priority plan
+	AutoSwitched   bool     // Alias for Switched, for clearer context key
 }
 
 // ErrNoPlanAvailable indicates no valid plan is available
@@ -31,6 +32,37 @@ var ErrPlanQuotaExhausted = errors.New("current plan quota exhausted")
 
 // ErrPlanLocked indicates the plan is locked by admin
 var ErrPlanLocked = errors.New("plan is locked by administrator")
+
+// ErrDailyQuotaExhausted indicates the daily quota limit has been reached
+var ErrDailyQuotaExhausted = errors.New("daily quota limit exhausted")
+
+// RateLimitError represents a rate limit error with wait time information
+type RateLimitError struct {
+	WaitSeconds int64
+	Message     string
+}
+
+func (e *RateLimitError) Error() string {
+	return e.Message
+}
+
+// newPlanSelectionResult creates a PlanSelectionResult from a UserPlan
+func newPlanSelectionResult(up *model.UserPlan, switched bool) *PlanSelectionResult {
+	result := &PlanSelectionResult{
+		UserPlan:     up,
+		Plan:         up.Plan,
+		PlanId:       up.PlanId,
+		UserPlanId:   up.Id,
+		Switched:     switched,
+		AutoSwitched: switched,
+	}
+	if up.Plan != nil {
+		result.PlanName = up.Plan.Name
+		result.ChannelGroup = up.Plan.ChannelGroup // Deprecated, keep for compatibility
+		result.ChannelGroups = up.Plan.GetChannelGroupsList()
+	}
+	return result
+}
 
 // SelectPlanForRequest selects the appropriate plan for a user request
 // This is the main entry point for plan-based routing
@@ -67,16 +99,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			common.SysLog(fmt.Sprintf("failed to set initial current plan: %v", err))
 		}
 
-		return &PlanSelectionResult{
-			UserPlan:     selectedPlan,
-			Plan:         selectedPlan.Plan,
-			PlanId:       selectedPlan.PlanId,
-			UserPlanId:   selectedPlan.Id,
-			PlanName:     selectedPlan.Plan.Name,
-			ChannelGroup: selectedPlan.Plan.ChannelGroup,
-			Switched:     true,
-			AutoSwitched: true,
-		}, nil
+		return newPlanSelectionResult(selectedPlan, true), nil
 	}
 
 	// 4. Check if locked
@@ -96,16 +119,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 				} else {
 					common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to higher priority plan %d",
 						userId, currentPlan.PlanId, higherPlan.PlanId))
-					return &PlanSelectionResult{
-						UserPlan:     higherPlan,
-						Plan:         higherPlan.Plan,
-						PlanId:       higherPlan.PlanId,
-						UserPlanId:   higherPlan.Id,
-						PlanName:     higherPlan.Plan.Name,
-						ChannelGroup: higherPlan.Plan.ChannelGroup,
-						Switched:     true,
-						AutoSwitched: true,
-					}, nil
+					return newPlanSelectionResult(higherPlan, true), nil
 				}
 			}
 
@@ -117,16 +131,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 				} else {
 					common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to available plan %d",
 						userId, currentPlan.PlanId, anyPlanWithQuota.PlanId))
-					return &PlanSelectionResult{
-						UserPlan:     anyPlanWithQuota,
-						Plan:         anyPlanWithQuota.Plan,
-						PlanId:       anyPlanWithQuota.PlanId,
-						UserPlanId:   anyPlanWithQuota.Id,
-						PlanName:     anyPlanWithQuota.Plan.Name,
-						ChannelGroup: anyPlanWithQuota.Plan.ChannelGroup,
-						Switched:     true,
-						AutoSwitched: true,
-					}, nil
+					return newPlanSelectionResult(anyPlanWithQuota, true), nil
 				}
 			}
 		}
@@ -145,31 +150,13 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			} else {
 				common.SysLog(fmt.Sprintf("user %d auto-switched from plan %d to plan %d",
 					userId, currentPlan.PlanId, higherPlan.PlanId))
-				return &PlanSelectionResult{
-					UserPlan:     higherPlan,
-					Plan:         higherPlan.Plan,
-					PlanId:       higherPlan.PlanId,
-					UserPlanId:   higherPlan.Id,
-					PlanName:     higherPlan.Plan.Name,
-					ChannelGroup: higherPlan.Plan.ChannelGroup,
-					Switched:     true,
-					AutoSwitched: true,
-				}, nil
+				return newPlanSelectionResult(higherPlan, true), nil
 			}
 		}
 	}
 
 	// 7. Return current plan
-	return &PlanSelectionResult{
-		UserPlan:     currentPlan,
-		Plan:         currentPlan.Plan,
-		PlanId:       currentPlan.PlanId,
-		UserPlanId:   currentPlan.Id,
-		PlanName:     currentPlan.Plan.Name,
-		ChannelGroup: currentPlan.Plan.ChannelGroup,
-		Switched:     false,
-		AutoSwitched: false,
-	}, nil
+	return newPlanSelectionResult(currentPlan, false), nil
 }
 
 // selectHighestPriorityWithQuota selects the highest priority plan that has available quota
@@ -593,4 +580,117 @@ func LogPlanQuotaChange(userId, planId, userPlanId int, planName string, amount,
 	}
 
 	LogPlanSelectionEvent(event)
+}
+
+// SelectPlanWithQuotaChecks selects a plan and validates rate limits and daily quota
+// This is the enhanced version that includes all quota checks
+// Parameters:
+//   - userId: the user ID
+//   - modelName: the model being requested
+//   - estimatedCostUSD: estimated cost of the request in USD (for rate limit check)
+//   - estimatedQuota: estimated quota consumption (for daily quota check)
+func SelectPlanWithQuotaChecks(userId int, modelName string, estimatedCostUSD float64, estimatedQuota int64) (*PlanSelectionResult, error) {
+	// First, select the plan using existing logic
+	result, err := SelectPlanForRequest(userId, modelName)
+	if err != nil {
+		return nil, err
+	}
+
+	plan := result.Plan
+	if plan == nil {
+		return result, nil
+	}
+
+	// Check rate limits first (most restrictive)
+	if plan.HasRateLimits() {
+		canProceed, waitSec, message := CheckRateLimits(plan, result.UserPlanId, estimatedCostUSD)
+		if !canProceed {
+			return nil, &RateLimitError{
+				WaitSeconds: waitSec,
+				Message:     message,
+			}
+		}
+	}
+
+	// Check daily quota limit (subscription plans only)
+	if plan.HasDailyQuotaLimit() {
+		canProceed, _, err := CheckDailyQuota(plan, result.UserPlanId, estimatedQuota)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("daily quota check error for user %d: %v", userId, err))
+			// Allow on error (graceful degradation)
+		} else if !canProceed {
+			return nil, ErrDailyQuotaExhausted
+		}
+	}
+
+	return result, nil
+}
+
+// PostConsumePlanQuotaWithTracking consumes quota and records for rate limiting
+// This enhanced version also records consumption for rate limit tracking
+// Parameters:
+//   - ctx: gin context containing plan_id, user_plan_id, and plan info
+//   - quota: amount of quota to consume
+//   - costUSD: cost in USD for rate limit tracking
+//   - requestId: unique request ID for rate limit tracking
+func PostConsumePlanQuotaWithTracking(ctx interface {
+	Get(key string) (value interface{}, exists bool)
+}, quota int, costUSD float64, requestId string) error {
+	// Get user_plan_id from context
+	userPlanIdVal, exists := ctx.Get(string(constant.ContextKeyUserPlanId))
+	if !exists || userPlanIdVal == nil {
+		return nil
+	}
+
+	userPlanId, ok := userPlanIdVal.(int)
+	if !ok || userPlanId <= 0 {
+		return nil
+	}
+
+	// Consume from user_plan quota
+	if err := model.DecreaseUserPlanQuota(userPlanId, int64(quota)); err != nil {
+		return err
+	}
+
+	// Get plan info for tracking decisions
+	planIdVal, _ := ctx.Get(string(constant.ContextKeyPlanId))
+	planId, _ := planIdVal.(int)
+
+	if planId > 0 {
+		plan, err := model.GetPlanById(planId)
+		if err == nil && plan != nil {
+			// Record daily quota usage (subscription plans only)
+			if plan.HasDailyQuotaLimit() {
+				if err := IncrDailyQuotaUsage(userPlanId, int64(quota)); err != nil {
+					common.SysLog(fmt.Sprintf("failed to record daily quota for user_plan %d: %v", userPlanId, err))
+				}
+			}
+
+			// Record rate limit consumption (if rate limits configured)
+			if plan.HasRateLimits() && costUSD > 0 {
+				if err := RecordConsumptionForRateLimit(userPlanId, costUSD, requestId); err != nil {
+					common.SysLog(fmt.Sprintf("failed to record rate limit for user_plan %d: %v", userPlanId, err))
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// HasChannelGroupAccess checks if a plan selection result allows access to a specific channel group
+func (r *PlanSelectionResult) HasChannelGroupAccess(channelGroup string) bool {
+	if r == nil || r.Plan == nil {
+		return false
+	}
+	// If no channel groups specified, allow all
+	if len(r.ChannelGroups) == 0 {
+		return true
+	}
+	for _, g := range r.ChannelGroups {
+		if g == channelGroup || g == "" {
+			return true
+		}
+	}
+	return false
 }

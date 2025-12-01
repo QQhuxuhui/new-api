@@ -134,6 +134,7 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.GET("/search", controller.SearchChannels)
 			channelRoute.GET("/models", controller.ChannelListModels)
 			channelRoute.GET("/models_enabled", controller.EnabledListModels)
+			channelRoute.GET("/groups", controller.GetChannelGroups) // Get all distinct channel groups
 			channelRoute.GET("/:id", controller.GetChannel)
 			channelRoute.GET("/:id/concurrency", controller.GetChannelConcurrency)
 			channelRoute.GET("/:id/health", controller.GetChannelHealth)
@@ -305,6 +306,7 @@ func SetApiRouter(router *gin.Engine) {
 			userPlanAdminRoute.POST("/:id/unlock", controller.AdminUnlockUserPlan)
 			userPlanAdminRoute.PUT("/:id/quota", controller.AdminAdjustQuota)
 			userPlanAdminRoute.POST("/:id/add_quota", controller.AdminAddQuota)
+			userPlanAdminRoute.GET("/:id/quota-status", controller.GetUserPlanQuotaStatus)
 		}
 
 		// User plan routes (user)
@@ -314,6 +316,7 @@ func SetApiRouter(router *gin.Engine) {
 			userPlanRoute.GET("/", controller.GetMyPlans)
 			userPlanRoute.POST("/switch", controller.UserSwitchPlan)
 			userPlanRoute.PUT("/:id/auto_switch", controller.UserToggleAutoSwitch)
+			userPlanRoute.GET("/quota-status", controller.GetCurrentPlanQuotaStatus)
 		}
 
 		// Plan migration routes (root admin only)

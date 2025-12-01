@@ -56,12 +56,14 @@ export default function SettingsSidebarModulesAdmin(props) {
     personal: {
       enabled: true,
       topup: true,
+      myplans: true,
       personal: true,
     },
     admin: {
       enabled: true,
       channel: true,
       models: true,
+      plan: true,
       redemption: true,
       user: true,
       analytics: true,
@@ -116,12 +118,14 @@ export default function SettingsSidebarModulesAdmin(props) {
       personal: {
         enabled: true,
         topup: true,
+        myplans: true,
         personal: true,
       },
       admin: {
         enabled: true,
         channel: true,
         models: true,
+        plan: true,
         redemption: true,
         user: true,
         analytics: true,
@@ -167,35 +171,55 @@ export default function SettingsSidebarModulesAdmin(props) {
     }
   }
 
+  // 深度合并配置，确保缺失的键使用默认值
+  const mergeWithDefaults = (config, defaults) => {
+    const result = {};
+    Object.keys(defaults).forEach((sectionKey) => {
+      const defaultSection = defaults[sectionKey];
+      const configSection = config?.[sectionKey] || {};
+      result[sectionKey] = {};
+      Object.keys(defaultSection).forEach((moduleKey) => {
+        result[sectionKey][moduleKey] =
+          configSection[moduleKey] !== undefined
+            ? configSection[moduleKey]
+            : defaultSection[moduleKey];
+      });
+    });
+    return result;
+  };
+
+  // 默认配置
+  const defaultModules = {
+    chat: { enabled: true, playground: true, chat: true },
+    console: {
+      enabled: true,
+      detail: true,
+      token: true,
+      log: true,
+      midjourney: true,
+      task: true,
+    },
+    personal: { enabled: true, topup: true, myplans: true, personal: true },
+    admin: {
+      enabled: true,
+      channel: true,
+      models: true,
+      plan: true,
+      redemption: true,
+      user: true,
+      analytics: true,
+      setting: true,
+    },
+  };
+
   useEffect(() => {
     // 从 props.options 中获取配置
     if (props.options && props.options.SidebarModulesAdmin) {
       try {
         const modules = JSON.parse(props.options.SidebarModulesAdmin);
-        setSidebarModulesAdmin(modules);
+        // 与默认配置合并，确保新增的模块有默认值
+        setSidebarModulesAdmin(mergeWithDefaults(modules, defaultModules));
       } catch (error) {
-        // 使用默认配置
-        const defaultModules = {
-          chat: { enabled: true, playground: true, chat: true },
-          console: {
-            enabled: true,
-            detail: true,
-            token: true,
-            log: true,
-            midjourney: true,
-            task: true,
-          },
-          personal: { enabled: true, topup: true, personal: true },
-          admin: {
-            enabled: true,
-            channel: true,
-            models: true,
-            redemption: true,
-            user: true,
-            analytics: true,
-            setting: true,
-          },
-        };
         setSidebarModulesAdmin(defaultModules);
       }
     }
@@ -238,6 +262,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       description: t('用户个人功能'),
       modules: [
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
+        { key: 'myplans', title: t('我的套餐'), description: t('用户套餐管理') },
         {
           key: 'personal',
           title: t('个人设置'),
@@ -252,6 +277,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       modules: [
         { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
+        { key: 'plan', title: t('套餐管理'), description: t('套餐配置管理') },
         {
           key: 'redemption',
           title: t('兑换码管理'),

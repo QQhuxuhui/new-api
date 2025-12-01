@@ -87,12 +87,21 @@ func GetAllChannels(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
+
+		// Batch query optimization: use single query instead of N+1
+		tagChannelsMap, err := model.GetChannelsByTags(tags, idSort)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+
+		// Process channels from batch result
 		for _, tag := range tags {
 			if tag == nil || *tag == "" {
 				continue
 			}
-			tagChannels, err := model.GetChannelsByTag(*tag, idSort)
-			if err != nil {
+			tagChannels, ok := tagChannelsMap[*tag]
+			if !ok {
 				continue
 			}
 			filtered := make([]*model.Channel, 0)
@@ -278,11 +287,22 @@ func SearchChannels(c *gin.Context) {
 			})
 			return
 		}
+
+		// Batch query optimization: use single query instead of N+1
+		tagChannelsMap, err := model.GetChannelsByTags(tags, idSort)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+
+		// Collect channels from batch result
 		for _, tag := range tags {
 			if tag != nil && *tag != "" {
-				tagChannel, err := model.GetChannelsByTag(*tag, idSort)
-				if err == nil {
-					channelData = append(channelData, tagChannel...)
+				if tagChannels, ok := tagChannelsMap[*tag]; ok {
+					channelData = append(channelData, tagChannels...)
 				}
 			}
 		}
@@ -1696,14 +1716,20 @@ func GetAllChannelsHealth(c *gin.Context) {
 		return
 	}
 
-	// Collect health states for all channels
-	var healthStates []*service.ChannelHealth
-	for _, channel := range channels {
-		health, err := service.GetChannelHealth(channel.Id)
-		if err != nil {
-			continue // Skip channels with errors
-		}
-		healthStates = append(healthStates, health)
+	// Extract channel IDs for batch operation
+	channelIDs := make([]int, len(channels))
+	for i, channel := range channels {
+		channelIDs[i] = channel.Id
+	}
+
+	// Batch query optimization: get all health states in single Pipeline operation
+	healthStates, err := service.GetBatchChannelHealth(channelIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1735,5 +1761,23 @@ func ResetChannelHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "渠道健康状态已重置",
+	})
+}
+
+// GetChannelGroups returns all distinct channel groups
+func GetChannelGroups(c *gin.Context) {
+	groups, err := model.GetDistinctChannelGroups()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    groups,
 	})
 }

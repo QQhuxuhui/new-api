@@ -96,6 +96,20 @@ func RedisDel(key string) error {
 	return RDB.Del(ctx, key).Err()
 }
 
+// RedisSetNX sets a key only if it does not exist (distributed lock primitive)
+// Returns true if the key was set, false if it already exists
+func RedisSetNX(key string, value string, expiration time.Duration) bool {
+	if DebugEnabled {
+		SysLog(fmt.Sprintf("Redis SETNX: key=%s, value=%s, expiration=%v", key, value, expiration))
+	}
+	ctx := context.Background()
+	result, err := RDB.SetNX(ctx, key, value, expiration).Result()
+	if err != nil {
+		return false
+	}
+	return result
+}
+
 func RedisDelKey(key string) error {
 	if DebugEnabled {
 		SysLog(fmt.Sprintf("Redis DEL Key: key=%s", key))

@@ -90,6 +90,20 @@ func Distribute() func(c *gin.Context) {
 						// If user has plans configured, this is an error
 						// If user has no plans, fall through to use default group
 						if !errors.Is(planErr, service.ErrNoPlanAvailable) {
+							// Check for daily quota exhausted error
+							if errors.Is(planErr, service.ErrDailyQuotaExhausted) {
+								abortWithOpenAiMessage(c, http.StatusForbidden, "每日额度已用尽，请明日再试")
+								return
+							}
+
+							// Check for rate limit error
+							var rateLimitErr *service.RateLimitError
+							if errors.As(planErr, &rateLimitErr) {
+								abortWithOpenAiMessage(c, http.StatusTooManyRequests, rateLimitErr.Error())
+								return
+							}
+
+							// Other plan selection errors
 							abortWithOpenAiMessage(c, http.StatusForbidden, "套餐选择失败: "+planErr.Error())
 							return
 						}
@@ -101,10 +115,40 @@ func Distribute() func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyPlanName, planResult.PlanName)
 						common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, planResult.AutoSwitched)
 
-						// Use plan's channel group if specified
-						if planResult.ChannelGroup != "" {
-							common.SetContextKey(c, constant.ContextKeyPlanGroup, planResult.ChannelGroup)
-							usingGroup = planResult.ChannelGroup
+						// Check daily quota limit if plan has one
+						if planResult.Plan != nil && planResult.Plan.HasDailyQuotaLimit() {
+							canProceed, _, dailyErr := service.CheckDailyQuota(planResult.Plan, planResult.UserPlanId, 0)
+							if dailyErr != nil {
+								common.SysLog(fmt.Sprintf("daily quota check error: %v", dailyErr))
+								// Allow on error (graceful degradation)
+							} else if !canProceed {
+								abortWithOpenAiMessage(c, http.StatusForbidden, "每日额度已用尽，请明日再试")
+								return
+							}
+						}
+
+						// Check rate limits if plan has any
+						if planResult.Plan != nil && planResult.Plan.HasRateLimits() {
+							canProceed, _, message := service.CheckRateLimits(planResult.Plan, planResult.UserPlanId, 0)
+							if !canProceed {
+								abortWithOpenAiMessage(c, http.StatusTooManyRequests, message)
+								return
+							}
+						}
+
+						// Use plan's channel groups (prefer new ChannelGroups field)
+						var channelGroup string
+						if planResult.Plan != nil {
+							groups := planResult.Plan.GetChannelGroupsList()
+							if len(groups) > 0 {
+								channelGroup = groups[0] // Use first group for now
+							} else if planResult.ChannelGroup != "" {
+								channelGroup = planResult.ChannelGroup // Fallback to old field
+							}
+						}
+						if channelGroup != "" {
+							common.SetContextKey(c, constant.ContextKeyPlanGroup, channelGroup)
+							usingGroup = channelGroup
 							common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 						}
 					}

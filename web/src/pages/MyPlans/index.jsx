@@ -31,12 +31,15 @@ import {
   Switch,
   Popconfirm,
   Banner,
+  Divider,
+  Tooltip,
 } from '@douyinfe/semi-ui';
 import {
   IconTick,
   IconRefresh,
   IconClock,
   IconLock,
+  IconAlertTriangle,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess, renderQuota } from '../../helpers';
 
@@ -46,12 +49,13 @@ const MyPlans = () => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [userPlans, setUserPlans] = useState([]);
+  const [quotaStatus, setQuotaStatus] = useState(null);
 
   // Load user's plans
   const loadMyPlans = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await API.get('/api/user_plan/my');
+      const res = await API.get('/api/my_plans/');
       const { success, message, data } = res.data;
       if (success) {
         setUserPlans(data || []);
@@ -64,19 +68,35 @@ const MyPlans = () => {
     setLoading(false);
   }, []);
 
+  // Load quota status for current plan
+  const loadQuotaStatus = useCallback(async () => {
+    try {
+      const res = await API.get('/api/my_plans/quota-status');
+      const { success, data } = res.data;
+      if (success && data) {
+        setQuotaStatus(data);
+      }
+    } catch (e) {
+      // Silent fail - quota status is optional
+      console.error('Failed to load quota status:', e);
+    }
+  }, []);
+
   useEffect(() => {
     loadMyPlans();
-  }, [loadMyPlans]);
+    loadQuotaStatus();
+  }, [loadMyPlans, loadQuotaStatus]);
 
   // Switch to a different plan
   const handleSwitchPlan = async (planId) => {
     setLoading(true);
     try {
-      const res = await API.post('/api/user_plan/switch', { plan_id: planId });
+      const res = await API.post('/api/my_plans/switch', { plan_id: planId });
       const { success, message } = res.data;
       if (success) {
         showSuccess(t('套餐切换成功'));
         loadMyPlans();
+        loadQuotaStatus();
       } else {
         showError(message);
       }
@@ -90,8 +110,7 @@ const MyPlans = () => {
   const handleToggleAutoSwitch = async (userPlanId, enabled) => {
     setLoading(true);
     try {
-      const res = await API.post('/api/user_plan/toggle-auto', {
-        user_plan_id: userPlanId,
+      const res = await API.put(`/api/my_plans/${userPlanId}/auto_switch`, {
         enabled: enabled,
       });
       const { success, message } = res.data;
@@ -130,7 +149,7 @@ const MyPlans = () => {
       <div className="w-full">
         <div className="flex justify-between mb-1">
           <Text type="secondary" size="small">
-            {t('剩余额度')}
+            {t('总额度剩余')}
           </Text>
           <Text strong>
             {renderQuota(remain)} / {renderQuota(total)}
@@ -147,6 +166,83 @@ const MyPlans = () => {
             {t('已使用')}: {renderQuota(used)}
           </Text>
         </div>
+      </div>
+    );
+  };
+
+  // Render daily quota progress (if available)
+  const renderDailyQuotaProgress = () => {
+    if (!quotaStatus || quotaStatus.daily_quota_limit === 0) {
+      return null;
+    }
+
+    const used = quotaStatus.daily_quota_used || 0;
+    const total = quotaStatus.daily_quota_limit || 0;
+    const remain = quotaStatus.daily_quota_remain || 0;
+    const percent = total > 0 ? ((total - remain) / total) * 100 : 0;
+
+    // Format reset time
+    const resetTime = quotaStatus.daily_reset_time
+      ? new Date(quotaStatus.daily_reset_time * 1000).toLocaleTimeString()
+      : t('明日 00:00');
+
+    return (
+      <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+        <div className="flex justify-between items-center mb-2">
+          <Text strong>{t('每日限额使用情况')}</Text>
+          <Tag color="blue" size="small">
+            <IconClock className="mr-1" />
+            {t('重置时间')}: {resetTime}
+          </Tag>
+        </div>
+        <div className="flex justify-between mb-1">
+          <Text type="secondary" size="small">
+            {t('今日剩余')}
+          </Text>
+          <Text strong>
+            {renderQuota(remain)} / {renderQuota(total)}
+          </Text>
+        </div>
+        <Progress
+          percent={percent}
+          showInfo
+          format={() => `${percent.toFixed(1)}%`}
+          stroke={percent > 80 ? 'var(--semi-color-danger)' : 'var(--semi-color-primary)'}
+        />
+        <div className="flex justify-between mt-1">
+          <Text type="tertiary" size="small">
+            {t('今日已用')}: {renderQuota(used)}
+          </Text>
+        </div>
+      </div>
+    );
+  };
+
+  // Render rate limit status
+  const renderRateLimitStatus = () => {
+    if (!quotaStatus || !quotaStatus.rate_limited) {
+      return null;
+    }
+
+    const waitSec = quotaStatus.rate_limit_wait_sec || 0;
+    const waitMin = Math.ceil(waitSec / 60);
+    const message = quotaStatus.rate_limit_message || t('速率限制：请稍后重试');
+
+    return (
+      <div className="mt-4">
+        <Banner
+          type="warning"
+          icon={<IconAlertTriangle />}
+          description={
+            <div>
+              <Text strong>{message}</Text>
+              <br />
+              <Text type="secondary">
+                {t('预计等待时间')}: {waitMin} {t('分钟')} ({waitSec} {t('秒')})
+              </Text>
+            </div>
+          }
+        />
       </div>
     );
   };
@@ -236,20 +332,28 @@ const MyPlans = () => {
           </div>
         </div>
 
-        {/* Quota Progress */}
-        <div className="mb-4">
+        {/* Total Quota Progress */}
+        <div className="mb-2">
           {renderQuotaProgress(userPlan)}
         </div>
 
+        {/* Daily Quota Progress (current plan only) */}
+        {isCurrent && renderDailyQuotaProgress()}
+
+        {/* Rate Limit Status (current plan only) */}
+        {isCurrent && renderRateLimitStatus()}
+
         {/* Description */}
         {plan.description && (
-          <Paragraph type="tertiary" className="mb-4">
-            {plan.description}
-          </Paragraph>
+          <div className="mt-4">
+            <Paragraph type="tertiary" className="mb-0">
+              {plan.description}
+            </Paragraph>
+          </div>
         )}
 
         {/* Actions */}
-        <div className="flex justify-between items-center pt-4 border-t border-gray-100">
+        <div className="flex justify-between items-center pt-4 mt-4 border-t border-gray-100">
           <div className="flex items-center gap-4">
             {/* Auto-switch toggle */}
             {canToggleAuto && !isLocked && (
@@ -316,7 +420,10 @@ const MyPlans = () => {
         </div>
         <Button
           icon={<IconRefresh />}
-          onClick={loadMyPlans}
+          onClick={() => {
+            loadMyPlans();
+            loadQuotaStatus();
+          }}
           loading={loading}
         >
           {t('刷新')}

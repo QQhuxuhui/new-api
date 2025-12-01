@@ -68,25 +68,81 @@ func SaveQuotaDataCache() {
 	CacheQuotaDataLock.Lock()
 	defer CacheQuotaDataLock.Unlock()
 	size := len(CacheQuotaData)
-	// 如果缓存中有数据，就保存到数据库中
-	// 1. 先查询数据库中是否有数据
-	// 2. 如果有数据，就更新数据
-	// 3. 如果没有数据，就插入数据
-	for _, quotaData := range CacheQuotaData {
-		quotaDataDB := &QuotaData{}
-		DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
-			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt).First(quotaDataDB)
-		if quotaDataDB.Id > 0 {
-			//quotaDataDB.Count += quotaData.Count
-			//quotaDataDB.Quota += quotaData.Quota
-			//DB.Table("quota_data").Save(quotaDataDB)
-			increaseQuotaData(quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.Count, quotaData.Quota, quotaData.CreatedAt, quotaData.TokenUsed)
+
+	if size == 0 {
+		return
+	}
+
+	// Batch query optimization: collect all cache data
+	cacheData := make([]*QuotaData, 0, len(CacheQuotaData))
+	for _, qd := range CacheQuotaData {
+		cacheData = append(cacheData, qd)
+	}
+
+	// Build batch query conditions to check existing records
+	var existingRecords []*QuotaData
+	if len(cacheData) > 0 {
+		query := DB.Table("quota_data")
+		// Build OR conditions for batch lookup
+		for i, qd := range cacheData {
+			if i == 0 {
+				query = query.Where("(user_id = ? AND username = ? AND model_name = ? AND created_at = ?)",
+					qd.UserID, qd.Username, qd.ModelName, qd.CreatedAt)
+			} else {
+				query = query.Or("(user_id = ? AND username = ? AND model_name = ? AND created_at = ?)",
+					qd.UserID, qd.Username, qd.ModelName, qd.CreatedAt)
+			}
+		}
+		query.Find(&existingRecords)
+	}
+
+	// Build map of existing records for O(1) lookup
+	existingMap := make(map[string]*QuotaData)
+	for _, e := range existingRecords {
+		key := fmt.Sprintf("%d-%s-%s-%d", e.UserID, e.Username, e.ModelName, e.CreatedAt)
+		existingMap[key] = e
+	}
+
+	// Separate into insert and update batches
+	var toInsert []*QuotaData
+	var toUpdate []*QuotaData
+	for _, qd := range cacheData {
+		key := fmt.Sprintf("%d-%s-%s-%d", qd.UserID, qd.Username, qd.ModelName, qd.CreatedAt)
+		if _, exists := existingMap[key]; exists {
+			toUpdate = append(toUpdate, qd)
 		} else {
-			DB.Table("quota_data").Create(quotaData)
+			toInsert = append(toInsert, qd)
 		}
 	}
+
+	// Batch insert new records (100 per batch)
+	if len(toInsert) > 0 {
+		if err := DB.Table("quota_data").CreateInBatches(toInsert, 100).Error; err != nil {
+			common.SysLog(fmt.Sprintf("批量插入数据看板数据失败: %s", err))
+		}
+	}
+
+	// Batch update existing records using transaction
+	if len(toUpdate) > 0 {
+		tx := DB.Begin()
+		for _, qd := range toUpdate {
+			tx.Table("quota_data").
+				Where("user_id = ? AND username = ? AND model_name = ? AND created_at = ?",
+					qd.UserID, qd.Username, qd.ModelName, qd.CreatedAt).
+				Updates(map[string]interface{}{
+					"count":      gorm.Expr("count + ?", qd.Count),
+					"quota":      gorm.Expr("quota + ?", qd.Quota),
+					"token_used": gorm.Expr("token_used + ?", qd.TokenUsed),
+				})
+		}
+		if err := tx.Commit().Error; err != nil {
+			tx.Rollback()
+			common.SysLog(fmt.Sprintf("批量更新数据看板数据失败: %s", err))
+		}
+	}
+
 	CacheQuotaData = make(map[string]*QuotaData)
-	common.SysLog(fmt.Sprintf("保存数据看板数据成功，共保存%d条数据", size))
+	common.SysLog(fmt.Sprintf("保存数据看板数据成功，共保存%d条数据（插入%d条，更新%d条）", size, len(toInsert), len(toUpdate)))
 }
 
 func increaseQuotaData(userId int, username string, modelName string, count int, quota int, createdAt int64, tokenUsed int) {

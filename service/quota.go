@@ -105,7 +105,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		return err
 	}
 
-	token, err := model.GetTokenByKey(strings.TrimLeft(relayInfo.TokenKey, "sk-"), false)
+	token, err := model.GetTokenByKey(strings.TrimPrefix(relayInfo.TokenKey, "sk-"), false)
 	if err != nil {
 		return err
 	}
@@ -340,6 +340,20 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
+	// Check daily quota limit before consuming (prevents over-quota)
+	// IMPORTANT: Use actualQuota for daily limit check
+	if relayInfo.UserPlanId > 0 {
+		actualQuota := int64(quota + relayInfo.FinalPreConsumedQuota)
+		if actualQuota > 0 {
+			if err := CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, actualQuota); err != nil {
+				// Daily quota would be exceeded - refund pre-consumed quota
+				ReturnPreConsumedQuota(ctx, relayInfo)
+				logger.LogError(ctx, fmt.Sprintf("daily quota check failed: %v", err))
+				return
+			}
+		}
+	}
+
 	quotaDelta := quota - relayInfo.FinalPreConsumedQuota
 
 	if quotaDelta > 0 {
@@ -474,6 +488,20 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
+	// Check daily quota limit before consuming (prevents over-quota)
+	// IMPORTANT: Use actualQuota for daily limit check
+	if relayInfo.UserPlanId > 0 {
+		actualQuota := int64(quota + relayInfo.FinalPreConsumedQuota)
+		if actualQuota > 0 {
+			if err := CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, actualQuota); err != nil {
+				// Daily quota would be exceeded - refund pre-consumed quota
+				ReturnPreConsumedQuota(ctx, relayInfo)
+				logger.LogError(ctx, fmt.Sprintf("daily quota check failed: %v", err))
+				return
+			}
+		}
+	}
+
 	quotaDelta := quota - relayInfo.FinalPreConsumedQuota
 
 	if quotaDelta > 0 {
@@ -569,16 +597,49 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 	}
 
 	// Consume from user plan if one was selected
-	if relayInfo.UserPlanId > 0 && quota > 0 {
-		if err := model.DecreaseUserPlanQuota(relayInfo.UserPlanId, int64(quota)); err != nil {
-			// Log error but don't fail the request - user quota already consumed
-			common.SysLog(fmt.Sprintf("failed to consume plan quota for user_plan %d: %v", relayInfo.UserPlanId, err))
+	// IMPORTANT: Plan quota/daily quota/rate limit must use actualQuota, not quota delta
+	// Because PreConsumeQuota only deducts user quota and token quota, NOT plan quota
+	// actualQuota = quota (delta) + preConsumedQuota (what was pre-consumed)
+	if relayInfo.UserPlanId > 0 {
+		actualQuota := quota + preConsumedQuota
+
+		if actualQuota > 0 {
+			// Deduct plan quota based on actual consumption
+			if err := model.DecreaseUserPlanQuota(relayInfo.UserPlanId, int64(actualQuota)); err != nil {
+				// Log error but don't fail the request - user quota already consumed
+				common.SysLog(fmt.Sprintf("failed to consume plan quota for user_plan %d: %v", relayInfo.UserPlanId, err))
+			}
+
+			// Record consumption for daily quota and rate limiting (Redis tracking)
+			// Use actualQuota to ensure accurate tracking
+			// Approximate USD: actualQuota / 500000 (system convention: 1 USD = 500000 quota)
+			costUSD := float64(actualQuota) / 500000.0
+
+			// Record daily quota usage (use actual consumption)
+			if incrErr := IncrDailyQuotaUsage(relayInfo.UserPlanId, int64(actualQuota)); incrErr != nil {
+				common.SysLog(fmt.Sprintf("failed to record daily quota for user_plan %d: %v", relayInfo.UserPlanId, incrErr))
+			}
+
+			// Record for rate limiting (use actual consumption)
+			requestId := fmt.Sprintf("%d-%d", relayInfo.UserId, time.Now().UnixNano())
+			if rateErr := RecordConsumptionForRateLimit(relayInfo.UserPlanId, costUSD, requestId); rateErr != nil {
+				common.SysLog(fmt.Sprintf("failed to record rate limit for user_plan %d: %v", relayInfo.UserPlanId, rateErr))
+			}
+		} else if actualQuota < 0 {
+			// Refund to plan
+			// IMPORTANT: Only refund if there was actual plan consumption (preConsumedQuota > 0)
+			// When ReturnPreConsumedQuota is called with quota=-100, preConsumedQuota=0,
+			// plan quota was never deducted, so we should NOT refund
+			if preConsumedQuota > 0 {
+				// This is a refund after actual consumption, safe to refund
+				if err := model.IncreaseUserPlanQuota(relayInfo.UserPlanId, int64(-actualQuota)); err != nil {
+					common.SysLog(fmt.Sprintf("failed to refund plan quota for user_plan %d: %v", relayInfo.UserPlanId, err))
+				}
+			}
+			// else: This is ReturnPreConsumedQuota (preConsumedQuota=0, quota<0)
+			// Plan quota was never deducted during pre-consume, so we should NOT refund
 		}
-	} else if relayInfo.UserPlanId > 0 && quota < 0 {
-		// Refund to plan
-		if err := model.IncreaseUserPlanQuota(relayInfo.UserPlanId, int64(-quota)); err != nil {
-			common.SysLog(fmt.Sprintf("failed to refund plan quota for user_plan %d: %v", relayInfo.UserPlanId, err))
-		}
+		// else: actualQuota == 0, no operation needed
 	}
 
 	if sendEmail {

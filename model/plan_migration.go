@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -84,19 +85,29 @@ func MigrateExistingUsers(dryRun bool) (*MigrationResult, error) {
 		return result, nil
 	}
 
-	// Step 3: Migrate each user
-	now := time.Now().UnixMilli()
-	for _, user := range users {
-		// Check if user already has a user_plan
-		var existingCount int64
-		if err := DB.Model(&UserPlan{}).Where("user_id = ?", user.Id).Count(&existingCount).Error; err != nil {
-			result.FailedUsers++
-			result.Errors = append(result.Errors, fmt.Sprintf("failed to check existing plans for user %d: %v", user.Id, err))
-			continue
-		}
+	// Step 3: Batch query existing user plans to avoid N+1
+	userIds := make([]int, len(users))
+	for i, user := range users {
+		userIds[i] = user.Id
+	}
 
-		if existingCount > 0 {
-			// User already has plans, skip
+	var existingUserPlans []UserPlan
+	if err := DB.Model(&UserPlan{}).Where("user_id IN ?", userIds).Select("user_id").Find(&existingUserPlans).Error; err != nil {
+		return result, fmt.Errorf("failed to batch query existing plans: %v", err)
+	}
+
+	// Build set of users who already have plans
+	existingUserIds := make(map[int]bool)
+	for _, up := range existingUserPlans {
+		existingUserIds[up.UserId] = true
+	}
+
+	// Step 4: Create user plans for users without existing plans
+	now := time.Now().UnixMilli()
+	userPlansToCreate := make([]*UserPlan, 0)
+
+	for _, user := range users {
+		if existingUserIds[user.Id] {
 			result.SkippedUsers++
 			continue
 		}
@@ -116,14 +127,17 @@ func MigrateExistingUsers(dryRun bool) (*MigrationResult, error) {
 			ExpiresAt:       0, // Never expires
 			Status:          UserPlanStatusActive,
 		}
+		userPlansToCreate = append(userPlansToCreate, userPlan)
+	}
 
-		if err := DB.Create(userPlan).Error; err != nil {
-			result.FailedUsers++
-			result.Errors = append(result.Errors, fmt.Sprintf("failed to create user_plan for user %d: %v", user.Id, err))
-			continue
+	// Batch insert user plans (100 per batch)
+	if len(userPlansToCreate) > 0 {
+		if err := DB.CreateInBatches(userPlansToCreate, 100).Error; err != nil {
+			result.FailedUsers = len(userPlansToCreate)
+			result.Errors = append(result.Errors, fmt.Sprintf("failed to batch create user_plans: %v", err))
+		} else {
+			result.MigratedUsers = len(userPlansToCreate)
 		}
-
-		result.MigratedUsers++
 	}
 
 	common.SysLog(fmt.Sprintf("Migration completed: %d total, %d migrated, %d skipped, %d failed",
@@ -248,6 +262,84 @@ func GetMigrationStatus() map[string]interface{} {
 
 	// Plan system enabled status
 	status["plan_system_enabled"] = common.PlanSystemEnabled
+
+	return status
+}
+
+// MigrateChannelGroupToChannelGroups migrates the deprecated ChannelGroup field
+// to the new ChannelGroups JSON array field for all plans
+func MigrateChannelGroupToChannelGroups(dryRun bool) (*MigrationResult, error) {
+	result := &MigrationResult{
+		Errors: make([]string, 0),
+	}
+
+	// Get all plans that have ChannelGroup set but ChannelGroups empty
+	var plans []Plan
+	if err := DB.Where("channel_group != '' AND (channel_groups IS NULL OR channel_groups = '')").Find(&plans).Error; err != nil {
+		return result, fmt.Errorf("failed to fetch plans: %v", err)
+	}
+	result.TotalUsers = len(plans)
+
+	if dryRun {
+		common.SysLog(fmt.Sprintf("[DRY RUN] Would migrate %d plans from ChannelGroup to ChannelGroups", len(plans)))
+		for _, plan := range plans {
+			common.SysLog(fmt.Sprintf("[DRY RUN] Plan %d (%s): %s -> [\"%s\"]", plan.Id, plan.Name, plan.ChannelGroup, plan.ChannelGroup))
+		}
+		return result, nil
+	}
+
+	// Migrate each plan
+	for _, plan := range plans {
+		// Convert single ChannelGroup to JSON array
+		groups := []string{plan.ChannelGroup}
+		groupsJson, err := json.Marshal(groups)
+		if err != nil {
+			result.FailedUsers++
+			result.Errors = append(result.Errors, fmt.Sprintf("failed to marshal groups for plan %d: %v", plan.Id, err))
+			continue
+		}
+
+		// Update the plan
+		if err := DB.Model(&Plan{}).Where("id = ?", plan.Id).Update("channel_groups", string(groupsJson)).Error; err != nil {
+			result.FailedUsers++
+			result.Errors = append(result.Errors, fmt.Sprintf("failed to update plan %d: %v", plan.Id, err))
+			continue
+		}
+
+		result.MigratedUsers++
+		common.SysLog(fmt.Sprintf("Migrated plan %d (%s): ChannelGroup=%s -> ChannelGroups=%s",
+			plan.Id, plan.Name, plan.ChannelGroup, string(groupsJson)))
+	}
+
+	common.SysLog(fmt.Sprintf("ChannelGroup migration completed: %d total, %d migrated, %d failed",
+		result.TotalUsers, result.MigratedUsers, result.FailedUsers))
+
+	return result, nil
+}
+
+// GetChannelGroupMigrationStatus returns the current migration status for ChannelGroup -> ChannelGroups
+func GetChannelGroupMigrationStatus() map[string]interface{} {
+	status := make(map[string]interface{})
+
+	// Count total plans
+	var totalPlans int64
+	DB.Model(&Plan{}).Count(&totalPlans)
+	status["total_plans"] = totalPlans
+
+	// Count plans with only old ChannelGroup (need migration)
+	var needMigration int64
+	DB.Model(&Plan{}).Where("channel_group != '' AND (channel_groups IS NULL OR channel_groups = '')").Count(&needMigration)
+	status["need_migration"] = needMigration
+
+	// Count plans with new ChannelGroups
+	var hasMigrated int64
+	DB.Model(&Plan{}).Where("channel_groups IS NOT NULL AND channel_groups != ''").Count(&hasMigrated)
+	status["migrated"] = hasMigrated
+
+	// Count plans with neither (new plans without any channel group)
+	var noChannelGroup int64
+	DB.Model(&Plan{}).Where("(channel_group IS NULL OR channel_group = '') AND (channel_groups IS NULL OR channel_groups = '')").Count(&noChannelGroup)
+	status["no_channel_group"] = noChannelGroup
 
 	return status
 }
