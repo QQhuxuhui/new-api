@@ -27,13 +27,13 @@ import {
   Typography,
   Empty,
   Spin,
-  Alert,
+  Banner,
   Divider,
 } from '@douyinfe/semi-ui';
 import {
-  IconDollarStroked,
+  IconMoneyExchangeStroked,
   IconAlertTriangle,
-  IconTick,
+  IconTickCircle,
 } from '@douyinfe/semi-icons';
 import { useChannelCostData } from '../../../hooks/analytics/useChannelCostData';
 
@@ -247,20 +247,20 @@ const CostEfficiencyTab = ({ timeRange }) => {
     <div>
       {/* Data Quality Warning */}
       {data_quality?.has_warning && (
-        <Alert
+        <Banner
           type="warning"
-          message="数据质量警告"
+          title="数据质量警告"
           description={data_quality.warning_message}
-          closable
+          closeIcon
           style={{ marginBottom: 16 }}
         />
       )}
 
       {/* Warnings */}
       {warnings && warnings.length > 0 && (
-        <Alert
-          type="error"
-          message={`发现 ${warnings.length} 个警告`}
+        <Banner
+          type="danger"
+          title={`发现 ${warnings.length} 个警告`}
           description={
             <div>
               {warnings.slice(0, 3).map((warning, idx) => (
@@ -275,7 +275,7 @@ const CostEfficiencyTab = ({ timeRange }) => {
               )}
             </div>
           }
-          closable
+          closeIcon
           style={{ marginBottom: 16 }}
         />
       )}
@@ -287,7 +287,7 @@ const CostEfficiencyTab = ({ timeRange }) => {
             <Statistic
               title="总收入"
               value={formatUSD(summary?.total_revenue_usd)}
-              prefix={<IconDollarStroked style={{ color: '#52c41a' }} />}
+              prefix={<IconMoneyExchangeStroked style={{ color: '#52c41a' }} />}
               valueColor="#52c41a"
             />
           </Card>
@@ -297,7 +297,7 @@ const CostEfficiencyTab = ({ timeRange }) => {
             <Statistic
               title="总成本"
               value={formatUSD(summary?.total_cost_usd)}
-              prefix={<IconDollarStroked style={{ color: '#ff4d4f' }} />}
+              prefix={<IconMoneyExchangeStroked style={{ color: '#ff4d4f' }} />}
               valueColor="#ff4d4f"
             />
           </Card>
@@ -307,7 +307,7 @@ const CostEfficiencyTab = ({ timeRange }) => {
             <Statistic
               title="总利润"
               value={formatUSD(summary?.total_profit_usd)}
-              prefix={<IconDollarStroked />}
+              prefix={<IconMoneyExchangeStroked />}
               valueColor={
                 summary?.total_profit_usd >= 0 ? '#52c41a' : '#ff4d4f'
               }
@@ -321,7 +321,7 @@ const CostEfficiencyTab = ({ timeRange }) => {
               value={`${summary?.overall_margin?.toFixed(2)}%`}
               prefix={
                 summary?.overall_margin >= 0 ? (
-                  <IconTick style={{ color: '#52c41a' }} />
+                  <IconTickCircle style={{ color: '#52c41a' }} />
                 ) : (
                   <IconAlertTriangle style={{ color: '#ff4d4f' }} />
                 )
