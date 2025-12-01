@@ -31,6 +31,8 @@ func maxInt64(a, b int64) int64 {
 }
 
 // ParseTimeRange converts time range string to start and end timestamps using Beijing timezone (UTC+8)
+// For "24h": uses rolling window (now - 24 hours to now) for accurate "last 24 hours" statistics
+// For other ranges (7d/30d/90d): uses day-aligned boundaries for consistent daily aggregation
 func ParseTimeRange(timeRange string) (startTime, endTime int64) {
 	// Use Beijing timezone (UTC+8) for all time calculations
 	beijingLocation, err := time.LoadLocation("Asia/Shanghai")
@@ -41,13 +43,21 @@ func ParseTimeRange(timeRange string) (startTime, endTime int64) {
 
 	now := time.Now().In(beijingLocation)
 
+	// Special handling for "24h" - use rolling window for accurate "last 24 hours"
+	if timeRange == "24h" {
+		endTime = now.Unix()
+		startTime = now.Add(-24 * time.Hour).Unix()
+		return
+	}
+
+	// For other ranges, use day-aligned boundaries for consistent aggregation
 	// Set end time to end of current day in Beijing timezone
 	endTime = time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 999999999, beijingLocation).Unix()
 
 	var days int
 	switch timeRange {
-	case "24h", "1d":
-		days = 1 // Last 1 day (today only)
+	case "1d":
+		days = 1 // Today only (day-aligned)
 	case "7d":
 		days = 7 // Last 7 days (including today)
 	case "30d":
