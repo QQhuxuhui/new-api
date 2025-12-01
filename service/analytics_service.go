@@ -30,23 +30,41 @@ func maxInt64(a, b int64) int64 {
 	return b
 }
 
-// ParseTimeRange converts time range string to start and end timestamps
+// ParseTimeRange converts time range string to start and end timestamps using Beijing timezone (UTC+8)
 func ParseTimeRange(timeRange string) (startTime, endTime int64) {
-	now := time.Now()
-	endTime = now.Unix()
+	// Use Beijing timezone (UTC+8) for all time calculations
+	beijingLocation, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		// Fallback to UTC+8 offset if timezone loading fails
+		beijingLocation = time.FixedZone("CST", 8*3600)
+	}
 
+	now := time.Now().In(beijingLocation)
+
+	// Set end time to end of current day in Beijing timezone
+	endTime = time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 999999999, beijingLocation).Unix()
+
+	var days int
 	switch timeRange {
 	case "24h", "1d":
-		startTime = now.Add(-24 * time.Hour).Unix()
+		days = 1 // Last 1 day (today only)
 	case "7d":
-		startTime = now.Add(-7 * 24 * time.Hour).Unix()
+		days = 7 // Last 7 days (including today)
 	case "30d":
-		startTime = now.Add(-30 * 24 * time.Hour).Unix()
+		days = 30 // Last 30 days (including today)
 	case "90d":
-		startTime = now.Add(-90 * 24 * time.Hour).Unix()
+		days = 90 // Last 90 days (including today)
 	default:
-		startTime = now.Add(-7 * 24 * time.Hour).Unix()
+		days = 7 // Default to 7 days
 	}
+
+	// Calculate start date by going back (days - 1) from today
+	// For example, "last 7 days" means: today minus 6 days = 7 days total
+	startDate := now.AddDate(0, 0, -(days - 1))
+
+	// Set start time to beginning of the start day in Beijing timezone
+	startTime = time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, beijingLocation).Unix()
+
 	return
 }
 
@@ -240,14 +258,15 @@ func GetConsumptionTrend(timeRange string) ([]dto.ConsumptionTrend, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Build date format based on database type
+	// Build date format based on database type using Beijing timezone (UTC+8)
 	var dateFormat string
 	if common.UsingPostgreSQL {
-		dateFormat = "TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')"
+		dateFormat = "TO_CHAR(TO_TIMESTAMP(created_at) AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')"
 	} else if common.UsingSQLite {
-		dateFormat = "DATE(created_at, 'unixepoch')"
+		dateFormat = "DATE(created_at, 'unixepoch', '+8 hours')"
 	} else {
-		dateFormat = "DATE(FROM_UNIXTIME(created_at))"
+		// MySQL
+		dateFormat = "DATE(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'))"
 	}
 
 	type TrendResult struct {
@@ -447,17 +466,18 @@ func GetBehaviorPatterns(timeRange string) (*dto.BehaviorPatterns, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Get heatmap data
+	// Get heatmap data using Beijing timezone (UTC+8)
 	var hourFormat, weekdayFormat string
 	if common.UsingPostgreSQL {
-		hourFormat = "EXTRACT(HOUR FROM TO_TIMESTAMP(created_at))"
-		weekdayFormat = "EXTRACT(DOW FROM TO_TIMESTAMP(created_at))"
+		hourFormat = "EXTRACT(HOUR FROM TO_TIMESTAMP(created_at) AT TIME ZONE 'Asia/Shanghai')"
+		weekdayFormat = "EXTRACT(DOW FROM TO_TIMESTAMP(created_at) AT TIME ZONE 'Asia/Shanghai')"
 	} else if common.UsingSQLite {
-		hourFormat = "CAST(strftime('%H', created_at, 'unixepoch') AS INTEGER)"
-		weekdayFormat = "CAST(strftime('%w', created_at, 'unixepoch') AS INTEGER)"
+		hourFormat = "CAST(strftime('%H', created_at, 'unixepoch', '+8 hours') AS INTEGER)"
+		weekdayFormat = "CAST(strftime('%w', created_at, 'unixepoch', '+8 hours') AS INTEGER)"
 	} else {
-		hourFormat = "HOUR(FROM_UNIXTIME(created_at))"
-		weekdayFormat = "DAYOFWEEK(FROM_UNIXTIME(created_at)) - 1"
+		// MySQL
+		hourFormat = "HOUR(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'))"
+		weekdayFormat = "DAYOFWEEK(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00')) - 1"
 	}
 
 	type HeatmapResult struct {

@@ -96,16 +96,18 @@ Risk indicators:
 
 ```
 For each log entry where type = 2 (consume):
-  revenue = log.quota
-  upstream_cost = (log.prompt_tokens + log.completion_tokens) × log.other.model_price
-  profit = revenue - upstream_cost
-  margin = (profit / revenue) × 100%
+  revenue = log.quota / 500000                                    // 收入（美金）
+  cost = (log.prompt_tokens + log.completion_tokens) / 1000 × log.other.model_price  // 成本（美金）
+  profit = revenue - cost                                          // 利润（美金）
+  margin = (profit / revenue) × 100%                              // 利润率
 ```
 
-**Note:** Channel ratio already factored into `log.quota`, so:
-- User pays: `tokens × model_price × model_ratio × group_ratio × channel_ratio`
-- Platform pays upstream: `tokens × model_price`
-- Profit = difference between these two
+**说明：**
+- 所有金额单位为美金（USD）
+- `model_price` 为上游 API 每 1K tokens 的美金价格
+- `quota` 为内部积分单位（500,000 quota = $1）
+- Channel ratio 已包含在 `log.quota` 中
+- 可选：支持人民币显示（美金 × 汇率）
 
 ## Impact
 

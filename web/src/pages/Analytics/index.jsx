@@ -46,6 +46,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { useAnalyticsData } from '../../hooks/analytics/useAnalyticsData';
 import BalanceAnalysisTab from './components/BalanceAnalysisTab';
+import CostEfficiencyTab from './components/CostEfficiencyTab';
 
 const { Title, Text } = Typography;
 
@@ -452,6 +453,13 @@ const Analytics = () => {
             itemKey="balance"
           >
             <BalanceAnalysisTab timeRange={timeRange} />
+          </TabPane>
+
+          <TabPane
+            tab={<span><IconPriceTag className="mr-1" />成本效益</span>}
+            itemKey="cost-efficiency"
+          >
+            <CostEfficiencyTab timeRange={timeRange} />
           </TabPane>
 
           <TabPane

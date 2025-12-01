@@ -219,6 +219,10 @@ func SetApiRouter(router *gin.Engine) {
 			analyticsRoute.GET("/risk-indicators", controller.GetRiskIndicators)
 			analyticsRoute.GET("/user-balance-analysis", controller.GetUserBalanceAnalysis)
 			analyticsRoute.GET("/export", controller.ExportAnalyticsData)
+		// Cost analytics endpoints
+		analyticsRoute.GET("/channel-cost-analysis", controller.GetChannelCostAnalysis)
+		analyticsRoute.GET("/cost-trend", controller.GetCostTrend)
+		analyticsRoute.GET("/model-cost-analysis", controller.GetModelCostAnalysis)
 		}
 
 		logRoute.Use(middleware.CORS())

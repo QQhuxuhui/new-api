@@ -144,3 +144,69 @@ type UserBalanceAnalysisResponse struct {
 	Distribution []BalanceDistribution `json:"distribution"`
 	Rankings     []BalanceRanking      `json:"rankings"`
 }
+
+// ChannelCostMetrics represents cost analysis for a specific channel
+type ChannelCostMetrics struct {
+	ChannelId          int     `json:"channel_id"`
+	ChannelName        string  `json:"channel_name"`
+	TotalRequests      int     `json:"total_requests"`
+	TotalTokens        int64   `json:"total_tokens"`
+	RevenueUSD         float64 `json:"revenue_usd"`          // Total quota charged to users
+	CostUSD            float64 `json:"cost_usd"`             // Upstream API costs
+	ProfitUSD          float64 `json:"profit_usd"`           // Revenue - Cost
+	ProfitMargin       float64 `json:"profit_margin"`        // (Profit / Revenue) * 100
+	AverageChannelRatio float64 `json:"average_channel_ratio"` // Average channel ratio used
+}
+
+// CostTrendPoint represents a single point in cost trend chart
+type CostTrendPoint struct {
+	Date       string  `json:"date"`        // YYYY-MM-DD
+	RevenueUSD float64 `json:"revenue_usd"` // Total revenue
+	CostUSD    float64 `json:"cost_usd"`    // Total cost
+	ProfitUSD  float64 `json:"profit_usd"`  // Total profit
+}
+
+// ModelCostMetrics represents profitability analysis for a specific model
+type ModelCostMetrics struct {
+	ModelName     string  `json:"model_name"`
+	TotalRequests int     `json:"total_requests"`
+	RevenueUSD    float64 `json:"revenue_usd"`
+	CostUSD       float64 `json:"cost_usd"`
+	ProfitUSD     float64 `json:"profit_usd"`
+	ProfitMargin  float64 `json:"profit_margin"`
+}
+
+// DataQuality represents data quality metrics for cost analysis
+type DataQuality struct {
+	TotalLogs         int     `json:"total_logs"`
+	LogsWithPricing   int     `json:"logs_with_pricing"`
+	CoveragePercent   float64 `json:"coverage_percent"`
+	HasWarning        bool    `json:"has_warning"`
+	WarningMessage    string  `json:"warning_message,omitempty"`
+}
+
+// ChannelCostAnalysisResponse represents the complete channel cost analysis response
+type ChannelCostAnalysisResponse struct {
+	Channels    []ChannelCostMetrics `json:"channels"`
+	Summary     ChannelCostSummary   `json:"summary"`
+	DataQuality DataQuality          `json:"data_quality"`
+}
+
+// ChannelCostSummary represents overall cost summary across all channels
+type ChannelCostSummary struct {
+	TotalRevenueUSD  float64 `json:"total_revenue_usd"`
+	TotalCostUSD     float64 `json:"total_cost_usd"`
+	TotalProfitUSD   float64 `json:"total_profit_usd"`
+	OverallMargin    float64 `json:"overall_margin"`
+}
+
+// CostWarning represents cost-related warnings and alerts
+type CostWarning struct {
+	Type        string  `json:"type"`        // "negative_margin", "low_margin", "suspicious_ratio", "cost_spike"
+	Severity    string  `json:"severity"`    // "low", "medium", "high"
+	ChannelId   int     `json:"channel_id"`
+	ChannelName string  `json:"channel_name"`
+	Description string  `json:"description"`
+	Value       float64 `json:"value"`
+	Threshold   float64 `json:"threshold,omitempty"`
+}

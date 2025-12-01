@@ -108,7 +108,7 @@ analytics:model_profitability:{time_range}
 
 **Fallback**:
 - Count skipped entries separately
-- Display warning if >10% of logs lack pricing data
+- Display warning if coverage <90% (i.e., >10% logs lack pricing data)
 - Suggest log retention policies to admins
 
 ### Decision 5: Data Aggregation Granularity
@@ -123,6 +123,32 @@ analytics:model_profitability:{time_range}
 **Not Supported**:
 - Hourly breakdowns (too granular for cost analysis)
 - Custom date ranges (adds complexity, rarely needed)
+
+### Decision 6: Timezone Handling
+
+**Choice**: Use Beijing Time (UTC+8) for all date-based aggregations
+
+**Rationale**:
+- Primary user base is in China
+- Admin dashboard users expect local timezone
+- Simplifies date range interpretation for business analytics
+
+**Implementation**:
+```sql
+-- PostgreSQL
+DATE(created_at AT TIME ZONE 'Asia/Shanghai')
+
+-- MySQL
+DATE(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'))
+
+-- SQLite (store created_at as Beijing timestamp)
+DATE(created_at, 'unixepoch', '+8 hours')
+```
+
+**Frontend**:
+- All date pickers default to Beijing timezone
+- Tooltip displays: "数据按北京时间（UTC+8）统计"
+- Cost trend chart X-axis shows dates in Beijing time
 
 ## Risks / Trade-offs
 
