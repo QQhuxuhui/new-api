@@ -58,7 +58,8 @@ const MyPlans = () => {
       const res = await API.get('/api/my_plans/');
       const { success, message, data } = res.data;
       if (success) {
-        setUserPlans(data || []);
+        // data is UserPlanSummary object with { plans, current_plan, total_quota, total_used }
+        setUserPlans(data?.plans || []);
       } else {
         showError(message);
       }
