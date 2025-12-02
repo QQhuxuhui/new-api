@@ -990,8 +990,18 @@ export function renderQuota(quota, digits = 2) {
     return renderNumber(quota);
   }
 
-  // Invalid quotaPerUnit: fallback to tokens with label
+  // Invalid quotaPerUnit: fallback with currency symbol for currency modes
   if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) {
+    // For currency display modes, show symbol + loading indicator
+    // This maintains currency semantics while avoiding misleading users with estimates
+    if (quotaDisplayType === 'USD') {
+      return '$ ...';
+    } else if (quotaDisplayType === 'CNY') {
+      return '¥ ...';
+    } else if (quotaDisplayType === 'CUSTOM') {
+      return '¤ ...';
+    }
+    // For unknown types, show tokens
     return renderNumber(quota) + ' tokens';
   }
 

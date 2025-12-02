@@ -312,6 +312,9 @@ const PlansTable = () => {
         ...editingPlan,
         channel_groups: channel_groups_array,
         rate_limit_rules: rate_limit_rules_array,
+        // Convert int (0/1) to boolean for Switch component
+        default_allow_switch: editingPlan.default_allow_switch === 1,
+        default_allow_toggle: editingPlan.default_allow_toggle === 1,
       };
     }
     return {
@@ -321,8 +324,8 @@ const PlansTable = () => {
       default_quota: 0,
       daily_quota_limit: 0,
       validity_days: 0,
-      default_allow_switch: 1,
-      default_allow_toggle: 1,
+      default_allow_switch: true,
+      default_allow_toggle: true,
       channel_groups: [],
       rate_limit_rules: [],
     };
@@ -335,12 +338,15 @@ const PlansTable = () => {
     const values = editFormApi.getValues();
 
     // Transform channel_groups and rate_limit_rules to JSON strings
+    // Convert boolean Switch values to int (0/1) for backend
     const transformedValues = {
       ...values,
       channel_groups: JSON.stringify(values.channel_groups || []),
       rate_limit_rules: JSON.stringify(
         (values.rate_limit_rules || []).filter(r => r && r.window_hours > 0 && r.max_amount > 0)
       ),
+      default_allow_switch: values.default_allow_switch ? 1 : 0,
+      default_allow_toggle: values.default_allow_toggle ? 1 : 0,
     };
 
     let success = false;
@@ -585,12 +591,14 @@ const PlansTable = () => {
             label={t('允许切换')}
             checkedText={t('是')}
             uncheckedText={t('否')}
+            helpText={t('控制用户是否可以手动切换到此套餐。关闭后，用户无法自己切换到此套餐，仅管理员可强制切换')}
           />
           <Form.Switch
             field='default_allow_toggle'
             label={t('允许自动切换')}
             checkedText={t('是')}
             uncheckedText={t('否')}
+            helpText={t('控制用户是否可以开启/关闭此套餐的自动切换功能。关闭后，自动切换设置将由管理员控制')}
           />
           <Form.TextArea
             field='description'
