@@ -61,7 +61,8 @@ const (
 	/* plan related keys */
 	ContextKeyPlanId         ContextKey = "plan_id"          // int: selected plan ID
 	ContextKeyUserPlanId     ContextKey = "user_plan_id"     // int: user plan assignment ID
-	ContextKeyPlanGroup      ContextKey = "plan_group"       // string: channel group from plan
+	ContextKeyPlanGroup      ContextKey = "plan_group"       // string: channel group from plan (single, for compatibility)
+	ContextKeyPlanGroups     ContextKey = "plan_groups"      // []string: all channel groups from plan (multi-group support)
 	ContextKeyPlanName       ContextKey = "plan_name"        // string: plan name for logging
 	ContextKeyPlanAutoSwitch ContextKey = "plan_auto_switch" // bool: if auto-switch occurred
 )

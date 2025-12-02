@@ -16,6 +16,46 @@ func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 	var err error
 	selectGroup := group
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+
+	// Check if this is a plan-based request with multiple channel groups
+	// Priority: plan groups > auto mode > single group
+	if planGroups, exists := c.Get(string(constant.ContextKeyPlanGroups)); exists {
+		if groups, ok := planGroups.([]string); ok && len(groups) > 0 {
+			// Iterate through all plan groups (similar to auto mode)
+			var lastErr error
+			for _, planGroup := range groups {
+				logger.LogDebug(c, "Plan selecting group:", planGroup)
+				channel, lastErr = model.GetRandomSatisfiedChannel(planGroup, modelName, retry)
+
+				// Priority exhaustion is expected - try next group
+				if lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
+					continue
+				}
+
+				// System error (DB/config error) - stop immediately and return error
+				if lastErr != nil {
+					return nil, planGroup, lastErr
+				}
+
+				// No error but no channel - try next group
+				if channel == nil {
+					continue
+				}
+
+				// Found healthy channel - success
+				selectGroup = planGroup
+				common.SetContextKey(c, constant.ContextKeyUsingGroup, planGroup)
+				logger.LogDebug(c, "Plan selected group:", planGroup)
+				break
+			}
+			// If no channel found and we saw exhausted error, return it
+			if channel == nil && lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
+				return nil, selectGroup, lastErr
+			}
+			return channel, selectGroup, nil
+		}
+	}
+
 	if group == "auto" {
 		if len(setting.GetAutoGroups()) == 0 {
 			return nil, selectGroup, errors.New("auto groups is not enabled")
@@ -58,6 +98,46 @@ func CacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 	var err error
 	selectGroup := group
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+
+	// Check if this is a plan-based request with multiple channel groups
+	// Priority: plan groups > auto mode > single group
+	if planGroups, exists := c.Get(string(constant.ContextKeyPlanGroups)); exists {
+		if groups, ok := planGroups.([]string); ok && len(groups) > 0 {
+			// Iterate through all plan groups (similar to auto mode)
+			var lastErr error
+			for _, planGroup := range groups {
+				logger.LogDebug(c, "Plan selecting group (excluding tried):", planGroup)
+				channel, lastErr = model.GetRandomSatisfiedChannelExcluding(planGroup, modelName, retry, excludeIds)
+
+				// Priority exhaustion is expected - try next group
+				if lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
+					continue
+				}
+
+				// System error (DB/config error) - stop immediately and return error
+				if lastErr != nil {
+					return nil, planGroup, lastErr
+				}
+
+				// No error but no channel - try next group
+				if channel == nil {
+					continue
+				}
+
+				// Found healthy channel - success
+				selectGroup = planGroup
+				common.SetContextKey(c, constant.ContextKeyUsingGroup, planGroup)
+				logger.LogDebug(c, "Plan selected group:", planGroup)
+				break
+			}
+			// If no channel found and we saw exhausted error, return it
+			if channel == nil && lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
+				return nil, selectGroup, lastErr
+			}
+			return channel, selectGroup, nil
+		}
+	}
+
 	if group == "auto" {
 		if len(setting.GetAutoGroups()) == 0 {
 			return nil, selectGroup, errors.New("auto groups is not enabled")

@@ -1570,6 +1570,8 @@
     "自定义货币": "Custom currency",
     "自定义货币符号": "Custom currency symbol",
     "自用模式": "Self-use mode",
+    "套餐系统": "Plan System",
+    "启用后用户可使用套餐配额，优先扣除套餐配额而非余额": "When enabled, users can use plan quota, prioritizing plan quota over balance",
     "自适应列表": "Adaptive list",
     "节省": "Save",
     "花费": "Spend",

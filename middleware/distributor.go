@@ -136,19 +136,21 @@ func Distribute() func(c *gin.Context) {
 							}
 						}
 
-						// Use plan's channel groups (prefer new ChannelGroups field)
-						var channelGroup string
+						// Use plan's channel groups (support multiple groups)
+						var channelGroups []string
 						if planResult.Plan != nil {
-							groups := planResult.Plan.GetChannelGroupsList()
-							if len(groups) > 0 {
-								channelGroup = groups[0] // Use first group for now
-							} else if planResult.ChannelGroup != "" {
-								channelGroup = planResult.ChannelGroup // Fallback to old field
+							channelGroups = planResult.Plan.GetChannelGroupsList()
+							if len(channelGroups) == 0 && planResult.ChannelGroup != "" {
+								// Fallback to old single field
+								channelGroups = []string{planResult.ChannelGroup}
 							}
 						}
-						if channelGroup != "" {
-							common.SetContextKey(c, constant.ContextKeyPlanGroup, channelGroup)
-							usingGroup = channelGroup
+						if len(channelGroups) > 0 {
+							// Set plan groups for channel selection
+							common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
+							// Set first group as primary for compatibility
+							common.SetContextKey(c, constant.ContextKeyPlanGroup, channelGroups[0])
+							usingGroup = channelGroups[0]
 							common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 						}
 					}
@@ -180,23 +182,53 @@ func Distribute() func(c *gin.Context) {
 					userId := getSessionUserId(c)
 					sessionManager := &service.SessionManager{}
 
-					// Try to get bound channel
-					if channelId, exists := sessionManager.GetBoundChannel(userId, modelRequest.Model, usingGroup); exists {
-						// Use bound channel
-						channel, err = model.GetChannelById(channelId, true)
+					// For multi-plan-groups, try to get bound channel from any group
+					if planGroups, exists := c.Get(string(constant.ContextKeyPlanGroups)); exists {
+						if groups, ok := planGroups.([]string); ok && len(groups) > 0 {
+							// Try all plan groups to find bound channel
+							for _, planGroup := range groups {
+								if channelId, exists := sessionManager.GetBoundChannel(userId, modelRequest.Model, planGroup); exists {
+									// Try to use bound channel
+									channel, err = model.GetChannelById(channelId, true)
 
-						if err == nil && channel.Status == common.ChannelStatusEnabled {
-							// Channel is healthy, use it
-							common.SetContextKey(c, constant.ContextKeyStickySessionUsed, true)
-							setAutoGroupContext(c, usingGroup, channel)
+									if err == nil && channel.Status == common.ChannelStatusEnabled {
+										// Channel is healthy, use it
+										usingGroup = planGroup // Update to actual bound group
+										common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+										common.SetContextKey(c, constant.ContextKeyStickySessionUsed, true)
+										setAutoGroupContext(c, usingGroup, channel)
 
-							// Update last used time (extend TTL)
-							ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
-							sessionManager.UpdateLastUsed(userId, modelRequest.Model, usingGroup, channelId, time.Duration(ttl)*time.Second)
-						} else {
-							// Channel failed, unbind and re-select
-							sessionManager.UnbindChannel(userId, modelRequest.Model, usingGroup)
-							channel = nil
+										// Update last used time (extend TTL)
+										ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
+										sessionManager.UpdateLastUsed(userId, modelRequest.Model, planGroup, channelId, time.Duration(ttl)*time.Second)
+										break
+									} else {
+										// Channel failed, unbind and continue checking other groups
+										sessionManager.UnbindChannel(userId, modelRequest.Model, planGroup)
+										channel = nil
+									}
+								}
+							}
+						}
+					} else {
+						// Single group or auto mode - use usingGroup
+						if channelId, exists := sessionManager.GetBoundChannel(userId, modelRequest.Model, usingGroup); exists {
+							// Use bound channel
+							channel, err = model.GetChannelById(channelId, true)
+
+							if err == nil && channel.Status == common.ChannelStatusEnabled {
+								// Channel is healthy, use it
+								common.SetContextKey(c, constant.ContextKeyStickySessionUsed, true)
+								setAutoGroupContext(c, usingGroup, channel)
+
+								// Update last used time (extend TTL)
+								ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
+								sessionManager.UpdateLastUsed(userId, modelRequest.Model, usingGroup, channelId, time.Duration(ttl)*time.Second)
+							} else {
+								// Channel failed, unbind and re-select
+								sessionManager.UnbindChannel(userId, modelRequest.Model, usingGroup)
+								channel = nil
+							}
 						}
 					}
 
@@ -208,6 +240,12 @@ func Distribute() func(c *gin.Context) {
 
 						for retry := 0; retry < maxPriorityLevels; retry++ {
 							channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, retry)
+
+							// Sync usingGroup with actual selected group (critical for multi-plan-groups)
+							actualGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+							if actualGroup != "" {
+								usingGroup = actualGroup
+							}
 
 							// ErrPriorityExhausted is expected when all priorities are tried - clear it
 							if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
@@ -221,7 +259,7 @@ func Distribute() func(c *gin.Context) {
 							}
 
 							if channel != nil {
-								// Found healthy channel, bind it
+								// Found healthy channel, bind it to actual selected group
 								ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
 								sessionManager.BindChannel(userId, modelRequest.Model, usingGroup, channel.Id, time.Duration(ttl)*time.Second)
 								common.SetContextKey(c, constant.ContextKeyStickySessionNew, true)
@@ -239,6 +277,12 @@ func Distribute() func(c *gin.Context) {
 
 					for retry := 0; retry < maxPriorityLevels; retry++ {
 						channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, retry)
+
+						// Sync usingGroup with actual selected group (critical for multi-plan-groups)
+						actualGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+						if actualGroup != "" {
+							usingGroup = actualGroup
+						}
 
 						// ErrPriorityExhausted is expected when all priorities are tried - clear it
 						if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
