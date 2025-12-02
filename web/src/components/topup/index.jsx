@@ -110,19 +110,42 @@ const TopUp = () => {
       });
       const { success, message, data } = res.data;
       if (success) {
+        // Handle backward compatible response: data.quota for new format
+        const redeemedQuota = typeof data === 'object' ? data.quota : data;
+        const isPlanRedemption = data?.mode === 'plan';
+
         showSuccess(t('兑换成功！'));
-        Modal.success({
-          title: t('兑换成功！'),
-          content: t('成功兑换额度：') + renderQuota(data),
-          centered: true,
-        });
-        if (userState.user) {
-          const updatedUser = {
-            ...userState.user,
-            quota: userState.user.quota + data,
-          };
-          userDispatch({ type: 'login', payload: updatedUser });
+
+        if (isPlanRedemption) {
+          // Plan redemption: show plan info
+          Modal.success({
+            title: t('套餐兑换成功！'),
+            content: (
+              <div>
+                <p>{t('套餐名称')}: {data.plan_name}</p>
+                <p>{t('套餐额度')}: {renderQuota(redeemedQuota)}</p>
+                <p>{t('有效期')}: {data.validity_days > 0 ? `${data.validity_days} ${t('天')}` : t('永久')}</p>
+              </div>
+            ),
+            centered: true,
+          });
+        } else {
+          // User balance redemption: show quota info
+          Modal.success({
+            title: t('兑换成功！'),
+            content: t('成功兑换额度：') + renderQuota(redeemedQuota),
+            centered: true,
+          });
+          // Update user quota in context (only for user_balance mode)
+          if (userState.user) {
+            const updatedUser = {
+              ...userState.user,
+              quota: userState.user.quota + redeemedQuota,
+            };
+            userDispatch({ type: 'login', payload: updatedUser });
+          }
         }
+
         setRedemptionCode('');
       } else {
         showError(message);

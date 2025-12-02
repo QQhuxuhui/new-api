@@ -139,6 +139,24 @@ export const getRedemptionsColumns = ({
       },
     },
     {
+      title: t('关联套餐'),
+      dataIndex: 'plan_id',
+      render: (text) => {
+        if (!text || text === 0) {
+          return (
+            <Tag color='grey' shape='circle'>
+              {t('用户余额')}
+            </Tag>
+          );
+        }
+        return (
+          <Tag color='purple' shape='circle'>
+            {t('套餐')} #{text}
+          </Tag>
+        );
+      },
+    },
+    {
       title: '',
       dataIndex: 'operate',
       fixed: 'right',

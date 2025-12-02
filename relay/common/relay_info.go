@@ -112,8 +112,9 @@ type RelayInfo struct {
 	IsClaudeBetaQuery      bool // /v1/messages?beta=true
 
 	// Plan-related fields
-	UserPlanId int // User's current plan assignment ID for quota tracking
-	PlanId     int // Plan ID for logging
+	UserPlanId    int    // User's current plan assignment ID for quota tracking
+	PlanId        int    // Plan ID for logging
+	BillingSource string // "plan" or "user_balance" - indicates where quota was deducted from
 
 	PriceData types.PriceData
 

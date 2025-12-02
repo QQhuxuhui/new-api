@@ -50,6 +50,17 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 		other["upstream_model_name"] = relayInfo.UpstreamModelName
 	}
 
+	// Add billing source info for plan-priority tracking
+	if relayInfo.BillingSource != "" {
+		other["billing_source"] = relayInfo.BillingSource
+	}
+	if relayInfo.UserPlanId > 0 {
+		other["user_plan_id"] = relayInfo.UserPlanId
+	}
+	if relayInfo.PlanId > 0 {
+		other["plan_id"] = relayInfo.PlanId
+	}
+
 	isSystemPromptOverwritten := common.GetContextKeyBool(ctx, constant.ContextKeySystemPromptOverride)
 	if isSystemPromptOverwritten {
 		other["is_system_prompt_overwritten"] = true

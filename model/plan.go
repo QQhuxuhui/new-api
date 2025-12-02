@@ -342,6 +342,19 @@ func SeedDefaultPlans() error {
 			DefaultAllowToggle: 1,
 			Status:             PlanStatusEnabled,
 		},
+		{
+			Name:               "trial",
+			DisplayName:        "试用套餐",
+			Description:        "新用户试用套餐，注册时自动分配",
+			Type:               PlanTypeTrial,
+			Priority:           10,
+			ChannelGroup:       "default",
+			DefaultQuota:       100000, // 100K quota for trial
+			ValidityDays:       7,      // 7 days validity
+			DefaultAllowSwitch: 0,
+			DefaultAllowToggle: 0,
+			Status:             PlanStatusDisabled, // Disabled by default, admin enables if needed
+		},
 	}
 
 	for _, plan := range defaultPlans {

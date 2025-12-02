@@ -411,6 +411,13 @@ func (user *User) Insert(inviterId int) error {
 		}
 	}
 
+	// Bind trial plan to new user (if trial plan exists and is enabled)
+	gopool.Go(func() {
+		if err := bindTrialPlanToNewUser(user.Id); err != nil {
+			common.SysLog(fmt.Sprintf("failed to bind trial plan for user %d: %v", user.Id, err))
+		}
+	})
+
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
@@ -425,6 +432,30 @@ func (user *User) Insert(inviterId int) error {
 			_ = inviteUser(inviterId)
 		}
 	}
+	return nil
+}
+
+// bindTrialPlanToNewUser assigns the trial plan to a newly registered user
+func bindTrialPlanToNewUser(userId int) error {
+	// Find trial plan
+	trialPlan, err := GetPlanByName("trial")
+	if err != nil {
+		// Trial plan doesn't exist - this is normal, not an error
+		return nil
+	}
+	if trialPlan.Status != PlanStatusEnabled {
+		// Trial plan is disabled
+		return nil
+	}
+
+	// Assign trial plan to user
+	_, err = AssignPlanToUser(userId, trialPlan.Id, trialPlan.DefaultQuota, 0)
+	if err != nil {
+		return fmt.Errorf("assign trial plan failed: %v", err)
+	}
+
+	RecordLog(userId, LogTypeSystem, fmt.Sprintf("新用户注册赠送试用套餐 %s，额度 %s", trialPlan.DisplayName, logger.LogQuota(int(trialPlan.DefaultQuota))))
+	common.SysLog(fmt.Sprintf("assigned trial plan to new user %d", userId))
 	return nil
 }
 

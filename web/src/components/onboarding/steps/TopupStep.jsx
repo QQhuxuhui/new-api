@@ -67,16 +67,24 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
       });
       const { success, message, data } = res.data;
       if (success) {
-        showSuccess('兑换成功! 获得额度: ' + renderQuota(data));
+        // Handle backward compatible response: data.quota for new format
+        const redeemedQuota = typeof data === 'object' ? data.quota : data;
+        const isPlanRedemption = data?.mode === 'plan';
+
+        if (isPlanRedemption) {
+          showSuccess(`套餐兑换成功! 套餐: ${data.plan_name}, 额度: ${renderQuota(redeemedQuota)}`);
+        } else {
+          showSuccess('兑换成功! 获得额度: ' + renderQuota(redeemedQuota));
+        }
 
         // Track redemption code usage in onboarding
         OnboardingAnalytics.trackRedemptionCodeUsed();
 
-        // Update user quota in context
-        if (userState.user) {
+        // Update user quota in context (only for user_balance mode)
+        if (!isPlanRedemption && userState.user) {
           const updatedUser = {
             ...userState.user,
-            quota: userState.user.quota + data,
+            quota: userState.user.quota + redeemedQuota,
           };
           userDispatch({ type: 'login', payload: updatedUser });
         }
@@ -85,7 +93,7 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
 
         // Advance to next step after successful redemption
         setTimeout(() => {
-          onNext({ topupAmount: data, method: 'redemption_code' });
+          onNext({ topupAmount: redeemedQuota, method: isPlanRedemption ? 'plan_redemption' : 'redemption_code' });
         }, 1000);
       } else {
         showError(message || '兑换失败');

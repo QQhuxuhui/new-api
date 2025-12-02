@@ -47,6 +47,7 @@ import {
   IconSave,
   IconClose,
   IconGift,
+  IconBox,
 } from '@douyinfe/semi-icons';
 
 const { Text, Title } = Typography;
@@ -55,6 +56,7 @@ const EditRedemptionModal = (props) => {
   const { t } = useTranslation();
   const isEdit = props.editingRedemption.id !== undefined;
   const [loading, setLoading] = useState(isEdit);
+  const [plans, setPlans] = useState([]);
   const isMobile = useIsMobile();
   const formApiRef = useRef(null);
 
@@ -63,7 +65,27 @@ const EditRedemptionModal = (props) => {
     quota: 100000,
     count: 1,
     expired_time: null,
+    plan_id: 0,
+    validity_days: 0,
   });
+
+  const loadPlans = async () => {
+    try {
+      const res = await API.get('/api/plan/?p=0&size=100');
+      const { success, data } = res.data;
+      if (success && data?.items) {
+        // Filter only enabled plans
+        const enabledPlans = data.items.filter((plan) => plan.status === 1);
+        setPlans(enabledPlans);
+      }
+    } catch (error) {
+      console.error('Failed to load plans:', error);
+    }
+  };
+
+  useEffect(() => {
+    loadPlans();
+  }, []);
 
   const handleCancel = () => {
     props.handleClose();
@@ -105,6 +127,8 @@ const EditRedemptionModal = (props) => {
     let localInputs = { ...values };
     localInputs.count = parseInt(localInputs.count) || 0;
     localInputs.quota = parseInt(localInputs.quota) || 0;
+    localInputs.plan_id = parseInt(localInputs.plan_id) || 0;
+    localInputs.validity_days = parseInt(localInputs.validity_days) || 0;
     localInputs.name = name;
     if (!localInputs.expired_time) {
       localInputs.expired_time = 0;
@@ -339,6 +363,57 @@ const EditRedemptionModal = (props) => {
                         />
                       </Col>
                     )}
+                  </Row>
+                </Card>
+
+                <Card className='!rounded-2xl shadow-sm border-0 mt-6'>
+                  {/* Header: Plan Binding (optional) */}
+                  <div className='flex items-center mb-2'>
+                    <Avatar
+                      size='small'
+                      color='purple'
+                      className='mr-2 shadow-md'
+                    >
+                      <IconBox size={16} />
+                    </Avatar>
+                    <div>
+                      <Text className='text-lg font-medium'>
+                        {t('套餐绑定')}
+                      </Text>
+                      <div className='text-xs text-gray-600'>
+                        {t('可选：关联套餐后，兑换时会分配/续期套餐而不是增加用户余额')}
+                      </div>
+                    </div>
+                  </div>
+
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Select
+                        field='plan_id'
+                        label={t('关联套餐')}
+                        placeholder={t('选择套餐（可选）')}
+                        style={{ width: '100%' }}
+                        showClear
+                        optionList={[
+                          { value: 0, label: t('不关联套餐（充值用户余额）') },
+                          ...plans.map((plan) => ({
+                            value: plan.id,
+                            label: `${plan.display_name || plan.name} (${plan.type})`,
+                          })),
+                        ]}
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Form.InputNumber
+                        field='validity_days'
+                        label={t('有效期（天）')}
+                        placeholder={t('0 表示使用套餐默认有效期')}
+                        min={0}
+                        style={{ width: '100%' }}
+                        extraText={t('套餐有效期，0 表示使用套餐默认值')}
+                        disabled={!values.plan_id}
+                      />
+                    </Col>
                   </Row>
                 </Card>
               </div>

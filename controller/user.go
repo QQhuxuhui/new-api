@@ -1085,15 +1085,32 @@ func TopUp(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	quota, err := model.Redeem(req.Key, id)
+	result, err := model.RedeemWithResult(req.Key, id)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+
+	// Backward compatible response: always include "quota" at top level
+	// For user_balance mode: data is just the quota number (legacy behavior)
+	// For plan mode: data includes full result but quota is also available at top level
+	responseData := gin.H{
+		"quota": result.Quota, // Always available for backward compat
+	}
+
+	if result.Mode == "plan" {
+		// Plan redemption: include additional info
+		responseData["plan_id"] = result.PlanId
+		responseData["plan_name"] = result.PlanName
+		responseData["validity_days"] = result.ValidityDays
+		responseData["expires_at"] = result.ExpiresAt
+		responseData["mode"] = result.Mode
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    quota,
+		"data":    responseData,
 	})
 }
 
