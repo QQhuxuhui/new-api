@@ -87,11 +87,11 @@ func CalculateChannelCostMetrics(timeRange string, channelID *int) (*dto.Channel
 
 	var logs []LogData
 	query := model.LOG_DB.WithContext(ctx).Model(&model.Log{}).
-		Select("channel as channel_id, quota, prompt_tokens, completion_tokens, other").
+		Select("channel_id, quota, prompt_tokens, completion_tokens, other").
 		Where("created_at >= ? AND created_at <= ? AND type = ?", startTime, endTime, model.LogTypeConsume)
 
 	if channelID != nil {
-		query = query.Where("channel = ?", *channelID)
+		query = query.Where("channel_id = ?", *channelID)
 	}
 
 	if err := query.Find(&logs).Error; err != nil {

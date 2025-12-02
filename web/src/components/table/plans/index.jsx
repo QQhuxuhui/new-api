@@ -50,7 +50,7 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import { usePlansData, PLAN_TYPES, PLAN_STATUS } from '../../../hooks/plans/usePlansData';
-import { API, showError } from '../../../helpers';
+import { API, showError, renderQuotaWithPrompt, renderQuota } from '../../../helpers';
 
 const PlansTable = () => {
   const {
@@ -220,13 +220,13 @@ const PlansTable = () => {
       title: t('默认额度'),
       dataIndex: 'default_quota',
       width: 120,
-      render: (quota) => quota?.toLocaleString() || '0',
+      render: (quota) => renderQuota(quota || 0),
     },
     {
       title: t('每日限额'),
       dataIndex: 'daily_quota_limit',
       width: 120,
-      render: (limit) => limit > 0 ? limit.toLocaleString() : <Tag color="grey" size="small">{t('无限制')}</Tag>,
+      render: (limit) => limit > 0 ? renderQuota(limit) : <Tag color="grey" size="small">{t('无限制')}</Tag>,
     },
     {
       title: t('速率限制'),
@@ -358,15 +358,21 @@ const PlansTable = () => {
 
   // Watch form type change
   const [formPlanType, setFormPlanType] = useState(PLAN_TYPES.CONSUMPTION);
+  const [formDefaultQuota, setFormDefaultQuota] = useState(0);
+  const [formDailyQuotaLimit, setFormDailyQuotaLimit] = useState(0);
 
   // Update formPlanType when editing an existing plan
   useEffect(() => {
     if (showEdit && editingPlan && editingPlan.id) {
       // Editing existing plan - set type from plan data
       setFormPlanType(editingPlan.type || PLAN_TYPES.CONSUMPTION);
+      setFormDefaultQuota(editingPlan.default_quota || 0);
+      setFormDailyQuotaLimit(editingPlan.daily_quota_limit || 0);
     } else if (showEdit && (!editingPlan || !editingPlan.id)) {
       // Creating new plan - reset to default
       setFormPlanType(PLAN_TYPES.CONSUMPTION);
+      setFormDefaultQuota(0);
+      setFormDailyQuotaLimit(0);
     }
   }, [showEdit, editingPlan]);
 
@@ -462,8 +468,14 @@ const PlansTable = () => {
           labelPosition='left'
           labelWidth={120}
           onValueChange={(values) => {
-            if (values.type) {
+            if (values.type !== undefined) {
               setFormPlanType(values.type);
+            }
+            if (values.default_quota !== undefined) {
+              setFormDefaultQuota(values.default_quota);
+            }
+            if (values.daily_quota_limit !== undefined) {
+              setFormDailyQuotaLimit(values.daily_quota_limit);
             }
           }}
         >
@@ -504,6 +516,7 @@ const PlansTable = () => {
             label={t('默认额度')}
             placeholder={t('分配给用户的默认额度')}
             min={0}
+            extraText={renderQuotaWithPrompt(formDefaultQuota)}
           />
 
           {/* Daily Quota Limit - only for subscription plans */}
@@ -514,6 +527,7 @@ const PlansTable = () => {
               placeholder={t('每日最大消费额度（0表示无限制）')}
               min={0}
               suffix={t('（订阅套餐）')}
+              extraText={renderQuotaWithPrompt(formDailyQuotaLimit)}
             />
           )}
 

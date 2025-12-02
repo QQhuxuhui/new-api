@@ -984,9 +984,17 @@ export function renderQuota(quota, digits = 2) {
   let quotaPerUnit = localStorage.getItem('quota_per_unit');
   const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';
   quotaPerUnit = parseFloat(quotaPerUnit);
+
+  // TOKENS mode: display raw number
   if (quotaDisplayType === 'TOKENS') {
     return renderNumber(quota);
   }
+
+  // Invalid quotaPerUnit: fallback to tokens with label
+  if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) {
+    return renderNumber(quota) + ' tokens';
+  }
+
   const resultUSD = quota / quotaPerUnit;
   let symbol = '$';
   let value = resultUSD;

@@ -124,19 +124,69 @@ func AdminUpdateUserPlanPermissions(c *gin.Context) {
 		return
 	}
 
-	var req struct {
-		AllowUserSwitch int `json:"allow_user_switch"`
-		AllowUserToggle int `json:"allow_user_toggle"`
-	}
+	// Accept any permission field dynamically
+	var req map[string]interface{}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	err = model.UpdateUserPlanPermissions(id, req.AllowUserSwitch, req.AllowUserToggle)
+	// Validate and extract permission fields
+	updates := make(map[string]interface{})
+
+	// Check for allow_user_switch (from can_switch field)
+	if val, ok := req["can_switch"]; ok {
+		if intVal, ok := val.(float64); ok {
+			updates["allow_user_switch"] = int(intVal)
+		}
+	}
+	if val, ok := req["allow_user_switch"]; ok {
+		if intVal, ok := val.(float64); ok {
+			updates["allow_user_switch"] = int(intVal)
+		}
+	}
+
+	// Check for allow_user_toggle (from can_toggle_auto field)
+	if val, ok := req["can_toggle_auto"]; ok {
+		if intVal, ok := val.(float64); ok {
+			updates["allow_user_toggle"] = int(intVal)
+		}
+	}
+	if val, ok := req["allow_user_toggle"]; ok {
+		if intVal, ok := val.(float64); ok {
+			updates["allow_user_toggle"] = int(intVal)
+		}
+	}
+
+	// Check for auto_switch
+	if val, ok := req["auto_switch"]; ok {
+		if intVal, ok := val.(float64); ok {
+			updates["auto_switch"] = int(intVal)
+		}
+	}
+
+	if len(updates) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "没有有效的权限字段",
+		})
+		return
+	}
+
+	// Update the fields
+	err = model.DB.Model(&model.UserPlan{}).
+		Where("id = ?", id).
+		Updates(updates).Error
+
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+
+	// Invalidate cache
+	var userPlan model.UserPlan
+	if err := model.DB.Select("user_id").First(&userPlan, id).Error; err == nil {
+		model.InvalidateUserPlanCache(userPlan.UserId)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -179,10 +229,8 @@ func AdminLockUserPlan(c *gin.Context) {
 	var req struct {
 		Reason string `json:"reason"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ApiError(c, err)
-		return
-	}
+	// Make reason optional - ignore bind error
+	_ = c.ShouldBindJSON(&req)
 
 	err = model.LockUserPlan(id, req.Reason)
 	if err != nil {
@@ -225,14 +273,28 @@ func AdminAdjustQuota(c *gin.Context) {
 	}
 
 	var req struct {
-		Quota int64 `json:"quota" binding:"required"`
+		Amount int64 `json:"amount" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	err = model.SetUserPlanQuota(id, req.Quota)
+	if req.Amount == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "调整额度不能为0",
+		})
+		return
+	}
+
+	// Use increase or decrease based on sign
+	if req.Amount > 0 {
+		err = model.IncreaseUserPlanQuota(id, req.Amount)
+	} else {
+		err = model.DecreaseUserPlanQuota(id, -req.Amount)
+	}
+
 	if err != nil {
 		common.ApiError(c, err)
 		return

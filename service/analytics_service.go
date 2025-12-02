@@ -514,15 +514,15 @@ func GetBehaviorPatterns(timeRange string) (*dto.BehaviorPatterns, error) {
 
 	// Get channel stats
 	type ChannelResult struct {
-		ChannelId    int   `gorm:"column:channel"`
+		ChannelId    int   `gorm:"column:channel_id"`
 		RequestCount int64 `gorm:"column:request_count"`
 	}
 
 	var channelData []ChannelResult
 	model.LOG_DB.WithContext(ctx).Model(&model.Log{}).
-		Select("channel, COUNT(*) as request_count").
+		Select("channel_id, COUNT(*) as request_count").
 		Where("created_at >= ? AND created_at <= ? AND type = ?", startTime, endTime, model.LogTypeConsume).
-		Group("channel").
+		Group("channel_id").
 		Order("request_count DESC").
 		Limit(10).
 		Find(&channelData)

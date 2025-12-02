@@ -24,6 +24,7 @@ import {
   showError,
   showSuccess,
   renderQuota,
+  renderQuotaWithPrompt,
 } from '../../../../helpers';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import {
@@ -117,7 +118,7 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
     }
     setLoading(true);
     try {
-      const res = await API.post('/api/user_plan/', {
+      const res = await API.post('/api/user_plan/assign', {
         user_id: user.id,
         plan_id: assignPlanId,
         quota: assignQuota || 0,
@@ -139,10 +140,13 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
   };
 
   // Remove plan from user
-  const handleRemovePlan = async (userPlanId) => {
+  const handleRemovePlan = async (userPlan) => {
     setLoading(true);
     try {
-      const res = await API.delete(`/api/user_plan/${userPlanId}`);
+      const res = await API.post('/api/user_plan/remove', {
+        user_id: user.id,
+        plan_id: userPlan.plan_id,
+      });
       const { success, message } = res.data;
       if (success) {
         showSuccess(t('套餐移除成功'));
@@ -199,7 +203,7 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
   const handleForceSwitch = async (userPlanId, planId) => {
     setLoading(true);
     try {
-      const res = await API.post(`/api/user_plan/admin/switch`, {
+      const res = await API.post('/api/user_plan/force_switch', {
         user_id: user.id,
         plan_id: planId,
       });
@@ -393,7 +397,7 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
           </Button>
           <Popconfirm
             title={t('确认移除该套餐？')}
-            onConfirm={() => handleRemovePlan(record.id)}
+            onConfirm={() => handleRemovePlan(record)}
           >
             <Button size="small" icon={<IconDelete />} type="danger">
               {t('移除')}
@@ -517,7 +521,7 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
             />
             {assignQuota > 0 && (
               <Text type="secondary" className="text-xs mt-1 block">
-                {renderQuota(assignQuota)}
+                {renderQuotaWithPrompt(assignQuota)}
               </Text>
             )}
           </div>
@@ -555,11 +559,15 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
                 style={{ width: '100%' }}
                 step={500000}
               />
-              {adjustQuotaAmount !== 0 && (
-                <Text type="secondary" className="text-xs mt-1 block">
-                  {t('调整后')}: {renderQuota((selectedPlan.quota || 0) + (adjustQuotaAmount || 0))}
-                </Text>
-              )}
+              {adjustQuotaAmount !== 0 && (() => {
+                const prompt = renderQuotaWithPrompt(Math.abs(adjustQuotaAmount));
+                return (
+                  <Text type="secondary" className="text-xs mt-1 block">
+                    {prompt && `${prompt} | `}
+                    {t('调整后')}: {renderQuota((selectedPlan.quota || 0) + (adjustQuotaAmount || 0))}
+                  </Text>
+                );
+              })()}
             </div>
           </div>
         )}
