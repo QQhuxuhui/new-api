@@ -527,10 +527,17 @@ export const useLogsData = () => {
     const res = await API.get(url);
     const { success, message, data } = res.data;
     if (success) {
-      const newPageData = data.items;
+      let newPageData = data.items;
+
+      // Filter out error logs (type=5) for non-admin users
+      if (!isAdminUser) {
+        newPageData = newPageData.filter(log => log.type !== 5);
+      }
+
       setActivePage(data.page);
       setPageSize(data.page_size);
-      setLogCount(data.total);
+      // Adjust total count for non-admin users
+      setLogCount(!isAdminUser ? newPageData.length : data.total);
 
       setLogsFormat(newPageData);
     } else {
