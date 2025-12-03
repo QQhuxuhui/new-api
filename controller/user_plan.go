@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -402,6 +403,17 @@ func UserSwitchPlan(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+
+	// Clear sticky sessions to ensure new plan's channels are used immediately
+	sessionManager := &service.SessionManager{}
+	common.SysLog(fmt.Sprintf("[SessionClear] user=%d clearing sticky sessions on plan switch to plan_id=%d", userId, req.PlanId))
+
+	if clearErr := sessionManager.UnbindAllUserSessionsByUserId(userId); clearErr != nil {
+		common.SysLog(fmt.Sprintf("[SessionClear] user=%d failed to clear sessions: %v", userId, clearErr))
+		// Don't fail the response - plan switch succeeded
+	} else {
+		common.SysLog(fmt.Sprintf("[SessionClear] user=%d cleared sessions successfully", userId))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
