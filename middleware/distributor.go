@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
@@ -320,8 +321,78 @@ func Distribute() func(c *gin.Context) {
 					return
 				}
 				if channel == nil {
-					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", usingGroup, modelRequest.Model), string(types.ErrorCodeModelNotFound))
-					return
+					// Check if we should attempt plan failover
+					// Only trigger if: 1) Plan system enabled, 2) User has plan, 3) Auto-switch enabled
+					shouldAttemptFailover := false
+					currentPlanId := 0
+
+					if common.PlanSystemEnabled && userId > 0 {
+						// Get current plan ID and auto-switch setting
+						if planId, exists := common.GetContextKey(c, constant.ContextKeyUserPlanId); exists {
+							if userPlanId, ok := planId.(int); ok && userPlanId > 0 {
+								// Load the UserPlan to check auto_switch flag
+								if userPlan, err := model.GetUserPlanById(userPlanId); err == nil {
+									if userPlan.AutoSwitch == 1 {
+										shouldAttemptFailover = true
+										currentPlanId = userPlan.PlanId
+									}
+								}
+							}
+						}
+					}
+
+					if shouldAttemptFailover && currentPlanId > 0 {
+						logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d current_plan=%d all_channels_unavailable attempting_failover", userId, currentPlanId))
+
+						// Attempt to find alternative plan with available channels
+						failoverChannel, failoverPlan, failoverGroup, failoverErr := service.AttemptPlanFailover(c, userId, currentPlanId, modelRequest.Model)
+
+						if failoverErr != nil {
+							logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failover_error=%v", userId, failoverErr))
+						}
+
+						if failoverChannel != nil && failoverPlan != nil {
+							// Successfully found alternative plan with working channel
+							// Switch user to the new plan
+							if switchErr := model.SwitchUserCurrentPlan(userId, failoverPlan.PlanId); switchErr != nil {
+								logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
+							} else {
+								planName := "unknown"
+								if failoverPlan.Plan != nil {
+									planName = failoverPlan.Plan.Name
+								}
+								logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d switched from plan=%d to plan=%s(id=%d) reason=channel_unavailable",
+									userId, currentPlanId, planName, failoverPlan.PlanId))
+
+								// Update context with new plan info
+								common.SetContextKey(c, constant.ContextKeyPlanId, failoverPlan.PlanId)
+								common.SetContextKey(c, constant.ContextKeyUserPlanId, failoverPlan.Id)
+								common.SetContextKey(c, constant.ContextKeyPlanName, planName)
+								common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
+
+								// Update channel groups in context
+								if failoverPlan.Plan != nil {
+									channelGroups := failoverPlan.Plan.GetChannelGroupsList()
+									if len(channelGroups) > 0 {
+										common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
+										// Use the actual group where the channel was found
+										common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+										common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
+									}
+								}
+
+								// Use the failover channel
+								channel = failoverChannel
+								setAutoGroupContext(c, common.GetContextKeyString(c, constant.ContextKeyUsingGroup), channel)
+							}
+						}
+					}
+
+					// If still no channel after failover attempt (or failover disabled)
+					if channel == nil {
+						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", usingGroup, modelRequest.Model), string(types.ErrorCodeModelNotFound))
+						return
+					}
 				}
 			}
 		}

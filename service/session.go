@@ -3,10 +3,12 @@ package service
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 )
 
 type SessionManager struct{}
@@ -73,6 +75,58 @@ func (sm *SessionManager) UnbindChannel(userId, modelName, group string) error {
 
 	key := sm.GetSessionKey(userId, modelName, group)
 	return common.RedisDel(key)
+}
+
+// UnbindAllUserSessions removes all session bindings for a user
+// This is used when a user manually switches plans to ensure they use the new plan's channels
+// Note: sessionUserId should be the same format used by GetSessionKey (e.g., "token_123" or custom user string)
+func (sm *SessionManager) UnbindAllUserSessions(sessionUserId string) error {
+	pattern := fmt.Sprintf("session:channel:%s:*", sessionUserId)
+
+	if !common.RedisEnabled {
+		// Clear from memory cache
+		memorySessionMutex.Lock()
+		defer memorySessionMutex.Unlock()
+
+		prefix := fmt.Sprintf("session:channel:%s:", sessionUserId)
+		for key := range memorySessionCache {
+			if strings.HasPrefix(key, prefix) {
+				delete(memorySessionCache, key)
+			}
+		}
+		return nil
+	}
+
+	// Clear from Redis using pattern
+	return common.RedisDelPattern(pattern)
+}
+
+// UnbindAllUserSessionsByUserId is a helper that clears sessions for a numeric user ID
+// It clears all session patterns for all tokens belonging to this user
+func (sm *SessionManager) UnbindAllUserSessionsByUserId(userId int) error {
+	// Query all tokens for this user
+	var tokenIds []int
+
+	// Query token IDs from database
+	err := model.DB.Table("tokens").
+		Select("id").
+		Where("user_id = ?", userId).
+		Pluck("id", &tokenIds).Error
+
+	if err != nil {
+		return fmt.Errorf("failed to query user tokens: %w", err)
+	}
+
+	// Clear sessions for each token
+	for _, tokenId := range tokenIds {
+		sessionUserId := fmt.Sprintf("token_%d", tokenId)
+		if clearErr := sm.UnbindAllUserSessions(sessionUserId); clearErr != nil {
+			// Log but continue with other tokens
+			common.SysLog(fmt.Sprintf("Failed to clear sessions for token %d: %v", tokenId, clearErr))
+		}
+	}
+
+	return nil
 }
 
 // Memory cache methods (fallback when Redis unavailable)

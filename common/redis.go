@@ -339,3 +339,36 @@ func RedisHSetField(key, field string, value interface{}) error {
 	}
 	return nil
 }
+
+// RedisDelPattern deletes all keys matching a pattern using SCAN
+// This is safe for production use as it uses cursor-based iteration
+func RedisDelPattern(pattern string) error {
+	if DebugEnabled {
+		SysLog(fmt.Sprintf("Redis DEL Pattern: pattern=%s", pattern))
+	}
+	ctx := context.Background()
+	iter := RDB.Scan(ctx, 0, pattern, 0).Iterator()
+
+	// Delete keys in batches
+	const batchSize = 100
+	batch := make([]string, 0, batchSize)
+
+	for iter.Next(ctx) {
+		batch = append(batch, iter.Val())
+		if len(batch) >= batchSize {
+			if err := RDB.Del(ctx, batch...).Err(); err != nil {
+				return fmt.Errorf("failed to delete batch: %w", err)
+			}
+			batch = batch[:0] // Reset slice
+		}
+	}
+
+	// Delete remaining keys
+	if len(batch) > 0 {
+		if err := RDB.Del(ctx, batch...).Err(); err != nil {
+			return fmt.Errorf("failed to delete remaining keys: %w", err)
+		}
+	}
+
+	return iter.Err()
+}

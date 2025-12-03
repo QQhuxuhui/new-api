@@ -43,10 +43,13 @@ import {
   IconServer,
   IconAlertTriangle,
   IconCoinMoneyStroked,
+  IconBox,
 } from '@douyinfe/semi-icons';
 import { useAnalyticsData } from '../../hooks/analytics/useAnalyticsData';
 import BalanceAnalysisTab from './components/BalanceAnalysisTab';
 import CostEfficiencyTab from './components/CostEfficiencyTab';
+import PlanUsageTab from './components/PlanUsageTab';
+import MoneyWithDetails from '../../components/analytics/MoneyWithDetails';
 
 const { Title, Text } = Typography;
 
@@ -216,14 +219,15 @@ const Analytics = () => {
         render: (text, record) => text || `用户 ${record.user_id}`,
       },
       {
-        title: '消费额度',
-        dataIndex: 'total_quota',
-        sorter: (a, b) => a.total_quota - b.total_quota,
-        render: (value) => value.toLocaleString(),
-      },
-      {
-        title: '请求数',
-        dataIndex: 'request_count',
+        title: '消费金额',
+        dataIndex: 'total_usd',
+        sorter: (a, b) => (a.total_usd || 0) - (b.total_usd || 0),
+        render: (value, record) => (
+          <MoneyWithDetails
+            usd={value}
+            requests={record.request_count}
+          />
+        ),
       },
     ];
 
@@ -249,17 +253,20 @@ const Analytics = () => {
         width: 200,
       },
       {
-        title: '请求数',
-        dataIndex: 'request_count',
-        sorter: (a, b) => a.request_count - b.request_count,
+        title: '消费金额',
+        dataIndex: 'total_usd',
+        sorter: (a, b) => (a.total_usd || 0) - (b.total_usd || 0),
+        render: (value, record) => (
+          <MoneyWithDetails
+            usd={value}
+            requests={record.request_count}
+            tokens={record.avg_tokens}
+          />
+        ),
       },
       {
         title: '独立用户',
         dataIndex: 'unique_users',
-      },
-      {
-        title: '平均Token',
-        dataIndex: 'avg_tokens',
       },
       {
         title: '成功率',
@@ -356,14 +363,14 @@ const Analytics = () => {
         dataIndex: 'date',
       },
       {
-        title: '总额度',
-        dataIndex: 'total_quota',
-        render: (value) => value.toLocaleString(),
-      },
-      {
-        title: '请求数',
-        dataIndex: 'request_count',
-        render: (value) => value.toLocaleString(),
+        title: '消费金额',
+        dataIndex: 'total_usd',
+        render: (value, record) => (
+          <MoneyWithDetails
+            usd={value}
+            requests={record.request_count}
+          />
+        ),
       },
       {
         title: '活跃用户',
@@ -453,6 +460,13 @@ const Analytics = () => {
             itemKey="balance"
           >
             <BalanceAnalysisTab timeRange={timeRange} />
+          </TabPane>
+
+          <TabPane
+            tab={<span><IconBox className="mr-1" />套餐分析</span>}
+            itemKey="plan-usage"
+          >
+            <PlanUsageTab timeRange={timeRange} />
           </TabPane>
 
           <TabPane

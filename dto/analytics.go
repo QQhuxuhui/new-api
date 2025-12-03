@@ -210,3 +210,72 @@ type CostWarning struct {
 	Value       float64 `json:"value"`
 	Threshold   float64 `json:"threshold,omitempty"`
 }
+
+// PlanUsageOverview represents aggregate plan usage statistics
+type PlanUsageOverview struct {
+	TotalPlans          int     `json:"total_plans"`           // Total number of user plans
+	ActivePlans         int     `json:"active_plans"`          // Active plans count
+	ExpiringPlans       int     `json:"expiring_plans"`        // Plans expiring within 3 days
+	LockedPlans         int     `json:"locked_plans"`          // Locked plans count
+	TotalAllocatedUSD   float64 `json:"total_allocated_usd"`   // Total allocated quota in USD
+	TotalUsedUSD        float64 `json:"total_used_usd"`        // Total used quota in USD
+	AverageUsageRate    float64 `json:"average_usage_rate"`    // Average usage rate percentage
+}
+
+// PlanUsageListItem represents a single plan in the usage list
+type PlanUsageListItem struct {
+	UserPlanId      int     `json:"user_plan_id"`
+	UserId          int     `json:"user_id"`
+	Username        string  `json:"username"`
+	PlanId          int     `json:"plan_id"`
+	PlanName        string  `json:"plan_name"`
+	PlanDisplayName string  `json:"plan_display_name"`
+	PlanType        string  `json:"plan_type"`           // subscription, consumption, trial, enterprise
+	QuotaUSD        float64 `json:"quota_usd"`           // Remaining quota in USD
+	UsedUSD         float64 `json:"used_usd"`            // Used quota in USD
+	TotalUSD        float64 `json:"total_usd"`           // Total quota (used + remaining) in USD
+	UsageRate       float64 `json:"usage_rate"`          // Usage percentage
+	RequestCount    int     `json:"request_count"`       // Total API requests
+	ExpiresAt       int64   `json:"expires_at"`          // Expiration timestamp (0 = never)
+	Status          int     `json:"status"`              // 1=active, 2=expired, 3=disabled
+	Locked          int     `json:"locked"`              // 1=locked, 0=unlocked
+	LockedReason    string  `json:"locked_reason"`
+}
+
+// PlanUsageFilters represents filter parameters for plan usage queries
+type PlanUsageFilters struct {
+	UserId    int    `form:"user_id"`     // Filter by user ID
+	PlanType  string `form:"plan_type"`   // Filter by plan type
+	Status    string `form:"status"`      // active, expiring, expired, locked
+	TimeRange string `form:"time_range"`  // Time range for usage data: "1d", "7d", "30d", "90d"
+	Page      int    `form:"page"`        // Page number (1-based)
+	PageSize  int    `form:"page_size"`   // Items per page
+}
+
+// PlanUsageListResponse represents paginated plan usage list response
+type PlanUsageListResponse struct {
+	Items      []PlanUsageListItem `json:"items"`
+	Total      int                 `json:"total"`
+	Page       int                 `json:"page"`
+	PageSize   int                 `json:"page_size"`
+	TotalPages int                 `json:"total_pages"`
+}
+
+// PlanTypeDistribution represents distribution of plans by type
+type PlanTypeDistribution struct {
+	PlanType  string  `json:"plan_type"`   // subscription, consumption, trial, enterprise
+	UserCount int     `json:"user_count"`  // Number of users with this plan type
+	TotalUSD  float64 `json:"total_usd"`   // Total allocated quota in USD
+	Percentage float64 `json:"percentage"` // Percentage of total quota
+}
+
+// PlanConsumptionRank represents top consuming plans
+type PlanConsumptionRank struct {
+	Rank            int     `json:"rank"`
+	PlanId          int     `json:"plan_id"`
+	PlanName        string  `json:"plan_name"`
+	PlanDisplayName string  `json:"plan_display_name"`
+	TotalConsumedUSD float64 `json:"total_consumed_usd"` // Total consumed in USD
+	UserCount       int     `json:"user_count"`         // Number of users with this plan
+	RequestCount    int     `json:"request_count"`      // Total requests
+}
