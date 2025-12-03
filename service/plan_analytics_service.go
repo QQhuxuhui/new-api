@@ -14,25 +14,34 @@ func ConvertQuotaToUSD(quota int64) float64 {
 }
 
 // GetPlanUsageOverview returns aggregate plan usage statistics
-// Note: timeRange parameter is currently unused - overview shows ALL active plans regardless of creation date
-// This ensures old but still active plans are included in statistics
+// Time range filters to show plans that had activity within the specified period
 func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 	var overview dto.PlanUsageOverview
 	db := model.DB
 	now := time.Now().UnixMilli()
 
-	// Total plans count (all plans, regardless of creation date)
+	// Parse time range
+	startTime, _ := ParseTimeRange(timeRange)
+	startTimeMs := startTime * 1000
+
+	// Total plans count (all statuses that had overlap with time range)
+	// As per spec: "Total Plans Count: Total number of user plans (all statuses)"
 	var totalPlans int64
-	if err := db.Model(&model.UserPlan{}).Count(&totalPlans).Error; err != nil {
+	if err := db.Model(&model.UserPlan{}).
+		Where("started_at <= ?", now).                                      // Started before now
+		Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs).          // Not expired before time range start
+		Count(&totalPlans).Error; err != nil {
 		return nil, err
 	}
 	overview.TotalPlans = int(totalPlans)
 
-	// Active plans count (status=1, not locked, not expired - ALL active plans)
+	// Active plans count (currently active and were active in time range)
 	activeQuery := db.Model(&model.UserPlan{}).
 		Where("status = ?", model.UserPlanStatusActive).
 		Where("locked = ?", 0).
-		Where("(expires_at = 0 OR expires_at > ?)", now)
+		Where("(expires_at = 0 OR expires_at > ?)", now).                  // Currently not expired
+		Where("started_at <= ?", now).                                      // Already started
+		Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs)           // Was active during time range
 
 	var activePlans int64
 	if err := activeQuery.Count(&activePlans).Error; err != nil {
@@ -40,12 +49,14 @@ func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 	}
 	overview.ActivePlans = int(activePlans)
 
-	// Plans expiring within 3 days (regardless of creation date)
+	// Plans expiring within 3 days (from currently active plans)
 	threeDaysLater := time.Now().Add(72 * time.Hour).UnixMilli()
 	expiringQuery := db.Model(&model.UserPlan{}).
 		Where("status = ?", model.UserPlanStatusActive).
 		Where("expires_at > ?", now).
-		Where("expires_at <= ?", threeDaysLater)
+		Where("expires_at <= ?", threeDaysLater).
+		Where("started_at <= ?", now).
+		Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs)           // Was active during time range
 
 	var expiringPlans int64
 	if err := expiringQuery.Count(&expiringPlans).Error; err != nil {
@@ -53,14 +64,18 @@ func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 	}
 	overview.ExpiringPlans = int(expiringPlans)
 
-	// Locked plans count (all locked plans)
+	// Locked plans count (that were active in time range)
 	var lockedPlans int64
-	if err := db.Model(&model.UserPlan{}).Where("locked = ?", 1).Count(&lockedPlans).Error; err != nil {
+	if err := db.Model(&model.UserPlan{}).
+		Where("locked = ?", 1).
+		Where("started_at <= ?", now).
+		Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs).
+		Count(&lockedPlans).Error; err != nil {
 		return nil, err
 	}
 	overview.LockedPlans = int(lockedPlans)
 
-	// Total allocated and used quota (all active plans)
+	// Total allocated and used quota (for plans active in time range)
 	type QuotaSums struct {
 		TotalQuota int64
 		TotalUsed  int64
@@ -70,6 +85,8 @@ func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 	err := db.Model(&model.UserPlan{}).
 		Select("COALESCE(SUM(quota), 0) as total_quota, COALESCE(SUM(used_quota), 0) as total_used").
 		Where("status = ?", model.UserPlanStatusActive).
+		Where("started_at <= ?", now).
+		Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs).
 		Scan(&sums).Error
 
 	if err != nil {
@@ -79,7 +96,7 @@ func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 	overview.TotalAllocatedUSD = ConvertQuotaToUSD(sums.TotalQuota)
 	overview.TotalUsedUSD = ConvertQuotaToUSD(sums.TotalUsed)
 
-	// Calculate average usage rate (all active plans)
+	// Calculate average usage rate (for active plans in time range)
 	if overview.ActivePlans > 0 {
 		var avgUsageRate float64
 		err := db.Model(&model.UserPlan{}).
@@ -87,6 +104,8 @@ func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 			Where("status = ?", model.UserPlanStatusActive).
 			Where("locked = ?", 0).
 			Where("(expires_at = 0 OR expires_at > ?)", now).
+			Where("started_at <= ?", now).
+			Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs).
 			Scan(&avgUsageRate).Error
 
 		if err == nil {
@@ -239,9 +258,14 @@ func GetPlanUsageList(filters *dto.PlanUsageFilters) (*dto.PlanUsageListResponse
 }
 
 // GetPlanTypeDistribution returns distribution of plans by type based on total USD
-// Note: Shows all active plans regardless of time range (same as overview)
+// Time range filters to show plans that were active within the specified period
 func GetPlanTypeDistribution(timeRange string) ([]dto.PlanTypeDistribution, error) {
 	db := model.DB
+
+	// Parse time range
+	startTime, _ := ParseTimeRange(timeRange)
+	startTimeMs := startTime * 1000
+	now := time.Now().UnixMilli()
 
 	type DistResult struct {
 		PlanType   string
@@ -254,6 +278,8 @@ func GetPlanTypeDistribution(timeRange string) ([]dto.PlanTypeDistribution, erro
 		Select("plans.type as plan_type, COUNT(DISTINCT user_plans.user_id) as user_count, SUM(user_plans.quota) as total_quota").
 		Joins("LEFT JOIN plans ON user_plans.plan_id = plans.id").
 		Where("user_plans.status = ?", model.UserPlanStatusActive).
+		Where("user_plans.started_at <= ?", now).
+		Where("(user_plans.expires_at = 0 OR user_plans.expires_at >= ?)", startTimeMs).
 		Group("plans.type").
 		Scan(&results).Error
 
@@ -287,7 +313,7 @@ func GetPlanTypeDistribution(timeRange string) ([]dto.PlanTypeDistribution, erro
 }
 
 // GetPlanConsumptionRanking returns top consuming plans by total used USD
-// Time range filters request counts to avoid stale data
+// Time range filters both consumption amount and request counts from logs
 func GetPlanConsumptionRanking(limit int, timeRange string) ([]dto.PlanConsumptionRank, error) {
 	if limit <= 0 {
 		limit = 10
@@ -295,7 +321,7 @@ func GetPlanConsumptionRanking(limit int, timeRange string) ([]dto.PlanConsumpti
 
 	db := model.DB
 
-	// Parse time range for request counting
+	// Parse time range
 	var startTimeSeconds int64
 	if timeRange != "" {
 		startTime, _ := ParseTimeRange(timeRange)
@@ -306,53 +332,197 @@ func GetPlanConsumptionRanking(limit int, timeRange string) ([]dto.PlanConsumpti
 		startTimeSeconds = startTime
 	}
 
-	type RankResult struct {
-		PlanId          int
-		PlanName        string
-		PlanDisplayName string
-		TotalUsed       int64
-		UserCount       int
+	// Get all active user plans with their plan info
+	type UserPlanInfo struct {
+		UserId    int
+		PlanId    int
+		StartedAt int64
+		ExpiresAt int64
 	}
-
-	var results []RankResult
-	err := db.Model(&model.UserPlan{}).
-		Select("plans.id as plan_id, plans.name as plan_name, plans.display_name as plan_display_name, SUM(user_plans.used_quota) as total_used, COUNT(DISTINCT user_plans.user_id) as user_count").
-		Joins("LEFT JOIN plans ON user_plans.plan_id = plans.id").
-		Where("user_plans.status = ?", model.UserPlanStatusActive).
-		Group("plans.id, plans.name, plans.display_name").
-		Order("total_used DESC").
-		Limit(limit).
-		Scan(&results).Error
+	var userPlans []UserPlanInfo
+	err := db.Table("user_plans").
+		Select("user_id, plan_id, started_at, expires_at").
+		Where("status = ?", model.UserPlanStatusActive).
+		Scan(&userPlans).Error
 
 	if err != nil {
 		return nil, err
 	}
 
+	if len(userPlans) == 0 {
+		return []dto.PlanConsumptionRank{}, nil
+	}
+
+	// Build mapping: user_id -> []UserPlanInfo (support multiple plans per user)
+	userToPlans := make(map[int][]UserPlanInfo)
+	uniqueUserIds := make(map[int]bool)
+	for _, up := range userPlans {
+		userToPlans[up.UserId] = append(userToPlans[up.UserId], up)
+		uniqueUserIds[up.UserId] = true
+	}
+
+	// Get unique user IDs for batch query
+	userIds := make([]int, 0, len(uniqueUserIds))
+	for userId := range uniqueUserIds {
+		userIds = append(userIds, userId)
+	}
+
+	// Batch query: Get ALL logs for these users since overall time range start
+	// Then we'll filter by each plan's start time in application layer
+	type UserLogDetail struct {
+		UserId    int
+		CreatedAt int64
+		Quota     int
+	}
+	var userLogs []UserLogDetail
+	err = model.LOG_DB.Table("logs").
+		Select("user_id, created_at, quota").
+		Where("user_id IN ?", userIds).
+		Where("created_at >= ?", startTimeSeconds).
+		Scan(&userLogs).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Aggregate by plan in application layer
+	type PlanAggregation struct {
+		PlanId       int
+		TotalQuota   int64
+		RequestCount int64
+		UserSet      map[int]bool // Track unique users per plan
+	}
+	planMap := make(map[int]*PlanAggregation)
+
+	// Group logs by user_id for efficient lookup
+	userLogsMap := make(map[int][]UserLogDetail)
+	for _, log := range userLogs {
+		userLogsMap[log.UserId] = append(userLogsMap[log.UserId], log)
+	}
+
+	// For each user, distribute their logs to their plans
+	for userId, plans := range userToPlans {
+		logs := userLogsMap[userId]
+		if len(logs) == 0 {
+			continue
+		}
+
+		// Sort plans by started_at to handle plan transitions correctly
+		// This ensures we can attribute logs to the correct plan in chronological order
+		sortedPlans := make([]UserPlanInfo, len(plans))
+		copy(sortedPlans, plans)
+		for i := 0; i < len(sortedPlans)-1; i++ {
+			for j := i + 1; j < len(sortedPlans); j++ {
+				if sortedPlans[j].StartedAt < sortedPlans[i].StartedAt {
+					sortedPlans[i], sortedPlans[j] = sortedPlans[j], sortedPlans[i]
+				}
+			}
+		}
+
+		// For each log, find which plan it belongs to
+		for _, log := range logs {
+			logTimeMs := log.CreatedAt * 1000 // Convert to milliseconds for comparison
+
+			// Find the plan that was active when this log occurred
+			var attributedPlan *UserPlanInfo = nil
+			for i := range sortedPlans {
+				plan := &sortedPlans[i]
+				planStartMs := plan.StartedAt
+				planEndMs := plan.ExpiresAt
+				if planEndMs == 0 {
+					// Plan never expires, use a very large number
+					planEndMs = 9999999999999
+				}
+
+				// Check if log falls within this plan's validity period
+				if logTimeMs >= planStartMs && logTimeMs < planEndMs {
+					attributedPlan = plan
+					break
+				}
+			}
+
+			// If we found the plan this log belongs to, add it
+			if attributedPlan != nil {
+				// Also check time range constraint
+				planStartSeconds := attributedPlan.StartedAt / 1000
+				effectiveStartTime := startTimeSeconds
+				if planStartSeconds > startTimeSeconds {
+					effectiveStartTime = planStartSeconds
+				}
+
+				// Only count if log is within the effective time range
+				if log.CreatedAt >= effectiveStartTime {
+					// Initialize plan aggregation if not exists
+					if planMap[attributedPlan.PlanId] == nil {
+						planMap[attributedPlan.PlanId] = &PlanAggregation{
+							PlanId:       attributedPlan.PlanId,
+							TotalQuota:   0,
+							RequestCount: 0,
+							UserSet:      make(map[int]bool),
+						}
+					}
+
+					planMap[attributedPlan.PlanId].TotalQuota += int64(log.Quota)
+					planMap[attributedPlan.PlanId].RequestCount++
+					planMap[attributedPlan.PlanId].UserSet[userId] = true
+				}
+			}
+		}
+	}
+
+	// Convert map to slice and get plan details
+	type RankResult struct {
+		PlanId          int
+		PlanName        string
+		PlanDisplayName string
+		TotalQuota      int64
+		RequestCount    int64
+		UserCount       int
+	}
+	var results []RankResult
+
+	for planId, agg := range planMap {
+		// Get plan details
+		var plan model.Plan
+		if err := db.Where("id = ?", planId).First(&plan).Error; err != nil {
+			continue
+		}
+
+		results = append(results, RankResult{
+			PlanId:          planId,
+			PlanName:        plan.Name,
+			PlanDisplayName: plan.DisplayName,
+			TotalQuota:      agg.TotalQuota,
+			RequestCount:    agg.RequestCount,
+			UserCount:       len(agg.UserSet), // Use UserSet size for unique count
+		})
+	}
+
+	// Sort by total quota descending
+	for i := 0; i < len(results)-1; i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].TotalQuota > results[i].TotalQuota {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+
+	// Apply limit
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
 	// Build response with rank
 	ranking := make([]dto.PlanConsumptionRank, 0, len(results))
 	for i, r := range results {
-		// Get request count for this plan within time range
-		// Count DISTINCT user_id to avoid double counting when a user has multiple plans
-		// Only count requests from users who have THIS specific plan
-		var requestCount int64
-		subQuery := db.Table("user_plans").
-			Select("DISTINCT user_id").
-			Where("plan_id = ?", r.PlanId).
-			Where("status = ?", model.UserPlanStatusActive)
-
-		model.LOG_DB.Table("logs").
-			Where("user_id IN (?)", subQuery).
-			Where("created_at >= ?", startTimeSeconds).
-			Count(&requestCount)
-
 		ranking = append(ranking, dto.PlanConsumptionRank{
 			Rank:             i + 1,
 			PlanId:           r.PlanId,
 			PlanName:         r.PlanName,
 			PlanDisplayName:  r.PlanDisplayName,
-			TotalConsumedUSD: ConvertQuotaToUSD(r.TotalUsed),
+			TotalConsumedUSD: ConvertQuotaToUSD(r.TotalQuota),
 			UserCount:        r.UserCount,
-			RequestCount:     int(requestCount),
+			RequestCount:     int(r.RequestCount),
 		})
 	}
 
