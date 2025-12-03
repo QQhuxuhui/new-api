@@ -1,8 +1,11 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
@@ -31,17 +34,17 @@ func GetFailoverCandidates(userId, excludePlanId int) ([]*model.UserPlan, error)
 }
 
 // AttemptPlanFailover tries to switch to an alternative plan with available channels
-// Returns the selected channel, the new plan, and any error
-func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelName string) (*model.Channel, *model.UserPlan, error) {
+// Returns the selected channel, the new plan, the group where channel was found, and any error
+func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelName string) (*model.Channel, *model.UserPlan, string, error) {
 	// Get failover candidates (sorted by priority)
 	candidates, err := GetFailoverCandidates(userId, currentPlanId)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get failover candidates: %w", err)
+		return nil, nil, "", fmt.Errorf("failed to get failover candidates: %w", err)
 	}
 
 	if len(candidates) == 0 {
 		logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d no alternative plans available", userId))
-		return nil, nil, nil
+		return nil, nil, "", nil
 	}
 
 	// Save original context to restore on failure
@@ -76,24 +79,39 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 			c.Set("plan_group", group)
 			c.Set("using_group", group)
 
-			// Try to get a channel from this group (retry=0 means highest priority)
-			channel, _, channelErr := CacheGetRandomSatisfiedChannel(c, group, modelName, 0)
+			// Try all priority levels until we find a healthy channel or exhaust all priorities
+			retry := 0
+			for {
+				channel, _, channelErr := CacheGetRandomSatisfiedChannel(c, group, modelName, retry)
 
-			if channelErr != nil {
-				logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) group=%s error=%v",
-					userId, planName, candidate.PlanId, group, channelErr))
-				continue
+				// If we got ErrPriorityExhausted, all priorities tried - try next group
+				if channelErr != nil && errors.Is(channelErr, model.ErrPriorityExhausted) {
+					logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) group=%s all_priorities_exhausted",
+						userId, planName, candidate.PlanId, group))
+					break
+				}
+
+				// System error (DB/config error) - log and try next group
+				if channelErr != nil {
+					logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) group=%s retry=%d error=%v",
+						userId, planName, candidate.PlanId, group, retry, channelErr))
+					break
+				}
+
+				// Found a healthy channel - success
+				if channel != nil {
+					actualGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+					if actualGroup == "" {
+						actualGroup = group
+					}
+					logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) group=%s retry=%d channel_found=%d",
+						userId, planName, candidate.PlanId, actualGroup, retry, channel.Id))
+					return channel, candidate, actualGroup, nil
+				}
+
+				// No channel at this priority, try next priority
+				retry++
 			}
-
-			if channel != nil {
-				// Found a healthy channel in this plan/group
-				logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) group=%s channel_found=%d",
-					userId, planName, candidate.PlanId, group, channel.Id))
-				return channel, candidate, nil
-			}
-
-			logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) group=%s no_channels_available",
-				userId, planName, candidate.PlanId, group))
 		}
 
 		// Restore original context before trying next candidate
@@ -126,5 +144,5 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 	logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d all_failover_attempts_failed tried_plans=%v",
 		userId, triedPlanIds))
 
-	return nil, nil, nil
+	return nil, nil, "", nil
 }

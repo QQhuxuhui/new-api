@@ -345,7 +345,7 @@ func Distribute() func(c *gin.Context) {
 						logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d current_plan=%d all_channels_unavailable attempting_failover", userId, currentPlanId))
 
 						// Attempt to find alternative plan with available channels
-						failoverChannel, failoverPlan, failoverErr := service.AttemptPlanFailover(c, userId, currentPlanId, modelRequest.Model)
+						failoverChannel, failoverPlan, failoverGroup, failoverErr := service.AttemptPlanFailover(c, userId, currentPlanId, modelRequest.Model)
 
 						if failoverErr != nil {
 							logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failover_error=%v", userId, failoverErr))
@@ -375,8 +375,9 @@ func Distribute() func(c *gin.Context) {
 									channelGroups := failoverPlan.Plan.GetChannelGroupsList()
 									if len(channelGroups) > 0 {
 										common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
-										common.SetContextKey(c, constant.ContextKeyPlanGroup, channelGroups[0])
-										common.SetContextKey(c, constant.ContextKeyUsingGroup, channelGroups[0])
+										// Use the actual group where the channel was found
+										common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+										common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
 									}
 								}
 
