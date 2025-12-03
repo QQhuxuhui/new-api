@@ -224,6 +224,11 @@ func SetApiRouter(router *gin.Engine) {
 		analyticsRoute.GET("/channel-cost-analysis", controller.GetChannelCostAnalysis)
 		analyticsRoute.GET("/cost-trend", controller.GetCostTrend)
 		analyticsRoute.GET("/model-cost-analysis", controller.GetModelCostAnalysis)
+		// Plan usage analytics endpoints
+		analyticsRoute.GET("/plan-usage/overview", controller.GetPlanUsageOverview)
+		analyticsRoute.GET("/plan-usage/list", controller.GetPlanUsageList)
+		analyticsRoute.GET("/plan-usage/type-distribution", controller.GetPlanTypeDistribution)
+		analyticsRoute.GET("/plan-usage/consumption-ranking", controller.GetPlanConsumptionRanking)
 		}
 
 		logRoute.Use(middleware.CORS())

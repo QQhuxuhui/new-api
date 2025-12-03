@@ -132,18 +132,18 @@ const CostEfficiencyTab = ({ timeRange }) => {
       ellipsis: true,
     },
     {
-      title: '请求数',
+      title: '业务量',
       dataIndex: 'total_requests',
-      key: 'total_requests',
+      key: 'business_volume',
       sorter: (a, b) => a.total_requests - b.total_requests,
-      render: (count) => count?.toLocaleString() || 0,
-    },
-    {
-      title: '总Tokens',
-      dataIndex: 'total_tokens',
-      key: 'total_tokens',
-      sorter: (a, b) => a.total_tokens - b.total_tokens,
-      render: (tokens) => tokens?.toLocaleString() || 0,
+      render: (requests, record) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <Text>{requests?.toLocaleString() || 0} requests</Text>
+          <Text type="tertiary" style={{ fontSize: '12px' }}>
+            {((record.total_tokens || 0) / 1000000).toFixed(2)}M tokens
+          </Text>
+        </div>
+      ),
     },
     {
       title: '收入',
