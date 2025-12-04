@@ -319,7 +319,7 @@ func SeedDefaultPlans() error {
 		{
 			Name:               "monthly",
 			DisplayName:        "包月套餐",
-			Description:        "包月订阅套餐，使用专属高质量渠道",
+			Description:        "包月订阅套餐",
 			Type:               PlanTypeSubscription,
 			Priority:           100,
 			ChannelGroup:       "monthly",
@@ -332,7 +332,7 @@ func SeedDefaultPlans() error {
 		{
 			Name:               "payg",
 			DisplayName:        "按量付费",
-			Description:        "按使用量付费套餐，使用成本优化渠道",
+			Description:        "按使用量付费套餐",
 			Type:               PlanTypeConsumption,
 			Priority:           50,
 			ChannelGroup:       "payg",

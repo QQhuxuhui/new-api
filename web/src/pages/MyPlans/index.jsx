@@ -180,7 +180,7 @@ const MyPlans = () => {
     const used = quotaStatus.daily_quota_used || 0;
     const total = quotaStatus.daily_quota_limit || 0;
     const remain = quotaStatus.daily_quota_remain || 0;
-    const percent = total > 0 ? ((total - remain) / total) * 100 : 0;
+    const percent = total > 0 ? (used / total) * 100 : 0;
 
     // Format reset time
     const resetTime = quotaStatus.daily_reset_time
@@ -358,15 +358,20 @@ const MyPlans = () => {
           <div className="flex items-center gap-4">
             {/* Auto-switch toggle */}
             {canToggleAuto && !isLocked && (
-              <div className="flex items-center gap-2">
-                <Text type="secondary" size="small">
-                  {t('自动切换')}
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <Text type="secondary" size="small">
+                    {t('自动切换')}
+                  </Text>
+                  <Switch
+                    checked={autoSwitchEnabled}
+                    onChange={(checked) => handleToggleAutoSwitch(userPlan.id, checked)}
+                    size="small"
+                  />
+                </div>
+                <Text type="tertiary" size="small" style={{ fontSize: '12px' }}>
+                  {t('开启后，当前套餐额度用完或者服务故障时自动切换到其他可用的套餐')}
                 </Text>
-                <Switch
-                  checked={autoSwitchEnabled}
-                  onChange={(checked) => handleToggleAutoSwitch(userPlan.id, checked)}
-                  size="small"
-                />
               </div>
             )}
             {!canToggleAuto && (
