@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -527,4 +529,284 @@ func GetPlanConsumptionRanking(limit int, timeRange string) ([]dto.PlanConsumpti
 	}
 
 	return ranking, nil
+}
+
+// GetUserDailyUsage returns daily usage history for a specific user plan
+// This shows how much quota a user consumed each day, useful for subscription plans with daily limits
+func GetUserDailyUsage(userPlanId int, days int) (*dto.UserDailyUsageResponse, error) {
+	if days <= 0 {
+		days = 30 // Default to 30 days
+	}
+	if days > 90 {
+		days = 90 // Max 90 days
+	}
+
+	// Get user plan with related data
+	userPlan, err := model.GetUserPlanById(userPlanId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user plan: %w", err)
+	}
+
+	// Get plan details
+	plan, err := model.GetPlanById(userPlan.PlanId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get plan: %w", err)
+	}
+
+	// Get user details
+	user, err := model.GetUserById(userPlan.UserId, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	// Build response
+	response := &dto.UserDailyUsageResponse{
+		UserPlanId:      userPlan.Id,
+		UserId:          userPlan.UserId,
+		Username:        user.Username,
+		PlanName:        plan.Name,
+		PlanDisplayName: plan.DisplayName,
+		PlanType:        plan.Type,
+		DailyQuotaLimit: plan.DailyQuotaLimit,
+		DailyLimitUSD:   ConvertQuotaToUSD(plan.DailyQuotaLimit),
+	}
+
+	// Check if user has multiple active plans - if so, add a notice
+	activePlans, _ := model.GetUserValidPlans(userPlan.UserId)
+	if len(activePlans) > 1 {
+		response.DataNotice = "用户同时持有多个套餐，用量数据按套餐有效期过滤，可能包含其他套餐的消费"
+	}
+
+	// Get historical daily usage from logs first
+	// Pass plan start time and expires time to limit query to plan validity period
+	dailyHistory, err := getDailyUsageFromLogs(userPlan.UserId, userPlan.StartedAt, userPlan.ExpiresAt, days)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("failed to get daily usage from logs: %v", err))
+		dailyHistory = []dto.UserDailyUsageItem{}
+	}
+
+	// For subscription plans with daily limit, merge Redis historical data
+	// This handles cases where log consumption is disabled or logs are cleaned up
+	if plan.DailyQuotaLimit > 0 && common.RedisEnabled {
+		redisHistory, err := GetDailyQuotaUsageHistory(userPlanId, days)
+		if err == nil && len(redisHistory) > 0 {
+			// Create a map from dailyHistory for quick lookup
+			historyMap := make(map[string]*dto.UserDailyUsageItem)
+			for i := range dailyHistory {
+				historyMap[dailyHistory[i].Date] = &dailyHistory[i]
+			}
+
+			// Merge Redis data: use Redis value if log value is 0 or missing
+			for dateStr, redisQuota := range redisHistory {
+				if item, exists := historyMap[dateStr]; exists {
+					// If log shows 0 but Redis has data, use Redis data
+					if item.UsedQuota == 0 && redisQuota > 0 {
+						item.UsedQuota = redisQuota
+						item.UsedUSD = ConvertQuotaToUSD(redisQuota)
+						// Note: RequestCount remains 0 since we don't track it in Redis
+					}
+				} else {
+					// Date exists in Redis but not in log result, add it
+					// This can happen if logs were cleaned but Redis still has the data
+					newItem := dto.UserDailyUsageItem{
+						Date:         dateStr,
+						UsedQuota:    redisQuota,
+						UsedUSD:      ConvertQuotaToUSD(redisQuota),
+						RequestCount: 0, // Unknown from Redis
+					}
+					dailyHistory = append(dailyHistory, newItem)
+				}
+			}
+
+			// Re-sort dailyHistory by date descending after merge
+			for i := 0; i < len(dailyHistory)-1; i++ {
+				for j := i + 1; j < len(dailyHistory); j++ {
+					if dailyHistory[j].Date > dailyHistory[i].Date {
+						dailyHistory[i], dailyHistory[j] = dailyHistory[j], dailyHistory[i]
+					}
+				}
+			}
+		}
+	}
+
+	// Add daily limit info to each item
+	for i := range dailyHistory {
+		dailyHistory[i].DailyLimit = plan.DailyQuotaLimit
+		dailyHistory[i].DailyLimitUSD = ConvertQuotaToUSD(plan.DailyQuotaLimit)
+		if plan.DailyQuotaLimit > 0 {
+			dailyHistory[i].UsagePercent = float64(dailyHistory[i].UsedQuota) * 100.0 / float64(plan.DailyQuotaLimit)
+		}
+	}
+
+	response.DailyHistory = dailyHistory
+
+	// Get today's usage - try Redis first, fallback to log query result
+	if plan.DailyQuotaLimit > 0 {
+		var todayUsed int64 = 0
+		gotFromRedis := false
+
+		// Try to get from Redis if enabled
+		if common.RedisEnabled {
+			redisUsage, err := GetDailyQuotaUsage(userPlanId)
+			if err == nil && redisUsage > 0 {
+				todayUsed = redisUsage
+				gotFromRedis = true
+			}
+		}
+
+		// Fallback to log query result if Redis unavailable or returned 0
+		if !gotFromRedis && len(dailyHistory) > 0 {
+			today := time.Now().Format("2006-01-02")
+			if dailyHistory[0].Date == today {
+				todayUsed = dailyHistory[0].UsedQuota
+			}
+		}
+
+		response.TodayUsed = todayUsed
+		response.TodayUsedUSD = ConvertQuotaToUSD(todayUsed)
+		response.TodayRemaining = plan.DailyQuotaLimit - todayUsed
+		if response.TodayRemaining < 0 {
+			response.TodayRemaining = 0
+		}
+		response.TodayRemainingUSD = ConvertQuotaToUSD(response.TodayRemaining)
+	}
+
+	return response, nil
+}
+
+// getDailyUsageFromLogs retrieves daily usage from log table
+// Only counts consumption logs (type = 2) within the plan's validity period
+// Note: Logs don't have plan_id field, so this aggregates all consumption for the user
+// within the plan's validity period. If user has multiple concurrent plans, data may overlap.
+func getDailyUsageFromLogs(userId int, planStartedAt int64, planExpiresAt int64, days int) ([]dto.UserDailyUsageItem, error) {
+	// Calculate date range using local timezone to match database DATE functions
+	loc := time.Local
+	now := time.Now().In(loc)
+	endDate := now.Format("2006-01-02")
+	startDate := now.AddDate(0, 0, -days+1).Format("2006-01-02")
+
+	// Convert planStartedAt from milliseconds to date (use local timezone)
+	// Limit query to plan's validity period
+	planStartTime := time.UnixMilli(planStartedAt).In(loc)
+	planStartDate := planStartTime.Format("2006-01-02")
+	if planStartDate > startDate {
+		startDate = planStartDate
+	}
+
+	// If plan has expiration, limit end date to plan expiration
+	if planExpiresAt > 0 {
+		planEndTime := time.UnixMilli(planExpiresAt).In(loc)
+		planEndDate := planEndTime.Format("2006-01-02")
+		if planEndDate < endDate {
+			endDate = planEndDate
+		}
+	}
+
+	// Query logs grouped by date
+	type DailyLog struct {
+		Date         string
+		TotalQuota   int64
+		RequestCount int
+	}
+
+	var dailyLogs []DailyLog
+
+	// Use different date formatting based on database type
+	// Note: MySQL/PostgreSQL use server timezone, SQLite uses UTC
+	dateFormat := "DATE(FROM_UNIXTIME(created_at))"
+	if common.UsingPostgreSQL {
+		dateFormat = "TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')"
+	} else if common.UsingSQLite {
+		// SQLite: convert to localtime to match application timezone
+		dateFormat = "DATE(created_at, 'unixepoch', 'localtime')"
+	}
+
+	// Parse dates in local timezone to get correct timestamps
+	startTimestamp, _ := time.ParseInLocation("2006-01-02", startDate, loc)
+	endTimestamp, _ := time.ParseInLocation("2006-01-02", endDate, loc)
+	endTimestamp = endTimestamp.Add(24*time.Hour - time.Second) // End of day
+
+	// Only count consumption logs (type = 2), exclude topup/manage/system/error/refund logs
+	query := fmt.Sprintf(`
+		SELECT %s as date,
+		       COALESCE(SUM(quota), 0) as total_quota,
+		       COUNT(*) as request_count
+		FROM logs
+		WHERE user_id = ?
+		  AND type = ?
+		  AND created_at >= ?
+		  AND created_at <= ?
+		GROUP BY %s
+		ORDER BY date DESC
+	`, dateFormat, dateFormat)
+
+	err := model.LOG_DB.Raw(query, userId, model.LogTypeConsume, startTimestamp.Unix(), endTimestamp.Unix()).Scan(&dailyLogs).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a map for quick lookup
+	logMap := make(map[string]DailyLog)
+	for _, log := range dailyLogs {
+		logMap[log.Date] = log
+	}
+
+	// Build result with all dates (including zeros)
+	result := make([]dto.UserDailyUsageItem, 0, days)
+	current := now
+	for i := 0; i < days; i++ {
+		dateStr := current.Format("2006-01-02")
+		if dateStr < startDate {
+			break
+		}
+		// Skip dates after plan expiration
+		if planExpiresAt > 0 && dateStr > endDate {
+			current = current.AddDate(0, 0, -1)
+			continue
+		}
+
+		item := dto.UserDailyUsageItem{
+			Date:         dateStr,
+			UsedQuota:    0,
+			UsedUSD:      0,
+			RequestCount: 0,
+		}
+
+		if log, exists := logMap[dateStr]; exists {
+			item.UsedQuota = log.TotalQuota
+			item.UsedUSD = ConvertQuotaToUSD(log.TotalQuota)
+			item.RequestCount = log.RequestCount
+		}
+
+		result = append(result, item)
+		current = current.AddDate(0, 0, -1)
+	}
+
+	return result, nil
+}
+
+// GetDailyQuotaUsageHistory retrieves daily quota usage from Redis for past days
+// This returns actual tracked daily quota usage (more accurate than log aggregation for subscription plans)
+func GetDailyQuotaUsageHistory(userPlanId int, days int) (map[string]int64, error) {
+	result := make(map[string]int64)
+
+	if !common.RedisEnabled {
+		return result, nil
+	}
+
+	ctx := context.Background()
+	now := time.Now()
+
+	for i := 0; i < days; i++ {
+		date := now.AddDate(0, 0, -i)
+		dateStr := date.Format("20060102")
+		key := fmt.Sprintf(dailyQuotaKeyFmt, userPlanId, dateStr)
+
+		val, err := common.RDB.Get(ctx, key).Int64()
+		if err == nil {
+			result[date.Format("2006-01-02")] = val
+		}
+	}
+
+	return result, nil
 }

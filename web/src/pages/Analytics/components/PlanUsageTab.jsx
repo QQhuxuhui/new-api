@@ -31,16 +31,21 @@ import {
   Input,
   Space,
   Progress,
+  Button,
+  Modal,
+  Tooltip,
 } from '@douyinfe/semi-ui';
 import {
   IconSearch,
   IconBox,
   IconLock,
   IconAlertTriangle,
+  IconCalendar,
 } from '@douyinfe/semi-icons';
 import { VChart } from '@visactor/react-vchart';
 import { usePlanUsageData } from '../../../hooks/analytics/usePlanUsageData';
 import QuotaProgress from '../../../components/analytics/QuotaProgress';
+import { PlanUsageAPI } from '../../../services/planUsageApi';
 
 const { Text, Title } = Typography;
 
@@ -80,6 +85,12 @@ const PlanUsageTab = ({ timeRange }) => {
   const [selectedPlanType, setSelectedPlanType] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
 
+  // Daily usage modal states
+  const [dailyUsageModalVisible, setDailyUsageModalVisible] = useState(false);
+  const [dailyUsageData, setDailyUsageData] = useState(null);
+  const [dailyUsageLoading, setDailyUsageLoading] = useState(false);
+  const [selectedDays, setSelectedDays] = useState(30);
+
   // Fetch data on mount and when timeRange changes
   useEffect(() => {
     if (timeRange) {
@@ -117,6 +128,249 @@ const PlanUsageTab = ({ timeRange }) => {
     if (selectedPlanType) newFilters.plan_type = selectedPlanType;
     if (value) newFilters.status = value;
     updateFilters(newFilters);
+  };
+
+  // Handle viewing daily usage for a user plan
+  const handleViewDailyUsage = async (userPlanId) => {
+    setDailyUsageLoading(true);
+    setDailyUsageModalVisible(true);
+    try {
+      const data = await PlanUsageAPI.fetchUserDailyUsage(userPlanId, selectedDays);
+      setDailyUsageData(data);
+    } catch (error) {
+      console.error('Failed to fetch daily usage:', error);
+    } finally {
+      setDailyUsageLoading(false);
+    }
+  };
+
+  // Handle changing days for daily usage
+  const handleDaysChange = async (days) => {
+    setSelectedDays(days);
+    if (dailyUsageData) {
+      setDailyUsageLoading(true);
+      try {
+        const data = await PlanUsageAPI.fetchUserDailyUsage(dailyUsageData.user_plan_id, days);
+        setDailyUsageData(data);
+      } catch (error) {
+        console.error('Failed to fetch daily usage:', error);
+      } finally {
+        setDailyUsageLoading(false);
+      }
+    }
+  };
+
+  // Render daily usage modal content
+  const renderDailyUsageModal = () => {
+    if (!dailyUsageData) {
+      return <Empty description="暂无数据" />;
+    }
+
+    const { daily_history, daily_quota_limit, daily_limit_usd, today_used_usd, today_remaining_usd, plan_type, data_notice } = dailyUsageData;
+    const hasLimit = daily_quota_limit > 0;
+
+    // Chart spec for daily usage
+    const chartSpec = {
+      type: 'bar',
+      data: [
+        {
+          id: 'dailyUsage',
+          values: [...(daily_history || [])].reverse().map(item => ({
+            date: item.date,
+            usedUSD: item.used_usd,
+            limitUSD: item.daily_limit_usd,
+            usagePercent: item.usage_percent || 0,
+          })),
+        },
+      ],
+      xField: 'date',
+      yField: 'usedUSD',
+      bar: {
+        style: {
+          fill: (datum) => {
+            if (!hasLimit) return '#1890ff';
+            if (datum.usagePercent >= 100) return '#ff4d4f';
+            if (datum.usagePercent >= 80) return '#faad14';
+            return '#52c41a';
+          },
+        },
+      },
+      axes: [
+        { orient: 'bottom', label: { style: { fontSize: 10 } } },
+        { orient: 'left', title: { visible: true, text: '用量 (USD)' } },
+      ],
+      tooltip: {
+        visible: true,
+        renderMode: 'canvas',
+        mark: {
+          content: [
+            { key: () => '日期', value: (datum) => datum.date },
+            { key: () => '用量', value: (datum) => `$${datum.usedUSD.toFixed(4)}` },
+            hasLimit && { key: () => '日限额', value: (datum) => `$${datum.limitUSD.toFixed(4)}` },
+            hasLimit && { key: () => '使用率', value: (datum) => `${datum.usagePercent.toFixed(1)}%` },
+          ].filter(Boolean),
+        },
+      },
+      width: 600,
+      height: 300,
+    };
+
+    // Daily usage history table columns
+    const dailyColumns = [
+      {
+        title: '日期',
+        dataIndex: 'date',
+        key: 'date',
+        width: 120,
+      },
+      {
+        title: '用量 (USD)',
+        dataIndex: 'used_usd',
+        key: 'used_usd',
+        render: (value) => `$${value.toFixed(4)}`,
+      },
+      {
+        title: '请求数',
+        dataIndex: 'request_count',
+        key: 'request_count',
+      },
+      hasLimit && {
+        title: '日限额 (USD)',
+        dataIndex: 'daily_limit_usd',
+        key: 'daily_limit_usd',
+        render: (value) => `$${value.toFixed(4)}`,
+      },
+      hasLimit && {
+        title: '使用率',
+        dataIndex: 'usage_percent',
+        key: 'usage_percent',
+        render: (value) => {
+          const percent = value || 0;
+          let color = '#52c41a';
+          if (percent >= 100) color = '#ff4d4f';
+          else if (percent >= 80) color = '#faad14';
+          return (
+            <Progress
+              percent={Math.min(percent, 100)}
+              stroke={color}
+              style={{ width: 100 }}
+              size="small"
+              showInfo
+              format={() => `${percent.toFixed(1)}%`}
+            />
+          );
+        },
+      },
+    ].filter(Boolean);
+
+    return (
+      <div>
+        {/* Data notice warning */}
+        {data_notice && (
+          <div style={{
+            marginBottom: 16,
+            padding: '8px 12px',
+            backgroundColor: '#fffbe6',
+            border: '1px solid #ffe58f',
+            borderRadius: 4,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8
+          }}>
+            <IconAlertTriangle style={{ color: '#faad14' }} />
+            <Text type="warning">{data_notice}</Text>
+          </div>
+        )}
+
+        {/* Header info */}
+        <Row gutter={16} style={{ marginBottom: 16 }}>
+          <Col span={12}>
+            <Card>
+              <Text type="tertiary">用户</Text>
+              <div>
+                <Text strong style={{ fontSize: 16 }}>{dailyUsageData.username}</Text>
+                <Text type="tertiary"> (ID: {dailyUsageData.user_id})</Text>
+              </div>
+            </Card>
+          </Col>
+          <Col span={12}>
+            <Card>
+              <Text type="tertiary">套餐</Text>
+              <div>
+                <Text strong style={{ fontSize: 16 }}>{dailyUsageData.plan_display_name || dailyUsageData.plan_name}</Text>
+                <Tag color={plan_type === 'subscription' ? 'blue' : 'green'} style={{ marginLeft: 8 }}>
+                  {plan_type === 'subscription' ? '订阅' : plan_type === 'consumption' ? '按量' : plan_type}
+                </Tag>
+              </div>
+            </Card>
+          </Col>
+        </Row>
+
+        {/* Today's usage for subscription plans with daily limit */}
+        {hasLimit && (
+          <Card style={{ marginBottom: 16 }}>
+            <Row gutter={16}>
+              <Col span={8}>
+                <Statistic
+                  title="今日已用"
+                  value={`$${today_used_usd?.toFixed(4) || '0.0000'}`}
+                  valueColor="#1890ff"
+                />
+              </Col>
+              <Col span={8}>
+                <Statistic
+                  title="今日剩余"
+                  value={`$${today_remaining_usd?.toFixed(4) || '0.0000'}`}
+                  valueColor="#52c41a"
+                />
+              </Col>
+              <Col span={8}>
+                <Statistic
+                  title="日限额"
+                  value={`$${daily_limit_usd?.toFixed(4) || '0.0000'}`}
+                  valueColor="#722ed1"
+                />
+              </Col>
+            </Row>
+          </Card>
+        )}
+
+        {/* Days selector */}
+        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Text>查看天数:</Text>
+          <Select
+            value={selectedDays}
+            onChange={handleDaysChange}
+            style={{ width: 120 }}
+            optionList={[
+              { value: 7, label: '7天' },
+              { value: 14, label: '14天' },
+              { value: 30, label: '30天' },
+              { value: 60, label: '60天' },
+              { value: 90, label: '90天' },
+            ]}
+          />
+        </div>
+
+        {/* Chart */}
+        {daily_history && daily_history.length > 0 && (
+          <Card title="每日用量趋势" style={{ marginBottom: 16 }}>
+            <VChart spec={chartSpec} />
+          </Card>
+        )}
+
+        {/* Table */}
+        <Card title="每日用量明细">
+          <Table
+            columns={dailyColumns}
+            dataSource={daily_history || []}
+            pagination={{ pageSize: 10 }}
+            rowKey="date"
+            size="small"
+          />
+        </Card>
+      </div>
+    );
   };
 
   // Render overview cards
@@ -494,6 +748,22 @@ const PlanUsageTab = ({ timeRange }) => {
         return <Tag color="grey">禁用</Tag>;
       },
     },
+    {
+      title: '操作',
+      dataIndex: 'action',
+      key: 'action',
+      width: 100,
+      render: (_, record) => (
+        <Tooltip content="查看每日用量">
+          <Button
+            icon={<IconCalendar />}
+            size="small"
+            theme="borderless"
+            onClick={() => handleViewDailyUsage(record.user_plan_id)}
+          />
+        </Tooltip>
+      ),
+    },
   ];
 
   // Top 10 ranking table
@@ -626,6 +896,23 @@ const PlanUsageTab = ({ timeRange }) => {
 
       {/* Ranking */}
       <div style={{ marginTop: 16 }}>{renderRanking()}</div>
+
+      {/* Daily Usage Modal */}
+      <Modal
+        title="用户每日用量详情"
+        visible={dailyUsageModalVisible}
+        onCancel={() => {
+          setDailyUsageModalVisible(false);
+          setDailyUsageData(null);
+        }}
+        footer={null}
+        width={800}
+        style={{ top: 50 }}
+      >
+        <Spin spinning={dailyUsageLoading}>
+          {renderDailyUsageModal()}
+        </Spin>
+      </Modal>
     </div>
   );
 };

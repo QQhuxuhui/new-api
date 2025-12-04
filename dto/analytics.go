@@ -279,3 +279,41 @@ type PlanConsumptionRank struct {
 	UserCount       int     `json:"user_count"`         // Number of users with this plan
 	RequestCount    int     `json:"request_count"`      // Total requests
 }
+
+// UserDailyUsageItem represents a single day's usage for a user plan
+type UserDailyUsageItem struct {
+	Date           string  `json:"date"`             // YYYY-MM-DD
+	UsedQuota      int64   `json:"used_quota"`       // Quota used on this day
+	UsedUSD        float64 `json:"used_usd"`         // Used quota in USD
+	RequestCount   int     `json:"request_count"`    // Number of requests on this day
+	DailyLimit     int64   `json:"daily_limit"`      // Daily limit quota (0 = no limit)
+	DailyLimitUSD  float64 `json:"daily_limit_usd"`  // Daily limit in USD
+	UsagePercent   float64 `json:"usage_percent"`    // Percentage of daily limit used
+}
+
+// UserDailyUsageRequest represents request parameters for user daily usage
+type UserDailyUsageRequest struct {
+	UserPlanId int    `form:"user_plan_id" binding:"required"` // User plan ID
+	Days       int    `form:"days"`                            // Number of days to retrieve (default 30)
+}
+
+// UserDailyUsageResponse represents the response for user daily usage
+type UserDailyUsageResponse struct {
+	UserPlanId      int                  `json:"user_plan_id"`
+	UserId          int                  `json:"user_id"`
+	Username        string               `json:"username"`
+	PlanName        string               `json:"plan_name"`
+	PlanDisplayName string               `json:"plan_display_name"`
+	PlanType        string               `json:"plan_type"`
+	DailyQuotaLimit int64                `json:"daily_quota_limit"`     // Plan's daily quota limit
+	DailyLimitUSD   float64              `json:"daily_limit_usd"`       // Daily limit in USD
+	TodayUsed       int64                `json:"today_used"`            // Today's usage
+	TodayUsedUSD    float64              `json:"today_used_usd"`        // Today's usage in USD
+	TodayRemaining  int64                `json:"today_remaining"`       // Today's remaining quota
+	TodayRemainingUSD float64            `json:"today_remaining_usd"`   // Today's remaining in USD
+	DailyHistory    []UserDailyUsageItem `json:"daily_history"`         // Daily usage history
+	// DataNotice explains data limitations
+	// When user has multiple concurrent plans, usage data is aggregated by user within
+	// the plan's validity period. Data may include consumption from other overlapping plans.
+	DataNotice      string               `json:"data_notice,omitempty"` // Notice about data limitations
+}

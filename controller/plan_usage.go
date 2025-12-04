@@ -70,3 +70,43 @@ func GetPlanConsumptionRanking(c *gin.Context) {
 
 	common.ApiSuccess(c, result)
 }
+
+// GetUserDailyUsage returns daily usage history for a specific user plan
+// @Summary Get user daily usage history
+// @Description Returns daily quota usage history for a specific user plan, including today's usage and historical data
+// @Tags Plan Analytics
+// @Accept json
+// @Produce json
+// @Param user_plan_id query int true "User Plan ID"
+// @Param days query int false "Number of days to retrieve (default 30, max 90)"
+// @Success 200 {object} dto.UserDailyUsageResponse
+// @Router /api/admin/analytics/plan-usage/user-daily [get]
+func GetUserDailyUsage(c *gin.Context) {
+	userPlanIdStr := c.Query("user_plan_id")
+	if userPlanIdStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "user_plan_id is required",
+		})
+		return
+	}
+
+	userPlanId, err := strconv.Atoi(userPlanIdStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "invalid user_plan_id",
+		})
+		return
+	}
+
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
+
+	result, err := service.GetUserDailyUsage(userPlanId, days)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, result)
+}
