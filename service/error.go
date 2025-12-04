@@ -88,107 +88,50 @@ func ShouldImmediateFailover(statusCode int, errorMessage string) bool {
 }
 
 // ShouldTriggerChannelFailover determines if an upstream error should trigger channel failover
-// This allows failover to work even when RetryTimes=0 for channel-level issues
-// Returns true for: 5xx errors (500-599 excl. 504/524), 401 auth failures, connection errors,
-// SSL/TLS issues, DNS failures, empty responses, and provider-specific errors
+// and record to health tracking system.
+//
+// 设计原则：基于HTTP状态码判断，不依赖错误消息关键词匹配
+// 原因：
+//  1. HTTP状态码语义明确，401/403/429/5xx都表示渠道级问题
+//  2. 上游错误消息格式不统一（中文/英文/各厂商格式不同），关键词匹配容易遗漏
+//  3. 健康系统有滑动窗口机制兜底，单次失败不会暂停渠道，需要失败率>30%才触发
 func ShouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
-	errorMessageLower := strings.ToLower(errorMessage)
+	// 2xx 成功 - 不触发故障转移
+	if statusCode >= 200 && statusCode < 300 {
+		return false
+	}
 
-	// TIER 1: HTTP Status Code Based (High Confidence)
+	// 4xx 客户端错误
+	if statusCode >= 400 && statusCode < 500 {
+		// 400 Bad Request - 通常是客户端请求格式问题，不是渠道问题
+		if statusCode == 400 {
+			return false
+		}
+		// 401 Unauthorized - 认证失败（密钥无效、过期、余额不足等）
+		// 403 Forbidden - 禁止访问（用户被禁用、权限不足等）
+		// 429 Too Many Requests - 请求过多（速率限制、配额耗尽等）
+		// 其他4xx - 也应记录到健康系统
+		return true
+	}
 
-	// All 5xx errors (excluding timeouts)
+	// 5xx 服务器错误
 	if statusCode >= 500 && statusCode < 600 {
-		// Preserve timeout behavior (by design: timeouts should not retry)
+		// 504/524 超时在调用处单独处理，这里返回false避免重复
 		if statusCode == 504 || statusCode == 524 {
 			return false
 		}
 		return true
 	}
 
-	// 401: Authentication failures (API key issues)
-	if statusCode == 401 {
-		// Only trigger failover if error indicates key problem
-		// (not client request formatting issues)
-		if strings.Contains(errorMessageLower, "invalid") ||
-			strings.Contains(errorMessageLower, "expired") ||
-			strings.Contains(errorMessageLower, "unauthorized") ||
-			strings.Contains(errorMessageLower, "api key") ||
-			strings.Contains(errorMessageLower, "authentication") {
-			return true
-		}
-	}
-
-	// 429: Rate limiting
-	if statusCode == 429 {
-		if strings.Contains(errorMessageLower, "rate limit") ||
-			strings.Contains(errorMessageLower, "quota") ||
-			strings.Contains(errorMessageLower, "too many requests") {
-			return true
-		}
-	}
-
-	// 403: Resource exhaustion
-	if statusCode == 403 {
-		if strings.Contains(errorMessageLower, "并发") ||
-			strings.Contains(errorMessageLower, "concurrency") ||
-			(strings.Contains(errorMessageLower, "session") && strings.Contains(errorMessageLower, "已满")) ||
-			strings.Contains(errorMessageLower, "overloaded") {
-			return true
-		}
-	}
-
-	// TIER 2: Message Pattern Matching (Medium Confidence)
-
-	// Connection/Network errors
-	if (strings.Contains(errorMessageLower, "连接") && strings.Contains(errorMessageLower, "失败")) ||
-		(strings.Contains(errorMessageLower, "连接") && strings.Contains(errorMessageLower, "服务失败")) ||
-		strings.Contains(errorMessageLower, "connection failed") ||
-		strings.Contains(errorMessageLower, "connection refused") ||
-		strings.Contains(errorMessageLower, "connection reset") ||
-		strings.Contains(errorMessageLower, "connection timeout") ||
-		strings.Contains(errorMessageLower, "network error") ||
-		strings.Contains(errorMessageLower, "upstream error") ||
-		strings.Contains(errorMessageLower, "service unavailable") ||
-		strings.Contains(errorMessageLower, "temporarily unavailable") {
-		return true
-	}
-
-	// SSL/TLS certificate errors
-	if strings.Contains(errorMessageLower, "certificate") ||
+	// 网络错误等（状态码可能是0或其他非标准值）
+	// 保留关键词匹配作为兜底
+	errorMessageLower := strings.ToLower(errorMessage)
+	if strings.Contains(errorMessageLower, "connection") ||
+		strings.Contains(errorMessageLower, "timeout") ||
+		strings.Contains(errorMessageLower, "dns") ||
 		strings.Contains(errorMessageLower, "tls") ||
 		strings.Contains(errorMessageLower, "ssl") ||
-		strings.Contains(errorMessageLower, "handshake") {
-		return true
-	}
-
-	// DNS resolution failures
-	if strings.Contains(errorMessageLower, "dns") ||
-		strings.Contains(errorMessageLower, "resolve") ||
-		strings.Contains(errorMessageLower, "域名") {
-		return true
-	}
-
-	// Empty or malformed responses
-	if strings.Contains(errorMessageLower, "empty response") ||
-		strings.Contains(errorMessageLower, "no response") ||
-		strings.Contains(errorMessageLower, "响应为空") {
-		return true
-	}
-
-	// TIER 3: Provider-Specific (Vendor-Aware)
-
-	// Claude: overloaded_error, internal_error
-	// OpenAI: server_error, insufficient_quota
-	// Generic: proxy, gateway errors
-	if strings.Contains(errorMessageLower, "overloaded_error") ||
-		strings.Contains(errorMessageLower, "overloaded") ||
-		strings.Contains(errorMessageLower, "internal_error") ||
-		strings.Contains(errorMessageLower, "server_error") ||
-		strings.Contains(errorMessageLower, "insufficient_quota") ||
-		strings.Contains(errorMessageLower, "insufficient quota") ||
-		strings.Contains(errorMessageLower, "proxy") ||
-		strings.Contains(errorMessageLower, "gateway") ||
-		strings.Contains(errorMessageLower, "bad gateway") {
+		strings.Contains(errorMessageLower, "network") {
 		return true
 	}
 
