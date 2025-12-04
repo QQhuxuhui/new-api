@@ -49,6 +49,7 @@ import { useAnalyticsData } from '../../hooks/analytics/useAnalyticsData';
 import BalanceAnalysisTab from './components/BalanceAnalysisTab';
 import CostEfficiencyTab from './components/CostEfficiencyTab';
 import PlanUsageTab from './components/PlanUsageTab';
+import ChannelCostTab from './components/ChannelCostTab';
 import MoneyWithDetails from '../../components/analytics/MoneyWithDetails';
 
 const { Title, Text } = Typography;
@@ -87,6 +88,7 @@ const Analytics = () => {
   } = useAnalyticsData('7d');
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
   const timeRangeOptions = [
     { value: '1d', label: '最近24小时' },
@@ -412,7 +414,10 @@ const Analytics = () => {
           />
           <Button
             icon={<IconRefresh />}
-            onClick={refreshData}
+            onClick={() => {
+              refreshData();
+              setRefreshVersion(v => v + 1);
+            }}
             loading={loading}
           >
             刷新
@@ -474,6 +479,13 @@ const Analytics = () => {
             itemKey="cost-efficiency"
           >
             <CostEfficiencyTab timeRange={timeRange} />
+          </TabPane>
+
+          <TabPane
+            tab={<span><IconServer className="mr-1" />渠道消耗</span>}
+            itemKey="channel-cost"
+          >
+            <ChannelCostTab timeRange={timeRange} refreshVersion={refreshVersion} />
           </TabPane>
 
           <TabPane

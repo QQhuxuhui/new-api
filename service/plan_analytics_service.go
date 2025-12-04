@@ -573,92 +573,163 @@ func GetUserDailyUsage(userPlanId int, days int) (*dto.UserDailyUsageResponse, e
 
 	// Check if user has multiple active plans - if so, add a notice
 	activePlans, _ := model.GetUserValidPlans(userPlan.UserId)
+	multiPlanWarning := ""
 	if len(activePlans) > 1 {
-		response.DataNotice = "用户同时持有多个套餐，用量数据按套餐有效期过滤，可能包含其他套餐的消费"
+		multiPlanWarning = "用户同时持有多个套餐，"
 	}
 
-	// Get historical daily usage from logs first
-	// Pass plan start time and expires time to limit query to plan validity period
-	dailyHistory, err := getDailyUsageFromLogs(userPlan.UserId, userPlan.StartedAt, userPlan.ExpiresAt, days)
-	if err != nil {
-		common.SysLog(fmt.Sprintf("failed to get daily usage from logs: %v", err))
-		dailyHistory = []dto.UserDailyUsageItem{}
-	}
+	// For subscription plans with daily limit, use Redis data as primary source
+	// This is more accurate as it tracks actual daily consumption per plan
+	var dailyHistory []dto.UserDailyUsageItem
+	var dataSource string
 
-	// For subscription plans with daily limit, merge Redis historical data
-	// This handles cases where log consumption is disabled or logs are cleaned up
 	if plan.DailyQuotaLimit > 0 && common.RedisEnabled {
+		// Subscription plan with Redis tracking - use Redis as primary source
 		redisHistory, err := GetDailyQuotaUsageHistory(userPlanId, days)
 		if err == nil && len(redisHistory) > 0 {
-			// Create a map from dailyHistory for quick lookup
-			historyMap := make(map[string]*dto.UserDailyUsageItem)
+			// Build daily history from Redis data
+			loc := time.Local
+			now := time.Now().In(loc)
+
+			for i := 0; i < days; i++ {
+				date := now.AddDate(0, 0, -i)
+				dateStr := date.Format("2006-01-02")
+
+				// Skip dates before plan started or after plan expired
+				planStartTime := time.UnixMilli(userPlan.StartedAt).In(loc)
+				if date.Before(planStartTime.Truncate(24 * time.Hour)) {
+					continue
+				}
+				if userPlan.ExpiresAt > 0 {
+					planEndTime := time.UnixMilli(userPlan.ExpiresAt).In(loc)
+					if date.After(planEndTime.Truncate(24 * time.Hour)) {
+						continue
+					}
+				}
+
+				usedQuota := int64(0)
+				if redisUsage, exists := redisHistory[dateStr]; exists {
+					usedQuota = redisUsage
+				}
+
+				item := dto.UserDailyUsageItem{
+					Date:            dateStr,
+					UsedQuota:       usedQuota,
+					UsedUSD:         ConvertQuotaToUSD(usedQuota),
+					RequestCount:    0, // Will be populated from logs below
+					DailyLimit:      plan.DailyQuotaLimit,
+					DailyLimitUSD:   ConvertQuotaToUSD(plan.DailyQuotaLimit),
+					UsagePercent:    0,
+				}
+
+				if plan.DailyQuotaLimit > 0 {
+					item.UsagePercent = float64(usedQuota) * 100.0 / float64(plan.DailyQuotaLimit)
+				}
+
+				dailyHistory = append(dailyHistory, item)
+			}
+
+			// Query request counts from logs for each day
+			if len(dailyHistory) > 0 {
+				// Get request counts per day from logs
+				type DailyRequestCount struct {
+					Date         string
+					RequestCount int
+				}
+
+				startDate := dailyHistory[len(dailyHistory)-1].Date
+				endDate := dailyHistory[0].Date
+
+				dateFormat := "DATE(FROM_UNIXTIME(created_at))"
+				if common.UsingPostgreSQL {
+					dateFormat = "TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')"
+				} else if common.UsingSQLite {
+					dateFormat = "DATE(created_at, 'unixepoch', 'localtime')"
+				}
+
+				startTimestamp, _ := time.ParseInLocation("2006-01-02", startDate, loc)
+				endTimestamp, _ := time.ParseInLocation("2006-01-02", endDate, loc)
+				endTimestamp = endTimestamp.Add(24*time.Hour - time.Second)
+
+				query := fmt.Sprintf(`
+					SELECT %s as date, COUNT(*) as request_count
+					FROM logs
+					WHERE user_id = ? AND type = ?
+					  AND created_at >= ? AND created_at <= ?
+					GROUP BY %s
+				`, dateFormat, dateFormat)
+
+				var dailyRequests []DailyRequestCount
+				err := model.LOG_DB.Raw(query, userPlan.UserId, model.LogTypeConsume,
+					startTimestamp.Unix(), endTimestamp.Unix()).Scan(&dailyRequests).Error
+
+				if err == nil {
+					// Build a map for quick lookup
+					requestMap := make(map[string]int)
+					for _, dr := range dailyRequests {
+						requestMap[dr.Date] = dr.RequestCount
+					}
+
+					// Fill in request counts
+					for i := range dailyHistory {
+						if count, exists := requestMap[dailyHistory[i].Date]; exists {
+							dailyHistory[i].RequestCount = count
+						}
+					}
+				}
+			}
+
+			dataSource = "Redis日志跟踪"
+		} else {
+			// Redis data not available, fall back to log query
+			dailyHistory, _ = getDailyUsageFromLogs(userPlan.UserId, userPlan.StartedAt, userPlan.ExpiresAt, days)
 			for i := range dailyHistory {
-				historyMap[dailyHistory[i].Date] = &dailyHistory[i]
-			}
-
-			// Merge Redis data: use Redis value if log value is 0 or missing
-			for dateStr, redisQuota := range redisHistory {
-				if item, exists := historyMap[dateStr]; exists {
-					// If log shows 0 but Redis has data, use Redis data
-					if item.UsedQuota == 0 && redisQuota > 0 {
-						item.UsedQuota = redisQuota
-						item.UsedUSD = ConvertQuotaToUSD(redisQuota)
-						// Note: RequestCount remains 0 since we don't track it in Redis
-					}
-				} else {
-					// Date exists in Redis but not in log result, add it
-					// This can happen if logs were cleaned but Redis still has the data
-					newItem := dto.UserDailyUsageItem{
-						Date:         dateStr,
-						UsedQuota:    redisQuota,
-						UsedUSD:      ConvertQuotaToUSD(redisQuota),
-						RequestCount: 0, // Unknown from Redis
-					}
-					dailyHistory = append(dailyHistory, newItem)
+				dailyHistory[i].DailyLimit = plan.DailyQuotaLimit
+				dailyHistory[i].DailyLimitUSD = ConvertQuotaToUSD(plan.DailyQuotaLimit)
+				if plan.DailyQuotaLimit > 0 {
+					dailyHistory[i].UsagePercent = float64(dailyHistory[i].UsedQuota) * 100.0 / float64(plan.DailyQuotaLimit)
 				}
 			}
-
-			// Re-sort dailyHistory by date descending after merge
-			for i := 0; i < len(dailyHistory)-1; i++ {
-				for j := i + 1; j < len(dailyHistory); j++ {
-					if dailyHistory[j].Date > dailyHistory[i].Date {
-						dailyHistory[i], dailyHistory[j] = dailyHistory[j], dailyHistory[i]
-					}
-				}
+			dataSource = "数据库日志"
+			if len(activePlans) > 1 {
+				response.DataNotice = multiPlanWarning + "数据源自数据库日志，可能包含其他套餐的消费"
 			}
 		}
-	}
-
-	// Add daily limit info to each item
-	for i := range dailyHistory {
-		dailyHistory[i].DailyLimit = plan.DailyQuotaLimit
-		dailyHistory[i].DailyLimitUSD = ConvertQuotaToUSD(plan.DailyQuotaLimit)
-		if plan.DailyQuotaLimit > 0 {
-			dailyHistory[i].UsagePercent = float64(dailyHistory[i].UsedQuota) * 100.0 / float64(plan.DailyQuotaLimit)
+	} else {
+		// Consumption plan or no Redis - use log query
+		dailyHistory, _ = getDailyUsageFromLogs(userPlan.UserId, userPlan.StartedAt, userPlan.ExpiresAt, days)
+		for i := range dailyHistory {
+			dailyHistory[i].DailyLimit = plan.DailyQuotaLimit
+			dailyHistory[i].DailyLimitUSD = ConvertQuotaToUSD(plan.DailyQuotaLimit)
+			if plan.DailyQuotaLimit > 0 {
+				dailyHistory[i].UsagePercent = float64(dailyHistory[i].UsedQuota) * 100.0 / float64(plan.DailyQuotaLimit)
+			}
+		}
+		dataSource = "数据库日志"
+		if len(activePlans) > 1 {
+			response.DataNotice = multiPlanWarning + "数据源自数据库日志，可能包含其他套餐的消费"
 		}
 	}
 
 	response.DailyHistory = dailyHistory
 
-	// Get today's usage - try Redis first, fallback to log query result
+	// Get today's usage - use consistent data source
 	if plan.DailyQuotaLimit > 0 {
 		var todayUsed int64 = 0
-		gotFromRedis := false
 
-		// Try to get from Redis if enabled
-		if common.RedisEnabled {
+		if dataSource == "Redis日志跟踪" && common.RedisEnabled {
+			// Use Redis for today's data (same source as history)
 			redisUsage, err := GetDailyQuotaUsage(userPlanId)
-			if err == nil && redisUsage > 0 {
+			if err == nil {
 				todayUsed = redisUsage
-				gotFromRedis = true
 			}
-		}
-
-		// Fallback to log query result if Redis unavailable or returned 0
-		if !gotFromRedis && len(dailyHistory) > 0 {
-			today := time.Now().Format("2006-01-02")
-			if dailyHistory[0].Date == today {
-				todayUsed = dailyHistory[0].UsedQuota
+		} else {
+			// Use log query result
+			if len(dailyHistory) > 0 {
+				today := time.Now().Format("2006-01-02")
+				if dailyHistory[0].Date == today {
+					todayUsed = dailyHistory[0].UsedQuota
+				}
 			}
 		}
 
