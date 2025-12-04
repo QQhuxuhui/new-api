@@ -529,15 +529,9 @@ export const useLogsData = () => {
     if (success) {
       let newPageData = data.items;
 
-      // Filter out error logs (type=5) for non-admin users
-      if (!isAdminUser) {
-        newPageData = newPageData.filter(log => log.type !== 5);
-      }
-
       setActivePage(data.page);
       setPageSize(data.page_size);
-      // Adjust total count for non-admin users
-      setLogCount(!isAdminUser ? newPageData.length : data.total);
+      setLogCount(data.total);
 
       setLogsFormat(newPageData);
     } else {
