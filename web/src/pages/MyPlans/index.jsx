@@ -142,8 +142,8 @@ const MyPlans = () => {
   // Render quota progress
   const renderQuotaProgress = (userPlan) => {
     const used = parseInt(userPlan.used_quota) || 0;
-    const total = parseInt(userPlan.quota) || 0;
-    const remain = total - used;
+    const remain = parseInt(userPlan.quota) || 0;
+    const total = used + remain;
     const percent = total > 0 ? (remain / total) * 100 : 0;
 
     return (
@@ -445,7 +445,7 @@ const MyPlans = () => {
             <span>
               {t('当前使用套餐')}: <strong>{currentPlan.plan?.display_name || currentPlan.plan?.name}</strong>
               {' - '}
-              {t('剩余额度')}: <strong>{renderQuota((currentPlan.quota || 0) - (currentPlan.used_quota || 0))}</strong>
+              {t('剩余额度')}: <strong>{renderQuota(currentPlan.quota || 0)}</strong>
             </span>
           }
         />

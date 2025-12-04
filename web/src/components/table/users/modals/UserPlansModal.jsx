@@ -273,8 +273,8 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
   // Render quota progress
   const renderQuotaProgress = (userPlan) => {
     const used = parseInt(userPlan.used_quota) || 0;
-    const total = parseInt(userPlan.quota) || 0;
-    const remain = total - used;
+    const remain = parseInt(userPlan.quota) || 0;
+    const total = used + remain;
     const percent = total > 0 ? (remain / total) * 100 : 0;
     return (
       <Tooltip content={`${t('已用')}: ${renderQuota(used)} / ${t('总计')}: ${renderQuota(total)}`}>

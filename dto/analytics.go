@@ -317,3 +317,73 @@ type UserDailyUsageResponse struct {
 	// the plan's validity period. Data may include consumption from other overlapping plans.
 	DataNotice      string               `json:"data_notice,omitempty"` // Notice about data limitations
 }
+
+// UserConsumptionDetail represents detailed consumption data for a specific user
+type UserConsumptionDetail struct {
+	UserInfo              UserBasicInfo              `json:"user_info"`
+	DailyConsumption      []DailyConsumptionItem     `json:"daily_consumption"`
+	PlanDailyConsumption  []PlanConsumptionDetail    `json:"plan_daily_consumption"`
+	ModelSummary          []ModelConsumptionSummary  `json:"model_summary"`
+	Stats                 UserConsumptionStats       `json:"stats"`
+}
+
+// UserBasicInfo represents basic user information
+type UserBasicInfo struct {
+	ID           int     `json:"id"`
+	Username     string  `json:"username"`
+	QuotaUSD     float64 `json:"quota_usd"`
+	UsedQuotaUSD float64 `json:"used_quota_usd"`
+	RequestCount int     `json:"request_count"`
+}
+
+// DailyConsumptionItem represents consumption for a single day
+type DailyConsumptionItem struct {
+	Date         string                     `json:"date"` // YYYY-MM-DD
+	TotalUSD     float64                    `json:"total_usd"`
+	RequestCount int                        `json:"request_count"`
+	Models       []ModelDailyConsumption    `json:"models"`
+}
+
+// ModelDailyConsumption represents model-specific consumption for a day
+type ModelDailyConsumption struct {
+	ModelName    string  `json:"model_name"`
+	USD          float64 `json:"usd"`
+	Quota        int     `json:"quota"`
+	RequestCount int     `json:"request_count"`
+	Percentage   float64 `json:"percentage"` // Percentage of day's total
+}
+
+// PlanConsumptionDetail represents consumption details for a specific plan
+type PlanConsumptionDetail struct {
+	UserPlanID   int                      `json:"user_plan_id"`
+	PlanName     string                   `json:"plan_name"`
+	PlanType     string                   `json:"plan_type"`
+	IsCurrent    int                      `json:"is_current"`
+	DailyData    []PlanDailyData          `json:"daily_data"`
+}
+
+// PlanDailyData represents daily consumption data for a plan
+type PlanDailyData struct {
+	Date          string                  `json:"date"`
+	UsedUSD       float64                 `json:"used_usd"`
+	DailyLimitUSD float64                 `json:"daily_limit_usd"`
+	UsagePercent  float64                 `json:"usage_percent"`
+	Models        []ModelDailyConsumption `json:"models"`
+}
+
+// ModelConsumptionSummary represents overall consumption summary for a model
+type ModelConsumptionSummary struct {
+	ModelName    string  `json:"model_name"`
+	TotalUSD     float64 `json:"total_usd"`
+	RequestCount int     `json:"request_count"`
+	Percentage   float64 `json:"percentage"` // Percentage of total consumption
+}
+
+// UserConsumptionStats represents statistical summary
+type UserConsumptionStats struct {
+	TotalDays       int     `json:"total_days"`
+	TotalUSD        float64 `json:"total_usd"`
+	AvgDailyUSD     float64 `json:"avg_daily_usd"`
+	PeakDailyUSD    float64 `json:"peak_daily_usd"`
+	TotalRequests   int     `json:"total_requests"`
+}

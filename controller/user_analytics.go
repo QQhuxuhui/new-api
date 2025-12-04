@@ -279,3 +279,36 @@ func GetUserBalanceAnalysis(c *gin.Context) {
 		"data":    result,
 	})
 }
+
+// GetUserConsumptionDetail returns detailed consumption data for a specific user
+// including daily trends, plan-wise consumption, and model usage breakdown
+func GetUserConsumptionDetail(c *gin.Context) {
+	userIdStr := c.Param("user_id")
+	userId, err := strconv.Atoi(userIdStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid user ID",
+		})
+		return
+	}
+
+	daysStr := c.DefaultQuery("days", "30")
+	days, err := strconv.Atoi(daysStr)
+	if err != nil || days <= 0 || days > 90 {
+		days = 30
+	}
+
+	result, err := service.GetUserConsumptionDetail(userId, days)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    result,
+	})
+}
+

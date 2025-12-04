@@ -32,6 +32,7 @@ import DeleteUserModal from './modals/DeleteUserModal';
 import ResetPasskeyModal from './modals/ResetPasskeyModal';
 import ResetTwoFAModal from './modals/ResetTwoFAModal';
 import UserPlansModal from './modals/UserPlansModal';
+import UserDetailModal from './modals/UserDetailModal';
 
 const UsersTable = (usersData) => {
   const {
@@ -63,6 +64,7 @@ const UsersTable = (usersData) => {
   const [showResetPasskeyModal, setShowResetPasskeyModal] = useState(false);
   const [showResetTwoFAModal, setShowResetTwoFAModal] = useState(false);
   const [showUserPlansModal, setShowUserPlansModal] = useState(false);
+  const [showUserDetailModal, setShowUserDetailModal] = useState(false);
 
   // Modal handlers
   const showPromoteUserModal = (user) => {
@@ -99,6 +101,11 @@ const UsersTable = (usersData) => {
   const showUserPlansUserModal = (user) => {
     setModalUser(user);
     setShowUserPlansModal(true);
+  };
+
+  const showUserDetailUserModal = (user) => {
+    setModalUser(user);
+    setShowUserDetailModal(true);
   };
 
   // Modal confirm handlers
@@ -140,6 +147,7 @@ const UsersTable = (usersData) => {
       showResetPasskeyModal: showResetPasskeyUserModal,
       showResetTwoFAModal: showResetTwoFAUserModal,
       showUserPlansModal: showUserPlansUserModal,
+      showUserDetailModal: showUserDetailUserModal,
     });
   }, [
     t,
@@ -152,6 +160,7 @@ const UsersTable = (usersData) => {
     showResetPasskeyUserModal,
     showResetTwoFAUserModal,
     showUserPlansUserModal,
+    showUserDetailUserModal,
   ]);
 
   // Handle compact mode by removing fixed positioning
@@ -257,6 +266,12 @@ const UsersTable = (usersData) => {
         user={modalUser}
         onClose={() => setShowUserPlansModal(false)}
         refresh={refresh}
+      />
+
+      <UserDetailModal
+        visible={showUserDetailModal}
+        user={modalUser}
+        onClose={() => setShowUserDetailModal(false)}
       />
     </>
   );

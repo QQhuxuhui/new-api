@@ -64,19 +64,35 @@ const renderRole = (role, t) => {
 };
 
 /**
- * Render username with remark
+ * Render username with remark and click to view details
  */
-const renderUsername = (text, record) => {
+const renderUsername = (text, record, showUserDetailModal) => {
   const remark = record.remark;
+
+  const usernameElement = (
+    <span
+      style={{
+        cursor: 'pointer',
+        color: '#1890ff',
+        textDecoration: 'underline',
+        textDecorationStyle: 'dotted',
+      }}
+      onClick={() => showUserDetailModal && showUserDetailModal(record)}
+    >
+      {text}
+    </span>
+  );
+
   if (!remark) {
-    return <span>{text}</span>;
+    return usernameElement;
   }
+
   const maxLen = 10;
   const displayRemark =
     remark.length > maxLen ? remark.slice(0, maxLen) + '…' : remark;
   return (
     <Space spacing={2}>
-      <span>{text}</span>
+      {usernameElement}
       <Tooltip content={remark} position='top' showArrow>
         <Tag color='white' shape='circle' className='!text-xs'>
           <div className='flex items-center gap-1'>
@@ -309,6 +325,7 @@ export const getUsersColumns = ({
   showResetPasskeyModal,
   showResetTwoFAModal,
   showUserPlansModal,
+  showUserDetailModal,
 }) => {
   return [
     {
@@ -318,7 +335,7 @@ export const getUsersColumns = ({
     {
       title: t('用户名'),
       dataIndex: 'username',
-      render: (text, record) => renderUsername(text, record),
+      render: (text, record) => renderUsername(text, record, showUserDetailModal),
     },
     {
       title: t('状态'),

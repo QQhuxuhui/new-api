@@ -279,6 +279,29 @@ export const AnalyticsAPI = {
       throw error;
     }
   },
+
+  /**
+   * Fetch user consumption detail with daily trends and model breakdown
+   * @param {number} userId - User ID
+   * @param {number} days - Number of days to retrieve (default 30, max 90)
+   * @returns {Promise<Object>}
+   */
+  async fetchUserConsumptionDetail(userId, days = 30) {
+    try {
+      const response = await API.get(`${BASE_URL}/user-consumption-detail/${userId}`, {
+        params: { days },
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(
+        response.data.message || 'Failed to fetch user consumption detail'
+      );
+    } catch (error) {
+      showError(error.message || 'Failed to fetch user consumption detail');
+      throw error;
+    }
+  },
 };
 
 export default AnalyticsAPI;
