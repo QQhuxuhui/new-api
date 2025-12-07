@@ -79,21 +79,27 @@ const UserDetailModal = ({ visible, user, onClose }) => {
 
   // Daily consumption stacked bar chart (models stacked by day)
   const dailyChartSpec = useMemo(() => {
-    if (!data?.daily_consumption) return null;
+    if (!data?.daily_consumption || !Array.isArray(data.daily_consumption)) return null;
 
     // Transform data for stacked chart
     const chartData = [];
     data.daily_consumption.forEach((day) => {
-      day.models.forEach((model) => {
-        chartData.push({
-          date: day.date,
-          model: model.model_name,
-          usd: model.usd,
-          requests: model.request_count,
-          percentage: model.percentage,
+      // Safely handle null or undefined models array
+      if (day.models && Array.isArray(day.models)) {
+        day.models.forEach((model) => {
+          chartData.push({
+            date: day.date,
+            model: model.model_name,
+            usd: model.usd,
+            requests: model.request_count,
+            percentage: model.percentage,
+          });
         });
-      });
+      }
     });
+
+    // Return null if no data to display
+    if (chartData.length === 0) return null;
 
     return {
       type: 'bar',
@@ -152,20 +158,26 @@ const UserDetailModal = ({ visible, user, onClose }) => {
 
   // Plan comparison chart
   const planChartSpec = useMemo(() => {
-    if (!data?.plan_daily_consumption) return null;
+    if (!data?.plan_daily_consumption || !Array.isArray(data.plan_daily_consumption)) return null;
 
     const chartData = [];
     data.plan_daily_consumption.forEach((plan) => {
-      plan.daily_data.forEach((day) => {
-        chartData.push({
-          date: day.date,
-          plan: plan.plan_name,
-          usd: day.used_usd,
-          limit: day.daily_limit_usd,
-          percent: day.usage_percent,
+      // Safely handle null or undefined daily_data array
+      if (plan.daily_data && Array.isArray(plan.daily_data)) {
+        plan.daily_data.forEach((day) => {
+          chartData.push({
+            date: day.date,
+            plan: plan.plan_name,
+            usd: day.used_usd,
+            limit: day.daily_limit_usd,
+            percent: day.usage_percent,
+          });
         });
-      });
+      }
     });
+
+    // Return null if no data to display
+    if (chartData.length === 0) return null;
 
     return {
       type: 'bar',
@@ -228,7 +240,7 @@ const UserDetailModal = ({ visible, user, onClose }) => {
 
   // Model usage pie chart
   const modelPieSpec = useMemo(() => {
-    if (!data?.model_summary) return null;
+    if (!data?.model_summary || !Array.isArray(data.model_summary) || data.model_summary.length === 0) return null;
 
     return {
       type: 'pie',
@@ -473,7 +485,7 @@ const UserDetailModal = ({ visible, user, onClose }) => {
                       <Col span={isMobile ? 24 : 12}>
                         <Table
                           columns={modelTableColumns}
-                          dataSource={data.model_summary}
+                          dataSource={data.model_summary || []}
                           rowKey="model_name"
                           pagination={false}
                           size="small"
