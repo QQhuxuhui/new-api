@@ -179,8 +179,10 @@ const MyPlans = () => {
 
     const used = quotaStatus.daily_quota_used || 0;
     const total = quotaStatus.daily_quota_limit || 0;
-    const remain = quotaStatus.daily_quota_remain || 0;
-    const percent = total > 0 ? (used / total) * 100 : 0;
+    // 后端返回的字段是 daily_quota_remaining，备用计算防止负值
+    const remain = quotaStatus.daily_quota_remaining ?? Math.max(total - used, 0);
+    // 进度条显示已使用百分比
+    const usedPercent = total > 0 ? (used / total) * 100 : 0;
 
     // Format reset time
     const resetTime = quotaStatus.daily_reset_time
@@ -205,10 +207,10 @@ const MyPlans = () => {
           </Text>
         </div>
         <Progress
-          percent={percent}
+          percent={usedPercent}
           showInfo
-          format={() => `${percent.toFixed(1)}%`}
-          stroke={percent > 80 ? 'var(--semi-color-danger)' : 'var(--semi-color-primary)'}
+          format={() => `${usedPercent.toFixed(1)}%`}
+          stroke={usedPercent > 80 ? 'var(--semi-color-danger)' : 'var(--semi-color-primary)'}
         />
         <div className="flex justify-between mt-1">
           <Text type="tertiary" size="small">
