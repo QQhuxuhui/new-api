@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Card, Typography, Button, Toast, Spin } from '@douyinfe/semi-ui';
+import { Card, Typography, Button, Toast, Spin, Tabs, TabPane } from '@douyinfe/semi-ui';
 import { IconCopy, IconTick } from '@douyinfe/semi-icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -89,53 +89,48 @@ function Tutorial() {
     const content = replaceVariables(section.content);
 
     return (
-      <div key={section.id} className='mb-8'>
-        <Title heading={3} className='mb-6'>
-          {section.title}
-        </Title>
-        <div className='prose prose-sm sm:prose max-w-none dark:prose-invert'>
-          {section.format === 'markdown' ? (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                code: ({ node, inline, className, children, ...props }) => {
-                  if (inline) {
-                    return (
-                      <code className='bg-gray-200 dark:bg-gray-700 px-1 rounded' {...props}>
-                        {children}
-                      </code>
-                    );
-                  }
+      <div className='prose prose-sm sm:prose max-w-none dark:prose-invert'>
+        {section.format === 'markdown' ? (
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              code: ({ node, inline, className, children, ...props }) => {
+                if (inline) {
                   return (
-                    <div className='overflow-x-auto rounded-lg bg-gray-900 dark:bg-black p-3 sm:p-4 font-mono text-xs sm:text-sm border border-gray-700 dark:border-gray-800'>
-                      <pre className='text-green-400'>
-                        <code {...props}>{children}</code>
-                      </pre>
-                    </div>
+                    <code className='bg-gray-200 dark:bg-gray-700 px-1 rounded' {...props}>
+                      {children}
+                    </code>
                   );
-                },
-                a: ({ href, children }) => (
-                  <a
-                    href={href}
-                    target='_blank'
-                    rel='noopener noreferrer'
-                    className='text-blue-600 dark:text-blue-400 hover:underline'
-                  >
-                    {children}
-                  </a>
-                ),
-              }}
-            >
-              {content}
-            </ReactMarkdown>
-          ) : (
-            <div
-              dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(content),
-              }}
-            />
-          )}
-        </div>
+                }
+                return (
+                  <div className='overflow-x-auto rounded-lg bg-gray-900 dark:bg-black p-3 sm:p-4 font-mono text-xs sm:text-sm border border-gray-700 dark:border-gray-800'>
+                    <pre className='text-green-400'>
+                      <code {...props}>{children}</code>
+                    </pre>
+                  </div>
+                );
+              },
+              a: ({ href, children }) => (
+                <a
+                  href={href}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='text-blue-600 dark:text-blue-400 hover:underline'
+                >
+                  {children}
+                </a>
+              ),
+            }}
+          >
+            {content}
+          </ReactMarkdown>
+        ) : (
+          <div
+            dangerouslySetInnerHTML={{
+              __html: DOMPurify.sanitize(content),
+            }}
+          />
+        )}
       </div>
     );
   };
@@ -155,15 +150,32 @@ function Tutorial() {
     tutorialData?.sections &&
     tutorialData.sections.length > 0;
 
-  // If admin tutorial is available, render it
+  // If admin tutorial is available, render it with tabs
   if (hasAdminTutorial) {
+    const sortedSections = tutorialData.sections
+      .filter(section => section.enabled)
+      .sort((a, b) => a.order - b.order);
+
     return (
       <div className='mt-[60px] px-2'>
-        <div className='max-w-4xl mx-auto px-3 sm:px-6 py-6 sm:py-8'>
+        <div className='max-w-6xl mx-auto px-3 sm:px-6 py-6 sm:py-8'>
           <Card className='p-4 sm:p-6'>
-            {tutorialData.sections
-              .sort((a, b) => a.order - b.order)
-              .map(renderSection)}
+            <Title heading={2} className='mb-6'>
+              {t('tutorial_title', '安装教程')}
+            </Title>
+            <Tabs type='line' size='large'>
+              {sortedSections.map((section) => (
+                <TabPane
+                  key={section.id}
+                  tab={section.title}
+                  itemKey={section.id}
+                >
+                  <div className='py-4'>
+                    {renderSection(section)}
+                  </div>
+                </TabPane>
+              ))}
+            </Tabs>
           </Card>
         </div>
       </div>
