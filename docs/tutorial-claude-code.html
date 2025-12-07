@@ -16,78 +16,29 @@
     <pre><code>node --version
 npm --version</code></pre>
 
-    <p class="tip">💡 如果版本不符合要求，请先从 <a href="https://nodejs.org/" target="_blank">nodejs.org</a> 下载安装最新版本</p>
+    <p class="tip">💡 如果版本不符合要求，请先从 <a href="https://nodejs.org/" target="_blank">nodejs.org</a> 下载安装最新 LTS 版本</p>
   </div>
 
   <!-- 第一步：安装 Node.js（如果需要） -->
   <div class="step">
-    <h4>步骤 1: 安装/更新 Node.js（如果需要）</h4>
+    <h4>步骤 1: 安装 Node.js（如果需要）</h4>
 
-    <div class="os-tabs">
-      <!-- Windows -->
-      <div class="os-tab" data-os="windows">
-        <p><strong>Windows 安装方式：</strong></p>
+    <p><strong>Windows：</strong></p>
+    <p>访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a> 下载 LTS 版本安装包，运行安装程序，按默认选项安装，安装完成后重启终端。</p>
 
-        <p>方式 1：使用官方安装包（推荐）</p>
-        <ol>
-          <li>访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a></li>
-          <li>下载 LTS 版本（长期支持版）</li>
-          <li>运行安装程序，按默认选项安装</li>
-          <li>安装完成后重启终端</li>
-        </ol>
+    <p><strong>macOS：</strong></p>
+    <p>使用 Homebrew 安装（推荐）：</p>
+    <pre><code>brew install node</code></pre>
 
-        <p>方式 2：使用 Chocolatey（如果已安装）</p>
-        <pre><code>choco install nodejs</code></pre>
-      </div>
-
-      <!-- macOS -->
-      <div class="os-tab" data-os="macos">
-        <p><strong>macOS 安装方式：</strong></p>
-
-        <p>方式 1：使用 Homebrew（推荐）</p>
-        <pre><code>brew install node</code></pre>
-
-        <p>方式 2：使用官方安装包</p>
-        <ol>
-          <li>访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a></li>
-          <li>下载 macOS 安装包</li>
-          <li>运行 .pkg 文件完成安装</li>
-        </ol>
-
-        <p>方式 3：使用 nvm（Node 版本管理器）</p>
-        <pre><code># 安装 nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-
-# 安装 Node.js LTS
-nvm install --lts
-nvm use --lts</code></pre>
-      </div>
-
-      <!-- Linux -->
-      <div class="os-tab" data-os="linux">
-        <p><strong>Linux 安装方式：</strong></p>
-
-        <p>方式 1：使用 NodeSource 仓库（推荐）</p>
-        <pre><code># Ubuntu/Debian
+    <p><strong>Linux：</strong></p>
+    <p>使用 NodeSource 仓库安装：</p>
+    <pre><code># Ubuntu/Debian
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
 # 验证安装
 node --version
 npm --version</code></pre>
-
-        <p>方式 2：使用 nvm（Node 版本管理器）</p>
-        <pre><code># 安装 nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-
-# 重新加载配置
-source ~/.bashrc  # 或 source ~/.zshrc
-
-# 安装 Node.js LTS
-nvm install --lts
-nvm use --lts</code></pre>
-      </div>
-    </div>
   </div>
 
   <!-- 第二步：使用 npm 安装 Claude Code -->
@@ -95,144 +46,78 @@ nvm use --lts</code></pre>
     <h4>步骤 2: 使用 npm 安装 Claude Code</h4>
 
     <p><strong>全局安装 Claude Code：</strong></p>
+    <pre><code># Windows/macOS/Linux 通用命令
+npm install -g @anthropic-ai/claude-code</code></pre>
 
-    <div class="os-tabs">
-      <!-- Windows -->
-      <div class="os-tab" data-os="windows">
-        <p><strong>Windows 安装：</strong></p>
-        <pre><code>npm install -g @anthropic-ai/claude-code</code></pre>
-
-        <p class="tip">💡 如遇权限问题，请使用管理员权限运行 PowerShell</p>
-      </div>
-
-      <!-- macOS -->
-      <div class="os-tab" data-os="macos">
-        <p><strong>macOS 安装：</strong></p>
-        <pre><code>npm install -g @anthropic-ai/claude-code</code></pre>
-
-        <p>如果遇到权限错误，使用 sudo：</p>
-        <pre><code>sudo npm install -g @anthropic-ai/claude-code</code></pre>
-
-        <p class="tip">💡 推荐配置 npm 使用用户目录，避免使用 sudo</p>
-      </div>
-
-      <!-- Linux -->
-      <div class="os-tab" data-os="linux">
-        <p><strong>Linux 安装：</strong></p>
-        <pre><code>npm install -g @anthropic-ai/claude-code</code></pre>
-
-        <p>如果遇到权限错误，使用 sudo：</p>
-        <pre><code>sudo npm install -g @anthropic-ai/claude-code</code></pre>
-      </div>
-    </div>
+    <p class="tip">💡 <strong>权限问题解决：</strong>
+      <br>• Windows：使用管理员权限运行 PowerShell
+      <br>• macOS/Linux：如遇权限错误，使用 <code>sudo npm install -g @anthropic-ai/claude-code</code>
+    </p>
 
     <p><strong>验证安装：</strong></p>
     <pre><code>claude --version</code></pre>
     <p>显示版本号即表示安装成功（例如：claude version 1.0.58）</p>
 
     <div class="info-box">
-      <p><strong>🔧 常见安装问题：</strong></p>
+      <p><strong>🔧 常见问题：</strong></p>
       <ul>
         <li><strong>命令未找到</strong>：重启终端或检查 npm 全局路径配置</li>
-        <li><strong>权限错误</strong>：Windows 使用管理员权限；macOS/Linux 使用 sudo</li>
-        <li><strong>网络超时</strong>：配置 npm 镜像源（如使用淘宝镜像）</li>
+        <li><strong>网络超时</strong>：中国用户可配置淘宝镜像：<code>npm config set registry https://registry.npmmirror.com</code></li>
       </ul>
     </div>
   </div>
 
-  <!-- 第三步：配置 npm 镜像（可选，加速安装） -->
+  <!-- 第三步：配置中转 API -->
   <div class="step">
-    <h4>步骤 3: 配置 npm 镜像（可选）</h4>
+    <h4>步骤 3: 配置中转 API</h4>
 
-    <p><strong>使用淘宝镜像加速下载（中国用户推荐）：</strong></p>
-    <pre><code># 临时使用
-npm install -g @anthropic-ai/claude-code --registry=https://registry.npmmirror.com
+    <p><strong>创建配置文件（推荐方式）：</strong></p>
 
-# 永久配置
-npm config set registry https://registry.npmmirror.com
-
-# 恢复官方源
-npm config set registry https://registry.npmjs.org</code></pre>
-  </div>
-
-  <!-- 第四步：配置中转 API -->
-  <div class="step">
-    <h4>步骤 4: 配置中转 API</h4>
-
-    <p><strong>推荐方式：全局配置文件</strong></p>
-
-    <div class="os-tabs">
-      <!-- Windows 配置 -->
-      <div class="os-tab" data-os="windows">
-        <p><strong>Windows 配置：</strong></p>
-        <p>1. 创建配置目录和文件：</p>
-        <pre><code># 在 PowerShell 中执行
-$configDir = "$env:USERPROFILE\.claude"
+    <p><strong>Windows：</strong></p>
+    <p>在 PowerShell 中执行：</p>
+    <pre><code>$configDir = "$env:USERPROFILE\.claude"
 if (!(Test-Path $configDir)) {
     New-Item -ItemType Directory -Path $configDir
 }
 
-# 创建配置文件
 @"
 {
   "env": {
     "ANTHROPIC_BASE_URL": "{{CLAUDE_API_URL}}",
-    "ANTHROPIC_API_KEY": "YOUR_API_KEY"
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_API_KEY"
   }
 }
 "@ | Out-File -FilePath "$configDir\settings.json" -Encoding utf8</code></pre>
 
-        <p>2. 或手动创建文件：</p>
-        <ul>
-          <li>位置：<code>%USERPROFILE%\.claude\settings.json</code></li>
-          <li>例如：<code>C:\Users\YourName\.claude\settings.json</code></li>
-        </ul>
-      </div>
-
-      <!-- macOS/Linux 配置 -->
-      <div class="os-tab" data-os="macos">
-        <p><strong>macOS 配置：</strong></p>
-        <p>创建配置目录和文件：</p>
-        <pre><code>mkdir -p ~/.claude
+    <p><strong>macOS / Linux：</strong></p>
+    <p>在终端中执行：</p>
+    <pre><code>mkdir -p ~/.claude
 cat > ~/.claude/settings.json &lt;&lt; 'EOF'
 {
   "env": {
     "ANTHROPIC_BASE_URL": "{{CLAUDE_API_URL}}",
-    "ANTHROPIC_API_KEY": "YOUR_API_KEY"
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_API_KEY"
   }
 }
 EOF</code></pre>
-      </div>
-
-      <div class="os-tab" data-os="linux">
-        <p><strong>Linux 配置：</strong></p>
-        <p>创建配置目录和文件：</p>
-        <pre><code>mkdir -p ~/.claude
-cat > ~/.claude/settings.json &lt;&lt; 'EOF'
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "{{CLAUDE_API_URL}}",
-    "ANTHROPIC_API_KEY": "YOUR_API_KEY"
-  }
-}
-EOF</code></pre>
-      </div>
-    </div>
 
     <div class="info-box">
       <p><strong>📝 配置说明：</strong></p>
       <ul>
         <li><strong>API Base URL</strong>: <code>{{CLAUDE_API_URL}}</code></li>
         <li><strong>API Key</strong>: 将 <code>YOUR_API_KEY</code> 替换为您的实际 API Key（通常以 sk- 开头）</li>
-        <li><strong>配置位置</strong>: 存储在用户目录下，安全且所有项目共享</li>
-        <li><strong>配置格式</strong>: 必须是有效的 JSON 格式</li>
+        <li><strong>注意</strong>: 配置文件中使用 <code>ANTHROPIC_AUTH_TOKEN</code>（不是 ANTHROPIC_API_KEY）</li>
+        <li><strong>配置位置</strong>:
+          <br>• Windows: <code>%USERPROFILE%\.claude\settings.json</code>
+          <br>• macOS/Linux: <code>~/.claude/settings.json</code>
+        </li>
       </ul>
     </div>
   </div>
 
-  <!-- 第五步：验证配置 -->
+  <!-- 第四步：验证配置 -->
   <div class="step">
-    <h4>步骤 5: 验证配置</h4>
+    <h4>步骤 4: 验证配置</h4>
 
     <p><strong>运行诊断命令：</strong></p>
     <pre><code>claude doctor</code></pre>
@@ -247,11 +132,11 @@ EOF</code></pre>
     <p class="tip">💡 如果诊断显示问题，请检查配置文件的 JSON 格式和 API Key 是否正确</p>
   </div>
 
-  <!-- 第六步：开始使用 -->
+  <!-- 第五步：开始使用 -->
   <div class="step">
-    <h4>步骤 6: 开始使用</h4>
+    <h4>步骤 5: 开始使用</h4>
 
-    <p><strong>基本使用：</strong></p>
+    <p><strong>启动 Claude Code：</strong></p>
     <pre><code># 进入项目目录
 cd your-project
 
@@ -274,33 +159,6 @@ npm update -g @anthropic-ai/claude-code</code></pre>
     <p class="tip">💡 现在可以通过自然语言与 Claude Code 交互，进行代码生成、调试、重构等任务了！</p>
   </div>
 
-  <!-- 更新与卸载 -->
-  <div class="step">
-    <h4>更新与卸载</h4>
-
-    <p><strong>更新 Claude Code：</strong></p>
-    <pre><code>npm update -g @anthropic-ai/claude-code</code></pre>
-
-    <p><strong>卸载 Claude Code：</strong></p>
-    <pre><code>npm uninstall -g @anthropic-ai/claude-code</code></pre>
-
-    <p><strong>清理配置文件（可选）：</strong></p>
-    <div class="os-tabs">
-      <div class="os-tab" data-os="windows">
-        <pre><code># Windows (PowerShell)
-Remove-Item -Recurse -Force "$env:USERPROFILE\.claude"</code></pre>
-      </div>
-      <div class="os-tab" data-os="macos">
-        <pre><code># macOS/Linux
-rm -rf ~/.claude</code></pre>
-      </div>
-      <div class="os-tab" data-os="linux">
-        <pre><code># Linux
-rm -rf ~/.claude</code></pre>
-      </div>
-    </div>
-  </div>
-
   <!-- 参考资源 -->
   <div class="step">
     <h4>📚 官方参考资源</h4>
@@ -308,7 +166,6 @@ rm -rf ~/.claude</code></pre>
       <li><a href="https://code.claude.com/docs/en/setup" target="_blank">官方安装文档</a></li>
       <li><a href="https://github.com/anthropics/claude-code" target="_blank">GitHub 仓库</a></li>
       <li><a href="https://www.claude.com/product/claude-code" target="_blank">产品介绍页</a></li>
-      <li><a href="https://console.anthropic.com/" target="_blank">Anthropic 控制台</a></li>
     </ul>
   </div>
 </div>
@@ -324,8 +181,6 @@ pre code { background: none; padding: 0; }
 .info-box { background: #f0f8ff; padding: 15px; border-radius: 4px; margin-top: 10px; border: 1px solid #b3d9ff; }
 .info-box ul { margin: 10px 0; padding-left: 20px; }
 .info-box strong { color: #0066cc; }
-.os-tabs { margin: 15px 0; }
-.os-tab { margin: 10px 0; padding: 10px; background: #fafafa; border-radius: 4px; }
 ul, ol { padding-left: 20px; margin: 10px 0; }
 li { margin: 5px 0; line-height: 1.6; }
 a { color: #0066cc; text-decoration: none; }

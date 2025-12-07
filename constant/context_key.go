@@ -36,6 +36,7 @@ const (
 	ContextKeyChannelMultiKeyIndex     ContextKey = "channel_multi_key_index"
 	ContextKeyChannelKey               ContextKey = "channel_key"
 	ContextKeyChannelRatio             ContextKey = "channel_ratio"
+	ContextKeyChannelModelRatio        ContextKey = "channel_model_ratio" // float64: 渠道模型倍率
 
 	/* user related keys */
 	ContextKeyUserId      ContextKey = "id"

@@ -2,106 +2,108 @@
 <div class="tutorial-section">
   <h3>🤖 OpenAI Codex CLI 安装与配置</h3>
 
-  <!-- 第一步：安装 -->
+  <!-- 系统要求 -->
   <div class="step">
-    <h4>步骤 1: 安装 Codex CLI</h4>
-
-    <div class="os-tabs">
-      <!-- Windows -->
-      <div class="os-tab" data-os="windows">
-        <p><strong>Windows 安装方式（推荐使用 WSL）：</strong></p>
-        <p class="tip">💡 Windows 支持仍在实验阶段，建议在 WSL 中运行</p>
-
-        <p>方式 1：使用 npm（全局安装）</p>
-        <pre><code>npm install -g @openai/codex</code></pre>
-
-        <p>方式 2：下载预编译二进制文件</p>
-        <p>从 <a href="https://github.com/openai/codex/releases" target="_blank">GitHub Releases</a> 下载最新的 Windows 版本</p>
-      </div>
-
-      <!-- macOS -->
-      <div class="os-tab" data-os="macos">
-        <p><strong>macOS 安装方式（三选一）：</strong></p>
-
-        <p>方式 1：使用 Homebrew（推荐）</p>
-        <pre><code>brew install --cask codex</code></pre>
-
-        <p>方式 2：使用 npm（全局安装）</p>
-        <pre><code>npm install -g @openai/codex</code></pre>
-
-        <p>方式 3：下载预编译二进制文件</p>
-        <p>从 <a href="https://github.com/openai/codex/releases" target="_blank">GitHub Releases</a> 下载 macOS 版本（如 codex-aarch64-apple-darwin）</p>
-      </div>
-
-      <!-- Linux -->
-      <div class="os-tab" data-os="linux">
-        <p><strong>Linux 安装方式（二选一）：</strong></p>
-
-        <p>方式 1：使用 npm（全局安装）</p>
-        <pre><code>npm install -g @openai/codex</code></pre>
-
-        <p>方式 2：下载预编译二进制文件</p>
-        <p>从 <a href="https://github.com/openai/codex/releases" target="_blank">GitHub Releases</a> 下载 Linux 版本（如 codex-x86_64-unknown-linux-musl）</p>
-        <pre><code># 下载后解压并添加到 PATH
-chmod +x codex
-sudo mv codex /usr/local/bin/</code></pre>
-      </div>
-    </div>
-
-    <p><strong>系统要求：</strong></p>
+    <h4>系统要求</h4>
     <ul>
-      <li>macOS 或 Linux（Windows 需使用 WSL）</li>
-      <li>Node.js（如果使用 npm 安装）</li>
+      <li>支持 macOS 或 Linux（Windows 需使用 WSL）</li>
+      <li>Node.js（如使用 npm 安装）</li>
     </ul>
+
+    <p><strong>检查 Node.js 版本：</strong></p>
+    <pre><code>node --version</code></pre>
+    <p class="tip">💡 如果未安装 Node.js，请先完成步骤 1</p>
+  </div>
+
+  <!-- 第一步：安装 Node.js（如果需要） -->
+  <div class="step">
+    <h4>步骤 1: 安装 Node.js（如果需要）</h4>
+
+    <p><strong>Windows：</strong></p>
+    <p>访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a> 下载 LTS 版本安装包，运行安装程序，按默认选项安装，安装完成后重启终端。</p>
+
+    <p><strong>macOS：</strong></p>
+    <p>使用 Homebrew 安装（推荐）：</p>
+    <pre><code>brew install node</code></pre>
+
+    <p><strong>Linux：</strong></p>
+    <p>使用 NodeSource 仓库安装：</p>
+    <pre><code># Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# 验证安装
+node --version
+npm --version</code></pre>
+  </div>
+
+  <!-- 第二步：安装 Codex CLI -->
+  <div class="step">
+    <h4>步骤 2: 安装 Codex CLI</h4>
+
+    <p><strong>Windows（使用 WSL）：</strong></p>
+    <p class="tip">💡 Windows 支持仍在实验阶段，建议在 WSL 中运行</p>
+    <pre><code>npm install -g @openai/codex</code></pre>
+
+    <p><strong>macOS：</strong></p>
+    <p>使用 Homebrew（推荐）：</p>
+    <pre><code>brew install --cask codex</code></pre>
+
+    <p><strong>Linux：</strong></p>
+    <p>使用 npm 全局安装：</p>
+    <pre><code>npm install -g @openai/codex</code></pre>
 
     <p><strong>验证安装：</strong></p>
     <pre><code>codex --version</code></pre>
     <p>显示版本号即表示安装成功</p>
   </div>
 
-  <!-- 第二步：配置认证 -->
+  <!-- 第三步：配置认证 -->
   <div class="step">
-    <h4>步骤 2: 配置认证</h4>
+    <h4>步骤 3: 配置认证</h4>
 
-    <p><strong>首次运行时会自动引导认证：</strong></p>
+    <p><strong>首次运行自动引导认证：</strong></p>
     <pre><code>codex</code></pre>
 
-    <p><strong>认证方式（二选一）：</strong></p>
-
-    <div class="auth-option">
-      <p><strong>方式 1：使用 ChatGPT 账户登录（推荐）</strong></p>
-      <ul>
-        <li>支持账户类型：ChatGPT Plus、Pro、Business、Edu 或 Enterprise</li>
-        <li>在提示时选择 "Sign in with ChatGPT"</li>
-        <li>按照浏览器提示完成 OAuth 认证</li>
-      </ul>
-    </div>
-
-    <div class="auth-option">
-      <p><strong>方式 2：使用 API Key（高级控制）</strong></p>
-      <p>创建配置文件：<code>~/.codex/config.toml</code></p>
-      <pre><code>[api]
-key = "YOUR_OPENAI_API_KEY"
-base_url = "{{OPENAI_API_URL}}"  # 使用中转API时配置</code></pre>
-    </div>
+    <p><strong>推荐方式：使用 ChatGPT 账户登录</strong></p>
+    <ul>
+      <li>支持账户类型：ChatGPT Plus、Pro、Business、Edu 或 Enterprise</li>
+      <li>在提示时选择 "Sign in with ChatGPT"</li>
+      <li>按照浏览器提示完成 OAuth 认证</li>
+    </ul>
 
     <div class="info-box">
-      <p><strong>📝 中转 API 配置：</strong></p>
+      <p><strong>📝 使用 API Key 认证（可选）：</strong></p>
+      <p>如需使用 API Key，设置环境变量后使用以下命令：</p>
+      <pre><code># 设置环境变量
+export OPENAI_API_KEY="YOUR_API_KEY"
+
+# 使用 API Key 登录
+echo $OPENAI_API_KEY | codex login --with-api-key</code></pre>
+
+      <p><strong>配置中转 API Base URL（可选）：</strong></p>
+      <p>编辑配置文件 <code>~/.codex/config.toml</code>：</p>
+      <pre><code>preferred_auth_method = "apikey"
+
+[model_providers]
+[model_providers.openai]
+base_url = "{{OPENAI_API_URL}}"</code></pre>
       <ul>
         <li>API Base URL: <code>{{OPENAI_API_URL}}</code></li>
-        <li>将您的 API Key 替换到配置文件中</li>
         <li>配置文件位置：<code>~/.codex/config.toml</code></li>
-        <li>支持丰富的配置选项，详见 <a href="https://developers.openai.com/codex/cli/" target="_blank">官方文档</a></li>
+        <li>需要先设置 <code>OPENAI_API_KEY</code> 环境变量</li>
       </ul>
     </div>
   </div>
 
-  <!-- 第三步：开始使用 -->
+  <!-- 第四步：开始使用 -->
   <div class="step">
-    <h4>步骤 3: 开始使用</h4>
-    <p>直接在终端运行：</p>
+    <h4>步骤 4: 开始使用</h4>
+
+    <p><strong>启动 Codex CLI：</strong></p>
     <pre><code>codex</code></pre>
-    <p>或使用自然语言命令：</p>
+
+    <p><strong>或使用自然语言命令：</strong></p>
     <pre><code>codex "list all files in current directory"</code></pre>
 
     <p class="tip">💡 Codex CLI 可以将自然语言转换为对应的 Bash/ZShell/PowerShell 命令</p>
@@ -122,17 +124,15 @@ base_url = "{{OPENAI_API_URL}}"  # 使用中转API时配置</code></pre>
 .tutorial-section { margin: 20px 0; }
 .step { margin: 20px 0; padding: 15px; border-left: 3px solid #10a37f; }
 .step h4 { color: #10a37f; margin-bottom: 10px; }
-pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; }
-code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 13px; }
+code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; }
 pre code { background: none; padding: 0; }
 .tip { background: #d1fae5; padding: 10px; border-radius: 4px; color: #065f46; margin: 10px 0; }
-.info-box { background: #ecfdf5; padding: 15px; border-radius: 4px; margin-top: 10px; }
+.info-box { background: #ecfdf5; padding: 15px; border-radius: 4px; margin-top: 10px; border: 1px solid #a7f3d0; }
 .info-box ul { margin: 10px 0; padding-left: 20px; }
-.auth-option { background: #f9fafb; padding: 12px; border-radius: 4px; margin: 10px 0; border: 1px solid #e5e7eb; }
-.os-tabs { margin: 15px 0; }
-.os-tab { margin: 10px 0; }
-ul { padding-left: 20px; }
-li { margin: 5px 0; }
+.info-box pre { margin-top: 10px; }
+ul { padding-left: 20px; margin: 10px 0; }
+li { margin: 5px 0; line-height: 1.6; }
 a { color: #10a37f; text-decoration: none; }
 a:hover { text-decoration: underline; }
 </style>

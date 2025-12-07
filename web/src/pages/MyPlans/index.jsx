@@ -40,6 +40,12 @@ import {
   IconClock,
   IconLock,
   IconAlertTriangle,
+  IconBox,
+  IconCalendarClock,
+  IconBolt,
+  IconCreditCard,
+  IconArrowRight,
+  IconShoppingBag,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess, renderQuota } from '../../helpers';
 
@@ -130,13 +136,48 @@ const MyPlans = () => {
   // Render plan type tag
   const renderPlanType = (type) => {
     const typeConfig = {
-      subscription: { color: 'blue', label: t('订阅套餐') },
-      consumption: { color: 'green', label: t('按量付费') },
-      trial: { color: 'orange', label: t('试用套餐') },
-      enterprise: { color: 'purple', label: t('企业套餐') },
+      subscription: {
+        color: 'blue',
+        label: t('订阅套餐'),
+        icon: <IconCalendarClock />,
+      },
+      consumption: {
+        color: 'green',
+        label: t('按量付费'),
+        icon: <IconCreditCard />,
+      },
+      trial: {
+        color: 'orange',
+        label: t('试用套餐'),
+        icon: <IconShoppingBag />,
+      },
+      enterprise: {
+        color: 'purple',
+        label: t('企业套餐'),
+        icon: <IconBox />,
+      },
     };
-    const config = typeConfig[type] || { color: 'grey', label: type };
-    return <Tag color={config.color}>{config.label}</Tag>;
+    const config = typeConfig[type] || {
+      color: 'grey',
+      label: type,
+      icon: <IconBox />,
+    };
+    return (
+      <Tag
+        color={config.color}
+        type='ghost'
+        shape='circle'
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          fontWeight: 600,
+        }}
+      >
+        {config.icon}
+        {config.label}
+      </Tag>
+    );
   };
 
   // Render quota progress
@@ -147,24 +188,38 @@ const MyPlans = () => {
     const percent = total > 0 ? (remain / total) * 100 : 0;
 
     return (
-      <div className="w-full">
-        <div className="flex justify-between mb-1">
-          <Text type="secondary" size="small">
-            {t('总额度剩余')}
-          </Text>
-          <Text strong>
-            {renderQuota(remain)} / {renderQuota(total)}
+      <div className='w-full p-4 bg-[var(--semi-color-fill-0)] rounded-xl'>
+        <div className='flex justify-between items-center mb-2'>
+          <div className='flex items-center gap-2'>
+            <div className='p-1.5 rounded-lg bg-[var(--semi-color-primary-light-default)] text-[var(--semi-color-primary)]'>
+              <IconCreditCard />
+            </div>
+            <Text strong size='normal'>
+              {t('总额度使用情况')}
+            </Text>
+          </div>
+          <Text strong className='text-[var(--semi-color-text-0)]'>
+            {renderQuota(remain)} <span className='text-[var(--semi-color-text-2)] font-normal text-xs'>/ {renderQuota(total)}</span>
           </Text>
         </div>
         <Progress
           percent={percent}
           showInfo
           format={() => `${percent.toFixed(1)}%`}
-          stroke={percent > 20 ? 'var(--semi-color-success)' : 'var(--semi-color-danger)'}
+          stroke={
+            percent > 20
+              ? 'var(--semi-color-success)'
+              : 'var(--semi-color-danger)'
+          }
+          className='my-2'
+          style={{ height: '8px' }}
         />
-        <div className="flex justify-between mt-1">
-          <Text type="tertiary" size="small">
+        <div className='flex justify-between mt-1'>
+          <Text type='tertiary' size='small'>
             {t('已使用')}: {renderQuota(used)}
+          </Text>
+          <Text type={percent > 20 ? 'success' : 'danger'} size='small' strong>
+            {t('剩余')} {percent.toFixed(1)}%
           </Text>
         </div>
       </div>
@@ -180,7 +235,8 @@ const MyPlans = () => {
     const used = quotaStatus.daily_quota_used || 0;
     const total = quotaStatus.daily_quota_limit || 0;
     // 后端返回的字段是 daily_quota_remaining，备用计算防止负值
-    const remain = quotaStatus.daily_quota_remaining ?? Math.max(total - used, 0);
+    const remain =
+      quotaStatus.daily_quota_remaining ?? Math.max(total - used, 0);
     // 进度条显示已使用百分比
     const usedPercent = total > 0 ? (used / total) * 100 : 0;
 
@@ -190,31 +246,46 @@ const MyPlans = () => {
       : t('明日 00:00');
 
     return (
-      <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-        <div className="flex justify-between items-center mb-2">
-          <Text strong>{t('每日限额使用情况')}</Text>
-          <Tag color="blue" size="small">
-            <IconClock className="mr-1" />
+      <div className='mt-3 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-100 dark:border-blue-900/30 rounded-xl'>
+        <div className='flex justify-between items-center mb-3'>
+          <div className='flex items-center gap-2'>
+            <div className='p-1.5 rounded-lg bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-200'>
+              <IconBolt />
+            </div>
+            <Text strong className='text-blue-900 dark:text-blue-100'>
+              {t('每日限额')}
+            </Text>
+          </div>
+          <Tag color='blue' size='small' type='solid'>
+            <IconClock className='mr-1' />
             {t('重置时间')}: {resetTime}
           </Tag>
         </div>
-        <div className="flex justify-between mb-1">
-          <Text type="secondary" size="small">
-            {t('今日剩余')}
+        
+        <div className='flex justify-between mb-1'>
+          <Text className='text-blue-700 dark:text-blue-300' size='small'>
+            {t('今日已用')} {renderQuota(used)}
           </Text>
-          <Text strong>
-            {renderQuota(remain)} / {renderQuota(total)}
+          <Text strong className='text-blue-900 dark:text-blue-100'>
+            {usedPercent.toFixed(1)}%
           </Text>
         </div>
+        
         <Progress
           percent={usedPercent}
-          showInfo
-          format={() => `${usedPercent.toFixed(1)}%`}
-          stroke={usedPercent > 80 ? 'var(--semi-color-danger)' : 'var(--semi-color-primary)'}
+          showInfo={false}
+          stroke={
+            usedPercent > 80
+              ? 'var(--semi-color-danger)'
+              : 'var(--semi-color-primary)'
+          }
+          className='mb-2'
+          style={{ height: '8px' }}
         />
-        <div className="flex justify-between mt-1">
-          <Text type="tertiary" size="small">
-            {t('今日已用')}: {renderQuota(used)}
+        
+        <div className='flex justify-end'>
+          <Text className='text-blue-700 dark:text-blue-300' size='small'>
+             {t('总限额')}: {renderQuota(total)}
           </Text>
         </div>
       </div>
@@ -232,19 +303,20 @@ const MyPlans = () => {
     const message = quotaStatus.rate_limit_message || t('速率限制：请稍后重试');
 
     return (
-      <div className="mt-4">
+      <div className='mt-3'>
         <Banner
-          type="warning"
+          type='warning'
           icon={<IconAlertTriangle />}
           description={
             <div>
               <Text strong>{message}</Text>
               <br />
-              <Text type="secondary">
+              <Text type='secondary'>
                 {t('预计等待时间')}: {waitMin} {t('分钟')} ({waitSec} {t('秒')})
               </Text>
             </div>
           }
+          className='rounded-xl border-none shadow-sm'
         />
       </div>
     );
@@ -254,7 +326,7 @@ const MyPlans = () => {
   const renderExpiration = (userPlan) => {
     if (!userPlan.expires_at) {
       return (
-        <Tag color="green" size="small">
+        <Tag color='green' type='light' shape='circle'>
           {t('永久有效')}
         </Tag>
       );
@@ -266,19 +338,19 @@ const MyPlans = () => {
 
     if (daysLeft <= 0) {
       return (
-        <Tag color="red" size="small">
+        <Tag color='red' type='solid' shape='circle'>
           {t('已过期')}
         </Tag>
       );
     } else if (daysLeft <= 7) {
       return (
-        <Tag color="orange" size="small">
+        <Tag color='orange' type='solid' shape='circle'>
           {t('剩余')} {daysLeft} {t('天')}
         </Tag>
       );
     } else {
       return (
-        <Tag color="blue" size="small">
+        <Tag color='blue' type='light' shape='circle'>
           {t('剩余')} {daysLeft} {t('天')}
         </Tag>
       );
@@ -295,119 +367,178 @@ const MyPlans = () => {
     const plan = userPlan.plan || {};
 
     return (
-      <Card
+      <div
         key={userPlan.id}
-        className={`mb-4 ${isCurrent ? 'ring-2 ring-blue-500' : ''}`}
-        style={{
-          borderRadius: '12px',
-          opacity: isLocked ? 0.7 : 1,
-        }}
+        className={`group relative mb-6 transition-all duration-300 ease-in-out transform hover:-translate-y-1 ${isCurrent ? 'z-10' : 'z-0'}`}
       >
-        {/* Header */}
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <Space>
-              <Title heading={5} className="m-0">
-                {plan.display_name || plan.name || t('未知套餐')}
-              </Title>
-              {isCurrent && (
-                <Tag color="blue" size="small">
-                  <IconTick size="small" className="mr-1" />
-                  {t('当前使用')}
-                </Tag>
-              )}
-              {isLocked && (
-                <Tag color="red" size="small">
-                  <IconLock size="small" className="mr-1" />
-                  {t('已锁定')}
-                </Tag>
-              )}
-            </Space>
-            <div className="mt-1">
-              <Space>
-                {renderPlanType(plan.type)}
-                {renderExpiration(userPlan)}
-                <Tag color="grey" size="small">
-                  {t('优先级')}: {plan.priority || 0}
-                </Tag>
-              </Space>
-            </div>
-          </div>
-        </div>
-
-        {/* Total Quota Progress */}
-        <div className="mb-2">
-          {renderQuotaProgress(userPlan)}
-        </div>
-
-        {/* Daily Quota Progress (current plan only) */}
-        {isCurrent && renderDailyQuotaProgress()}
-
-        {/* Rate Limit Status (current plan only) */}
-        {isCurrent && renderRateLimitStatus()}
-
-        {/* Description */}
-        {plan.description && (
-          <div className="mt-4">
-            <Paragraph type="tertiary" className="mb-0">
-              {plan.description}
-            </Paragraph>
-          </div>
+        {/* Glow effect for current plan */}
+        {isCurrent && (
+          <div className='absolute -inset-0.5 bg-gradient-to-r from-blue-400 to-indigo-500 rounded-2xl blur opacity-30 dark:opacity-40 transition-opacity duration-500'></div>
         )}
-
-        {/* Actions */}
-        <div className="flex justify-between items-center pt-4 mt-4 border-t border-gray-100">
-          <div className="flex items-center gap-4">
-            {/* Auto-switch toggle */}
-            {canToggleAuto && !isLocked && (
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <Text type="secondary" size="small">
-                    {t('自动切换')}
-                  </Text>
-                  <Switch
-                    checked={autoSwitchEnabled}
-                    onChange={(checked) => handleToggleAutoSwitch(userPlan.id, checked)}
-                    size="small"
-                  />
-                </div>
-                <Text type="tertiary" size="small" style={{ fontSize: '12px' }}>
-                  {t('开启后，当前套餐额度用完或者服务故障时自动切换到其他可用的套餐')}
-                </Text>
+        
+        <Card
+          className={`relative h-full border-none shadow-sm hover:shadow-lg transition-shadow duration-300 ${isCurrent ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-800/50'}`}
+          style={{
+            borderRadius: '16px',
+            opacity: isLocked ? 0.75 : 1,
+            overflow: 'hidden',
+          }}
+          bodyStyle={{ padding: '24px' }}
+        >
+          {/* Header Section */}
+          <div className='flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4'>
+            <div className='flex items-start gap-4'>
+              <div className={`p-3 rounded-2xl ${isCurrent ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
+                 <IconBox size="large" />
               </div>
-            )}
-            {!canToggleAuto && (
-              <Text type="tertiary" size="small">
-                {t('自动切换由管理员控制')}
-              </Text>
-            )}
-          </div>
+              <div>
+                <div className='flex items-center gap-2 mb-1'>
+                  <Title heading={5} className='m-0 text-xl font-bold'>
+                    {plan.display_name || plan.name || t('未知套餐')}
+                  </Title>
+                  {isCurrent && (
+                    <Tag 
+                      style={{ backgroundColor: 'rgba(var(--semi-blue-5), 1)', color: 'white', borderColor: 'transparent' }}
+                      size='small'
+                      shape='circle'
+                      className='shadow-sm'
+                    >
+                      <IconTick size='small' className='mr-1' />
+                      {t('当前使用')}
+                    </Tag>
+                  )}
+                  {isLocked && (
+                    <Tag color='red' size='small' shape='circle' type='solid'>
+                      <IconLock size='small' className='mr-1' />
+                      {t('已锁定')}
+                    </Tag>
+                  )}
+                </div>
+                <Space className='flex-wrap gap-y-2 mt-2'>
+                  {renderPlanType(plan.type)}
+                  {renderExpiration(userPlan)}
+                  <Tag className='bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300' shape='circle' type="ghost">
+                    {t('优先级')}: {plan.priority || 0}
+                  </Tag>
+                </Space>
+              </div>
+            </div>
 
-          <Space>
+            {/* Switch Action (Top Right for Desktop) */}
             {!isCurrent && canSwitch && !isLocked && (
               <Popconfirm
                 title={t('确认切换到此套餐？')}
                 content={t('切换后将使用此套餐的额度和渠道配置')}
                 onConfirm={() => handleSwitchPlan(userPlan.plan_id)}
+                okType="primary"
               >
-                <Button theme="solid" type="primary" size="small">
+                <Button 
+                  theme='light' 
+                  type='primary' 
+                  icon={<IconArrowRight />} 
+                  iconPosition="right"
+                  className='hidden md:flex bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200'
+                  style={{ borderRadius: '12px' }}
+                >
                   {t('切换到此套餐')}
                 </Button>
               </Popconfirm>
             )}
-            {!isCurrent && !canSwitch && !isLocked && (
-              <Text type="tertiary" size="small">
-                {t('不允许手动切换')}
-              </Text>
+          </div>
+
+          <Divider className='mb-6 opacity-50' />
+
+          {/* Quota Progress Sections */}
+          <div className='grid grid-cols-1 gap-4'>
+            {renderQuotaProgress(userPlan)}
+            
+            {/* Daily Quota & Rate Limit (Current Plan Only) */}
+            {isCurrent && (
+              <div className='animate-fade-in'>
+                {renderDailyQuotaProgress()}
+                {renderRateLimitStatus()}
+              </div>
             )}
-            {isLocked && (
-              <Text type="danger" size="small">
-                {t('套餐已被管理员锁定')}
+          </div>
+
+          {/* Description */}
+          {plan.description && (
+            <div className='mt-5 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl border border-dashed border-gray-200 dark:border-gray-700'>
+              <Text type='secondary' className='text-sm leading-relaxed block'>
+                {plan.description}
               </Text>
-            )}
-          </Space>
-        </div>
-      </Card>
+            </div>
+          )}
+
+          {/* Footer Actions */}
+          <div className='flex flex-col sm:flex-row justify-between items-center mt-6 pt-2 gap-4'>
+            <div className='w-full sm:w-auto'>
+              {/* Auto-switch toggle */}
+              {canToggleAuto && !isLocked ? (
+                <div className='flex items-center justify-between sm:justify-start gap-3 p-3 bg-[var(--semi-color-bg-1)] rounded-xl border border-transparent hover:border-[var(--semi-color-border)] transition-colors'>
+                  <div className='flex flex-col'>
+                    <Text strong size='small'>
+                      {t('自动切换')}
+                    </Text>
+                    <Text type='tertiary' size='small' className='text-xs'>
+                      {autoSwitchEnabled ? t('余额不足时自动切换') : t('需手动切换套餐')}
+                    </Text>
+                  </div>
+                  <Switch
+                    checked={autoSwitchEnabled}
+                    onChange={(checked) =>
+                      handleToggleAutoSwitch(userPlan.id, checked)
+                    }
+                  />
+                </div>
+              ) : (
+                <div className='flex items-center gap-2 p-2'>
+                  <div className='w-2 h-2 rounded-full bg-gray-300'></div>
+                  <Text type='tertiary' size='small'>
+                    {t('自动切换由管理员控制')}
+                  </Text>
+                </div>
+              )}
+            </div>
+
+            <div className='w-full sm:w-auto flex justify-end'>
+               {/* Mobile Switch Button */}
+              {!isCurrent && canSwitch && !isLocked && (
+                <Popconfirm
+                  title={t('确认切换到此套餐？')}
+                  content={t('切换后将使用此套餐的额度和渠道配置')}
+                  onConfirm={() => handleSwitchPlan(userPlan.plan_id)}
+                  okType="primary"
+                >
+                  <Button 
+                    theme='solid' 
+                    type='primary' 
+                    block
+                    className='md:hidden w-full'
+                    style={{ borderRadius: '12px', height: '40px' }}
+                  >
+                    {t('切换到此套餐')}
+                  </Button>
+                </Popconfirm>
+              )}
+              
+              {!isCurrent && !canSwitch && !isLocked && (
+                <Tooltip content={t('请联系管理员或满足特定条件后切换')}>
+                  <Tag color='grey' style={{ borderRadius: '8px', padding: '6px 12px' }}>
+                    {t('暂不可手动切换')}
+                  </Tag>
+                </Tooltip>
+              )}
+              
+              {isLocked && (
+                <Tag color='red' style={{ borderRadius: '8px', padding: '6px 12px' }}>
+                  {t('套餐锁定中')}
+                </Tag>
+              )}
+            </div>
+          </div>
+        </Card>
+      </div>
     );
   };
 
@@ -415,72 +546,110 @@ const MyPlans = () => {
   const currentPlan = userPlans.find((p) => p.is_current === 1);
 
   return (
-    <div className="px-4 pt-[39px] pb-6 sm:pb-8 max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <Title heading={3} className="m-0">
-            {t('我的套餐')}
-          </Title>
-          <Text type="secondary">
-            {t('管理您的套餐订阅和使用情况')}
-          </Text>
-        </div>
-        <Button
-          icon={<IconRefresh />}
-          onClick={() => {
-            loadMyPlans();
-            loadQuotaStatus();
-          }}
-          loading={loading}
-        >
-          {t('刷新')}
-        </Button>
+    <div className='min-h-screen bg-[var(--semi-color-bg-0)] pb-12'>
+      {/* Page Header Background */}
+      <div className='h-[200px] bg-gradient-to-br from-blue-600 to-indigo-700 relative overflow-hidden'>
+        <div className='absolute inset-0 bg-[url("https://www.transparenttextures.com/patterns/cubes.png")] opacity-10'></div>
+        <div className='absolute -bottom-10 -right-10 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl'></div>
+        <div className='absolute top-10 left-10 w-32 h-32 bg-purple-500 opacity-20 rounded-full blur-2xl'></div>
       </div>
 
-      {/* Current Plan Summary */}
-      {currentPlan && (
-        <Banner
-          type="info"
-          className="mb-6"
-          description={
-            <span>
-              {t('当前使用套餐')}: <strong>{currentPlan.plan?.display_name || currentPlan.plan?.name}</strong>
-              {' - '}
-              {t('剩余额度')}: <strong>{renderQuota(currentPlan.quota || 0)}</strong>
-            </span>
-          }
-        />
-      )}
-
-      {/* Plans List */}
-      <Spin spinning={loading}>
-        {userPlans.length > 0 ? (
+      <div className='px-4 max-w-5xl mx-auto -mt-[120px] relative z-10'>
+        {/* Header Content */}
+        <div className='flex flex-col sm:flex-row justify-between items-start sm:items-end mb-8 text-white'>
           <div>
-            {/* Current plan first */}
-            {currentPlan && renderPlanCard(currentPlan)}
-
-            {/* Other plans */}
-            {userPlans
-              .filter((p) => p.is_current !== 1)
-              .map((userPlan) => renderPlanCard(userPlan))}
+            <Title heading={2} className='m-0 text-white font-bold tracking-tight'>
+              {t('我的套餐')}
+            </Title>
+            <Text className='text-blue-100 mt-2 block opacity-90 text-lg'>
+              {t('管理您的订阅计划与额度使用详情')}
+            </Text>
           </div>
-        ) : (
-          <Card>
-            <Empty
-              description={
-                <div>
-                  <Text>{t('您还没有任何套餐')}</Text>
-                  <br />
-                  <Text type="tertiary">
-                    {t('请联系管理员为您分配套餐')}
-                  </Text>
-                </div>
-              }
-            />
-          </Card>
+          <Button
+            icon={<IconRefresh />}
+            theme='borderless'
+            className='mt-4 sm:mt-0 text-white bg-white/20 hover:bg-white/30 border border-white/30 backdrop-blur-md'
+            onClick={() => {
+              loadMyPlans();
+              loadQuotaStatus();
+            }}
+            loading={loading}
+            style={{ borderRadius: '12px', height: '40px', padding: '0 20px' }}
+          >
+            {t('刷新数据')}
+          </Button>
+        </div>
+
+        {/* Current Plan Quick Stats (if exists) */}
+        {currentPlan && (
+          <div className='grid grid-cols-1 md:grid-cols-3 gap-4 mb-8'>
+            <div className='bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl p-5 rounded-2xl shadow-lg border border-white/20 flex flex-col justify-center'>
+               <Text type="secondary" className="mb-1">{t('当前套餐')}</Text>
+               <div className="flex items-center gap-2">
+                 <div className="w-2 h-8 rounded-full bg-blue-500"></div>
+                 <Title heading={4} className="m-0 truncate">{currentPlan.plan?.display_name || currentPlan.plan?.name}</Title>
+               </div>
+            </div>
+            <div className='bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl p-5 rounded-2xl shadow-lg border border-white/20 flex flex-col justify-center'>
+               <Text type="secondary" className="mb-1">{t('剩余总额度')}</Text>
+               <div className="flex items-center gap-2">
+                 <div className="w-2 h-8 rounded-full bg-green-500"></div>
+                 <Title heading={4} className="m-0 truncate">{renderQuota(currentPlan.quota || 0)}</Title>
+               </div>
+            </div>
+            <div className='bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl p-5 rounded-2xl shadow-lg border border-white/20 flex flex-col justify-center'>
+               <Text type="secondary" className="mb-1">{t('套餐状态')}</Text>
+               <div className="flex items-center gap-2">
+                 <div className="w-2 h-8 rounded-full bg-indigo-500"></div>
+                 <div className="flex items-center">
+                    <Text strong>{t('正常使用中')}</Text>
+                    {currentPlan.auto_switch === 1 && <Tag size="small" className="ml-2" color="blue">{t('自动切换开启')}</Tag>}
+                 </div>
+               </div>
+            </div>
+          </div>
         )}
-      </Spin>
+
+        {/* Plans List */}
+        <Spin spinning={loading} size="large" tip={t('加载套餐信息...')}>
+          {userPlans.length > 0 ? (
+            <div className='space-y-6'>
+              {/* Current plan first */}
+              {currentPlan && renderPlanCard(currentPlan)}
+
+              {/* Separator if other plans exist */}
+              {userPlans.length > 1 && (
+                <div className="flex items-center my-8">
+                  <div className="flex-grow h-px bg-gray-200 dark:bg-gray-700"></div>
+                  <span className="px-4 text-gray-400 font-medium text-sm uppercase tracking-wider">{t('其他可用套餐')}</span>
+                  <div className="flex-grow h-px bg-gray-200 dark:bg-gray-700"></div>
+                </div>
+              )}
+
+              {/* Other plans */}
+              <div className="grid grid-cols-1 gap-6">
+                {userPlans
+                  .filter((p) => p.is_current !== 1)
+                  .map((userPlan) => renderPlanCard(userPlan))}
+              </div>
+            </div>
+          ) : (
+            <div className='mt-12'>
+              <Empty
+                image={<IconBox size="extra-large" className="text-gray-300 text-6xl" />}
+                title={t('暂无套餐')}
+                description={t('您当前没有任何可用的套餐订阅，请联系管理员获取。')}
+                className='bg-white dark:bg-gray-800 p-12 rounded-3xl shadow-sm'
+              />
+            </div>
+          )}
+        </Spin>
+        
+        {/* Footer info */}
+        <div className="mt-12 text-center text-gray-400 text-sm pb-8">
+           <p>{t('套餐额度仅供参考，具体扣费以实际使用量为准')}</p>
+        </div>
+      </div>
     </div>
   );
 };

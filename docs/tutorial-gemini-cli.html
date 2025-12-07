@@ -2,7 +2,7 @@
 <div class="tutorial-section">
   <h3>✨ Google Gemini CLI 安装与配置</h3>
 
-  <!-- 第一步：前置要求 -->
+  <!-- 前置要求 -->
   <div class="step">
     <h4>前置要求</h4>
     <p><strong>系统要求：</strong></p>
@@ -13,32 +13,42 @@
 
     <p><strong>检查 Node.js 版本：</strong></p>
     <pre><code>node --version</code></pre>
-    <p class="tip">💡 如果版本低于 18，请先升级 Node.js</p>
+    <p class="tip">💡 如果版本低于 18 或未安装，请先完成步骤 1</p>
   </div>
 
-  <!-- 第二步：安装 -->
+  <!-- 第一步：安装 Node.js（如果需要） -->
   <div class="step">
-    <h4>步骤 1: 安装 Gemini CLI</h4>
+    <h4>步骤 1: 安装 Node.js（如果需要）</h4>
 
-    <div class="os-tabs">
-      <!-- 通用安装方式 -->
-      <div class="os-tab">
-        <p><strong>使用 npm 全局安装（所有平台通用）：</strong></p>
-        <pre><code>npm install -g @google/gemini-cli</code></pre>
+    <p><strong>Windows：</strong></p>
+    <p>访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a> 下载 LTS 版本安装包，运行安装程序，按默认选项安装，安装完成后重启终端。</p>
 
-        <p><strong>Windows 用户注意事项：</strong></p>
-        <ul>
-          <li>建议使用管理员权限运行 PowerShell 或 CMD</li>
-          <li>如遇权限问题，可能需要配置 npm 全局安装路径</li>
-        </ul>
+    <p><strong>macOS：</strong></p>
+    <p>使用 Homebrew 安装（推荐）：</p>
+    <pre><code>brew install node</code></pre>
 
-        <p><strong>macOS/Linux 用户注意事项：</strong></p>
-        <ul>
-          <li>如遇权限问题，可能需要使用 sudo：<code>sudo npm install -g @google/gemini-cli</code></li>
-          <li>或配置 npm 使用用户级全局目录（推荐）</li>
-        </ul>
-      </div>
-    </div>
+    <p><strong>Linux：</strong></p>
+    <p>使用 NodeSource 仓库安装：</p>
+    <pre><code># Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# 验证安装
+node --version
+npm --version</code></pre>
+  </div>
+
+  <!-- 第二步：安装 Gemini CLI -->
+  <div class="step">
+    <h4>步骤 2: 安装 Gemini CLI</h4>
+
+    <p><strong>使用 npm 全局安装（所有平台通用）：</strong></p>
+    <pre><code>npm install -g @google/gemini-cli</code></pre>
+
+    <p class="tip">💡 <strong>权限问题解决：</strong>
+      <br>• Windows：使用管理员权限运行 PowerShell 或 CMD
+      <br>• macOS/Linux：如遇权限问题，使用 <code>sudo npm install -g @google/gemini-cli</code>
+    </p>
 
     <p><strong>验证安装：</strong></p>
     <pre><code>gemini --version</code></pre>
@@ -47,7 +57,7 @@
 
   <!-- 第三步：配置 API Key -->
   <div class="step">
-    <h4>步骤 2: 配置 API Key</h4>
+    <h4>步骤 3: 配置 API Key</h4>
 
     <p><strong>获取 Gemini API Key：</strong></p>
     <ol>
@@ -56,61 +66,44 @@
       <li>在控制台中创建新的 API Key</li>
     </ol>
 
-    <p><strong>配置 API Key（三种方式）：</strong></p>
+    <p><strong>配置 API Key（推荐方式 - 使用环境变量）：</strong></p>
 
-    <div class="config-method">
-      <p><strong>方式 1：首次运行时交互式配置（推荐）</strong></p>
-      <pre><code>gemini</code></pre>
-      <p>首次运行时会提示输入 API Key，按照提示完成配置即可</p>
-    </div>
+    <p><strong>Windows：</strong></p>
+    <p>在 PowerShell 中执行：</p>
+    <pre><code># 临时设置（当前会话）
+$env:GEMINI_API_KEY="YOUR_API_KEY"
 
-    <div class="config-method">
-      <p><strong>方式 2：使用环境变量</strong></p>
+# 永久设置（添加到用户环境变量）
+[System.Environment]::SetEnvironmentVariable('GEMINI_API_KEY', 'YOUR_API_KEY', 'User')</code></pre>
 
-      <p>Windows (PowerShell)：</p>
-      <pre><code>$env:GEMINI_API_KEY="YOUR_API_KEY"</code></pre>
-
-      <p>Windows (CMD)：</p>
-      <pre><code>set GEMINI_API_KEY=YOUR_API_KEY</code></pre>
-
-      <p>macOS/Linux (编辑 ~/.zshrc 或 ~/.bashrc)：</p>
-      <pre><code>export GEMINI_API_KEY="YOUR_API_KEY"
+    <p><strong>macOS / Linux：</strong></p>
+    <p>编辑 shell 配置文件（~/.bashrc 或 ~/.zshrc）：</p>
+    <pre><code># 添加以下行
+export GEMINI_API_KEY="YOUR_API_KEY"
 
 # 重新加载配置
-source ~/.zshrc  # 或 source ~/.bashrc</code></pre>
-    </div>
+source ~/.bashrc  # 或 source ~/.zshrc</code></pre>
 
-    <div class="config-method">
-      <p><strong>方式 3：使用配置文件</strong></p>
-      <p>创建配置文件（路径因系统而异）：</p>
-      <ul>
-        <li>Windows: <code>%APPDATA%\gemini-cli\config.json</code></li>
-        <li>macOS/Linux: <code>~/.config/gemini-cli/config.json</code></li>
-      </ul>
-      <pre><code>{
-  "apiKey": "YOUR_API_KEY",
-  "model": "gemini-pro"
-}</code></pre>
-    </div>
+    <p><strong>验证配置：</strong></p>
+    <pre><code># 首次运行时会使用环境变量中的 API Key
+gemini</code></pre>
 
     <div class="info-box">
-      <p><strong>📝 中转 API 配置（如果使用）：</strong></p>
-      <p>如果您使用的是中转 API 服务，可以在配置文件中添加：</p>
-      <pre><code>{
-  "apiKey": "YOUR_API_KEY",
-  "baseUrl": "{{GEMINI_API_URL}}",
-  "model": "gemini-pro"
-}</code></pre>
+      <p><strong>📝 配置说明：</strong></p>
       <ul>
-        <li>API Base URL: <code>{{GEMINI_API_URL}}</code></li>
-        <li>确保中转服务兼容 Gemini API 格式</li>
+        <li><strong>推荐方式</strong>: 使用 <code>GEMINI_API_KEY</code> 环境变量</li>
+        <li><strong>API Key</strong>: 将 <code>YOUR_API_KEY</code> 替换为您从 Google AI Studio 获取的实际 API Key</li>
+        <li><strong>配置文件</strong>: Gemini CLI 也支持通过配置文件扩展功能，但 API Key 推荐使用环境变量</li>
       </ul>
+
+      <p><strong>使用中转 API（如需要）：</strong></p>
+      <p>如果使用中转服务，可能需要额外配置。请参考中转服务商的具体说明。</p>
     </div>
   </div>
 
   <!-- 第四步：开始使用 -->
   <div class="step">
-    <h4>步骤 3: 开始使用</h4>
+    <h4>步骤 4: 开始使用</h4>
 
     <p><strong>基本使用：</strong></p>
     <pre><code># 启动交互式对话
@@ -133,27 +126,6 @@ echo "Explain quantum computing" | gemini</code></pre>
     <p class="tip">💡 Gemini CLI 支持多种内置工具，可用于文件处理、代码分析等任务</p>
   </div>
 
-  <!-- 高级配置 -->
-  <div class="step">
-    <h4>高级配置选项</h4>
-
-    <p><strong>配置文件完整示例：</strong></p>
-    <pre><code>{
-  "apiKey": "YOUR_API_KEY",
-  "model": "gemini-pro",
-  "temperature": 0.7,
-  "maxTokens": 2048,
-  "topP": 0.9
-}</code></pre>
-
-    <p><strong>支持的模型：</strong></p>
-    <ul>
-      <li><code>gemini-pro</code> - 通用模型（默认）</li>
-      <li><code>gemini-pro-vision</code> - 支持图像输入</li>
-      <li><code>gemini-ultra</code> - 最强大的模型（需相应权限）</li>
-    </ul>
-  </div>
-
   <!-- 参考资源 -->
   <div class="step">
     <h4>📚 官方参考资源</h4>
@@ -170,17 +142,15 @@ echo "Explain quantum computing" | gemini</code></pre>
 .tutorial-section { margin: 20px 0; }
 .step { margin: 20px 0; padding: 15px; border-left: 3px solid #4285f4; }
 .step h4 { color: #4285f4; margin-bottom: 10px; }
-pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; }
-code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 13px; }
+code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; }
 pre code { background: none; padding: 0; }
 .tip { background: #e8f0fe; padding: 10px; border-radius: 4px; color: #1967d2; margin: 10px 0; }
 .info-box { background: #f1f3f4; padding: 15px; border-radius: 4px; margin-top: 10px; border: 1px solid #dadce0; }
 .info-box ul { margin: 10px 0; padding-left: 20px; }
-.config-method { background: #f9fafb; padding: 12px; border-radius: 4px; margin: 10px 0; border: 1px solid #e5e7eb; }
-.os-tabs { margin: 15px 0; }
-.os-tab { margin: 10px 0; }
-ul, ol { padding-left: 20px; }
-li { margin: 5px 0; }
+.info-box pre { margin-top: 10px; }
+ul, ol { padding-left: 20px; margin: 10px 0; }
+li { margin: 5px 0; line-height: 1.6; }
 a { color: #4285f4; text-decoration: none; }
 a:hover { text-decoration: underline; }
 </style>

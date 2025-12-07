@@ -619,6 +619,7 @@ code {
   filter: blur(120px);
   pointer-events: none;
   z-index: -1;
+  display: none;
 }
 
 .blur-ball-indigo {
@@ -679,6 +680,7 @@ html:not(.dark) .blur-ball-teal {
   filter: blur(var(--pb-blur));
   opacity: var(--pb-opacity);
   transform: translateZ(0);
+  display: none;
 }
 
 /* 暗黑模式下更柔和的色彩和透明度 */

@@ -57,6 +57,12 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		channelRatio = 1.0
 	}
 
+	// 获取渠道模型倍率，默认为 1.0
+	channelModelRatio := common.GetContextKeyFloat64(c, constant.ContextKeyChannelModelRatio)
+	if channelModelRatio == 0 {
+		channelModelRatio = 1.0
+	}
+
 	var preConsumedQuota int
 	var modelRatio float64
 	var completionRatio float64
@@ -94,15 +100,15 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		imageRatio, _ = ratio_setting.GetImageRatio(info.OriginModelName)
 		audioRatio = ratio_setting.GetAudioRatio(info.OriginModelName)
 		audioCompletionRatio = ratio_setting.GetAudioCompletionRatio(info.OriginModelName)
-		// 应用渠道倍率：模型倍率 * 分组倍率 * 渠道倍率
-		ratio := modelRatio * groupRatioInfo.GroupRatio * channelRatio
+		// 应用渠道倍率：模型倍率 * 分组倍率 * 渠道倍率 * 渠道模型倍率
+		ratio := modelRatio * groupRatioInfo.GroupRatio * channelRatio * channelModelRatio
 		preConsumedQuota = int(float64(preConsumedTokens) * ratio)
 	} else {
 		if meta.ImagePriceRatio != 0 {
 			modelPrice = modelPrice * meta.ImagePriceRatio
 		}
-		// 应用渠道倍率：模型价格 * 分组倍率 * 渠道倍率
-		preConsumedQuota = int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * channelRatio)
+		// 应用渠道倍率：模型价格 * 分组倍率 * 渠道倍率 * 渠道模型倍率
+		preConsumedQuota = int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * channelRatio * channelModelRatio)
 	}
 
 	// check if free model pre-consume is disabled
@@ -128,6 +134,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		CompletionRatio:      completionRatio,
 		GroupRatioInfo:       groupRatioInfo,
 		ChannelRatio:         channelRatio,
+		ChannelModelRatio:    channelModelRatio,
 		UsePrice:             usePrice,
 		CacheRatio:           cacheRatio,
 		ImageRatio:           imageRatio,
@@ -156,6 +163,12 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) types.
 		channelRatio = 1.0
 	}
 
+	// 获取渠道模型倍率，默认为 1.0
+	channelModelRatio := common.GetContextKeyFloat64(c, constant.ContextKeyChannelModelRatio)
+	if channelModelRatio == 0 {
+		channelModelRatio = 1.0
+	}
+
 	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
 	// 如果没有配置价格，则使用默认价格
 	if !success {
@@ -166,8 +179,8 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) types.
 			modelPrice = defaultPrice
 		}
 	}
-	// 应用渠道倍率：模型价格 * 分组倍率 * 渠道倍率
-	quota := int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * channelRatio)
+	// 应用渠道倍率：模型价格 * 分组倍率 * 渠道倍率 * 渠道模型倍率
+	quota := int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * channelRatio * channelModelRatio)
 	priceData := types.PerCallPriceData{
 		ModelPrice:     modelPrice,
 		Quota:          quota,

@@ -58,6 +58,8 @@ type Channel struct {
 
 	Ratio *float64 `json:"ratio" gorm:"type:decimal(10,4);default:1.0"` // 渠道倍率，默认为1.0
 
+	ModelRatio *string `json:"model_ratio" gorm:"type:text"` // 渠道模型倍率，JSON格式：{"model_name": ratio}，用于控制渠道下指定模型的使用倍率
+
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
 }
@@ -464,6 +466,45 @@ func (channel *Channel) GetRatio() float64 {
 		return 1.0
 	}
 	return *channel.Ratio
+}
+
+// GetModelRatio 获取指定模型的倍率
+// 如果未设置或解析失败，返回1.0（不影响计费）
+func (channel *Channel) GetModelRatio() string {
+	if channel.ModelRatio == nil {
+		return ""
+	}
+	return *channel.ModelRatio
+}
+
+// GetModelRatioByName 根据模型名称获取对应的倍率
+// 支持完全匹配和通配符匹配（如 "gpt-4*" 匹配所有以 gpt-4 开头的模型）
+func (channel *Channel) GetModelRatioByName(modelName string) float64 {
+	if channel.ModelRatio == nil || *channel.ModelRatio == "" {
+		return 1.0
+	}
+
+	var ratioMap map[string]float64
+	if err := json.Unmarshal([]byte(*channel.ModelRatio), &ratioMap); err != nil {
+		return 1.0
+	}
+
+	// 首先尝试完全匹配
+	if ratio, ok := ratioMap[modelName]; ok {
+		return ratio
+	}
+
+	// 尝试通配符匹配（以 * 结尾的模式）
+	for pattern, ratio := range ratioMap {
+		if strings.HasSuffix(pattern, "*") {
+			prefix := strings.TrimSuffix(pattern, "*")
+			if strings.HasPrefix(modelName, prefix) {
+				return ratio
+			}
+		}
+	}
+
+	return 1.0
 }
 
 func (channel *Channel) GetBaseURL() string {

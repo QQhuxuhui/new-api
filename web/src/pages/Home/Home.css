@@ -94,6 +94,7 @@
   z-index: 0;
   mix-blend-mode: multiply;
   pointer-events: none;
+  display: none;
 }
 
 html.dark .home-blob {
@@ -108,7 +109,7 @@ html.dark .home-blob {
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   top: -100px;
   left: -100px;
-  animation: float-slow 12s infinite ease-in-out;
+  /* animation: float-slow 12s infinite ease-in-out; */
   opacity: 0.5;
 }
 
@@ -119,7 +120,7 @@ html.dark .home-blob {
   background: linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%);
   bottom: -50px;
   right: -50px;
-  animation: float-medium 10s infinite ease-in-out;
+  /* animation: float-medium 10s infinite ease-in-out; */
   opacity: 0.5;
 }
 
@@ -130,7 +131,7 @@ html.dark .home-blob {
   background: linear-gradient(135deg, #a855f7 0%, #8b5cf6 100%);
   top: 20%;
   right: 20%;
-  animation: pulse-soft 8s infinite ease-in-out;
+  /* animation: pulse-soft 8s infinite ease-in-out; */
   opacity: 0.4;
 }
 
@@ -189,7 +190,8 @@ html.dark .home-blob {
   width: 100%;
   border-radius: 9999px;
   background-color: rgba(79, 70, 229, 0.75);
-  animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+  /* animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite; */
+  display: none;
 }
 
 .home-badge-dot-inner {
@@ -223,12 +225,13 @@ html.dark .home-blob {
 }
 
 .home-gradient-text {
-  background: linear-gradient(270deg, #4f46e5, #0ea5e9, #4f46e5);
-  background-size: 200% auto;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: gradient-xy 4s linear infinite;
+  color: var(--semi-color-text-0);
+  /* background: linear-gradient(270deg, #4f46e5, #0ea5e9, #4f46e5); */
+  /* background-size: 200% auto; */
+  /* background-clip: text; */
+  /* -webkit-background-clip: text; */
+  /* -webkit-text-fill-color: transparent; */
+  /* animation: gradient-xy 4s linear infinite; */
 }
 
 /* Subheadline */

@@ -80,6 +80,12 @@ const MODEL_MAPPING_EXAMPLE = {
   'gpt-3.5-turbo': 'gpt-3.5-turbo-0125',
 };
 
+const MODEL_RATIO_EXAMPLE = {
+  'gpt-4o': 1.5,
+  'gpt-4*': 2.0,
+  'claude-3*': 1.8,
+};
+
 const STATUS_CODE_MAPPING_EXAMPLE = {
   400: '500',
 };
@@ -138,6 +144,7 @@ const EditChannelModal = (props) => {
     base_url: '',
     other: '',
     model_mapping: '',
+    model_ratio: '',
     status_code_mapping: '',
     models: [],
     auto_ban: 1,
@@ -472,6 +479,13 @@ const EditChannelModal = (props) => {
       if (data.model_mapping !== '') {
         data.model_mapping = JSON.stringify(
           JSON.parse(data.model_mapping),
+          null,
+          2,
+        );
+      }
+      if (data.model_ratio !== '' && data.model_ratio != null) {
+        data.model_ratio = JSON.stringify(
+          JSON.parse(data.model_ratio),
           null,
           2,
         );
@@ -1005,6 +1019,14 @@ const EditChannelModal = (props) => {
       !verifyJSON(localInputs.model_mapping)
     ) {
       showInfo(t('模型映射必须是合法的 JSON 格式！'));
+      return;
+    }
+    if (
+      localInputs.model_ratio &&
+      localInputs.model_ratio !== '' &&
+      !verifyJSON(localInputs.model_ratio)
+    ) {
+      showInfo(t('模型倍率必须是合法的 JSON 格式！'));
       return;
     }
     if (localInputs.base_url && localInputs.base_url.endsWith('/')) {
@@ -2516,7 +2538,7 @@ const EditChannelModal = (props) => {
                       field='ratio'
                       label={t('渠道倍率')}
                       placeholder={t('默认为1.0')}
-                      min={0.0001}
+                      min={0.1}
                       max={100}
                       step={0.1}
                       onNumberChange={(value) =>
@@ -2524,7 +2546,30 @@ const EditChannelModal = (props) => {
                       }
                       style={{ width: '100%' }}
                       extraText={t(
-                        '渠道倍率用于调整该渠道的计费，范围0.0001~100，默认为1.0。最终费用 = Token × 模型倍率 × 分组倍率 × 渠道倍率',
+                        '渠道倍率用于调整该渠道的计费，范围0.1~100，默认为1.0。最终费用 = Token × 模型倍率 × 分组倍率 × 渠道倍率 × 渠道模型倍率',
+                      )}
+                    />
+
+                    <JSONEditor
+                      key={`model_ratio-${isEdit ? channelId : 'new'}`}
+                      field='model_ratio'
+                      label={t('渠道模型倍率')}
+                      placeholder={
+                        t(
+                          '此项可选，用于设置该渠道下特定模型的倍率，为一个 JSON 字符串，键为模型名称（支持通配符*），值为倍率，例如：',
+                        ) +
+                        `\n${JSON.stringify(MODEL_RATIO_EXAMPLE, null, 2)}`
+                      }
+                      value={inputs.model_ratio || ''}
+                      onChange={(value) =>
+                        handleInputChange('model_ratio', value)
+                      }
+                      template={MODEL_RATIO_EXAMPLE}
+                      templateLabel={t('填入模板')}
+                      editorType='keyValue'
+                      formApi={formApiRef.current}
+                      extraText={t(
+                        '键为模型名称，值为倍率。支持通配符（如 gpt-4* 匹配所有以 gpt-4 开头的模型）',
                       )}
                     />
 

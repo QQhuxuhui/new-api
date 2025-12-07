@@ -526,8 +526,8 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	// 校验渠道倍率配置
 	if channel.Ratio != nil {
 		ratio := *channel.Ratio
-		if ratio < 0.0001 || ratio > 100 {
-			return fmt.Errorf("渠道倍率必须在 0.0001 ~ 100 之间")
+		if ratio < 0.1 || ratio > 100 {
+			return fmt.Errorf("渠道倍率必须在 0.1 ~ 100 之间")
 		}
 	}
 
