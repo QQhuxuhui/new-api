@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useContext, useEffect, useState, useRef } from 'react';
-import { Button, Typography } from '@douyinfe/semi-ui';
+import { Button } from '@douyinfe/semi-ui';
 import { API, showError } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { StatusContext } from '../../context/Status';
@@ -30,8 +30,7 @@ import { IconPlay, IconFile, IconGithubLogo } from '@douyinfe/semi-icons';
 import { Link, useNavigate } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
 import OnboardingWizard from '../../components/onboarding/OnboardingWizard';
-
-const { Text } = Typography;
+import './Home.css';
 
 const Home = () => {
   const { t, i18n } = useTranslation();
@@ -51,10 +50,6 @@ const Home = () => {
 
   // Check if user is logged in
   const isLoggedIn = !!localStorage.getItem('user');
-
-  // FAQ data from admin-managed backend (console_setting.faq)
-  const faqData = statusState?.status?.faq || [];
-  const faqEnabled = statusState?.status?.faq_enabled ?? true;
 
   const displayHomePageContent = async () => {
     setHomePageContent(localStorage.getItem('home_page_content') || '');
@@ -138,7 +133,7 @@ const Home = () => {
   }, [homePageContent, actualTheme, i18n.language]);
 
   return (
-    <div className='w-full overflow-x-hidden'>
+    <div className='home-container'>
       <NoticeModal
         visible={noticeVisible}
         onClose={() => setNoticeVisible(false)}
@@ -149,138 +144,196 @@ const Home = () => {
         onClose={() => setOnboardingVisible(false)}
       />
       {homePageContentLoaded && homePageContent === '' ? (
-        <div className='w-full overflow-x-hidden'>
-          {/* Banner 部分 */}
-          <div className='w-full border-b border-semi-color-border min-h-[500px] md:min-h-[600px] lg:min-h-[700px] relative overflow-x-hidden'>
-            {/* 背景模糊晕染球 */}
-            <div className='blur-ball blur-ball-indigo' />
-            <div className='blur-ball blur-ball-teal' />
-            <div className='flex items-center justify-center h-full px-4 py-20 md:py-24 lg:py-32 mt-10'>
-              {/* 居中内容区 */}
-              <div className='flex flex-col items-center justify-center text-center max-w-4xl mx-auto'>
-                <div className='flex flex-col items-center justify-center mb-6 md:mb-8'>
-                  <h1
-                    className={`text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold text-semi-color-text-0 leading-tight ${isChinese ? 'tracking-wide md:tracking-wider' : ''}`}
+        <div className='home-wrapper'>
+          {/* Dynamic Background Blobs */}
+          <div className='home-blob home-blob-indigo' />
+          <div className='home-blob home-blob-teal' />
+          <div className='home-blob home-blob-purple' />
+
+          {/* Hero Section */}
+          <main className='home-hero'>
+            <div className='home-hero-content'>
+              {/* Badge */}
+              <div className='home-animate-fade-in'>
+                <span className='home-badge'>
+                  <span className='home-badge-dot'>
+                    <span className='home-badge-dot-ping' />
+                    <span className='home-badge-dot-inner' />
+                  </span>
+                  {t('全新架构 · 极速体验')}
+                </span>
+              </div>
+
+              {/* Headline */}
+              <h1
+                className={`home-headline home-animate-fade-in home-delay-100 ${isChinese ? 'tracking-wide' : ''}`}
+              >
+                {t('连接未来的')} <br className='hidden md:block' />
+                <span className='home-gradient-text'>{t('智能网关')}</span>
+              </h1>
+
+              {/* Subheadline */}
+              <p className='home-subheadline home-animate-fade-in home-delay-200'>
+                {t('Claude Code 与 Codex 的最佳中转服务。')}
+                <br />
+                {t('更低的价格，更稳定的连接，为您的开发之旅保驾护航。')}
+              </p>
+
+              {/* Buttons */}
+              <div className='home-buttons home-animate-fade-in home-delay-300'>
+                <Link to='/login' className='w-full sm:w-auto'>
+                  <Button
+                    theme='solid'
+                    type='primary'
+                    size='large'
+                    className='home-btn-primary'
                   >
-                    <span className='shine-text'>Spark Code</span>
-                  </h1>
-                  <p className='text-base md:text-lg lg:text-xl text-semi-color-text-1 mt-4 md:mt-6 max-w-xl'>
-                    {t('Claude Code/Codex中转，更好的价格，更好的稳定性')}
-                  </p>
-                  {/* 主要操作按钮组 */}
-                  <div className='flex flex-col items-center justify-center gap-6 mt-8 md:mt-10 w-full max-w-2xl'>
-                    {/* 快速开始按钮 - 更大更突出 */}
-                    <Link to='/login' className='w-full sm:w-auto'>
-                      <Button
-                        theme='solid'
-                        type='primary'
-                        size='large'
-                        className='!rounded-3xl w-full sm:w-auto px-16 py-4 font-semibold shadow-lg hover:shadow-xl transition-shadow'
-                      >
-                        {t('快速开始')}
-                      </Button>
-                    </Link>
-
-                    {/* 次要按钮组 - 水平排列 */}
-                    <div className='flex flex-row gap-3 md:gap-4 justify-center items-center flex-wrap'>
-                      <Button
-                        theme='solid'
-                        type='primary'
-                        size={isMobile ? 'default' : 'large'}
-                        className='!rounded-3xl px-6 md:px-8 py-2'
-                        icon={<IconPlay />}
-                        onClick={() => {
-                          if (xianyuShopLink) {
-                            window.open(xianyuShopLink, '_blank');
-                          } else {
-                            navigate('/console');
-                          }
-                        }}
-                      >
-                        {t('获取密钥')}
-                      </Button>
-                      <Button
-                        size={isMobile ? 'default' : 'large'}
-                        className='flex items-center !rounded-3xl px-6 py-2'
-                        icon={<IconFile />}
-                        onClick={() => {
-                          if (isLoggedIn) {
-                            setOnboardingVisible(true);
-                          } else {
-                            window.location.href = '/login';
-                          }
-                        }}
-                      >
-                        {t('使用教程')}
-                      </Button>
-                      {isDemoSiteMode && statusState?.status?.version && (
-                        <Button
-                          size={isMobile ? 'default' : 'large'}
-                          className='flex items-center !rounded-3xl px-6 py-2'
-                          icon={<IconGithubLogo />}
-                          onClick={() =>
-                            window.open(
-                              'https://github.com/QQhuxuhui/new-api',
-                              '_blank',
-                            )
-                          }
-                        >
-                          {statusState.status.version}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* 常见问答 FAQ - Admin-managed content (displays first 4 items) */}
-                {faqEnabled && faqData.length > 0 && (
-                  <div className='mt-12 md:mt-16 lg:mt-20 w-full px-4'>
-                    <div className='flex items-center mb-6 md:mb-8 justify-center'>
-                      <Text
-                        type='tertiary'
-                        className='text-lg md:text-xl lg:text-2xl font-light'
-                      >
-                        {t('常见问答')}
-                      </Text>
-                    </div>
-                    <div className='max-w-4xl mx-auto space-y-4'>
-                      {faqData.slice(0, 4).map((faq, index) => (
-                        <div
-                          key={faq.id || index}
-                          className='bg-semi-color-bg-1 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow'
-                        >
-                          <h3 className='text-lg md:text-xl font-semibold text-semi-color-text-0 mb-2'>
-                            {faq.question}
-                          </h3>
-                          <div
-                            className='text-semi-color-text-2'
-                            dangerouslySetInnerHTML={{
-                              __html: DOMPurify.sanitize(
-                                marked.parse(faq.answer || ''),
-                              ),
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 外部文档链接（独立于FAQ，只要配置了就显示） */}
-                {docsLink && (
-                  <div className='mt-12 md:mt-16 lg:mt-20 w-full px-4 text-center'>
-                    <Button
-                      type='tertiary'
-                      size='small'
-                      onClick={() => window.open(docsLink, '_blank')}
+                    <span>{t('快速开始')}</span>
+                    <svg
+                      className='home-btn-arrow'
+                      fill='none'
+                      stroke='currentColor'
+                      viewBox='0 0 24 24'
                     >
-                      {t('查看更多外部文档')}
-                    </Button>
-                  </div>
+                      <path
+                        strokeLinecap='round'
+                        strokeLinejoin='round'
+                        strokeWidth='2'
+                        d='M13 7l5 5m0 0l-5 5m5-5H6'
+                      />
+                    </svg>
+                  </Button>
+                </Link>
+                <Button
+                  size='large'
+                  className='home-btn-secondary'
+                  icon={<IconPlay />}
+                  onClick={() => {
+                    if (xianyuShopLink) {
+                      window.open(xianyuShopLink, '_blank');
+                    } else {
+                      navigate('/console');
+                    }
+                  }}
+                >
+                  {t('获取密钥')}
+                </Button>
+              </div>
+
+              {/* Additional Buttons */}
+              <div className='home-extra-buttons home-animate-fade-in home-delay-300'>
+                <Button
+                  size={isMobile ? 'default' : 'large'}
+                  className='home-btn-tertiary'
+                  icon={<IconFile />}
+                  onClick={() => {
+                    if (isLoggedIn) {
+                      setOnboardingVisible(true);
+                    } else {
+                      window.location.href = '/login';
+                    }
+                  }}
+                >
+                  {t('使用教程')}
+                </Button>
+                {isDemoSiteMode && statusState?.status?.version && (
+                  <Button
+                    size={isMobile ? 'default' : 'large'}
+                    className='home-btn-tertiary'
+                    icon={<IconGithubLogo />}
+                    onClick={() =>
+                      window.open(
+                        'https://github.com/QQhuxuhui/new-api',
+                        '_blank',
+                      )
+                    }
+                  >
+                    {statusState.status.version}
+                  </Button>
+                )}
+                {docsLink && (
+                  <Button
+                    size={isMobile ? 'default' : 'large'}
+                    className='home-btn-tertiary'
+                    onClick={() => window.open(docsLink, '_blank')}
+                  >
+                    {t('查看文档')}
+                  </Button>
                 )}
               </div>
             </div>
-          </div>
+
+            {/* Features / Stats Cards */}
+            <div className='home-features home-animate-fade-in home-delay-400'>
+              {/* Card 1 */}
+              <div className='home-feature-card'>
+                <div className='home-feature-icon home-feature-icon-indigo'>
+                  <svg
+                    className='w-6 h-6'
+                    fill='none'
+                    stroke='currentColor'
+                    viewBox='0 0 24 24'
+                  >
+                    <path
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      strokeWidth='2'
+                      d='M13 10V3L4 14h7v7l9-11h-7z'
+                    />
+                  </svg>
+                </div>
+                <div className='home-feature-value'>99.9%</div>
+                <div className='home-feature-label'>{t('服务可用性')}</div>
+              </div>
+
+              {/* Card 2 */}
+              <div className='home-feature-card'>
+                <div className='home-feature-icon home-feature-icon-teal'>
+                  <svg
+                    className='w-6 h-6'
+                    fill='none'
+                    stroke='currentColor'
+                    viewBox='0 0 24 24'
+                  >
+                    <path
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      strokeWidth='2'
+                      d='M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
+                    />
+                  </svg>
+                </div>
+                <div className='home-feature-value'>{t('Low Latency')}</div>
+                <div className='home-feature-label'>{t('全球加速节点')}</div>
+              </div>
+
+              {/* Card 3 */}
+              <div className='home-feature-card'>
+                <div className='home-feature-icon home-feature-icon-purple'>
+                  <svg
+                    className='w-6 h-6'
+                    fill='none'
+                    stroke='currentColor'
+                    viewBox='0 0 24 24'
+                  >
+                    <path
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      strokeWidth='2'
+                      d='M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z'
+                    />
+                  </svg>
+                </div>
+                <div className='home-feature-value'>{t('Secure')}</div>
+                <div className='home-feature-label'>{t('企业级安全防护')}</div>
+              </div>
+            </div>
+          </main>
+
+          {/* Footer */}
+          <footer className='home-footer'>
+            &copy; 2025 Spark Code. All rights reserved.
+          </footer>
         </div>
       ) : (
         <div className='overflow-x-hidden w-full'>
@@ -294,7 +347,9 @@ const Home = () => {
           ) : (
             <div
               className='mt-[60px]'
-              dangerouslySetInnerHTML={{ __html: homePageContent }}
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(homePageContent),
+              }}
             />
           )}
         </div>
