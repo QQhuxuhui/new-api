@@ -114,6 +114,27 @@ export const PlanUsageAPI = {
       throw error;
     }
   },
+
+  /**
+   * Fetch user daily usage history for a specific user plan
+   * @param {number} userPlanId - User plan ID
+   * @param {number} days - Number of days to retrieve (default 30, max 90)
+   * @returns {Promise<Object>}
+   */
+  async fetchUserDailyUsage(userPlanId, days = 30) {
+    try {
+      const response = await API.get(`${BASE_URL}/user-daily`, {
+        params: { user_plan_id: userPlanId, days },
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data.message || 'Failed to fetch user daily usage');
+    } catch (error) {
+      showError(error.message || 'Failed to fetch user daily usage');
+      throw error;
+    }
+  },
 };
 
 export default PlanUsageAPI;

@@ -142,8 +142,8 @@ const MyPlans = () => {
   // Render quota progress
   const renderQuotaProgress = (userPlan) => {
     const used = parseInt(userPlan.used_quota) || 0;
-    const total = parseInt(userPlan.quota) || 0;
-    const remain = total - used;
+    const remain = parseInt(userPlan.quota) || 0;
+    const total = used + remain;
     const percent = total > 0 ? (remain / total) * 100 : 0;
 
     return (
@@ -180,7 +180,7 @@ const MyPlans = () => {
     const used = quotaStatus.daily_quota_used || 0;
     const total = quotaStatus.daily_quota_limit || 0;
     const remain = quotaStatus.daily_quota_remain || 0;
-    const percent = total > 0 ? ((total - remain) / total) * 100 : 0;
+    const percent = total > 0 ? (used / total) * 100 : 0;
 
     // Format reset time
     const resetTime = quotaStatus.daily_reset_time
@@ -358,15 +358,20 @@ const MyPlans = () => {
           <div className="flex items-center gap-4">
             {/* Auto-switch toggle */}
             {canToggleAuto && !isLocked && (
-              <div className="flex items-center gap-2">
-                <Text type="secondary" size="small">
-                  {t('自动切换')}
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <Text type="secondary" size="small">
+                    {t('自动切换')}
+                  </Text>
+                  <Switch
+                    checked={autoSwitchEnabled}
+                    onChange={(checked) => handleToggleAutoSwitch(userPlan.id, checked)}
+                    size="small"
+                  />
+                </div>
+                <Text type="tertiary" size="small" style={{ fontSize: '12px' }}>
+                  {t('开启后，当前套餐额度用完或者服务故障时自动切换到其他可用的套餐')}
                 </Text>
-                <Switch
-                  checked={autoSwitchEnabled}
-                  onChange={(checked) => handleToggleAutoSwitch(userPlan.id, checked)}
-                  size="small"
-                />
               </div>
             )}
             {!canToggleAuto && (
@@ -408,7 +413,7 @@ const MyPlans = () => {
   const currentPlan = userPlans.find((p) => p.is_current === 1);
 
   return (
-    <div className="px-4 py-6 sm:py-8 max-w-4xl mx-auto">
+    <div className="px-4 pt-[39px] pb-6 sm:pb-8 max-w-4xl mx-auto">
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
@@ -440,7 +445,7 @@ const MyPlans = () => {
             <span>
               {t('当前使用套餐')}: <strong>{currentPlan.plan?.display_name || currentPlan.plan?.name}</strong>
               {' - '}
-              {t('剩余额度')}: <strong>{renderQuota((currentPlan.quota || 0) - (currentPlan.used_quota || 0))}</strong>
+              {t('剩余额度')}: <strong>{renderQuota(currentPlan.quota || 0)}</strong>
             </span>
           }
         />
