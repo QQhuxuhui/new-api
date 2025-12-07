@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spark Code - Option 3: Dark & Tech</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .gradient-text {
+            background: linear-gradient(to right, #818cf8, #2dd4bf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .grid-bg {
+            background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 30px 30px;
+        }
+        .glow {
+            box-shadow: 0 0 20px rgba(129, 140, 248, 0.15);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col grid-bg selection:bg-indigo-500 selection:text-white">
+
+    <!-- Header -->
+    <header class="w-full py-6 px-8 flex justify-between items-center border-b border-slate-800/50 backdrop-blur-sm sticky top-0 z-50 bg-slate-900/80">
+        <div class="text-xl font-bold tracking-wider text-white flex items-center gap-2">
+            <span class="text-indigo-400">&lt;</span>Spark<span class="text-teal-400">/&gt;</span>
+        </div>
+        <nav class="hidden md:flex gap-8 text-sm font-medium text-slate-400">
+            <a href="#" class="hover:text-white transition">Products</a>
+            <a href="#" class="hover:text-white transition">Pricing</a>
+            <a href="#" class="hover:text-white transition">Docs</a>
+        </nav>
+        <a href="/login" class="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2 px-4 rounded border border-slate-700 transition">
+            CONSOLE LOGIN
+        </a>
+    </header>
+
+    <!-- Main Hero -->
+    <main class="flex-grow flex flex-col items-center justify-center text-center px-4 py-20 relative overflow-hidden">
+        
+        <!-- Background Glow -->
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-indigo-600/20 rounded-full blur-[100px] pointer-events-none"></div>
+
+        <div class="relative z-10 max-w-4xl mx-auto">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/50 border border-slate-700/50 text-xs text-indigo-300 mb-8 font-mono">
+                <span class="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
+                System Online: v3.0.1 Available
+            </div>
+            
+            <h1 class="text-5xl md:text-7xl font-extrabold tracking-tight text-white mb-6 leading-tight">
+                The API Gateway for <br>
+                <span class="gradient-text">Next-Gen AI Models</span>
+            </h1>
+            
+            <p class="text-lg md:text-xl text-slate-400 mb-12 max-w-2xl mx-auto leading-relaxed">
+                Seamlessly integrate Claude, Codex, and more. Engineered for developers who demand reliability, speed, and comprehensive control.
+            </p>
+
+            <div class="flex flex-col sm:flex-row gap-5 justify-center items-center">
+                <button class="group relative px-8 py-4 bg-indigo-600 text-white font-bold rounded-lg overflow-hidden transition-all hover:bg-indigo-500 hover:scale-105 glow">
+                    <span class="relative z-10">Start Building Now</span>
+                    <div class="absolute inset-0 h-full w-full scale-0 rounded-2xl transition-all duration-300 group-hover:scale-100 group-hover:bg-indigo-500/30"></div>
+                </button>
+                <button class="font-mono text-slate-400 hover:text-white transition border-b border-transparent hover:border-white pb-0.5">
+                    $ curl api.sparkcode.com
+                </button>
+            </div>
+
+            <!-- Code Snippet Visual -->
+            <div class="mt-16 mx-auto max-w-3xl bg-slate-900 rounded-xl border border-slate-800 p-4 text-left shadow-2xl relative group">
+                <div class="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-teal-500 rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
+                <div class="relative bg-slate-950 rounded-lg p-6 overflow-x-auto">
+                    <div class="flex gap-2 mb-4">
+                        <div class="w-3 h-3 rounded-full bg-slate-700"></div>
+                        <div class="w-3 h-3 rounded-full bg-slate-700"></div>
+                        <div class="w-3 h-3 rounded-full bg-slate-700"></div>
+                    </div>
+                    <pre class="font-mono text-sm text-slate-300 leading-relaxed">
+<span class="text-purple-400">const</span> response = <span class="text-purple-400">await</span> client.chat.completions.create({
+  <span class="text-blue-400">model</span>: <span class="text-green-400">"claude-3-opus-20240229"</span>,
+  <span class="text-blue-400">messages</span>: [{ <span class="text-blue-400">role</span>: <span class="text-green-400">"user"</span>, <span class="text-blue-400">content</span>: <span class="text-green-400">"Refactor this UI."</span> }],
+  <span class="text-blue-400">temperature</span>: <span class="text-orange-400">0.7</span>
+});</pre>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="py-8 border-t border-slate-800/50 text-center text-slate-600 text-sm">
+        <div class="max-w-6xl mx-auto px-6 flex justify-between items-center">
+            <div>Spark Code © 2025</div>
+            <div class="flex gap-4">
+                <a href="#" class="hover:text-indigo-400 transition">Status</a>
+                <a href="#" class="hover:text-indigo-400 transition">Privacy</a>
+                <a href="#" class="hover:text-indigo-400 transition">Terms</a>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>

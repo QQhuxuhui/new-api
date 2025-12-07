@@ -1,0 +1,186 @@
+<!-- Google Gemini CLI 安装配置教程 -->
+<div class="tutorial-section">
+  <h3>✨ Google Gemini CLI 安装与配置</h3>
+
+  <!-- 第一步：前置要求 -->
+  <div class="step">
+    <h4>前置要求</h4>
+    <p><strong>系统要求：</strong></p>
+    <ul>
+      <li>Node.js 18+ 或更高版本（推荐 Node 20+）</li>
+      <li>支持 Windows、macOS 和 Linux</li>
+    </ul>
+
+    <p><strong>检查 Node.js 版本：</strong></p>
+    <pre><code>node --version</code></pre>
+    <p class="tip">💡 如果版本低于 18，请先升级 Node.js</p>
+  </div>
+
+  <!-- 第二步：安装 -->
+  <div class="step">
+    <h4>步骤 1: 安装 Gemini CLI</h4>
+
+    <div class="os-tabs">
+      <!-- 通用安装方式 -->
+      <div class="os-tab">
+        <p><strong>使用 npm 全局安装（所有平台通用）：</strong></p>
+        <pre><code>npm install -g @google/gemini-cli</code></pre>
+
+        <p><strong>Windows 用户注意事项：</strong></p>
+        <ul>
+          <li>建议使用管理员权限运行 PowerShell 或 CMD</li>
+          <li>如遇权限问题，可能需要配置 npm 全局安装路径</li>
+        </ul>
+
+        <p><strong>macOS/Linux 用户注意事项：</strong></p>
+        <ul>
+          <li>如遇权限问题，可能需要使用 sudo：<code>sudo npm install -g @google/gemini-cli</code></li>
+          <li>或配置 npm 使用用户级全局目录（推荐）</li>
+        </ul>
+      </div>
+    </div>
+
+    <p><strong>验证安装：</strong></p>
+    <pre><code>gemini --version</code></pre>
+    <p>显示版本号即表示安装成功</p>
+  </div>
+
+  <!-- 第三步：配置 API Key -->
+  <div class="step">
+    <h4>步骤 2: 配置 API Key</h4>
+
+    <p><strong>获取 Gemini API Key：</strong></p>
+    <ol>
+      <li>访问 <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a></li>
+      <li>登录您的 Google 账户</li>
+      <li>在控制台中创建新的 API Key</li>
+    </ol>
+
+    <p><strong>配置 API Key（三种方式）：</strong></p>
+
+    <div class="config-method">
+      <p><strong>方式 1：首次运行时交互式配置（推荐）</strong></p>
+      <pre><code>gemini</code></pre>
+      <p>首次运行时会提示输入 API Key，按照提示完成配置即可</p>
+    </div>
+
+    <div class="config-method">
+      <p><strong>方式 2：使用环境变量</strong></p>
+
+      <p>Windows (PowerShell)：</p>
+      <pre><code>$env:GEMINI_API_KEY="YOUR_API_KEY"</code></pre>
+
+      <p>Windows (CMD)：</p>
+      <pre><code>set GEMINI_API_KEY=YOUR_API_KEY</code></pre>
+
+      <p>macOS/Linux (编辑 ~/.zshrc 或 ~/.bashrc)：</p>
+      <pre><code>export GEMINI_API_KEY="YOUR_API_KEY"
+
+# 重新加载配置
+source ~/.zshrc  # 或 source ~/.bashrc</code></pre>
+    </div>
+
+    <div class="config-method">
+      <p><strong>方式 3：使用配置文件</strong></p>
+      <p>创建配置文件（路径因系统而异）：</p>
+      <ul>
+        <li>Windows: <code>%APPDATA%\gemini-cli\config.json</code></li>
+        <li>macOS/Linux: <code>~/.config/gemini-cli/config.json</code></li>
+      </ul>
+      <pre><code>{
+  "apiKey": "YOUR_API_KEY",
+  "model": "gemini-pro"
+}</code></pre>
+    </div>
+
+    <div class="info-box">
+      <p><strong>📝 中转 API 配置（如果使用）：</strong></p>
+      <p>如果您使用的是中转 API 服务，可以在配置文件中添加：</p>
+      <pre><code>{
+  "apiKey": "YOUR_API_KEY",
+  "baseUrl": "{{GEMINI_API_URL}}",
+  "model": "gemini-pro"
+}</code></pre>
+      <ul>
+        <li>API Base URL: <code>{{GEMINI_API_URL}}</code></li>
+        <li>确保中转服务兼容 Gemini API 格式</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 第四步：开始使用 -->
+  <div class="step">
+    <h4>步骤 3: 开始使用</h4>
+
+    <p><strong>基本使用：</strong></p>
+    <pre><code># 启动交互式对话
+gemini
+
+# 直接提问
+gemini "What is the capital of France?"
+
+# 使用管道输入
+echo "Explain quantum computing" | gemini</code></pre>
+
+    <p><strong>常用功能：</strong></p>
+    <ul>
+      <li>代码生成和解释</li>
+      <li>文本翻译和摘要</li>
+      <li>问答和知识查询</li>
+      <li>创意写作辅助</li>
+    </ul>
+
+    <p class="tip">💡 Gemini CLI 支持多种内置工具，可用于文件处理、代码分析等任务</p>
+  </div>
+
+  <!-- 高级配置 -->
+  <div class="step">
+    <h4>高级配置选项</h4>
+
+    <p><strong>配置文件完整示例：</strong></p>
+    <pre><code>{
+  "apiKey": "YOUR_API_KEY",
+  "model": "gemini-pro",
+  "temperature": 0.7,
+  "maxTokens": 2048,
+  "topP": 0.9
+}</code></pre>
+
+    <p><strong>支持的模型：</strong></p>
+    <ul>
+      <li><code>gemini-pro</code> - 通用模型（默认）</li>
+      <li><code>gemini-pro-vision</code> - 支持图像输入</li>
+      <li><code>gemini-ultra</code> - 最强大的模型（需相应权限）</li>
+    </ul>
+  </div>
+
+  <!-- 参考资源 -->
+  <div class="step">
+    <h4>📚 官方参考资源</h4>
+    <ul>
+      <li><a href="https://github.com/google-gemini/gemini-cli" target="_blank">GitHub 仓库</a></li>
+      <li><a href="https://codelabs.developers.google.com/gemini-cli-hands-on" target="_blank">Google Codelabs 教程</a></li>
+      <li><a href="https://ai.google.dev/" target="_blank">Google AI Studio</a></li>
+      <li><a href="https://geminicli.com/docs/get-started/" target="_blank">官方文档</a></li>
+    </ul>
+  </div>
+</div>
+
+<style>
+.tutorial-section { margin: 20px 0; }
+.step { margin: 20px 0; padding: 15px; border-left: 3px solid #4285f4; }
+.step h4 { color: #4285f4; margin-bottom: 10px; }
+pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; }
+code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+pre code { background: none; padding: 0; }
+.tip { background: #e8f0fe; padding: 10px; border-radius: 4px; color: #1967d2; margin: 10px 0; }
+.info-box { background: #f1f3f4; padding: 15px; border-radius: 4px; margin-top: 10px; border: 1px solid #dadce0; }
+.info-box ul { margin: 10px 0; padding-left: 20px; }
+.config-method { background: #f9fafb; padding: 12px; border-radius: 4px; margin: 10px 0; border: 1px solid #e5e7eb; }
+.os-tabs { margin: 15px 0; }
+.os-tab { margin: 10px 0; }
+ul, ol { padding-left: 20px; }
+li { margin: 5px 0; }
+a { color: #4285f4; text-decoration: none; }
+a:hover { text-decoration: underline; }
+</style>

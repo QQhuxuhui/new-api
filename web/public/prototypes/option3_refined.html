@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spark Code - Option 3: Refined Tech</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; overflow-x: hidden; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Custom Scrollbar for Terminal */
+        .terminal-scroll::-webkit-scrollbar { width: 6px; }
+        .terminal-scroll::-webkit-scrollbar-track { background: #0f172a; }
+        .terminal-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+        /* Animations */
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        @keyframes grid-move {
+            0% { background-position: 0 0; }
+            100% { background-position: 40px 40px; }
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+        }
+
+        .animate-scanline {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(to bottom, transparent, rgba(99, 102, 241, 0.1), transparent);
+            animation: scanline 3s linear infinite;
+            pointer-events: none;
+        }
+
+        .grid-bg {
+            background-image: 
+                linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px);
+            background-size: 40px 40px;
+            animation: grid-move 20s linear infinite;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #818cf8 0%, #2dd4bf 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-size: 200% auto;
+        }
+        
+        .terminal-cursor::after {
+            content: '▋';
+            animation: blink 1s step-start infinite;
+            color: #2dd4bf;
+            margin-left: 2px;
+        }
+
+        /* Refined Button Styles */
+        .btn-primary {
+            background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3);
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(79, 70, 229, 0.4);
+            filter: brightness(1.1);
+        }
+        
+        .btn-secondary {
+            background: rgba(30, 41, 59, 0.5);
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            transition: all 0.3s ease;
+        }
+        .btn-secondary:hover {
+            background: rgba(30, 41, 59, 0.8);
+            border-color: rgba(148, 163, 184, 0.4);
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col grid-bg relative selection:bg-indigo-500/30 selection:text-indigo-200">
+
+    <!-- Vignette -->
+    <div class="fixed inset-0 bg-radial-gradient pointer-events-none z-0" style="background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.1), transparent 70%);"></div>
+
+    <!-- Header -->
+    <header class="w-full py-5 px-8 flex justify-between items-center border-b border-slate-800/60 backdrop-blur-md sticky top-0 z-50 bg-slate-900/80">
+        <div class="text-xl font-bold tracking-wider text-white flex items-center gap-2 cursor-pointer">
+            <div class="w-8 h-8 bg-indigo-500/20 rounded-lg border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-mono text-sm">
+                &gt;_
+            </div>
+            <span class="text-slate-200">Spark<span class="text-indigo-400">Code</span></span>
+        </div>
+        <div class="flex gap-4">
+             <a href="/login" class="text-sm font-semibold text-slate-300 hover:text-white transition px-2 py-2">登录</a>
+             <a href="/register" class="text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white py-2 px-5 rounded-lg transition shadow-lg shadow-indigo-900/20">
+                注册账号
+            </a>
+        </div>
+    </header>
+
+    <!-- Main Hero -->
+    <main class="flex-grow flex flex-col items-center justify-center text-center px-4 py-16 relative z-10">
+        
+        <div class="max-w-5xl mx-auto w-full flex flex-col items-center">
+            <!-- Status Badge -->
+            <div class="mb-8 inline-flex items-center gap-3 px-4 py-2 rounded-full bg-slate-800/50 border border-indigo-500/20 text-xs font-medium text-indigo-300 backdrop-blur-sm">
+                <span class="relative flex h-2 w-2">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
+                </span>
+                系统状态：运行正常 | 延迟 24ms
+            </div>
+            
+            <h1 class="text-5xl md:text-7xl font-extrabold tracking-tight text-white mb-6 leading-tight">
+                连接未来的 <br>
+                <span class="gradient-text">智能 API 网关</span>
+            </h1>
+            
+            <p class="text-lg text-slate-400 mb-10 max-w-2xl mx-auto leading-relaxed font-light">
+                Claude Code 与 Codex 的最佳中转服务。<br>
+                <span class="text-indigo-400/80 text-sm">企业级加密 · 99.99% 高可用 · 全球加速</span>
+            </p>
+
+            <div class="flex flex-col sm:flex-row gap-5 justify-center items-center mb-20">
+                <button class="btn-primary px-8 py-3.5 rounded-xl text-white font-semibold text-lg tracking-wide min-w-[160px]">
+                    立即开始
+                </button>
+                <button class="btn-secondary px-8 py-3.5 rounded-xl text-slate-300 font-medium min-w-[160px] flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    开发文档
+                </button>
+            </div>
+
+            <!-- Live Terminal Effect -->
+            <div class="w-full max-w-4xl relative group perspective-1000">
+                <!-- Glow behind -->
+                <div class="absolute -inset-1 bg-gradient-to-r from-indigo-600 to-teal-600 rounded-xl blur opacity-20 group-hover:opacity-30 transition duration-1000"></div>
+                
+                <!-- Terminal Window -->
+                <div class="relative bg-[#0a0f1c] rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl text-left">
+                    <!-- Title Bar -->
+                    <div class="bg-slate-900/50 px-4 py-2.5 flex items-center justify-between border-b border-slate-800/50">
+                        <div class="flex gap-2">
+                            <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+                            <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                            <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+                        </div>
+                        <div class="text-xs font-mono text-slate-500 select-none">root@spark-gateway:~</div>
+                        <div class="w-10"></div>
+                    </div>
+
+                    <!-- Terminal Content -->
+                    <div class="p-6 h-64 font-mono text-sm overflow-y-auto terminal-scroll" id="terminal-content">
+                        <div class="animate-scanline"></div>
+                        <!-- Content injected by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Terminal Script -->
+    <script>
+        const logs = [
+            { text: "> 初始化安全连接...", color: "text-slate-400", delay: 0 },
+            { text: "> 验证 API 密钥...", color: "text-yellow-400", delay: 800 },
+            { text: "[成功] 身份验证通过", color: "text-green-400", delay: 1600 },
+            { text: "> 请求路由至 claude-3-opus...", color: "text-slate-300", delay: 2400 },
+            { text: "  载荷: { max_tokens: 4096, temp: 0.7 }", color: "text-slate-500", delay: 2600 },
+            { text: "[流式] 正在接收数据包...", color: "text-blue-400", delay: 3200 },
+            { text: "  数据包 1/45 已接收 (12ms)", color: "text-slate-600", delay: 3500 },
+            { text: "  数据包 2/45 已接收 (15ms)", color: "text-slate-600", delay: 3600 },
+            { text: "  数据包 3/45 已接收 (11ms)", color: "text-slate-600", delay: 3700 },
+            { text: "[完成] 请求处理耗时 0.45s", color: "text-green-400", delay: 4500 },
+            { text: "> 等待下一条指令...", color: "text-indigo-400", delay: 5200 }
+        ];
+
+        const terminal = document.getElementById('terminal-content');
+
+        function addLog(log) {
+            const line = document.createElement('div');
+            line.className = `mb-1.5 ${log.color} opacity-0 transform translate-x-[-10px] transition-all duration-300`;
+            line.textContent = log.text;
+            terminal.appendChild(line);
+
+            requestAnimationFrame(() => {
+                line.classList.remove('opacity-0', 'translate-x-[-10px]');
+            });
+
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function runSequence() {
+            terminal.innerHTML = '<div class="animate-scanline"></div>'; 
+            
+            logs.forEach(log => {
+                setTimeout(() => {
+                    addLog(log);
+                }, log.delay);
+            });
+
+            setTimeout(() => {
+                const cursorLine = document.createElement('div');
+                cursorLine.className = "mt-2 terminal-cursor text-slate-300";
+                cursorLine.innerHTML = '<span class="text-indigo-500">root@spark-gateway</span>:<span class="text-blue-500">~</span>$ ';
+                terminal.appendChild(cursorLine);
+                terminal.scrollTop = terminal.scrollHeight;
+            }, logs[logs.length - 1].delay + 500);
+        }
+
+        runSequence();
+        setInterval(runSequence, 8000);
+    </script>
+</body>
+</html>

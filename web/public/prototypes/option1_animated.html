@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spark Code - Option 1: Minimalist Focus with Animation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Animation Keyframes */
+        @keyframes float-slow {
+            0% { transform: translate(0, 0) rotate(0deg); }
+            33% { transform: translate(30px, -50px) rotate(5deg); }
+            66% { transform: translate(-20px, 20px) rotate(-5deg); }
+            100% { transform: translate(0, 0) rotate(0deg); }
+        }
+        
+        @keyframes float-medium {
+            0% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(-20px, 30px) scale(1.1); }
+            100% { transform: translate(0, 0) scale(1); }
+        }
+
+        @keyframes pulse-soft {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 0.8; transform: scale(1.05); }
+        }
+
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes gradient-xy {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        /* Utility Classes */
+        .animate-float-slow {
+            animation: float-slow 12s infinite ease-in-out;
+        }
+        
+        .animate-float-medium {
+            animation: float-medium 10s infinite ease-in-out;
+        }
+        
+        .animate-fade-in-up {
+            animation: fade-in-up 0.8s ease-out forwards;
+        }
+
+        .delay-100 { animation-delay: 100ms; }
+        .delay-200 { animation-delay: 200ms; }
+        .delay-300 { animation-delay: 300ms; }
+
+        .blur-blob {
+            position: absolute;
+            filter: blur(80px);
+            z-index: -1;
+            mix-blend-mode: multiply;
+        }
+
+        .glass-nav {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            transition: all 0.3s ease;
+        }
+        
+        .glass-nav:hover {
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+        .gradient-text-animate {
+            background: linear-gradient(270deg, #4f46e5, #0ea5e9, #4f46e5);
+            background-size: 200% auto;
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: gradient-xy 4s linear infinite;
+        }
+
+        .btn-hover-effect {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .btn-hover-effect:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.3);
+        }
+
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        
+        .card-hover:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.02);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 overflow-x-hidden relative min-h-screen flex flex-col">
+
+    <!-- Dynamic Background Blobs -->
+    <div class="blur-blob bg-indigo-200 w-[500px] h-[500px] rounded-full top-[-100px] left-[-100px] animate-float-slow opacity-60"></div>
+    <div class="blur-blob bg-teal-100 w-[400px] h-[400px] rounded-full bottom-[-50px] right-[-50px] animate-float-medium opacity-60"></div>
+    <div class="blur-blob bg-purple-100 w-[300px] h-[300px] rounded-full top-[20%] right-[20%] animate-pulse-soft opacity-40"></div>
+
+    <!-- Navigation (Glassmorphism) -->
+    <nav class="w-full py-4 px-6 fixed top-0 z-50 glass-nav border-b border-slate-200/50">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <div class="font-bold text-xl tracking-tight flex items-center gap-2 group cursor-pointer">
+                <div class="w-8 h-8 bg-gradient-to-tr from-indigo-600 to-teal-400 rounded-lg flex items-center justify-center text-white transform transition-transform group-hover:rotate-12">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                </div>
+                <span class="bg-clip-text text-transparent bg-gradient-to-r from-slate-800 to-slate-600 group-hover:from-indigo-600 group-hover:to-teal-500 transition-all duration-300">Spark Code</span>
+            </div>
+            <div class="hidden md:flex space-x-8 text-sm font-medium text-slate-500">
+                <a href="#" class="hover:text-indigo-600 transition relative group">
+                    首页
+                    <span class="absolute -bottom-1 left-0 w-0 h-0.5 bg-indigo-600 transition-all group-hover:w-full"></span>
+                </a>
+                <a href="#" class="hover:text-indigo-600 transition relative group">
+                    价格
+                    <span class="absolute -bottom-1 left-0 w-0 h-0.5 bg-indigo-600 transition-all group-hover:w-full"></span>
+                </a>
+                <a href="#" class="hover:text-indigo-600 transition relative group">
+                    关于
+                    <span class="absolute -bottom-1 left-0 w-0 h-0.5 bg-indigo-600 transition-all group-hover:w-full"></span>
+                </a>
+            </div>
+            <div class="flex gap-3">
+                 <a href="/login" class="text-sm font-semibold text-slate-600 hover:text-indigo-600 px-3 py-2 transition">登录</a>
+                 <a href="/register" class="text-sm font-semibold bg-indigo-600 text-white px-4 py-2 rounded-full hover:bg-indigo-700 hover:shadow-md transition active:scale-95">注册</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <main class="flex-grow flex flex-col justify-center items-center px-4 pt-32 pb-16 relative z-10">
+        <div class="text-center max-w-4xl mx-auto">
+            
+            <!-- Badge -->
+            <div class="animate-fade-in-up opacity-0">
+                <span class="inline-flex items-center gap-1.5 py-1.5 px-4 rounded-full bg-indigo-50/80 border border-indigo-100 text-indigo-600 text-xs font-semibold mb-8 tracking-wide shadow-sm backdrop-blur-sm cursor-default hover:bg-indigo-100 transition-colors">
+                    <span class="relative flex h-2 w-2">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                    </span>
+                    全新架构 · 极速体验
+                </span>
+            </div>
+
+            <!-- Headline -->
+            <h1 class="text-5xl md:text-7xl font-bold tracking-tight text-slate-900 mb-8 leading-[1.1] animate-fade-in-up delay-100 opacity-0">
+                连接未来的 <br class="hidden md:block" />
+                <span class="gradient-text-animate">智能网关</span>
+            </h1>
+
+            <!-- Subheadline -->
+            <p class="text-lg md:text-xl text-slate-500 mb-12 max-w-2xl mx-auto leading-relaxed animate-fade-in-up delay-200 opacity-0">
+                Claude Code 与 Codex 的最佳中转服务。<br>
+                更低的价格，更稳定的连接，为您的开发之旅保驾护航。
+            </p>
+            
+            <!-- Buttons -->
+            <div class="flex flex-col sm:flex-row gap-4 justify-center items-center animate-fade-in-up delay-300 opacity-0">
+                <button class="btn-hover-effect w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-full font-semibold shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 group">
+                    <span>快速开始</span>
+                    <svg class="w-4 h-4 transform group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
+                </button>
+                <button class="btn-hover-effect w-full sm:w-auto px-8 py-4 bg-white text-slate-700 border border-slate-200 rounded-full font-medium hover:border-slate-300 hover:bg-slate-50 flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    获取密钥
+                </button>
+            </div>
+        </div>
+
+        <!-- Features / Stats Cards -->
+        <div class="mt-24 grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl animate-fade-in-up opacity-0" style="animation-delay: 400ms;">
+            <!-- Card 1 -->
+            <div class="card-hover bg-white/60 backdrop-blur-sm p-8 rounded-2xl border border-white/50 shadow-sm text-center group">
+                <div class="w-12 h-12 mx-auto bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 mb-4 group-hover:scale-110 transition-transform duration-300">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                </div>
+                <div class="text-3xl font-bold text-slate-800 mb-1">99.9%</div>
+                <div class="text-sm text-slate-500 font-medium">服务可用性</div>
+            </div>
+
+            <!-- Card 2 -->
+            <div class="card-hover bg-white/60 backdrop-blur-sm p-8 rounded-2xl border border-white/50 shadow-sm text-center group">
+                <div class="w-12 h-12 mx-auto bg-teal-50 rounded-xl flex items-center justify-center text-teal-600 mb-4 group-hover:scale-110 transition-transform duration-300">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                </div>
+                <div class="text-3xl font-bold text-slate-800 mb-1">Low Latency</div>
+                <div class="text-sm text-slate-500 font-medium">全球加速节点</div>
+            </div>
+
+            <!-- Card 3 -->
+            <div class="card-hover bg-white/60 backdrop-blur-sm p-8 rounded-2xl border border-white/50 shadow-sm text-center group">
+                 <div class="w-12 h-12 mx-auto bg-purple-50 rounded-xl flex items-center justify-center text-purple-600 mb-4 group-hover:scale-110 transition-transform duration-300">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                </div>
+                <div class="text-3xl font-bold text-slate-800 mb-1">Secure</div>
+                <div class="text-sm text-slate-500 font-medium">企业级安全防护</div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="py-8 text-center text-slate-400 text-sm relative z-10">
+        &copy; 2025 Spark Code. All rights reserved.
+    </footer>
+</body>
+</html>
