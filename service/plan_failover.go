@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 )
 
@@ -145,4 +146,188 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 		userId, triedPlanIds))
 
 	return nil, nil, "", nil
+}
+
+// ShouldAttemptCrossplanFailover checks if cross-plan failover should be attempted
+// This is called after all retries within current plan have failed
+// Returns: shouldAttempt, currentPlanId, userId
+// Conditions for failover:
+// 1. Plan system is enabled
+// 2. User has a valid user ID
+// 3. User has a current plan with AutoSwitch enabled
+func ShouldAttemptCrossplanFailover(c *gin.Context) (bool, int, int) {
+	// Condition 1: Plan system must be enabled
+	if !common.PlanSystemEnabled {
+		return false, 0, 0
+	}
+
+	// Condition 2: User must have valid ID
+	userId := c.GetInt("id")
+	if userId <= 0 {
+		return false, 0, 0
+	}
+
+	// Condition 3: Get current UserPlan and check AutoSwitch
+	userPlanIdRaw, exists := common.GetContextKey(c, constant.ContextKeyUserPlanId)
+	if !exists {
+		return false, 0, userId
+	}
+
+	userPlanId, ok := userPlanIdRaw.(int)
+	if !ok || userPlanId <= 0 {
+		return false, 0, userId
+	}
+
+	// Load the UserPlan to check auto_switch flag
+	userPlan, err := model.GetUserPlanById(userPlanId)
+	if err != nil {
+		logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failed to get user plan %d: %v", userPlanId, err))
+		return false, 0, userId
+	}
+
+	// Check if AutoSwitch is enabled for this user plan
+	if userPlan.AutoSwitch != 1 {
+		logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d plan=%d auto_switch disabled, skipping failover", userId, userPlan.PlanId))
+		return false, 0, userId
+	}
+
+	return true, userPlan.PlanId, userId
+}
+
+// AttemptCrossplanFailoverAfterRetry tries to failover to alternative plans after all retries failed
+// This is the main entry point for cross-plan failover after channel call failures
+// Returns: channel, newUserPlan, group, success
+// When successful, this function:
+// 1. Finds an alternative plan with available channels
+// 2. Switches the user to that plan
+// 3. Updates the context with new plan info
+// 4. Returns the channel ready for use
+func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*model.Channel, *model.UserPlan, string, bool) {
+	// Check if we should attempt failover
+	shouldAttempt, currentPlanId, userId := ShouldAttemptCrossplanFailover(c)
+	if !shouldAttempt || currentPlanId == 0 {
+		return nil, nil, "", false
+	}
+
+	logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d current_plan=%d initiating cross-plan failover after retry exhaustion", userId, currentPlanId))
+
+	// Attempt to find alternative plan with available channels
+	failoverChannel, failoverPlan, failoverGroup, failoverErr := AttemptPlanFailover(c, userId, currentPlanId, modelName)
+
+	if failoverErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] user=%d failover_error=%v", userId, failoverErr))
+		return nil, nil, "", false
+	}
+
+	if failoverChannel == nil || failoverPlan == nil {
+		logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d no_alternative_plan_found", userId))
+		return nil, nil, "", false
+	}
+
+	// Successfully found alternative plan - switch user to it
+	if switchErr := model.SwitchUserCurrentPlan(userId, failoverPlan.PlanId); switchErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
+		// Continue anyway - channel was found, we can still use it even if plan switch failed
+	}
+
+	planName := "unknown"
+	if failoverPlan.Plan != nil {
+		planName = failoverPlan.Plan.Name
+	}
+
+	logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d switched from plan=%d to plan=%s(id=%d) channel=%d reason=retry_exhaustion",
+		userId, currentPlanId, planName, failoverPlan.PlanId, failoverChannel.Id))
+
+	// Update context with new plan info
+	common.SetContextKey(c, constant.ContextKeyPlanId, failoverPlan.PlanId)
+	common.SetContextKey(c, constant.ContextKeyUserPlanId, failoverPlan.Id)
+	common.SetContextKey(c, constant.ContextKeyPlanName, planName)
+	common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
+
+	// Update channel groups in context
+	if failoverPlan.Plan != nil {
+		channelGroups := failoverPlan.Plan.GetChannelGroupsList()
+		if len(channelGroups) > 0 {
+			common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
+			common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
+		}
+	}
+
+	return failoverChannel, failoverPlan, failoverGroup, true
+}
+
+// UpdateRelayInfoForCrossplanFailover updates the relayInfo billing fields after cross-plan failover
+// This ensures that quota consumption is correctly attributed to the new plan
+// Parameters:
+// - c: gin context for logging
+// - relayInfo: the relay info to update
+// - newUserPlan: the new user plan that was switched to
+// - newGroup: the new channel group to use
+// Returns: whether update was successful
+func UpdateRelayInfoForCrossplanFailover(c *gin.Context, relayInfo *relaycommon.RelayInfo, newUserPlan *model.UserPlan, newGroup string) {
+	if relayInfo == nil || newUserPlan == nil {
+		return
+	}
+
+	oldBillingSource := relayInfo.BillingSource
+	oldPreConsumed := relayInfo.FinalPreConsumedQuota
+
+	// CRITICAL: Return pre-consumed quota before switching to new plan
+	// This prevents double-charging when PreConsumeQuota is called again for the new plan
+	if oldPreConsumed > 0 {
+		if oldBillingSource == BillingSourceUserBalance {
+			// User balance billing: return both user balance and token quota
+			err := model.IncreaseUserQuota(relayInfo.UserId, oldPreConsumed, false)
+			if err != nil {
+				logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failed to return pre-consumed quota %d to user %d: %v",
+					oldPreConsumed, relayInfo.UserId, err))
+			} else {
+				logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] returned pre-consumed quota %d to user %d balance",
+					oldPreConsumed, relayInfo.UserId))
+			}
+
+			// Also return token quota
+			if !relayInfo.IsPlayground {
+				err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, oldPreConsumed)
+				if err != nil {
+					logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failed to return pre-consumed token quota %d (user_balance): %v",
+						oldPreConsumed, err))
+				} else {
+					logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] returned pre-consumed token quota %d (user_balance)",
+						oldPreConsumed))
+				}
+			}
+		} else if oldBillingSource == BillingSourcePlan {
+			// Plan billing: only token quota was pre-consumed (plan quota is deducted in PostConsumeQuota)
+			// Must return token quota to prevent double-charging
+			if !relayInfo.IsPlayground {
+				err := model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, oldPreConsumed)
+				if err != nil {
+					logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failed to return pre-consumed token quota %d (plan): %v",
+						oldPreConsumed, err))
+				} else {
+					logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] returned pre-consumed token quota %d (plan billing)",
+						oldPreConsumed))
+				}
+			}
+		}
+
+		// Reset pre-consumed quota since we returned it
+		// New PreConsumeQuota will be called for the new plan
+		relayInfo.FinalPreConsumedQuota = 0
+	}
+
+	// Update plan-related fields in relayInfo
+	relayInfo.UserPlanId = newUserPlan.Id
+	relayInfo.PlanId = newUserPlan.PlanId
+
+	// Set billing source to plan since we're switching to a new plan with available quota
+	relayInfo.BillingSource = BillingSourcePlan
+
+	// Update using group to the new group
+	// This is critical for correct group ratio calculation in PostConsumeQuota
+	if newGroup != "" {
+		relayInfo.UsingGroup = newGroup
+	}
 }

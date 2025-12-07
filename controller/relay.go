@@ -209,6 +209,99 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}
 
+	// After all retries within current plan failed, attempt cross-plan failover
+	// This is triggered when:
+	// 1. There's still an error (newAPIError != nil)
+	// 2. Plan system is enabled
+	// 3. User has AutoSwitch enabled on their current plan
+	// 4. There are alternative plans with available channels
+	if newAPIError != nil {
+		failoverChannel, failoverPlan, failoverGroup, success := service.AttemptCrossplanFailoverAfterRetry(c, originalModel)
+		if success && failoverChannel != nil {
+			// Setup context for the failover channel
+			setupErr := middleware.SetupContextForSelectedChannel(c, failoverChannel, originalModel)
+			if setupErr != nil {
+				logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failed to setup channel context: %v", setupErr.Error()))
+			} else {
+				// CRITICAL: Update relayInfo billing fields for the new plan and group
+				// This ensures quota consumption is correctly attributed to the new plan
+				oldUserPlanId := relayInfo.UserPlanId
+				oldBillingSource := relayInfo.BillingSource
+				oldUsingGroup := relayInfo.UsingGroup
+				service.UpdateRelayInfoForCrossplanFailover(c, relayInfo, failoverPlan, failoverGroup)
+				logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] updated relayInfo: user_plan=%d->%d billing=%s->%s group=%s->%s",
+					oldUserPlanId, relayInfo.UserPlanId, oldBillingSource, relayInfo.BillingSource, oldUsingGroup, relayInfo.UsingGroup))
+
+				// Update channel meta for the new channel
+				relayInfo.InitChannelMeta(c)
+
+				// CRITICAL: Recalculate PriceData with new group ratio and channel ratio
+				// This ensures correct billing rates are used for the new plan/channel
+				oldGroupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+				oldChannelRatio := relayInfo.PriceData.ChannelRatio
+				newPriceData, priceErr := helper.ModelPriceHelper(c, relayInfo, relayInfo.PromptTokens, meta)
+				if priceErr != nil {
+					logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failed to recalculate price data: %v, aborting failover", priceErr))
+					// Abort failover - price calculation failed
+					goto failoverEnd
+				}
+				logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] recalculated PriceData: group_ratio=%.4f->%.4f channel_ratio=%.4f->%.4f pre_consume=%d",
+					oldGroupRatio, newPriceData.GroupRatioInfo.GroupRatio, oldChannelRatio, newPriceData.ChannelRatio, newPriceData.QuotaToPreConsume))
+
+				// CRITICAL: Pre-consume quota from new plan to prevent overdraft
+				// This ensures the new plan has sufficient quota before proceeding
+				if !newPriceData.FreeModel {
+					preConsumeErr := service.PreConsumeQuota(c, newPriceData.QuotaToPreConsume, relayInfo)
+					if preConsumeErr != nil {
+						logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] new plan quota insufficient: %v, aborting failover", preConsumeErr.Error()))
+						// Abort failover - new plan doesn't have enough quota
+						// Keep the original error to return to client
+						goto failoverEnd
+					}
+					logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] pre-consumed %d quota from new plan %d",
+						relayInfo.FinalPreConsumedQuota, relayInfo.UserPlanId))
+				}
+
+				// Update group for this request
+				group = failoverGroup
+
+				// Track the failover channel
+				addUsedChannel(c, failoverChannel.Id)
+
+				// Reset request body for retry
+				requestBody, _ := common.GetRequestBody(c)
+				c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+
+				// Attempt the relay with failover channel
+				switch relayFormat {
+				case types.RelayFormatOpenAIRealtime:
+					newAPIError = relay.WssHelper(c, relayInfo)
+				case types.RelayFormatClaude:
+					newAPIError = relay.ClaudeHelper(c, relayInfo)
+				case types.RelayFormatGemini:
+					newAPIError = geminiRelayHandler(c, relayInfo)
+				default:
+					newAPIError = relayHandler(c, relayInfo)
+				}
+
+				// Record channel health based on result
+				if newAPIError == nil {
+					service.RecordChannelSuccess(failoverChannel.Id)
+					logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] success with channel=%d group=%s user_plan=%d", failoverChannel.Id, failoverGroup, relayInfo.UserPlanId))
+					return
+				}
+
+				// Failover channel also failed - record health and continue to error response
+				if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) ||
+					newAPIError.StatusCode == 504 || newAPIError.StatusCode == 524 {
+					service.RecordChannelFailure(failoverChannel.Id, newAPIError.StatusCode, newAPIError.Error())
+				}
+				logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failover channel=%d also failed: %s", failoverChannel.Id, newAPIError.Error()))
+			}
+		}
+	}
+failoverEnd:
+
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {
 		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
