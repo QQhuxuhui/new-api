@@ -28,6 +28,10 @@ type UserPlan struct {
 	CreatedAt         int64  `json:"created_at" gorm:"autoCreateTime:milli"`
 	UpdatedAt         int64  `json:"updated_at" gorm:"autoUpdateTime:milli"`
 
+	// Override fields - allow per-user customization of plan defaults
+	// -1 means use plan default, 0 means no limit, >0 is custom limit
+	DailyQuotaLimitOverride *int64 `json:"daily_quota_limit_override" gorm:"default:null"` // Override plan's daily quota limit (nil = use plan default)
+
 	// Associations (for preloading)
 	Plan *Plan `json:"plan,omitempty" gorm:"foreignKey:PlanId"`
 	User *User `json:"user,omitempty" gorm:"foreignKey:UserId"`
@@ -75,6 +79,29 @@ func (up *UserPlan) IsExpired() bool {
 // IsValid checks if the user plan is valid (active, not expired, not locked)
 func (up *UserPlan) IsValid() bool {
 	return up.Status == UserPlanStatusActive && !up.IsExpired() && !up.IsLocked()
+}
+
+// GetEffectiveDailyQuotaLimit returns the effective daily quota limit for this user plan
+// Priority: UserPlan override > Plan default
+// Returns: (limit, hasLimit)
+// - If override is set (not nil): use override value (0 = no limit, >0 = custom limit)
+// - If override is nil: use plan's daily quota limit
+func (up *UserPlan) GetEffectiveDailyQuotaLimit() (int64, bool) {
+	// Check if override is set
+	if up.DailyQuotaLimitOverride != nil {
+		limit := *up.DailyQuotaLimitOverride
+		if limit <= 0 {
+			return 0, false // 0 or negative means no limit
+		}
+		return limit, true
+	}
+
+	// Fall back to plan default
+	if up.Plan != nil && up.Plan.HasDailyQuotaLimit() {
+		return up.Plan.DailyQuotaLimit, true
+	}
+
+	return 0, false
 }
 
 // Insert creates a new user plan
@@ -335,6 +362,66 @@ func UnlockUserPlan(userPlanId int) error {
 			"locked_reason": "",
 			"updated_at":    time.Now().UnixMilli(),
 		}).Error
+}
+
+// UpdateUserPlanFields updates multiple fields for a user plan
+// This is used for admin operations to modify quota, expiration, daily limit override, etc.
+func UpdateUserPlanFields(userPlanId int, updates map[string]interface{}) error {
+	// Get user_id before update for cache invalidation
+	var userPlan UserPlan
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
+		defer InvalidateUserPlanCache(userPlan.UserId)
+	}
+
+	// Add updated_at timestamp
+	updates["updated_at"] = time.Now().UnixMilli()
+
+	return DB.Model(&UserPlan{}).
+		Where("id = ?", userPlanId).
+		Updates(updates).Error
+}
+
+// ClearUserPlanDailyQuotaOverride clears the daily quota limit override for a user plan
+// This will make the user plan use the plan's default daily quota limit
+func ClearUserPlanDailyQuotaOverride(userPlanId int) error {
+	// Get user_id before update for cache invalidation
+	var userPlan UserPlan
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
+		defer InvalidateUserPlanCache(userPlan.UserId)
+	}
+
+	// Set to NULL to indicate "use plan default"
+	return DB.Model(&UserPlan{}).
+		Where("id = ?", userPlanId).
+		Updates(map[string]interface{}{
+			"daily_quota_limit_override": nil,
+			"updated_at":                 time.Now().UnixMilli(),
+		}).Error
+}
+
+// UpdateUserPlanExpiry updates the expiration time for a user plan
+func UpdateUserPlanExpiry(userPlanId int, expiresAt int64) error {
+	// Get user_id before update for cache invalidation
+	var userPlan UserPlan
+	if err := DB.Select("user_id, status").First(&userPlan, userPlanId).Error; err == nil {
+		defer InvalidateUserPlanCache(userPlan.UserId)
+	}
+
+	updates := map[string]interface{}{
+		"expires_at": expiresAt,
+		"updated_at": time.Now().UnixMilli(),
+	}
+
+	// If extending expiration and plan was expired, reactivate it
+	if expiresAt == 0 || expiresAt > time.Now().UnixMilli() {
+		if userPlan.Status == UserPlanStatusExpired {
+			updates["status"] = UserPlanStatusActive
+		}
+	}
+
+	return DB.Model(&UserPlan{}).
+		Where("id = ?", userPlanId).
+		Updates(updates).Error
 }
 
 // UpdateUserPlanPermissions updates the permission flags for a user plan

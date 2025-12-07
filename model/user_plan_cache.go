@@ -26,34 +26,38 @@ type UserPlanCacheEntry struct {
 	ExpiresAt       int64  `json:"expires_at"`
 	Status          int    `json:"status"`
 
+	// User-level override fields
+	DailyQuotaLimitOverride *int64 `json:"daily_quota_limit_override"` // Per-user daily quota limit override
+
 	// Embedded plan info for routing
-	PlanName           string `json:"plan_name"`
-	PlanType           string `json:"plan_type"`
-	PlanPriority       int    `json:"plan_priority"`
-	PlanChannelGroup   string `json:"plan_channel_group"`   // Deprecated: use PlanChannelGroups
-	PlanChannelGroups  string `json:"plan_channel_groups"`  // JSON array of channel groups
+	PlanName            string `json:"plan_name"`
+	PlanType            string `json:"plan_type"`
+	PlanPriority        int    `json:"plan_priority"`
+	PlanChannelGroup    string `json:"plan_channel_group"`    // Deprecated: use PlanChannelGroups
+	PlanChannelGroups   string `json:"plan_channel_groups"`   // JSON array of channel groups
 	PlanDailyQuotaLimit int64  `json:"plan_daily_quota_limit"`
-	PlanRateLimitRules string `json:"plan_rate_limit_rules"` // JSON array of rate limit rules
-	PlanStatus         int    `json:"plan_status"`
+	PlanRateLimitRules  string `json:"plan_rate_limit_rules"` // JSON array of rate limit rules
+	PlanStatus          int    `json:"plan_status"`
 }
 
 // ToUserPlan converts cache entry back to UserPlan with embedded Plan
 func (e *UserPlanCacheEntry) ToUserPlan() *UserPlan {
 	return &UserPlan{
-		Id:              e.Id,
-		UserId:          e.UserId,
-		PlanId:          e.PlanId,
-		Quota:           e.Quota,
-		UsedQuota:       e.UsedQuota,
-		IsCurrent:       e.IsCurrent,
-		AutoSwitch:      e.AutoSwitch,
-		AllowUserSwitch: e.AllowUserSwitch,
-		AllowUserToggle: e.AllowUserToggle,
-		Locked:          e.Locked,
-		LockedReason:    e.LockedReason,
-		StartedAt:       e.StartedAt,
-		ExpiresAt:       e.ExpiresAt,
-		Status:          e.Status,
+		Id:                      e.Id,
+		UserId:                  e.UserId,
+		PlanId:                  e.PlanId,
+		Quota:                   e.Quota,
+		UsedQuota:               e.UsedQuota,
+		IsCurrent:               e.IsCurrent,
+		AutoSwitch:              e.AutoSwitch,
+		AllowUserSwitch:         e.AllowUserSwitch,
+		AllowUserToggle:         e.AllowUserToggle,
+		Locked:                  e.Locked,
+		LockedReason:            e.LockedReason,
+		StartedAt:               e.StartedAt,
+		ExpiresAt:               e.ExpiresAt,
+		Status:                  e.Status,
+		DailyQuotaLimitOverride: e.DailyQuotaLimitOverride,
 		Plan: &Plan{
 			Id:              e.PlanId,
 			Name:            e.PlanName,
@@ -71,20 +75,21 @@ func (e *UserPlanCacheEntry) ToUserPlan() *UserPlan {
 // FromUserPlan creates a cache entry from UserPlan
 func FromUserPlan(up *UserPlan) *UserPlanCacheEntry {
 	entry := &UserPlanCacheEntry{
-		Id:              up.Id,
-		UserId:          up.UserId,
-		PlanId:          up.PlanId,
-		Quota:           up.Quota,
-		UsedQuota:       up.UsedQuota,
-		IsCurrent:       up.IsCurrent,
-		AutoSwitch:      up.AutoSwitch,
-		AllowUserSwitch: up.AllowUserSwitch,
-		AllowUserToggle: up.AllowUserToggle,
-		Locked:          up.Locked,
-		LockedReason:    up.LockedReason,
-		StartedAt:       up.StartedAt,
-		ExpiresAt:       up.ExpiresAt,
-		Status:          up.Status,
+		Id:                      up.Id,
+		UserId:                  up.UserId,
+		PlanId:                  up.PlanId,
+		Quota:                   up.Quota,
+		UsedQuota:               up.UsedQuota,
+		IsCurrent:               up.IsCurrent,
+		AutoSwitch:              up.AutoSwitch,
+		AllowUserSwitch:         up.AllowUserSwitch,
+		AllowUserToggle:         up.AllowUserToggle,
+		Locked:                  up.Locked,
+		LockedReason:            up.LockedReason,
+		StartedAt:               up.StartedAt,
+		ExpiresAt:               up.ExpiresAt,
+		Status:                  up.Status,
+		DailyQuotaLimitOverride: up.DailyQuotaLimitOverride,
 	}
 
 	if up.Plan != nil {

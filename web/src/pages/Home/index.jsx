@@ -204,20 +204,6 @@ const Home = () => {
                     </svg>
                   </Button>
                 </Link>
-                <Button
-                  size='large'
-                  className='home-btn-secondary'
-                  icon={<IconPlay />}
-                  onClick={() => {
-                    if (xianyuShopLink) {
-                      window.open(xianyuShopLink, '_blank');
-                    } else {
-                      navigate('/console');
-                    }
-                  }}
-                >
-                  {t('获取密钥')}
-                </Button>
               </div>
 
               {/* Additional Buttons */}

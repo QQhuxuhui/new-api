@@ -56,20 +56,22 @@ func CheckDailyQuotaBeforeConsume(userPlanId int, quotaAmount int64) error {
 		return nil
 	}
 
-	// Get the plan details
+	// Get the plan details for the user plan
 	plan, err := model.GetPlanById(userPlan.PlanId)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to get plan %d for daily quota check: %v", userPlan.PlanId, err))
 		return nil
 	}
+	userPlan.Plan = plan
 
-	// Check if plan has daily quota limit
-	if !plan.HasDailyQuotaLimit() {
+	// Check effective daily quota limit (user override > plan default)
+	dailyLimit, hasLimit := userPlan.GetEffectiveDailyQuotaLimit()
+	if !hasLimit {
 		return nil
 	}
 
 	// Check if adding this quota would exceed the limit
-	canProceed, remaining, err := CheckDailyQuota(plan, userPlanId, quotaAmount)
+	canProceed, remaining, err := CheckDailyQuotaWithLimit(userPlanId, dailyLimit, quotaAmount)
 	if err != nil {
 		// Log error but don't fail (graceful degradation)
 		common.SysLog(fmt.Sprintf("error checking daily quota before consume: %v", err))
@@ -156,6 +158,19 @@ func CheckDailyQuota(plan *model.Plan, userPlanId int, requestAmount int64) (boo
 		return true, -1, nil // -1 indicates no limit
 	}
 
+	return CheckDailyQuotaWithLimit(userPlanId, plan.DailyQuotaLimit, requestAmount)
+}
+
+// CheckDailyQuotaWithLimit checks if the user plan has exceeded a specific daily quota limit
+// This function is used for both plan-level and user-level daily quota limits
+// Returns (canProceed, remainingQuota, error)
+// If requestAmount is 0, only checks if already over limit (for middleware pre-check)
+// If requestAmount > 0, checks if adding this request would exceed limit
+func CheckDailyQuotaWithLimit(userPlanId int, dailyLimit int64, requestAmount int64) (bool, int64, error) {
+	if dailyLimit <= 0 {
+		return true, -1, nil // -1 indicates no limit
+	}
+
 	usage, err := GetDailyQuotaUsage(userPlanId)
 	if err != nil {
 		// On error, log and allow (graceful degradation)
@@ -163,11 +178,11 @@ func CheckDailyQuota(plan *model.Plan, userPlanId int, requestAmount int64) (boo
 		return true, -1, nil
 	}
 
-	remaining := plan.DailyQuotaLimit - usage
+	remaining := dailyLimit - usage
 
 	// If requestAmount is 0, only check if already over limit (middleware pre-check)
 	if requestAmount == 0 {
-		if usage >= plan.DailyQuotaLimit {
+		if usage >= dailyLimit {
 			return false, remaining, nil
 		}
 		return true, remaining, nil
@@ -380,16 +395,17 @@ func GetQuotaLimitStatus(userPlan *model.UserPlan) (*QuotaLimitStatus, error) {
 
 	plan := userPlan.Plan
 
-	// Daily quota status (subscription plans only)
-	if plan.HasDailyQuotaLimit() {
-		status.DailyQuotaLimit = plan.DailyQuotaLimit
+	// Daily quota status - use effective limit (UserPlan override > Plan default)
+	dailyLimit, hasLimit := userPlan.GetEffectiveDailyQuotaLimit()
+	if hasLimit {
+		status.DailyQuotaLimit = dailyLimit
 
 		usage, err := GetDailyQuotaUsage(userPlan.Id)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("failed to get daily quota usage: %v", err))
 		} else {
 			status.DailyQuotaUsed = usage
-			status.DailyQuotaRemain = plan.DailyQuotaLimit - usage
+			status.DailyQuotaRemain = dailyLimit - usage
 			if status.DailyQuotaRemain < 0 {
 				status.DailyQuotaRemain = 0
 			}

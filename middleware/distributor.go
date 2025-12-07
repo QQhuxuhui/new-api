@@ -116,15 +116,24 @@ func Distribute() func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyPlanName, planResult.PlanName)
 						common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, planResult.AutoSwitched)
 
-						// Check daily quota limit if plan has one
-						if planResult.Plan != nil && planResult.Plan.HasDailyQuotaLimit() {
-							canProceed, _, dailyErr := service.CheckDailyQuota(planResult.Plan, planResult.UserPlanId, 0)
-							if dailyErr != nil {
-								common.SysLog(fmt.Sprintf("daily quota check error: %v", dailyErr))
-								// Allow on error (graceful degradation)
-							} else if !canProceed {
-								abortWithOpenAiMessage(c, http.StatusForbidden, "每日额度已用尽，请明日再试")
-								return
+						// Check daily quota limit using effective limit (UserPlan override > Plan default)
+						if planResult.Plan != nil && planResult.UserPlanId > 0 {
+							userPlan, upErr := model.GetUserPlanById(planResult.UserPlanId)
+							if upErr == nil && userPlan != nil {
+								userPlan.Plan = planResult.Plan
+								dailyLimit, hasLimit := userPlan.GetEffectiveDailyQuotaLimit()
+								if hasLimit {
+									// Use 0 for pre-check (just check if already exhausted)
+									// The actual per-request check happens in relay handler
+									canProceed, _, dailyErr := service.CheckDailyQuotaWithLimit(planResult.UserPlanId, dailyLimit, 0)
+									if dailyErr != nil {
+										common.SysLog(fmt.Sprintf("daily quota check error: %v", dailyErr))
+										// Allow on error (graceful degradation)
+									} else if !canProceed {
+										abortWithOpenAiMessage(c, http.StatusForbidden, "每日额度已用尽，请明日再试")
+										return
+									}
+								}
 							}
 						}
 

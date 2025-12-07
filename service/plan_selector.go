@@ -107,9 +107,9 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 		return nil, ErrPlanLocked
 	}
 
-	// 5. Check if current plan has quota
-	if !currentPlan.HasQuota() {
-		// Current plan exhausted - try to find another plan with quota
+	// 5. Check if current plan has quota (including daily quota)
+	if !hasPlanAvailableQuota(currentPlan) {
+		// Current plan exhausted (total quota or daily quota) - try to find another plan with quota
 		if currentPlan.AutoSwitch == 1 {
 			// First try higher priority plans
 			higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
@@ -136,6 +136,11 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			}
 		}
 		// No available plan found or auto-switch disabled
+		// Check if it's daily quota exhausted vs total quota exhausted
+		if currentPlan.HasQuota() {
+			// Has total quota but daily quota exhausted
+			return nil, ErrDailyQuotaExhausted
+		}
 		return nil, ErrPlanQuotaExhausted
 	}
 
@@ -160,10 +165,11 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 }
 
 // selectHighestPriorityWithQuota selects the highest priority plan that has available quota
+// This includes checking both total quota and daily quota limit
 func selectHighestPriorityWithQuota(plans []*model.UserPlan) *model.UserPlan {
 	// Plans are already sorted by priority DESC
 	for _, plan := range plans {
-		if plan.HasQuota() && plan.IsValid() {
+		if plan.IsValid() && hasPlanAvailableQuota(plan) {
 			return plan
 		}
 	}
@@ -171,6 +177,7 @@ func selectHighestPriorityWithQuota(plans []*model.UserPlan) *model.UserPlan {
 }
 
 // findHigherPriorityPlanWithQuota finds a plan with higher priority than current that has quota
+// This includes checking both total quota and daily quota limit
 func findHigherPriorityPlanWithQuota(plans []*model.UserPlan, current *model.UserPlan) *model.UserPlan {
 	if current == nil || current.Plan == nil {
 		return nil
@@ -182,11 +189,40 @@ func findHigherPriorityPlanWithQuota(plans []*model.UserPlan, current *model.Use
 		if plan.Plan == nil {
 			continue
 		}
-		if plan.Plan.Priority > currentPriority && plan.HasQuota() && plan.IsValid() {
+		if plan.Plan.Priority > currentPriority && plan.IsValid() && hasPlanAvailableQuota(plan) {
 			return plan
 		}
 	}
 	return nil
+}
+
+// hasPlanAvailableQuota checks if a plan has available quota
+// This checks both:
+// 1. Total quota (plan.HasQuota())
+// 2. Daily quota limit (if applicable)
+func hasPlanAvailableQuota(plan *model.UserPlan) bool {
+	// Check total quota first
+	if !plan.HasQuota() {
+		return false
+	}
+
+	// Check daily quota limit
+	dailyLimit, hasLimit := plan.GetEffectiveDailyQuotaLimit()
+	if !hasLimit {
+		// No daily limit, total quota is sufficient
+		return true
+	}
+
+	// Check if daily quota is exhausted
+	// Use 0 as request amount to just check if already exhausted
+	canProceed, _, err := CheckDailyQuotaWithLimit(plan.Id, dailyLimit, 0)
+	if err != nil {
+		// On error, assume quota is available (graceful degradation)
+		common.SysLog(fmt.Sprintf("hasPlanAvailableQuota: error checking daily quota for user_plan %d: %v", plan.Id, err))
+		return true
+	}
+
+	return canProceed
 }
 
 // GetPlanChannelGroup returns the channel group for a user's current plan
@@ -612,8 +648,23 @@ func SelectPlanWithQuotaChecks(userId int, modelName string, estimatedCostUSD fl
 		}
 	}
 
-	// Check daily quota limit (subscription plans only)
-	if plan.HasDailyQuotaLimit() {
+	// Check daily quota limit using effective limit (UserPlan override > Plan default)
+	// Get user plan to check for override
+	userPlan, err := model.GetUserPlanById(result.UserPlanId)
+	if err == nil && userPlan != nil {
+		userPlan.Plan = plan
+		dailyLimit, hasLimit := userPlan.GetEffectiveDailyQuotaLimit()
+		if hasLimit {
+			canProceed, _, err := CheckDailyQuotaWithLimit(result.UserPlanId, dailyLimit, estimatedQuota)
+			if err != nil {
+				common.SysLog(fmt.Sprintf("daily quota check error for user %d: %v", userId, err))
+				// Allow on error (graceful degradation)
+			} else if !canProceed {
+				return nil, ErrDailyQuotaExhausted
+			}
+		}
+	} else if plan.HasDailyQuotaLimit() {
+		// Fallback to plan's daily quota limit if can't get user plan
 		canProceed, _, err := CheckDailyQuota(plan, result.UserPlanId, estimatedQuota)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("daily quota check error for user %d: %v", userId, err))

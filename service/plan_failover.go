@@ -14,6 +14,7 @@ import (
 
 // GetFailoverCandidates returns all valid user plans excluding the current plan
 // Plans are sorted by priority (descending) for failover attempts
+// Note: Checks both total quota (HasQuota) and daily quota limits
 func GetFailoverCandidates(userId, excludePlanId int) ([]*model.UserPlan, error) {
 	// Get user's valid plans (active, not expired, not locked)
 	validPlans, err := model.CachedGetUserValidPlans(userId)
@@ -21,17 +22,51 @@ func GetFailoverCandidates(userId, excludePlanId int) ([]*model.UserPlan, error)
 		return nil, fmt.Errorf("failed to get user plans: %w", err)
 	}
 
-	// Filter out the current plan and locked plans
+	// Filter out the current plan, locked plans, and plans without available quota
 	var candidates []*model.UserPlan
 	for _, plan := range validPlans {
-		if plan.PlanId != excludePlanId && !plan.IsLocked() && plan.HasQuota() {
-			candidates = append(candidates, plan)
+		if plan.PlanId == excludePlanId || plan.IsLocked() {
+			continue
 		}
+
+		// Check both total quota and daily quota
+		if !hasPlanAvailableQuotaForFailover(plan) {
+			continue
+		}
+
+		candidates = append(candidates, plan)
 	}
 
 	// Plans are already sorted by priority in model.CachedGetUserValidPlans
 	// Priority is descending (higher priority first)
 	return candidates, nil
+}
+
+// hasPlanAvailableQuotaForFailover checks if a plan has available quota for failover
+// This checks both total quota and daily quota limit
+func hasPlanAvailableQuotaForFailover(plan *model.UserPlan) bool {
+	// Check total quota first
+	if !plan.HasQuota() {
+		return false
+	}
+
+	// Check daily quota limit using effective limit (user override > plan default)
+	dailyLimit, hasLimit := plan.GetEffectiveDailyQuotaLimit()
+	if !hasLimit {
+		// No daily limit, total quota is sufficient
+		return true
+	}
+
+	// Check if daily quota is exhausted
+	// Use 0 as request amount to just check if already exhausted
+	canProceed, _, err := CheckDailyQuotaWithLimit(plan.Id, dailyLimit, 0)
+	if err != nil {
+		// On error, assume quota is available (graceful degradation)
+		common.SysLog(fmt.Sprintf("hasPlanAvailableQuotaForFailover: error checking daily quota for user_plan %d: %v", plan.Id, err))
+		return true
+	}
+
+	return canProceed
 }
 
 // AttemptPlanFailover tries to switch to an alternative plan with available channels

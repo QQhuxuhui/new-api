@@ -343,6 +343,116 @@ func AdminAddQuota(c *gin.Context) {
 	})
 }
 
+// AdminUpdateUserPlanRequest is the request body for updating a user plan
+type AdminUpdateUserPlanRequest struct {
+	Quota                   *int64 `json:"quota"`                      // Set absolute quota value (nil = no change)
+	ExpiresAt               *int64 `json:"expires_at"`                 // Set expiration time (nil = no change, 0 = never expires)
+	DailyQuotaLimitOverride *int64 `json:"daily_quota_limit_override"` // Set daily limit override (nil = use plan default, 0 = no limit)
+	AdminNote               string `json:"admin_note"`                 // Admin note
+}
+
+// AdminUpdateUserPlan updates a user plan's configuration (admin)
+// This allows modifying quota, expiration, daily limit override, etc.
+func AdminUpdateUserPlan(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req AdminUpdateUserPlanRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Get existing user plan
+	userPlan, err := model.GetUserPlanById(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Build updates map
+	updates := make(map[string]interface{})
+
+	// Update quota if provided
+	if req.Quota != nil {
+		if *req.Quota < 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "额度不能为负数",
+			})
+			return
+		}
+		updates["quota"] = *req.Quota
+	}
+
+	// Update expiration if provided
+	if req.ExpiresAt != nil {
+		updates["expires_at"] = *req.ExpiresAt
+		// If setting a new expiration and plan was expired, reactivate it
+		if *req.ExpiresAt == 0 || *req.ExpiresAt > common.GetTimestamp() {
+			if userPlan.Status == model.UserPlanStatusExpired {
+				updates["status"] = model.UserPlanStatusActive
+			}
+		}
+	}
+
+	// Update daily quota limit override
+	// Note: We need to handle this specially since nil means "use plan default"
+	// and 0 means "no limit" - both are valid values
+	if req.DailyQuotaLimitOverride != nil {
+		updates["daily_quota_limit_override"] = *req.DailyQuotaLimitOverride
+	}
+
+	// Update admin note if provided
+	if req.AdminNote != "" {
+		updates["admin_note"] = req.AdminNote
+	}
+
+	if len(updates) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "没有有效的更新字段",
+		})
+		return
+	}
+
+	// Perform update
+	err = model.UpdateUserPlanFields(id, updates)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "用户套餐更新成功",
+	})
+}
+
+// AdminClearDailyQuotaOverride clears the daily quota limit override for a user plan
+// This will make the user plan use the plan's default daily quota limit
+func AdminClearDailyQuotaOverride(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = model.ClearUserPlanDailyQuotaOverride(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "每日限额已恢复为套餐默认值",
+	})
+}
+
 // ==================== User Endpoints ====================
 
 // UserPlanSummaryResponse is the response format for frontend with mapped field names
@@ -453,47 +563,54 @@ func UserToggleAutoSwitch(c *gin.Context) {
 
 // UserPlanResponse is the response format for frontend (with mapped field names)
 type UserPlanResponse struct {
-	Id            int          `json:"id"`
-	UserId        int          `json:"user_id"`
-	PlanId        int          `json:"plan_id"`
-	Quota         int64        `json:"quota"`
-	UsedQuota     int64        `json:"used_quota"`
-	IsCurrent     int          `json:"is_current"`
-	AutoSwitch    int          `json:"auto_switch"`
-	CanSwitch     int          `json:"can_switch"`      // Mapped from AllowUserSwitch
-	CanToggleAuto int          `json:"can_toggle_auto"` // Mapped from AllowUserToggle
-	Locked        int          `json:"locked"`
-	LockedReason  string       `json:"locked_reason"`
-	AdminNote     string       `json:"admin_note"`
-	StartedAt     int64        `json:"started_at"`
-	ExpiresAt     int64        `json:"expires_at"`
-	Status        int          `json:"status"`
-	CreatedAt     int64        `json:"created_at"`
-	UpdatedAt     int64        `json:"updated_at"`
-	Plan          *model.Plan  `json:"plan,omitempty"`
+	Id                      int          `json:"id"`
+	UserId                  int          `json:"user_id"`
+	PlanId                  int          `json:"plan_id"`
+	Quota                   int64        `json:"quota"`
+	UsedQuota               int64        `json:"used_quota"`
+	IsCurrent               int          `json:"is_current"`
+	AutoSwitch              int          `json:"auto_switch"`
+	CanSwitch               int          `json:"can_switch"`                 // Mapped from AllowUserSwitch
+	CanToggleAuto           int          `json:"can_toggle_auto"`            // Mapped from AllowUserToggle
+	Locked                  int          `json:"locked"`
+	LockedReason            string       `json:"locked_reason"`
+	AdminNote               string       `json:"admin_note"`
+	StartedAt               int64        `json:"started_at"`
+	ExpiresAt               int64        `json:"expires_at"`
+	Status                  int          `json:"status"`
+	CreatedAt               int64        `json:"created_at"`
+	UpdatedAt               int64        `json:"updated_at"`
+	DailyQuotaLimitOverride *int64       `json:"daily_quota_limit_override"` // Per-user daily quota limit override (nil = use plan default)
+	EffectiveDailyLimit     int64        `json:"effective_daily_limit"`      // Computed effective daily limit
+	Plan                    *model.Plan  `json:"plan,omitempty"`
 }
 
 // convertToUserPlanResponse converts UserPlan to UserPlanResponse with mapped field names
 func convertToUserPlanResponse(up *model.UserPlan) *UserPlanResponse {
+	// Calculate effective daily limit
+	effectiveLimit, _ := up.GetEffectiveDailyQuotaLimit()
+
 	return &UserPlanResponse{
-		Id:            up.Id,
-		UserId:        up.UserId,
-		PlanId:        up.PlanId,
-		Quota:         up.Quota,
-		UsedQuota:     up.UsedQuota,
-		IsCurrent:     up.IsCurrent,
-		AutoSwitch:    up.AutoSwitch,
-		CanSwitch:     up.AllowUserSwitch,  // Map field name
-		CanToggleAuto: up.AllowUserToggle,  // Map field name
-		Locked:        up.Locked,
-		LockedReason:  up.LockedReason,
-		AdminNote:     up.AdminNote,
-		StartedAt:     up.StartedAt,
-		ExpiresAt:     up.ExpiresAt,
-		Status:        up.Status,
-		CreatedAt:     up.CreatedAt,
-		UpdatedAt:     up.UpdatedAt,
-		Plan:          up.Plan,
+		Id:                      up.Id,
+		UserId:                  up.UserId,
+		PlanId:                  up.PlanId,
+		Quota:                   up.Quota,
+		UsedQuota:               up.UsedQuota,
+		IsCurrent:               up.IsCurrent,
+		AutoSwitch:              up.AutoSwitch,
+		CanSwitch:               up.AllowUserSwitch,           // Map field name
+		CanToggleAuto:           up.AllowUserToggle,           // Map field name
+		Locked:                  up.Locked,
+		LockedReason:            up.LockedReason,
+		AdminNote:               up.AdminNote,
+		StartedAt:               up.StartedAt,
+		ExpiresAt:               up.ExpiresAt,
+		Status:                  up.Status,
+		CreatedAt:               up.CreatedAt,
+		UpdatedAt:               up.UpdatedAt,
+		DailyQuotaLimitOverride: up.DailyQuotaLimitOverride,
+		EffectiveDailyLimit:     effectiveLimit,
+		Plan:                    up.Plan,
 	}
 }
 

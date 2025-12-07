@@ -309,6 +309,7 @@ func SetApiRouter(router *gin.Engine) {
 			userPlanAdminRoute.GET("/plan/:plan_id", controller.GetUserPlansByPlan)
 			userPlanAdminRoute.GET("/user/:user_id", controller.GetUserPlansForUser)
 			userPlanAdminRoute.GET("/:id", controller.GetUserPlan)
+			userPlanAdminRoute.PUT("/:id", controller.AdminUpdateUserPlan)                          // Update user plan (quota, expiry, daily limit override, etc.)
 			userPlanAdminRoute.POST("/assign", controller.AdminAssignPlan)
 			userPlanAdminRoute.POST("/remove", controller.AdminRemovePlan)
 			userPlanAdminRoute.PUT("/:id/permissions", controller.AdminUpdateUserPlanPermissions)
@@ -317,6 +318,7 @@ func SetApiRouter(router *gin.Engine) {
 			userPlanAdminRoute.POST("/:id/unlock", controller.AdminUnlockUserPlan)
 			userPlanAdminRoute.PUT("/:id/quota", controller.AdminAdjustQuota)
 			userPlanAdminRoute.POST("/:id/add_quota", controller.AdminAddQuota)
+			userPlanAdminRoute.DELETE("/:id/daily_quota_override", controller.AdminClearDailyQuotaOverride) // Clear daily quota override
 			userPlanAdminRoute.GET("/:id/quota-status", controller.GetUserPlanQuotaStatus)
 		}
 
