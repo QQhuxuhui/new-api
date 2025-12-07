@@ -88,6 +88,7 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 
 	// Phase 2: Fall back to user balance
 	relayInfo.BillingSource = BillingSourceUserBalance
+	relayInfo.UserPlanId = 0 // 清零套餐ID，确保消费日志不会错误地关联到套餐
 
 	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
 	if err != nil {

@@ -213,6 +213,14 @@ func InitDB() (err error) {
 func InitLogDB() (err error) {
 	if os.Getenv("LOG_SQL_DSN") == "" {
 		LOG_DB = DB
+		// Sync LogSqlType with main database type when using shared connection
+		if common.UsingPostgreSQL {
+			common.LogSqlType = common.DatabaseTypePostgreSQL
+		} else if common.UsingMySQL {
+			common.LogSqlType = common.DatabaseTypeMySQL
+		} else if common.UsingSQLite {
+			common.LogSqlType = common.DatabaseTypeSQLite
+		}
 		return
 	}
 	db, err := chooseDB("LOG_SQL_DSN", true)

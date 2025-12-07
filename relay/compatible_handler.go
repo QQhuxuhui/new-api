@@ -483,6 +483,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		Quota:            quota,
 		Content:          logContent,
 		TokenId:          relayInfo.TokenId,
+		UserPlanId:       relayInfo.UserPlanId,
 		UseTimeSeconds:   int(useTimeSeconds),
 		IsStream:         relayInfo.IsStream,
 		Group:            relayInfo.UsingGroup,

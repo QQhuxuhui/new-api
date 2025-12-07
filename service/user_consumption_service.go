@@ -10,6 +10,20 @@ import (
 	"github.com/QuantumNous/new-api/model"
 )
 
+// getLogDBDateFormat returns the date format SQL expression for the log database
+// based on LogSqlType (not the main database type)
+func getLogDBDateFormat() string {
+	switch common.LogSqlType {
+	case common.DatabaseTypePostgreSQL:
+		return "TO_CHAR(TO_TIMESTAMP(created_at) AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')"
+	case common.DatabaseTypeSQLite:
+		return "DATE(created_at, 'unixepoch', '+8 hours')"
+	default:
+		// MySQL
+		return "DATE(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'))"
+	}
+}
+
 // GetUserConsumptionDetail retrieves detailed consumption data for a specific user
 // including daily consumption trends, plan-wise consumption, and model usage breakdown
 func GetUserConsumptionDetail(userId int, days int) (*dto.UserConsumptionDetail, error) {
@@ -81,16 +95,8 @@ func getUserDailyConsumption(userId int, startTime, endTime int64) ([]dto.DailyC
 		RequestCount int
 	}
 
-	// Build date format based on database type using Beijing timezone (UTC+8)
-	var dateFormat string
-	if common.UsingPostgreSQL {
-		dateFormat = "TO_CHAR(TO_TIMESTAMP(created_at) AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')"
-	} else if common.UsingSQLite {
-		dateFormat = "DATE(created_at, 'unixepoch', '+8 hours')"
-	} else {
-		// MySQL
-		dateFormat = "DATE(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'))"
-	}
+	// Use log database dialect for date formatting
+	dateFormat := getLogDBDateFormat()
 
 	var results []DailyModelData
 	query := fmt.Sprintf(`
@@ -156,7 +162,7 @@ func getUserDailyConsumption(userId int, startTime, endTime int64) ([]dto.DailyC
 }
 
 // getUserPlanConsumption retrieves plan-wise daily consumption
-// Fixed: Get model breakdown with time window constraint to avoid cross-plan mixing
+// Now uses user_plan_id field in logs table for accurate per-plan statistics
 func getUserPlanConsumption(userId int, startTime, endTime int64, days int) ([]dto.PlanConsumptionDetail, error) {
 	// Get all user plans
 	userPlans, err := model.GetAllUserPlans(userId)
@@ -198,25 +204,8 @@ func getUserPlanConsumption(userId int, startTime, endTime int64, days int) ([]d
 			continue
 		}
 
-		// Get daily usage data for this plan
-		dailyData := []dto.PlanDailyData{}
-
-		// Use the daily usage endpoint logic from plan_analytics_service
-		usageResp, err := GetUserDailyUsage(up.Id, days)
-		if err == nil && usageResp != nil {
-			for _, history := range usageResp.DailyHistory {
-				// Get model breakdown for this day with time window constraint
-				models, _ := getDayModelBreakdownWithTimeWindow(userId, history.Date, planStartTime, planEndTime)
-
-				dailyData = append(dailyData, dto.PlanDailyData{
-					Date:          history.Date,
-					UsedUSD:       history.UsedUSD,
-					DailyLimitUSD: history.DailyLimitUSD,
-					UsagePercent:  history.UsagePercent,
-					Models:        models,
-				})
-			}
-		}
+		// Get daily consumption data directly from logs using user_plan_id
+		dailyData, _ := getPlanDailyConsumption(up.Id, userId, planStartTime, planEndTime, days, plan.DailyQuotaLimit)
 
 		planDetails = append(planDetails, dto.PlanConsumptionDetail{
 			UserPlanID: up.Id,
@@ -230,71 +219,89 @@ func getUserPlanConsumption(userId int, startTime, endTime int64, days int) ([]d
 	return planDetails, nil
 }
 
-// getDayModelBreakdownWithTimeWindow gets model breakdown for a specific day with time constraints
-// Fixed: Use Beijing timezone and add time window filtering to avoid cross-plan mixing
-func getDayModelBreakdownWithTimeWindow(userId int, date string, startTime, endTime int64) ([]dto.ModelDailyConsumption, error) {
-	type ModelData struct {
+// getPlanDailyConsumption retrieves daily consumption for a specific user plan using user_plan_id
+func getPlanDailyConsumption(userPlanId int, userId int, startTime, endTime int64, days int, dailyQuotaLimit int64) ([]dto.PlanDailyData, error) {
+	type DailyModelData struct {
+		Date         string
 		ModelName    string
 		TotalQuota   int
 		RequestCount int
 	}
 
-	// Build date format based on database type using Beijing timezone (UTC+8)
-	var dateFormat string
-	if common.UsingPostgreSQL {
-		dateFormat = "TO_CHAR(TO_TIMESTAMP(created_at) AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')"
-	} else if common.UsingSQLite {
-		dateFormat = "DATE(created_at, 'unixepoch', '+8 hours')"
-	} else {
-		// MySQL
-		dateFormat = "DATE(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'))"
-	}
+	// Use log database dialect for date formatting
+	dateFormat := getLogDBDateFormat()
 
-	var results []ModelData
+	var results []DailyModelData
 	query := fmt.Sprintf(`
 		SELECT
+			%s as date,
 			model_name,
 			SUM(quota) as total_quota,
 			COUNT(*) as request_count
 		FROM logs
 		WHERE user_id = ?
+			AND user_plan_id = ?
 			AND type = 2
-			AND %s = ?
 			AND created_at >= ?
 			AND created_at <= ?
-		GROUP BY model_name
-		ORDER BY total_quota DESC
-	`, dateFormat)
+		GROUP BY %s, model_name
+		ORDER BY date DESC, total_quota DESC
+	`, dateFormat, dateFormat)
 
-	err := model.LOG_DB.Raw(query, userId, date, startTime, endTime).Scan(&results).Error
+	err := model.LOG_DB.Raw(query, userId, userPlanId, startTime, endTime).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}
 
-	// Calculate total for percentages
-	var total float64
-	for _, r := range results {
-		total += common.QuotaToUSD(r.TotalQuota)
-	}
-
-	var models []dto.ModelDailyConsumption
-	for _, r := range results {
-		usd := common.QuotaToUSD(r.TotalQuota)
-		percentage := float64(0)
-		if total > 0 {
-			percentage = (usd / total) * 100
+	// Group by date
+	dailyMap := make(map[string]*dto.PlanDailyData)
+	for _, row := range results {
+		if _, exists := dailyMap[row.Date]; !exists {
+			dailyMap[row.Date] = &dto.PlanDailyData{
+				Date:          row.Date,
+				UsedUSD:       0,
+				DailyLimitUSD: common.QuotaToUSD(int(dailyQuotaLimit)),
+				UsagePercent:  0,
+				Models:        []dto.ModelDailyConsumption{},
+			}
 		}
 
-		models = append(models, dto.ModelDailyConsumption{
-			ModelName:    r.ModelName,
+		usd := common.QuotaToUSD(row.TotalQuota)
+		dailyMap[row.Date].UsedUSD += usd
+		dailyMap[row.Date].Models = append(dailyMap[row.Date].Models, dto.ModelDailyConsumption{
+			ModelName:    row.ModelName,
 			USD:          usd,
-			Quota:        r.TotalQuota,
-			RequestCount: r.RequestCount,
-			Percentage:   percentage,
+			Quota:        row.TotalQuota,
+			RequestCount: row.RequestCount,
 		})
 	}
 
-	return models, nil
+	// Calculate percentages and usage percent
+	for _, item := range dailyMap {
+		// Calculate model percentages
+		for i := range item.Models {
+			if item.UsedUSD > 0 {
+				item.Models[i].Percentage = (item.Models[i].USD / item.UsedUSD) * 100
+			}
+		}
+		// Calculate daily usage percent
+		if item.DailyLimitUSD > 0 {
+			item.UsagePercent = (item.UsedUSD / item.DailyLimitUSD) * 100
+		}
+	}
+
+	// Convert to array and sort by date descending
+	var dailyData []dto.PlanDailyData
+	for _, item := range dailyMap {
+		dailyData = append(dailyData, *item)
+	}
+
+	// Sort by date descending
+	sort.Slice(dailyData, func(i, j int) bool {
+		return dailyData[i].Date > dailyData[j].Date
+	})
+
+	return dailyData, nil
 }
 
 // getUserModelSummary retrieves overall model consumption summary

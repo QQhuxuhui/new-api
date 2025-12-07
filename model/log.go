@@ -34,6 +34,7 @@ type Log struct {
 	ChannelId        int    `json:"channel" gorm:"index"`
 	ChannelName      string `json:"channel_name" gorm:"->"`
 	TokenId          int    `json:"token_id" gorm:"default:0;index"`
+	UserPlanId       int    `json:"user_plan_id" gorm:"default:0;index"` // 关联的用户套餐ID，用于套餐消耗统计
 	Group            string `json:"group" gorm:"index"`
 	Ip               string `json:"ip" gorm:"index;default:''"`
 	Other            string `json:"other"`
@@ -147,6 +148,7 @@ type RecordConsumeLogParams struct {
 	Quota            int                    `json:"quota"`
 	Content          string                 `json:"content"`
 	TokenId          int                    `json:"token_id"`
+	UserPlanId       int                    `json:"user_plan_id"` // 关联的用户套餐ID
 	UseTimeSeconds   int                    `json:"use_time_seconds"`
 	IsStream         bool                   `json:"is_stream"`
 	Group            string                 `json:"group"`
@@ -180,6 +182,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		Quota:            params.Quota,
 		ChannelId:        params.ChannelId,
 		TokenId:          params.TokenId,
+		UserPlanId:       params.UserPlanId,
 		UseTime:          params.UseTimeSeconds,
 		IsStream:         params.IsStream,
 		Group:            params.Group,
