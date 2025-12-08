@@ -482,14 +482,18 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
                     dimension: {
                       title: {
                         value: (datum) => {
+                          // Ensure datum is an array
+                          const data = Array.isArray(datum) ? datum : [datum];
                           // Calculate total based on visible series only (datum already filtered by legend)
-                          const total = datum.reduce((sum, d) => sum + (d.value || 0), 0);
-                          return `${t('日期')}: ${datum[0]?.date} | ${t('总额')}: $${Number(total).toFixed(4)}`;
+                          const total = data.reduce((sum, d) => sum + (d.value || 0), 0);
+                          return `${t('日期')}: ${data[0]?.date} | ${t('总额')}: $${Number(total).toFixed(4)}`;
                         },
                       },
                       content: (datum) => {
+                        // Ensure datum is an array
+                        const data = Array.isArray(datum) ? datum : [datum];
                         // Sort by value in descending order (use visible data only)
-                        const sorted = [...datum].sort((a, b) => (b.value || 0) - (a.value || 0));
+                        const sorted = [...data].sort((a, b) => (b.value || 0) - (a.value || 0));
                         return sorted.map(item => ({
                           key: item.channel,
                           value: `$${Number(item.value).toFixed(4)} (${t('请求数')}: ${Number(item.requests).toLocaleString()})`,

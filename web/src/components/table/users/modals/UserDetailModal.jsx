@@ -140,14 +140,18 @@ const UserDetailModal = ({ visible, user, onClose }) => {
         dimension: {
           title: {
             value: (datum) => {
+              // Ensure datum is an array
+              const data = Array.isArray(datum) ? datum : [datum];
               // Calculate total based on visible series only (datum already filtered by legend)
-              const total = datum.reduce((sum, d) => sum + (d.usd || 0), 0);
-              return `${t('日期')}: ${datum[0]?.date} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
+              const total = data.reduce((sum, d) => sum + (d.usd || 0), 0);
+              return `${t('日期')}: ${data[0]?.date} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
             },
           },
           content: (datum) => {
+            // Ensure datum is an array
+            const data = Array.isArray(datum) ? datum : [datum];
             // Sort by value in descending order (use visible data only)
-            const sorted = [...datum].sort((a, b) => (b.usd || 0) - (a.usd || 0));
+            const sorted = [...data].sort((a, b) => (b.usd || 0) - (a.usd || 0));
             // Calculate percentage based on visible total
             const visibleTotal = sorted.reduce((sum, d) => sum + (d.usd || 0), 0);
             return sorted.map(item => ({
@@ -228,14 +232,18 @@ const UserDetailModal = ({ visible, user, onClose }) => {
         dimension: {
           title: {
             value: (datum) => {
+              // Ensure datum is an array
+              const data = Array.isArray(datum) ? datum : [datum];
               // Calculate total based on visible series only (datum already filtered by legend)
-              const total = datum.reduce((sum, d) => sum + (d.usd || 0), 0);
-              return `${t('日期')}: ${datum[0]?.date} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
+              const total = data.reduce((sum, d) => sum + (d.usd || 0), 0);
+              return `${t('日期')}: ${data[0]?.date} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
             },
           },
           content: (datum) => {
+            // Ensure datum is an array
+            const data = Array.isArray(datum) ? datum : [datum];
             // Sort by value in descending order (use visible data only)
-            const sorted = [...datum].sort((a, b) => (b.usd || 0) - (a.usd || 0));
+            const sorted = [...data].sort((a, b) => (b.usd || 0) - (a.usd || 0));
             return sorted.map(item => ({
               key: item.plan,
               value: `${formatUSDAmount(item.usd)} (${t('限额')}: ${item.limit > 0 ? formatUSDAmount(item.limit) : t('无限制')}, ${t('使用率')}: ${item.percent > 0 ? item.percent.toFixed(1) + '%' : '-'})`,

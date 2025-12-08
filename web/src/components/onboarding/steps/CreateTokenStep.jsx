@@ -19,8 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useState } from 'react';
 import { Button, Typography, Space, Card } from '@douyinfe/semi-ui';
-import { IconCode, IconTerminal, IconSetting } from '@douyinfe/semi-icons';
-import { Gemini } from '@lobehub/icons';
+import { IconSetting } from '@douyinfe/semi-icons';
+import { Claude, OpenAI, Gemini } from '@lobehub/icons';
 import { useTranslation } from 'react-i18next';
 import QuickCreateTokenModal from '../../table/tokens/modals/QuickCreateTokenModal';
 import { OnboardingAnalytics } from '../../../helpers/analytics';
@@ -79,25 +79,28 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
     onSkip({ skipped: true });
   };
 
+  // Icon size for consistent display (24px matches Semi UI's extra-large)
+  const ICON_SIZE = 24;
+
   const tokenTypes = [
     {
       id: 'claude-code',
       name: 'Claude Code',
-      icon: <IconCode size='extra-large' />,
+      icon: <Claude.Color size={ICON_SIZE} />,
       description: '用于 Claude Code 开发工具',
       color: 'var(--semi-color-primary)',
     },
     {
       id: 'codex',
       name: 'Codex',
-      icon: <IconTerminal size='extra-large' />,
+      icon: <OpenAI size={ICON_SIZE} />,
       description: '用于代码生成和补全',
       color: 'var(--semi-color-success)',
     },
     {
       id: 'gemini',
       name: 'Gemini',
-      icon: <Gemini.Color size='extra-large' />,
+      icon: <Gemini.Color size={ICON_SIZE} />,
       description: '用于 Google Gemini',
       color: 'var(--semi-color-warning)',
     },

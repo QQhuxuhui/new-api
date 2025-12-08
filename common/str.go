@@ -159,6 +159,56 @@ func maskHostForPlainDomain(domain string) string {
 	return stars + "." + strings.Join(tail, ".")
 }
 
+// upstreamSensitivePatterns contains keywords that indicate upstream account/billing sensitive errors
+// These errors should be hidden from downstream clients to prevent leaking upstream provider information
+var upstreamSensitivePatterns = []string{
+	// Chinese patterns
+	"余额不足",
+	"账户余额",
+	"剩余额度",
+	"用户额度不足",
+	"额度不足",
+	"欠费",
+	"账户已停用",
+	"账户被禁",
+	"配额不足",
+	"配额耗尽",
+	// English patterns
+	"insufficient_quota",
+	"insufficient quota",
+	"billing_not_active",
+	"billing not active",
+	"quota exceeded",
+	"quota exhausted",
+	"account_deactivated",
+	"account deactivated",
+	"credit",
+	"balance",
+	"arrearage",
+	"billing",
+	"subscription",
+	"payment",
+}
+
+// MaskUpstreamSensitiveError checks if an error message contains upstream provider sensitive information
+// (account balance, quota, billing status etc.) and replaces it with a generic message.
+// This prevents leaking upstream provider details to downstream clients.
+// Returns the original message if no sensitive information is detected.
+func MaskUpstreamSensitiveError(str string) string {
+	if str == "" {
+		return str
+	}
+	lowerStr := strings.ToLower(str)
+
+	for _, pattern := range upstreamSensitivePatterns {
+		if strings.Contains(lowerStr, strings.ToLower(pattern)) {
+			return "上游服务暂时不可用，请稍后重试"
+		}
+	}
+
+	return str
+}
+
 // MaskSensitiveInfo masks sensitive information like URLs, IPs, and domain names in a string
 // Example:
 // http://example.com -> http://***.com
