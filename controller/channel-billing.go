@@ -460,12 +460,23 @@ func SetChannelBalanceManually(c *gin.Context) {
 	}
 
 	var req struct {
-		Balance float64 `json:"balance" binding:"required"`
+		Balance *float64 `json:"balance" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
+
+	// 检查balance是否为nil
+	if req.Balance == nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "余额不能为空",
+		})
+		return
+	}
+
+	balance := *req.Balance
 
 	// 先查询渠道是否存在
 	channel, err := model.GetChannelById(id, false)
@@ -489,7 +500,7 @@ func SetChannelBalanceManually(c *gin.Context) {
 	// 使用 map 方式强制更新所有字段，包括零值
 	manualBalance := true
 	updates := map[string]interface{}{
-		"balance":              req.Balance,
+		"balance":              balance,
 		"balance_updated_time": time.Now().Unix(),
 		"manual_balance":       manualBalance,
 	}
@@ -512,7 +523,7 @@ func SetChannelBalanceManually(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "余额已手动设置",
-		"balance": req.Balance,
+		"balance": balance,
 	})
 }
 
