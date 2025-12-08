@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -389,10 +390,12 @@ func AdminUpdateUserPlan(c *gin.Context) {
 	}
 
 	// Update expiration if provided
+	// Note: expires_at is stored in milliseconds
 	if req.ExpiresAt != nil {
 		updates["expires_at"] = *req.ExpiresAt
 		// If setting a new expiration and plan was expired, reactivate it
-		if *req.ExpiresAt == 0 || *req.ExpiresAt > common.GetTimestamp() {
+		// Compare with current time in milliseconds
+		if *req.ExpiresAt == 0 || *req.ExpiresAt > time.Now().UnixMilli() {
 			if userPlan.Status == model.UserPlanStatusExpired {
 				updates["status"] = model.UserPlanStatusActive
 			}

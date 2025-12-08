@@ -251,13 +251,14 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
       }
 
       // Handle expiration - check if never-expires state changed or date changed
+      // Backend stores expires_at in milliseconds
       const currentNeverExpires = selectedPlan.expires_at === 0;
       if (neverExpires !== currentNeverExpires) {
         // Never-expires state changed
-        payload.expires_at = neverExpires ? 0 : Math.floor(new Date(editExpiresAt).getTime() / 1000);
+        payload.expires_at = neverExpires ? 0 : new Date(editExpiresAt).getTime();
       } else if (!neverExpires && editExpiresAt) {
         // Not never-expires, check if date changed
-        const newTimestamp = Math.floor(new Date(editExpiresAt).getTime() / 1000);
+        const newTimestamp = new Date(editExpiresAt).getTime();
         if (newTimestamp !== selectedPlan.expires_at) {
           payload.expires_at = newTimestamp;
         }
@@ -344,7 +345,8 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
       defaultDate.setDate(defaultDate.getDate() + 30);
       setEditExpiresAt(defaultDate);
     } else {
-      setEditExpiresAt(new Date(record.expires_at * 1000));
+      // Backend stores expires_at in milliseconds, use it directly
+      setEditExpiresAt(new Date(record.expires_at));
     }
     setNeverExpires(isNeverExpires);
 
@@ -714,7 +716,7 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
               )}
               {selectedPlan.expires_at > 0 && (
                 <Text type="secondary" className="text-xs mt-1 block">
-                  {t('当前过期时间')}: {new Date(selectedPlan.expires_at * 1000).toLocaleString()}
+                  {t('当前过期时间')}: {new Date(selectedPlan.expires_at).toLocaleString()}
                 </Text>
               )}
             </div>
