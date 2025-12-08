@@ -140,16 +140,24 @@ const UserDetailModal = ({ visible, user, onClose }) => {
         dimension: {
           title: {
             value: (datum) => {
-              // Ensure datum is an array
-              const data = Array.isArray(datum) ? datum : [datum];
+              // Normalize datum to array
+              const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
+              // Return placeholder if no data
+              if (data.length === 0) {
+                return t('日期') + ': - | ' + t('当日总额') + ': $0.00';
+              }
               // Calculate total based on visible series only (datum already filtered by legend)
               const total = data.reduce((sum, d) => sum + (d.usd || 0), 0);
-              return `${t('日期')}: ${data[0]?.date} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
+              return `${t('日期')}: ${data[0]?.date || '-'} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
             },
           },
           content: (datum) => {
-            // Ensure datum is an array
-            const data = Array.isArray(datum) ? datum : [datum];
+            // Normalize datum to array
+            const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
+            // Return empty if no data
+            if (data.length === 0) {
+              return [];
+            }
             // Sort by value in descending order (use visible data only)
             const sorted = [...data].sort((a, b) => (b.usd || 0) - (a.usd || 0));
             // Calculate percentage based on visible total
@@ -232,16 +240,24 @@ const UserDetailModal = ({ visible, user, onClose }) => {
         dimension: {
           title: {
             value: (datum) => {
-              // Ensure datum is an array
-              const data = Array.isArray(datum) ? datum : [datum];
+              // Normalize datum to array
+              const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
+              // Return placeholder if no data
+              if (data.length === 0) {
+                return t('日期') + ': - | ' + t('当日总额') + ': $0.00';
+              }
               // Calculate total based on visible series only (datum already filtered by legend)
               const total = data.reduce((sum, d) => sum + (d.usd || 0), 0);
-              return `${t('日期')}: ${data[0]?.date} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
+              return `${t('日期')}: ${data[0]?.date || '-'} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
             },
           },
           content: (datum) => {
-            // Ensure datum is an array
-            const data = Array.isArray(datum) ? datum : [datum];
+            // Normalize datum to array
+            const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
+            // Return empty if no data
+            if (data.length === 0) {
+              return [];
+            }
             // Sort by value in descending order (use visible data only)
             const sorted = [...data].sort((a, b) => (b.usd || 0) - (a.usd || 0));
             return sorted.map(item => ({
