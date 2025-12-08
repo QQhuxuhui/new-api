@@ -482,30 +482,44 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
                     dimension: {
                       title: {
                         value: (datum) => {
-                          // Normalize datum to array
                           const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
-                          // Return placeholder if no data
-                          if (data.length === 0) {
-                            return t('日期') + ': - | ' + t('总额') + ': $0.0000';
-                          }
-                          // Calculate total based on visible series only (datum already filtered by legend)
-                          const total = data.reduce((sum, d) => sum + (d.value || 0), 0);
-                          return `${t('日期')}: ${data[0]?.date || '-'} | ${t('总额')}: $${Number(total).toFixed(4)}`;
+                          return data.length > 0 ? `${t('日期')}: ${data[0]?.date || '-'}` : t('日期') + ': -';
                         },
                       },
-                      content: (datum) => {
-                        // Normalize datum to array
-                        const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
-                        // Return empty if no data
-                        if (data.length === 0) {
-                          return [];
+                      content: [
+                        {
+                          key: (datum) => datum['channel'],
+                          value: (datum) => ({
+                            value: datum['value'] || 0,
+                            requests: datum['requests'] || 0,
+                          }),
+                        },
+                      ],
+                      updateContent: (array) => {
+                        // Sort by value in descending order
+                        array.sort((a, b) => {
+                          const aVal = typeof a.value === 'object' ? a.value.value : a.value;
+                          const bVal = typeof b.value === 'object' ? b.value.value : b.value;
+                          return bVal - aVal;
+                        });
+
+                        let sum = 0;
+                        // Process each item and calculate sum
+                        for (let i = 0; i < array.length; i++) {
+                          const itemValue = typeof array[i].value === 'object' ? array[i].value : { value: 0, requests: 0 };
+                          const value = itemValue.value || 0;
+                          const requests = itemValue.requests || 0;
+                          sum += value;
+                          array[i].value = `$${Number(value).toFixed(4)} (${t('请求数')}: ${Number(requests).toLocaleString()})`;
                         }
-                        // Sort by value in descending order (use visible data only)
-                        const sorted = [...data].sort((a, b) => (b.value || 0) - (a.value || 0));
-                        return sorted.map(item => ({
-                          key: item.channel,
-                          value: `$${Number(item.value).toFixed(4)} (${t('请求数')}: ${Number(item.requests).toLocaleString()})`,
-                        }));
+
+                        // Add total row at the beginning
+                        array.unshift({
+                          key: t('总额'),
+                          value: `$${Number(sum).toFixed(4)}`,
+                        });
+
+                        return array;
                       },
                     },
                   },

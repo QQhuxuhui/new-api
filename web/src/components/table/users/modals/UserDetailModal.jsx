@@ -140,32 +140,61 @@ const UserDetailModal = ({ visible, user, onClose }) => {
         dimension: {
           title: {
             value: (datum) => {
-              // Normalize datum to array
               const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
-              // Return placeholder if no data
-              if (data.length === 0) {
-                return t('日期') + ': - | ' + t('当日总额') + ': $0.00';
-              }
-              // Calculate total based on visible series only (datum already filtered by legend)
-              const total = data.reduce((sum, d) => sum + (d.usd || 0), 0);
-              return `${t('日期')}: ${data[0]?.date || '-'} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
+              return data.length > 0 ? `${t('日期')}: ${data[0]?.date || '-'}` : t('日期') + ': -';
             },
           },
-          content: (datum) => {
-            // Normalize datum to array
-            const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
-            // Return empty if no data
-            if (data.length === 0) {
-              return [];
+          content: [
+            {
+              key: (datum) => datum['model'],
+              value: (datum) => ({
+                usd: datum['usd'] || 0,
+                requests: datum['requests'] || 0,
+              }),
+            },
+          ],
+          updateContent: (array) => {
+            // Sort by value in descending order
+            array.sort((a, b) => {
+              const aVal = typeof a.value === 'object' ? a.value.usd : a.value;
+              const bVal = typeof b.value === 'object' ? b.value.usd : b.value;
+              return bVal - aVal;
+            });
+
+            // Calculate total sum first and store original values
+            let sum = 0;
+            const processedData = [];
+
+            for (let i = 0; i < array.length; i++) {
+              const itemValue = typeof array[i].value === 'object' ? array[i].value : { usd: 0, requests: 0 };
+              const usd = itemValue.usd || 0;
+              const requests = itemValue.requests || 0;
+              sum += usd;
+
+              // Store original values for later formatting
+              processedData.push({
+                key: array[i].key,
+                usd: usd,
+                requests: requests,
+              });
             }
-            // Sort by value in descending order (use visible data only)
-            const sorted = [...data].sort((a, b) => (b.usd || 0) - (a.usd || 0));
-            // Calculate percentage based on visible total
-            const visibleTotal = sorted.reduce((sum, d) => sum + (d.usd || 0), 0);
-            return sorted.map(item => ({
-              key: item.model,
-              value: `${formatUSDAmount(item.usd)} (${t('请求')}: ${item.requests.toLocaleString()}, ${t('占比')}: ${visibleTotal > 0 ? ((item.usd / visibleTotal) * 100).toFixed(1) : '0.0'}%)`,
-            }));
+
+            // Now format with correct percentages using original values
+            const result = processedData.map(item => {
+              const percentage = sum > 0 ? ((item.usd / sum) * 100).toFixed(1) : '0.0';
+              return {
+                key: item.key,
+                value: `${formatUSDAmount(item.usd)} (${t('请求')}: ${item.requests.toLocaleString()}, ${t('占比')}: ${percentage}%)`,
+              };
+            });
+
+            // Add total row at the beginning
+            result.unshift({
+              key: t('当日总额'),
+              value: formatUSDAmount(sum),
+            });
+
+            return result;
           },
         },
       },
@@ -240,30 +269,46 @@ const UserDetailModal = ({ visible, user, onClose }) => {
         dimension: {
           title: {
             value: (datum) => {
-              // Normalize datum to array
               const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
-              // Return placeholder if no data
-              if (data.length === 0) {
-                return t('日期') + ': - | ' + t('当日总额') + ': $0.00';
-              }
-              // Calculate total based on visible series only (datum already filtered by legend)
-              const total = data.reduce((sum, d) => sum + (d.usd || 0), 0);
-              return `${t('日期')}: ${data[0]?.date || '-'} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
+              return data.length > 0 ? `${t('日期')}: ${data[0]?.date || '-'}` : t('日期') + ': -';
             },
           },
-          content: (datum) => {
-            // Normalize datum to array
-            const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
-            // Return empty if no data
-            if (data.length === 0) {
-              return [];
+          content: [
+            {
+              key: (datum) => datum['plan'],
+              value: (datum) => ({
+                usd: datum['usd'] || 0,
+                limit: datum['limit'] || 0,
+                percent: datum['percent'] || 0,
+              }),
+            },
+          ],
+          updateContent: (array) => {
+            // Sort by value in descending order
+            array.sort((a, b) => {
+              const aVal = typeof a.value === 'object' ? a.value.usd : a.value;
+              const bVal = typeof b.value === 'object' ? b.value.usd : b.value;
+              return bVal - aVal;
+            });
+
+            let sum = 0;
+            // Process each item and calculate sum
+            for (let i = 0; i < array.length; i++) {
+              const itemValue = typeof array[i].value === 'object' ? array[i].value : { usd: 0, limit: 0, percent: 0 };
+              const usd = itemValue.usd || 0;
+              const limit = itemValue.limit || 0;
+              const percent = itemValue.percent || 0;
+              sum += usd;
+              array[i].value = `${formatUSDAmount(usd)} (${t('限额')}: ${limit > 0 ? formatUSDAmount(limit) : t('无限制')}, ${t('使用率')}: ${percent > 0 ? percent.toFixed(1) + '%' : '-'})`;
             }
-            // Sort by value in descending order (use visible data only)
-            const sorted = [...data].sort((a, b) => (b.usd || 0) - (a.usd || 0));
-            return sorted.map(item => ({
-              key: item.plan,
-              value: `${formatUSDAmount(item.usd)} (${t('限额')}: ${item.limit > 0 ? formatUSDAmount(item.limit) : t('无限制')}, ${t('使用率')}: ${item.percent > 0 ? item.percent.toFixed(1) + '%' : '-'})`,
-            }));
+
+            // Add total row at the beginning
+            array.unshift({
+              key: t('当日总额'),
+              value: formatUSDAmount(sum),
+            });
+
+            return array;
           },
         },
       },
