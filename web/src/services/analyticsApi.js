@@ -349,6 +349,26 @@ export const AnalyticsAPI = {
       throw error;
     }
   },
+
+  /**
+   * Fetch channel daily quota trend (daily quota consumption by channel)
+   * @param {string} timeRange - Time range
+   * @returns {Promise<Object>}
+   */
+  async fetchChannelDailyQuotaTrend(timeRange = '7d') {
+    try {
+      const response = await API.get(`${BASE_URL}/channel-daily-quota-trend`, {
+        params: { time_range: timeRange },
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data.message || 'Failed to fetch channel daily quota trend');
+    } catch (error) {
+      showError(error.message || 'Failed to fetch channel daily quota trend');
+      throw error;
+    }
+  },
 };
 
 export default AnalyticsAPI;

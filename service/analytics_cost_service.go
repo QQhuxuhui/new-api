@@ -672,3 +672,118 @@ func CalculateQuotaTrend(timeRange string) ([]dto.QuotaTrendPoint, error) {
 	setCachedData(cacheKey, result, analyticsCacheTTLMedium)
 	return result, nil
 }
+
+// CalculateChannelDailyQuotaTrend calculates daily quota consumption trends by channel
+func CalculateChannelDailyQuotaTrend(timeRange string) (*dto.ChannelDailyQuotaTrendResponse, error) {
+	startTime, endTime := ParseTimeRange(timeRange)
+	cacheKey := fmt.Sprintf("%schannel_daily_quota_trend:%s", analyticsCachePrefix, timeRange)
+
+	var result dto.ChannelDailyQuotaTrendResponse
+	if getCachedData(cacheKey, &result) {
+		return &result, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get channel names
+	var channels []model.Channel
+	channelNameMap := make(map[int]string)
+	if err := model.DB.WithContext(ctx).Select("id, name").Find(&channels).Error; err == nil {
+		for _, ch := range channels {
+			channelNameMap[ch.Id] = ch.Name
+		}
+	}
+
+	// Use database aggregation with GROUP BY and ORDER BY
+	// Convert timestamp to date using database functions
+	type AggregatedResult struct {
+		Date         string
+		ChannelId    int
+		TotalQuota   int64
+		RequestCount int
+	}
+
+	var aggregatedResults []AggregatedResult
+
+	// Use database-specific date conversion based on LOG database type
+	var query string
+	switch common.LogSqlType {
+	case common.DatabaseTypeMySQL:
+		// MySQL: Use DATE_FORMAT with CONVERT_TZ for timezone conversion
+		query = `
+			SELECT
+				DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'), '%Y-%m-%d') as date,
+				channel_id,
+				SUM(quota) as total_quota,
+				COUNT(*) as request_count
+			FROM logs
+			WHERE created_at >= ? AND created_at <= ? AND type = ?
+			GROUP BY DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'), '%Y-%m-%d'), channel_id
+			ORDER BY date ASC, channel_id ASC
+		`
+	case common.DatabaseTypePostgreSQL:
+		// PostgreSQL: Use to_char with to_timestamp and timezone conversion
+		query = `
+			SELECT
+				to_char(to_timestamp(created_at) at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
+				channel_id,
+				SUM(quota) as total_quota,
+				COUNT(*) as request_count
+			FROM logs
+			WHERE created_at >= ? AND created_at <= ? AND type = ?
+			GROUP BY to_char(to_timestamp(created_at) at time zone 'Asia/Shanghai', 'YYYY-MM-DD'), channel_id
+			ORDER BY date ASC, channel_id ASC
+		`
+	default:
+		// SQLite: Use DATE and DATETIME functions
+		query = `
+			SELECT
+				DATE(DATETIME(created_at, 'unixepoch', '+8 hours')) as date,
+				channel_id,
+				SUM(quota) as total_quota,
+				COUNT(*) as request_count
+			FROM logs
+			WHERE created_at >= ? AND created_at <= ? AND type = ?
+			GROUP BY DATE(DATETIME(created_at, 'unixepoch', '+8 hours')), channel_id
+			ORDER BY date ASC, channel_id ASC
+		`
+	}
+
+	err := model.LOG_DB.WithContext(ctx).Raw(query, startTime, endTime, model.LogTypeConsume).Scan(&aggregatedResults).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert aggregated results to ChannelDailyQuotaPoint
+	result.Trends = make([]dto.ChannelDailyQuotaPoint, 0, len(aggregatedResults))
+	for _, aggResult := range aggregatedResults {
+		point := dto.ChannelDailyQuotaPoint{
+			Date:         aggResult.Date,
+			ChannelId:    aggResult.ChannelId,
+			TotalQuota:   aggResult.TotalQuota,
+			RequestCount: aggResult.RequestCount,
+		}
+
+		// Set channel name
+		if name, ok := channelNameMap[aggResult.ChannelId]; ok {
+			point.ChannelName = name
+		} else {
+			point.ChannelName = fmt.Sprintf("Channel %d", aggResult.ChannelId)
+		}
+
+		// Calculate average quota
+		if aggResult.RequestCount > 0 {
+			point.AvgQuota = float64(aggResult.TotalQuota) / float64(aggResult.RequestCount)
+			point.AvgQuotaUSD = point.AvgQuota / common.QuotaPerUnit
+		}
+
+		// Convert total quota to USD
+		point.TotalQuotaUSD = common.QuotaToUSD(int(aggResult.TotalQuota))
+
+		result.Trends = append(result.Trends, point)
+	}
+
+	setCachedData(cacheKey, result, analyticsCacheTTLMedium)
+	return &result, nil
+}

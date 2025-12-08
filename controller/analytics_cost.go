@@ -135,3 +135,19 @@ func GetQuotaTrend(c *gin.Context) {
 		},
 	})
 }
+
+// GetChannelDailyQuotaTrend returns daily quota consumption trends by channel
+func GetChannelDailyQuotaTrend(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+
+	result, err := service.CalculateChannelDailyQuotaTrend(timeRange)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": result,
+	})
+}

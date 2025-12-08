@@ -63,6 +63,7 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [trendData, setTrendData] = useState([]);
+  const [channelDailyData, setChannelDailyData] = useState([]);
 
   useEffect(() => {
     fetchChannelQuotaData();
@@ -100,6 +101,17 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
     } catch (trendErr) {
       console.error('Failed to load trend data:', trendErr);
       setTrendData([]);
+    }
+
+    // Fetch channel daily quota trend data
+    try {
+      const channelDailyResult = await AnalyticsAPI.fetchChannelDailyQuotaTrend(timeRange);
+      if (channelDailyResult && channelDailyResult.trends) {
+        setChannelDailyData(channelDailyResult.trends);
+      }
+    } catch (channelDailyErr) {
+      console.error('Failed to load channel daily data:', channelDailyErr);
+      setChannelDailyData([]);
     }
   };
 
@@ -406,6 +418,113 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
               loading={loading}
               rowKey='channel_id'
             />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Channel Daily Quota Bar Chart */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col span={24}>
+          <Card title={t('渠道每日消费额度')}>
+            {channelDailyData.length === 0 ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t('渠道每日数据暂时无法加载')}
+                style={{ padding: '40px 0' }}
+              />
+            ) : (
+              <VChart
+                spec={{
+                  type: 'bar',
+                  data: [
+                    {
+                      id: 'channelDailyData',
+                      values: channelDailyData.map(d => ({
+                        date: d.date,
+                        channel: d.channel_name,
+                        value: d.total_quota_usd,
+                        requests: d.request_count,
+                      }))
+                    }
+                  ],
+                  xField: 'date',
+                  yField: 'value',
+                  seriesField: 'channel',
+                  stack: false,
+                  bar: {
+                    style: {
+                      cornerRadius: 4,
+                    },
+                  },
+                  legends: [
+                    {
+                      visible: true,
+                      orient: 'top',
+                      position: 'start',
+                    },
+                  ],
+                  axes: [
+                    {
+                      orient: 'left',
+                      label: {
+                        formatMethod: (v) => `$${Number(v).toFixed(2)}`,
+                      },
+                      title: {
+                        visible: true,
+                        text: t('消费额度 (USD)'),
+                        style: {
+                          fontSize: 12,
+                        },
+                      },
+                    },
+                    {
+                      orient: 'bottom',
+                      label: {
+                        autoRotate: true,
+                        autoRotateAngle: [0, 45],
+                      },
+                      title: {
+                        visible: true,
+                        text: t('日期'),
+                        style: {
+                          fontSize: 12,
+                        },
+                      },
+                    },
+                  ],
+                  tooltip: {
+                    visible: true,
+                    mark: {
+                      title: {
+                        key: t('日期'),
+                        value: (datum) => datum.date,
+                      },
+                      content: [
+                        {
+                          key: t('渠道'),
+                          value: (datum) => datum.channel,
+                        },
+                        {
+                          key: t('消费额度'),
+                          value: (datum) => `$${Number(datum.value).toFixed(4)}`,
+                        },
+                        {
+                          key: t('请求数'),
+                          value: (datum) => Number(datum.requests).toLocaleString(),
+                        },
+                      ],
+                    },
+                  },
+                  padding: {
+                    top: 20,
+                    right: 20,
+                    bottom: 40,
+                    left: 60,
+                  },
+                }}
+                style={{ width: '100%', height: '500px' }}
+              />
+            )}
           </Card>
         </Col>
       </Row>

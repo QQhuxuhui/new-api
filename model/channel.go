@@ -35,6 +35,7 @@ type Channel struct {
 	Other              string  `json:"other"`
 	Balance            float64 `json:"balance"` // in USD
 	BalanceUpdatedTime int64   `json:"balance_updated_time" gorm:"bigint"`
+	ManualBalance      *bool   `json:"manual_balance" gorm:"default:false"` // 是否手动设置余额
 	Models             string  `json:"models"`
 	Group              string  `json:"group" gorm:"type:varchar(64);default:'default'"`
 	UsedQuota          int64   `json:"used_quota" gorm:"bigint;default:0"`
@@ -602,9 +603,12 @@ func (channel *Channel) UpdateResponseTime(responseTime int64) {
 }
 
 func (channel *Channel) UpdateBalance(balance float64) {
-	err := DB.Model(channel).Select("balance_updated_time", "balance").Updates(Channel{
+	// 自动更新余额时，清除手动设置标记
+	manualBalance := false
+	err := DB.Model(channel).Select("balance_updated_time", "balance", "manual_balance").Updates(Channel{
 		BalanceUpdatedTime: common.GetTimestamp(),
 		Balance:            balance,
+		ManualBalance:      &manualBalance,
 	}).Error
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to update balance: channel_id=%d, error=%v", channel.Id, err))

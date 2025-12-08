@@ -194,6 +194,7 @@ export const getChannelsColumns = ({
   t,
   COLUMN_KEYS,
   updateChannelBalance,
+  setChannelBalanceManually,
   manageChannel,
   manageTag,
   submitTagEdit,
@@ -375,6 +376,43 @@ export const getChannelsColumns = ({
       dataIndex: 'expired_time',
       render: (text, record, index) => {
         if (record.children === undefined) {
+          const handleBalanceClick = () => {
+            let manualBalanceValue = record.balance;
+            Modal.confirm({
+              title: t('更新渠道余额'),
+              content: (
+                <div className='flex flex-col gap-3'>
+                  <div className='text-sm text-gray-600'>
+                    {t('当前余额：$')} {record.balance}
+                  </div>
+                  <div className='flex flex-col gap-2'>
+                    <label className='text-sm font-medium'>{t('手动设置余额 (USD):')}</label>
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      placeholder={t('输入余额数值')}
+                      defaultValue={record.balance}
+                      onChange={(value) => {
+                        manualBalanceValue = value;
+                      }}
+                      min={0}
+                      step={0.01}
+                    />
+                  </div>
+                </div>
+              ),
+              okText: t('手动设置'),
+              cancelText: t('自动更新'),
+              onOk: () => {
+                if (manualBalanceValue !== undefined && manualBalanceValue !== null) {
+                  setChannelBalanceManually(record, manualBalanceValue);
+                }
+              },
+              onCancel: () => {
+                updateChannelBalance(record);
+              },
+            });
+          };
+
           return (
             <div>
               <Space spacing={1}>
@@ -384,13 +422,17 @@ export const getChannelsColumns = ({
                   </Tag>
                 </Tooltip>
                 <Tooltip
-                  content={t('剩余额度$') + record.balance + t('，点击更新')}
+                  content={
+                    record.manual_balance
+                      ? t('剩余额度$') + record.balance + t('（手动设置），点击更新')
+                      : t('剩余额度$') + record.balance + t('，点击更新')
+                  }
                 >
                   <Tag
-                    color='white'
+                    color={record.manual_balance ? 'blue' : 'white'}
                     type='ghost'
                     shape='circle'
-                    onClick={() => updateChannelBalance(record)}
+                    onClick={handleBalanceClick}
                   >
                     {renderQuotaWithAmount(record.balance)}
                   </Tag>
