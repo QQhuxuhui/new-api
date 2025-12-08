@@ -407,23 +407,8 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
         </Col>
       </Row>
 
-      {/* Channel Quota Table */}
-      <Row gutter={[16, 16]}>
-        <Col span={24}>
-          <Card title={t('渠道消费详情')}>
-            <Table
-              columns={channelColumns}
-              dataSource={channels}
-              pagination={{ pageSize: 10 }}
-              loading={loading}
-              rowKey='channel_id'
-            />
-          </Card>
-        </Col>
-      </Row>
-
       {/* Channel Daily Quota Bar Chart */}
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+      <Row gutter={[16, 16]}>
         <Col span={24}>
           <Card title={t('渠道每日消费额度')}>
             {channelDailyData.length === 0 ? (
@@ -450,7 +435,7 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
                   xField: 'date',
                   yField: 'value',
                   seriesField: 'channel',
-                  stack: false,
+                  stack: true,
                   bar: {
                     style: {
                       cornerRadius: 4,
@@ -494,25 +479,22 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
                   ],
                   tooltip: {
                     visible: true,
-                    mark: {
+                    dimension: {
                       title: {
-                        key: t('日期'),
-                        value: (datum) => datum.date,
+                        value: (datum) => {
+                          // Calculate total based on visible series only (datum already filtered by legend)
+                          const total = datum.reduce((sum, d) => sum + (d.value || 0), 0);
+                          return `${t('日期')}: ${datum[0]?.date} | ${t('总额')}: $${Number(total).toFixed(4)}`;
+                        },
                       },
-                      content: [
-                        {
-                          key: t('渠道'),
-                          value: (datum) => datum.channel,
-                        },
-                        {
-                          key: t('消费额度'),
-                          value: (datum) => `$${Number(datum.value).toFixed(4)}`,
-                        },
-                        {
-                          key: t('请求数'),
-                          value: (datum) => Number(datum.requests).toLocaleString(),
-                        },
-                      ],
+                      content: (datum) => {
+                        // Sort by value in descending order (use visible data only)
+                        const sorted = [...datum].sort((a, b) => (b.value || 0) - (a.value || 0));
+                        return sorted.map(item => ({
+                          key: item.channel,
+                          value: `$${Number(item.value).toFixed(4)} (${t('请求数')}: ${Number(item.requests).toLocaleString()})`,
+                        }));
+                      },
                     },
                   },
                   padding: {
@@ -525,6 +507,21 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
                 style={{ width: '100%', height: '500px' }}
               />
             )}
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Channel Quota Table */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col span={24}>
+          <Card title={t('渠道消费详情')}>
+            <Table
+              columns={channelColumns}
+              dataSource={channels}
+              pagination={{ pageSize: 10 }}
+              loading={loading}
+              rowKey='channel_id'
+            />
           </Card>
         </Col>
       </Row>
