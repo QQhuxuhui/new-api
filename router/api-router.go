@@ -225,6 +225,9 @@ func SetApiRouter(router *gin.Engine) {
 		analyticsRoute.GET("/channel-cost-analysis", controller.GetChannelCostAnalysis)
 		analyticsRoute.GET("/cost-trend", controller.GetCostTrend)
 		analyticsRoute.GET("/model-cost-analysis", controller.GetModelCostAnalysis)
+		// Quota-based analytics endpoints (not requiring model_price)
+		analyticsRoute.GET("/channel-quota-analysis", controller.GetChannelQuotaAnalysis)
+		analyticsRoute.GET("/quota-trend", controller.GetQuotaTrend)
 		// Plan usage analytics endpoints
 		analyticsRoute.GET("/plan-usage/overview", controller.GetPlanUsageOverview)
 		analyticsRoute.GET("/plan-usage/list", controller.GetPlanUsageList)

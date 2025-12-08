@@ -65,40 +65,39 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
   const [trendData, setTrendData] = useState([]);
 
   useEffect(() => {
-    fetchChannelCostData();
+    fetchChannelQuotaData();
   }, [timeRange, refreshVersion]);
 
-  const fetchChannelCostData = async () => {
+  const fetchChannelQuotaData = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      // Fetch channel cost analysis data
-      const result = await AnalyticsAPI.fetchChannelCostAnalysis(timeRange);
+      // Fetch channel quota analysis data (using quota instead of model_price)
+      const result = await AnalyticsAPI.fetchChannelQuotaAnalysis(timeRange);
       setData(result);
     } catch (err) {
-      setError(err.message || 'Failed to load channel cost analysis');
+      setError(err.message || 'Failed to load channel quota analysis');
       setData(null);
     } finally {
       setLoading(false);
     }
 
-    // Fetch trend data separately, don't fail the whole tab if this fails
+    // Fetch trend data separately
     try {
-      const trendResult = await AnalyticsAPI.fetchCostTrend(timeRange);
+      const trendResult = await AnalyticsAPI.fetchQuotaTrend(timeRange);
       if (trendResult && trendResult.trends) {
         const chartData = [];
         trendResult.trends.forEach(item => {
           chartData.push(
-            { date: item.date, type: t('平台成本'), value: item.cost_usd || 0 },
-            { date: item.date, type: t('用户收入'), value: item.revenue_usd || 0 },
-            { date: item.date, type: t('利润'), value: item.profit_usd || 0 }
+            { date: item.date, type: t('总消费'), value: item.total_quota_usd || 0 },
+            { date: item.date, type: t('平均消费'), value: item.avg_quota_usd || 0 },
+            { date: item.date, type: t('请求数'), value: item.request_count || 0 }
           );
         });
         setTrendData(chartData);
       }
     } catch (trendErr) {
-      // Trend data failed, but we still show the main cost analysis
       console.error('Failed to load trend data:', trendErr);
       setTrendData([]);
     }
@@ -139,9 +138,9 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
     );
   }
 
-  const { channels, summary, data_quality, warnings } = data;
+  const { channels, summary, data_quality } = data;
 
-  // Channel cost table columns
+  // Channel quota table columns
   const channelColumns = [
     {
       title: t('排名'),
@@ -178,54 +177,35 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
       render: (count) => <Text>{count.toLocaleString()}</Text>,
     },
     {
-      title: t('平台成本'),
-      dataIndex: 'cost_usd',
-      key: 'cost_usd',
-      sorter: (a, b) => a.cost_usd - b.cost_usd,
-      render: (cost) => (
-        <Text strong style={{ color: '#ff4d4f' }}>
-          {formatUSDAmount(cost)}
+      title: t('总消费额度'),
+      dataIndex: 'total_quota_usd',
+      key: 'total_quota_usd',
+      sorter: (a, b) => a.total_quota_usd - b.total_quota_usd,
+      render: (quota) => (
+        <Text strong style={{ color: '#1890ff' }}>
+          {formatUSDAmount(quota)}
         </Text>
       ),
     },
     {
-      title: t('用户收入'),
-      dataIndex: 'revenue_usd',
-      key: 'revenue_usd',
-      sorter: (a, b) => a.revenue_usd - b.revenue_usd,
-      render: (revenue) => (
-        <Text strong style={{ color: '#52c41a' }}>
-          {formatUSDAmount(revenue)}
+      title: t('平均消费'),
+      dataIndex: 'avg_quota_usd',
+      key: 'avg_quota_usd',
+      sorter: (a, b) => a.avg_quota_usd - b.avg_quota_usd,
+      render: (avgQuota) => (
+        <Text style={{ color: '#52c41a' }}>
+          {formatUSDAmount(avgQuota)}
         </Text>
       ),
     },
     {
-      title: t('利润'),
-      dataIndex: 'profit_usd',
-      key: 'profit_usd',
-      sorter: (a, b) => a.profit_usd - b.profit_usd,
-      render: (profit) => (
-        <Text strong style={{ color: profit >= 0 ? '#1890ff' : '#ff4d4f' }}>
-          {formatUSDAmount(profit)}
-        </Text>
+      title: t('总Tokens'),
+      dataIndex: 'total_tokens',
+      key: 'total_tokens',
+      sorter: (a, b) => a.total_tokens - b.total_tokens,
+      render: (tokens) => (
+        <Text>{(tokens / 1000).toFixed(1)}K</Text>
       ),
-    },
-    {
-      title: t('利润率'),
-      dataIndex: 'profit_margin',
-      key: 'profit_margin',
-      sorter: (a, b) => a.profit_margin - b.profit_margin,
-      render: (margin) => {
-        let color = '#52c41a';
-        if (margin < 0) color = '#ff4d4f';
-        else if (margin < 10) color = '#faad14';
-
-        return (
-          <Tag color={margin < 0 ? 'red' : margin < 10 ? 'orange' : 'green'}>
-            {margin.toFixed(2)}%
-          </Tag>
-        );
-      },
     },
   ];
 
@@ -242,41 +222,22 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
         />
       )}
 
-      {/* Cost Warnings */}
-      {warnings && warnings.length > 0 && (
-        <Card style={{ marginBottom: 16 }}>
-          <Text strong style={{ fontSize: '16px', marginBottom: '12px', display: 'block' }}>
-            <IconAlertTriangle style={{ marginRight: '8px' }} />
-            {t('风险提示')}
-          </Text>
-          {warnings.map((warning, index) => (
-            <Banner
-              key={index}
-              type={warning.severity === 'high' ? 'danger' : warning.severity === 'medium' ? 'warning' : 'info'}
-              description={`${warning.channel_name || '系统'}: ${warning.description}`}
-              style={{ marginBottom: '8px' }}
-              closeIcon={null}
-            />
-          ))}
-        </Card>
-      )}
-
       {/* Summary Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={24} sm={12} md={6}>
           <Card>
             <Statistic
-              title={t('总平台成本')}
-              value={formatUSDAmount(summary.total_cost_usd)}
-              valueColor='#ff4d4f'
+              title={t('总请求数')}
+              value={summary.total_requests.toLocaleString()}
+              valueColor='#1890ff'
             />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
           <Card>
             <Statistic
-              title={t('总用户收入')}
-              value={formatUSDAmount(summary.total_revenue_usd)}
+              title={t('总消费额度')}
+              value={formatUSDAmount(summary.total_quota_usd)}
               valueColor='#52c41a'
             />
           </Card>
@@ -284,28 +245,28 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
         <Col xs={24} sm={12} md={6}>
           <Card>
             <Statistic
-              title={t('总利润')}
-              value={formatUSDAmount(summary.total_profit_usd)}
-              valueColor={summary.total_profit_usd >= 0 ? '#1890ff' : '#ff4d4f'}
+              title={t('平均消费')}
+              value={formatUSDAmount(summary.avg_quota_usd)}
+              valueColor='#faad14'
             />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
           <Card>
             <Statistic
-              title={t('整体利润率')}
-              value={`${summary.overall_margin.toFixed(2)}%`}
-              valueColor={summary.overall_margin >= 0 ? '#52c41a' : '#ff4d4f'}
-              prefix={summary.overall_margin >= 0 ? <IconTick /> : <IconAlertTriangle />}
+              title={t('数据完整度')}
+              value={`${data_quality.coverage_percent.toFixed(1)}%`}
+              valueColor='#52c41a'
+              prefix={<IconTick />}
             />
           </Card>
         </Col>
       </Row>
 
-      {/* Cost Trend Chart */}
+      {/* Quota Trend Chart */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col span={24}>
-          <Card title={t('成本趋势分析')}>
+          <Card title={t('消费趋势分析')}>
             {trendData.length === 0 ? (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -315,26 +276,60 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
             ) : (
               <VChart
                 spec={{
-                  type: 'line',
-                  data: [{ id: 'trendData', values: trendData }],
-                  xField: 'date',
-                  yField: 'value',
-                  seriesField: 'type',
-                  height: 400,
-                  line: {
-                    style: {
-                      lineWidth: 2,
+                  type: 'common',
+                  data: [
+                    {
+                      id: 'trendData',
+                      values: trendData.filter(d => d.type !== t('请求数'))
                     },
-                  },
-                  point: {
-                    style: {
-                      size: 3,
+                    {
+                      id: 'requestData',
+                      values: trendData.filter(d => d.type === t('请求数'))
+                    }
+                  ],
+                  series: [
+                    {
+                      type: 'line',
+                      id: 'quotaSeries',
+                      dataId: 'trendData',
+                      xField: 'date',
+                      yField: 'value',
+                      seriesField: 'type',
+                      line: {
+                        style: {
+                          lineWidth: 2,
+                        },
+                      },
+                      point: {
+                        style: {
+                          size: 3,
+                        },
+                      },
                     },
-                  },
+                    {
+                      type: 'line',
+                      id: 'requestSeries',
+                      dataId: 'requestData',
+                      xField: 'date',
+                      yField: 'value',
+                      seriesField: 'type',
+                      line: {
+                        style: {
+                          lineWidth: 2,
+                          lineDash: [4, 4],
+                        },
+                      },
+                      point: {
+                        style: {
+                          size: 3,
+                        },
+                      },
+                    }
+                  ],
                   color: {
                     type: 'ordinal',
-                    domain: [t('平台成本'), t('用户收入'), t('利润')],
-                    range: ['#ff4d4f', '#52c41a', '#1890ff'],
+                    domain: [t('总消费'), t('平均消费'), t('请求数')],
+                    range: ['#1890ff', '#52c41a', '#faad14'],
                   },
                   legends: [
                     {
@@ -345,8 +340,30 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
                   axes: [
                     {
                       orient: 'left',
+                      seriesId: ['quotaSeries'],
                       label: {
                         formatMethod: (v) => `$${Number(v).toFixed(2)}`,
+                      },
+                      title: {
+                        visible: true,
+                        text: t('消费金额 (USD)'),
+                        style: {
+                          fontSize: 12,
+                        },
+                      },
+                    },
+                    {
+                      orient: 'right',
+                      seriesId: ['requestSeries'],
+                      label: {
+                        formatMethod: (v) => Number(v).toLocaleString(),
+                      },
+                      title: {
+                        visible: true,
+                        text: t('请求数'),
+                        style: {
+                          fontSize: 12,
+                        },
                       },
                     },
                     {
@@ -360,7 +377,12 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
                       content: [
                         {
                           key: (datum) => datum.type,
-                          value: (datum) => `$${Number(datum.value).toFixed(4)}`,
+                          value: (datum) => {
+                            if (datum.type === t('请求数')) {
+                              return Number(datum.value).toLocaleString();
+                            }
+                            return `$${Number(datum.value).toFixed(4)}`;
+                          },
                         },
                       ],
                     },
@@ -373,10 +395,10 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
         </Col>
       </Row>
 
-      {/* Channel Cost Table */}
+      {/* Channel Quota Table */}
       <Row gutter={[16, 16]}>
         <Col span={24}>
-          <Card title={t('渠道成本详情')}>
+          <Card title={t('渠道消费详情')}>
             <Table
               columns={channelColumns}
               dataSource={channels}
@@ -392,7 +414,7 @@ const ChannelCostTab = ({ timeRange, refreshVersion }) => {
       {data_quality && (
         <Card style={{ marginTop: 16 }}>
           <Text type='tertiary' style={{ fontSize: '12px' }}>
-            {t('数据质量')}: {data_quality.logs_with_pricing} / {data_quality.total_logs} {t('条日志包含定价信息')}
+            {t('数据质量')}: {data_quality.logs_with_pricing} / {data_quality.total_logs} {t('条日志包含额度信息')}
             ({data_quality.coverage_percent.toFixed(1)}%)
           </Text>
         </Card>

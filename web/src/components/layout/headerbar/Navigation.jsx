@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@douyinfe/semi-ui';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import SkeletonWrapper from '../components/SkeletonWrapper';
@@ -34,6 +34,7 @@ const Navigation = ({
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleNewbieGuideClick = () => {
     if (userState.user) {
@@ -45,11 +46,11 @@ const Navigation = ({
 
   const renderNavLinks = () => {
     const baseClasses =
-      'flex-shrink-0 flex items-center gap-1 font-semibold rounded-md transition-all duration-200 ease-in-out';
+      'flex-shrink-0 flex items-center gap-1 font-semibold rounded-md transition-all duration-200 ease-in-out no-underline';
+    const defaultTextClasses = 'text-semi-color-text-0';
     const hoverClasses = 'hover:text-semi-color-primary';
+    const activeClasses = 'text-semi-color-primary';
     const spacingClasses = isMobile ? 'p-1' : 'p-2';
-
-    const commonLinkClasses = `${baseClasses} ${spacingClasses} ${hoverClasses}`;
 
     return mainNavLinks.map((link) => {
       const linkContent = <span>{link.text}</span>;
@@ -61,7 +62,7 @@ const Navigation = ({
             href={link.externalLink}
             target='_blank'
             rel='noopener noreferrer'
-            className={commonLinkClasses}
+            className={`${baseClasses} ${spacingClasses} ${defaultTextClasses} ${hoverClasses}`}
           >
             {linkContent}
           </a>
@@ -76,8 +77,13 @@ const Navigation = ({
         targetPath = '/login';
       }
 
+      const isActive = location.pathname === link.to;
+      const linkClasses = `${baseClasses} ${spacingClasses} ${
+        isActive ? activeClasses : `${defaultTextClasses} ${hoverClasses}`
+      }`;
+
       return (
-        <Link key={link.itemKey} to={targetPath} className={commonLinkClasses}>
+        <Link key={link.itemKey} to={targetPath} className={linkClasses}>
           {linkContent}
         </Link>
       );

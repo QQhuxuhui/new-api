@@ -302,6 +302,53 @@ export const AnalyticsAPI = {
       throw error;
     }
   },
+
+  /**
+   * Fetch channel quota analysis (quota-based, doesn't require model_price)
+   * @param {string} timeRange - Time range: '1d', '7d', '30d', '90d'
+   * @param {number|null} channelId - Optional channel ID filter
+   * @returns {Promise<Object>}
+   */
+  async fetchChannelQuotaAnalysis(timeRange = '7d', channelId = null) {
+    try {
+      const params = { time_range: timeRange };
+      if (channelId !== null) {
+        params.channel_id = channelId;
+      }
+      const response = await API.get(`${BASE_URL}/channel-quota-analysis`, {
+        params,
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(
+        response.data.message || 'Failed to fetch channel quota analysis'
+      );
+    } catch (error) {
+      showError(error.message || 'Failed to fetch channel quota analysis');
+      throw error;
+    }
+  },
+
+  /**
+   * Fetch quota trend (daily quota consumption)
+   * @param {string} timeRange - Time range
+   * @returns {Promise<Object>}
+   */
+  async fetchQuotaTrend(timeRange = '7d') {
+    try {
+      const response = await API.get(`${BASE_URL}/quota-trend`, {
+        params: { time_range: timeRange },
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data.message || 'Failed to fetch quota trend');
+    } catch (error) {
+      showError(error.message || 'Failed to fetch quota trend');
+      throw error;
+    }
+  },
 };
 
 export default AnalyticsAPI;

@@ -184,7 +184,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
-        text: t('用户分析'),
+        text: t('数据分析'),
         itemKey: 'analytics',
         to: '/console/analytics',
         className: isAdmin() ? '' : 'tableHiddle',

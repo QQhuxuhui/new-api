@@ -30,6 +30,7 @@ import {
   Spin,
 } from '@douyinfe/semi-ui';
 import { IconCode, IconTerminal } from '@douyinfe/semi-icons';
+import { Gemini } from '@lobehub/icons';
 import { API, showError, showSuccess } from '../../../../helpers';
 import { TokenAnalytics } from '../../../../helpers/analytics';
 
@@ -52,6 +53,14 @@ const TOKEN_TYPE_CONFIGS = {
     description: '用于 Codex 开发',
     features: ['无限额度', '永不过期', '无访问限制'],
     groupKeywords: ['codex'], // Search keywords in order of preference
+  },
+  gemini: {
+    id: 'gemini',
+    name: 'Gemini',
+    icon: <Gemini.Color size='extra-large' />,
+    description: '用于 Google Gemini',
+    features: ['无限额度', '永不过期', '无访问限制'],
+    groupKeywords: ['gemini', 'google gemini', 'google'], // Search keywords in order of preference
   },
 };
 

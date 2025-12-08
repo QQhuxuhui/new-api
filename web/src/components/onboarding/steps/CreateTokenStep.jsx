@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useState } from 'react';
 import { Button, Typography, Space, Card } from '@douyinfe/semi-ui';
 import { IconCode, IconTerminal, IconSetting } from '@douyinfe/semi-icons';
+import { Gemini } from '@lobehub/icons';
 import { useTranslation } from 'react-i18next';
 import QuickCreateTokenModal from '../../table/tokens/modals/QuickCreateTokenModal';
 import { OnboardingAnalytics } from '../../../helpers/analytics';
@@ -92,6 +93,13 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
       icon: <IconTerminal size='extra-large' />,
       description: '用于代码生成和补全',
       color: 'var(--semi-color-success)',
+    },
+    {
+      id: 'gemini',
+      name: 'Gemini',
+      icon: <Gemini.Color size='extra-large' />,
+      description: '用于 Google Gemini',
+      color: 'var(--semi-color-warning)',
     },
   ];
 
