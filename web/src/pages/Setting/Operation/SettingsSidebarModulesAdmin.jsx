@@ -286,7 +286,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
         {
           key: 'analytics',
-          title: t('用户分析'),
+          title: t('数据分析'),
           description: t('用户行为数据分析'),
         },
         {

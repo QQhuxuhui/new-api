@@ -31,6 +31,24 @@ body {
   background-color: var(--semi-color-bg-0);
 }
 
+/* 重置链接默认样式，防止浏览器默认的 visited 链接颜色 */
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+a:visited {
+  color: inherit;
+}
+
+a:hover {
+  text-decoration: none;
+}
+
+a:active {
+  color: inherit;
+}
+
 code {
   font-family:
     source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;

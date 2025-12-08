@@ -137,13 +137,36 @@ const UserDetailModal = ({ visible, user, onClose }) => {
         },
       ],
       tooltip: {
-        mark: {
-          title: { value: (d) => `${d.date} - ${d.model}` },
-          content: [
-            { key: t('消耗金额'), value: (d) => formatUSDAmount(d.usd) },
-            { key: t('请求次数'), value: (d) => d.requests.toLocaleString() },
-            { key: t('占比'), value: (d) => `${d.percentage.toFixed(1)}%` },
-          ],
+        dimension: {
+          title: {
+            value: (datum) => {
+              // Normalize datum to array
+              const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
+              // Return placeholder if no data
+              if (data.length === 0) {
+                return t('日期') + ': - | ' + t('当日总额') + ': $0.00';
+              }
+              // Calculate total based on visible series only (datum already filtered by legend)
+              const total = data.reduce((sum, d) => sum + (d.usd || 0), 0);
+              return `${t('日期')}: ${data[0]?.date || '-'} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
+            },
+          },
+          content: (datum) => {
+            // Normalize datum to array
+            const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
+            // Return empty if no data
+            if (data.length === 0) {
+              return [];
+            }
+            // Sort by value in descending order (use visible data only)
+            const sorted = [...data].sort((a, b) => (b.usd || 0) - (a.usd || 0));
+            // Calculate percentage based on visible total
+            const visibleTotal = sorted.reduce((sum, d) => sum + (d.usd || 0), 0);
+            return sorted.map(item => ({
+              key: item.model,
+              value: `${formatUSDAmount(item.usd)} (${t('请求')}: ${item.requests.toLocaleString()}, ${t('占比')}: ${visibleTotal > 0 ? ((item.usd / visibleTotal) * 100).toFixed(1) : '0.0'}%)`,
+            }));
+          },
         },
       },
       legends: {
@@ -214,19 +237,34 @@ const UserDetailModal = ({ visible, user, onClose }) => {
         },
       ],
       tooltip: {
-        mark: {
-          title: { value: (d) => `${d.date} - ${d.plan}` },
-          content: [
-            { key: t('消耗金额'), value: (d) => formatUSDAmount(d.usd) },
-            {
-              key: t('每日限额'),
-              value: (d) => (d.limit > 0 ? formatUSDAmount(d.limit) : t('无限制')),
+        dimension: {
+          title: {
+            value: (datum) => {
+              // Normalize datum to array
+              const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
+              // Return placeholder if no data
+              if (data.length === 0) {
+                return t('日期') + ': - | ' + t('当日总额') + ': $0.00';
+              }
+              // Calculate total based on visible series only (datum already filtered by legend)
+              const total = data.reduce((sum, d) => sum + (d.usd || 0), 0);
+              return `${t('日期')}: ${data[0]?.date || '-'} | ${t('当日总额')}: ${formatUSDAmount(total)}`;
             },
-            {
-              key: t('使用率'),
-              value: (d) => (d.percent > 0 ? `${d.percent.toFixed(1)}%` : '-'),
-            },
-          ],
+          },
+          content: (datum) => {
+            // Normalize datum to array
+            const data = Array.isArray(datum) ? datum : (datum ? [datum] : []);
+            // Return empty if no data
+            if (data.length === 0) {
+              return [];
+            }
+            // Sort by value in descending order (use visible data only)
+            const sorted = [...data].sort((a, b) => (b.usd || 0) - (a.usd || 0));
+            return sorted.map(item => ({
+              key: item.plan,
+              value: `${formatUSDAmount(item.usd)} (${t('限额')}: ${item.limit > 0 ? formatUSDAmount(item.limit) : t('无限制')}, ${t('使用率')}: ${item.percent > 0 ? item.percent.toFixed(1) + '%' : '-'})`,
+            }));
+          },
         },
       },
       legends: {

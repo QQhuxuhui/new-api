@@ -29,18 +29,21 @@ import {
   Tag,
   Spin,
 } from '@douyinfe/semi-ui';
-import { IconCode, IconTerminal } from '@douyinfe/semi-icons';
+import { Claude, OpenAI, Gemini } from '@lobehub/icons';
 import { API, showError, showSuccess } from '../../../../helpers';
 import { TokenAnalytics } from '../../../../helpers/analytics';
 
 const { Title, Text } = Typography;
+
+// Icon size for consistent display (24px matches Semi UI's extra-large)
+const ICON_SIZE = 24;
 
 // Token type configurations with search keywords for group matching
 const TOKEN_TYPE_CONFIGS = {
   'claude-code': {
     id: 'claude-code',
     name: 'Claude Code',
-    icon: <IconCode size='extra-large' />,
+    icon: <Claude.Color size={ICON_SIZE} />,
     description: '用于 Claude Code 开发',
     features: ['无限额度', '永不过期', '无访问限制'],
     groupKeywords: ['claude code', 'claude-code', 'claude', 'code'], // Search keywords in order of preference (space and hyphen variants)
@@ -48,10 +51,18 @@ const TOKEN_TYPE_CONFIGS = {
   codex: {
     id: 'codex',
     name: 'Codex',
-    icon: <IconTerminal size='extra-large' />,
+    icon: <OpenAI size={ICON_SIZE} />,
     description: '用于 Codex 开发',
     features: ['无限额度', '永不过期', '无访问限制'],
     groupKeywords: ['codex'], // Search keywords in order of preference
+  },
+  gemini: {
+    id: 'gemini',
+    name: 'Gemini',
+    icon: <Gemini.Color size={ICON_SIZE} />,
+    description: '用于 Google Gemini',
+    features: ['无限额度', '永不过期', '无访问限制'],
+    groupKeywords: ['gemini', 'google gemini', 'google'], // Search keywords in order of preference
   },
 };
 

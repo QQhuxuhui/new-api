@@ -44,6 +44,9 @@ import {
   Empty,
   Progress,
   Tooltip,
+  DatePicker,
+  TextArea,
+  Checkbox,
 } from '@douyinfe/semi-ui';
 import {
   IconPlus,
@@ -65,11 +68,18 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
   const [userPlans, setUserPlans] = useState([]);
   const [allPlans, setAllPlans] = useState([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
-  const [showAdjustQuotaModal, setShowAdjustQuotaModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [assignPlanId, setAssignPlanId] = useState(null);
   const [assignQuota, setAssignQuota] = useState(0);
-  const [adjustQuotaAmount, setAdjustQuotaAmount] = useState(0);
+
+  // Edit form states
+  const [editQuota, setEditQuota] = useState(null);
+  const [editExpiresAt, setEditExpiresAt] = useState(null);
+  const [editDailyQuotaOverride, setEditDailyQuotaOverride] = useState(null);
+  const [editAdminNote, setEditAdminNote] = useState('');
+  const [neverExpires, setNeverExpires] = useState(false);
+  const [usePlanDefault, setUsePlanDefault] = useState(true);
 
   // Load user's plans
   const loadUserPlans = useCallback(async () => {
@@ -220,28 +230,130 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
     setLoading(false);
   };
 
-  // Adjust quota
-  const handleAdjustQuota = async () => {
+  // Edit user plan (comprehensive)
+  const handleEditPlan = async () => {
     if (!selectedPlan) return;
+
+    // Validation: if not never-expires, must have a valid expiration date
+    if (!neverExpires && !editExpiresAt) {
+      showError(t('请选择过期时间或勾选"永不过期"'));
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await API.put(`/api/user_plan/${selectedPlan.id}/quota`, {
-        amount: adjustQuotaAmount,
-      });
-      const { success, message } = res.data;
-      if (success) {
-        showSuccess(t('额度调整成功'));
-        setShowAdjustQuotaModal(false);
-        setSelectedPlan(null);
-        setAdjustQuotaAmount(0);
-        loadUserPlans();
-      } else {
-        showError(message);
+      const payload = {};
+      let needsClearDailyQuotaOverride = false;
+
+      // Only include changed fields
+      if (editQuota !== null && editQuota !== selectedPlan.quota) {
+        payload.quota = editQuota;
       }
+
+      // Handle expiration - check if never-expires state changed or date changed
+      // Backend stores expires_at in milliseconds
+      const currentNeverExpires = selectedPlan.expires_at === 0;
+      if (neverExpires !== currentNeverExpires) {
+        // Never-expires state changed
+        payload.expires_at = neverExpires ? 0 : new Date(editExpiresAt).getTime();
+      } else if (!neverExpires && editExpiresAt) {
+        // Not never-expires, check if date changed
+        const newTimestamp = new Date(editExpiresAt).getTime();
+        if (newTimestamp !== selectedPlan.expires_at) {
+          payload.expires_at = newTimestamp;
+        }
+      }
+
+      // Handle daily quota override
+      const hadOverride = selectedPlan.daily_quota_limit_override !== null;
+      if (usePlanDefault && hadOverride) {
+        // User wants to clear override - need to call DELETE API
+        needsClearDailyQuotaOverride = true;
+      } else if (!usePlanDefault) {
+        // User wants to set override
+        const newOverride = editDailyQuotaOverride || 0;
+        if (newOverride !== selectedPlan.daily_quota_limit_override) {
+          payload.daily_quota_limit_override = newOverride;
+        }
+      }
+
+      // Handle admin note - allow clearing (empty string)
+      if (editAdminNote !== (selectedPlan.admin_note || '')) {
+        payload.admin_note = editAdminNote;
+      }
+
+      if (Object.keys(payload).length === 0 && !needsClearDailyQuotaOverride) {
+        showError(t('没有修改任何内容'));
+        setLoading(false);
+        return;
+      }
+
+      // Update main fields if any
+      if (Object.keys(payload).length > 0) {
+        const res = await API.put(`/api/user_plan/${selectedPlan.id}`, payload);
+        const { success, message } = res.data;
+        if (!success) {
+          showError(message);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Clear daily quota override if needed
+      if (needsClearDailyQuotaOverride) {
+        const res = await API.delete(`/api/user_plan/${selectedPlan.id}/daily_quota_override`);
+        const { success, message } = res.data;
+        if (!success) {
+          showError(message);
+          setLoading(false);
+          return;
+        }
+      }
+
+      showSuccess(t('用户套餐更新成功'));
+      setShowEditModal(false);
+      resetEditForm();
+      loadUserPlans();
     } catch (e) {
       showError(e.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
+  };
+
+  // Reset edit form
+  const resetEditForm = () => {
+    setSelectedPlan(null);
+    setEditQuota(null);
+    setEditExpiresAt(null);
+    setEditDailyQuotaOverride(null);
+    setEditAdminNote('');
+    setNeverExpires(false);
+    setUsePlanDefault(true);
+  };
+
+  // Open edit modal with current values
+  const openEditModal = (record) => {
+    setSelectedPlan(record);
+    setEditQuota(record.quota);
+
+    // Handle expiration date initialization
+    const isNeverExpires = record.expires_at === 0;
+    if (isNeverExpires) {
+      // If currently never-expires, default date to 30 days from now (for when user unchecks)
+      const defaultDate = new Date();
+      defaultDate.setDate(defaultDate.getDate() + 30);
+      setEditExpiresAt(defaultDate);
+    } else {
+      // Backend stores expires_at in milliseconds, use it directly
+      setEditExpiresAt(new Date(record.expires_at));
+    }
+    setNeverExpires(isNeverExpires);
+
+    setEditDailyQuotaOverride(record.daily_quota_limit_override || 0);
+    setUsePlanDefault(record.daily_quota_limit_override === null);
+    setEditAdminNote(record.admin_note || '');
+    setShowEditModal(true);
   };
 
   // Get available plans for assignment (exclude already assigned)
@@ -379,13 +491,9 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
           <Button
             size="small"
             icon={<IconEdit />}
-            onClick={() => {
-              setSelectedPlan(record);
-              setAdjustQuotaAmount(0);
-              setShowAdjustQuotaModal(true);
-            }}
+            onClick={() => openEditModal(record)}
           >
-            {t('调整额度')}
+            {t('编辑')}
           </Button>
           <Button
             size="small"
@@ -528,46 +636,147 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
         </div>
       </Modal>
 
-      {/* Adjust Quota Modal */}
+      {/* Edit Plan Modal */}
       <Modal
-        title={t('调整额度')}
-        visible={showAdjustQuotaModal}
-        onOk={handleAdjustQuota}
+        title={t('编辑用户套餐')}
+        visible={showEditModal}
+        onOk={handleEditPlan}
         onCancel={() => {
-          setShowAdjustQuotaModal(false);
-          setSelectedPlan(null);
-          setAdjustQuotaAmount(0);
+          setShowEditModal(false);
+          resetEditForm();
         }}
         confirmLoading={loading}
+        style={{ width: 600 }}
       >
         {selectedPlan && (
           <div className="space-y-4">
-            <div>
-              <Text type="secondary">{t('当前套餐')}: </Text>
+            {/* Plan Info */}
+            <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded">
+              <Text type="secondary">{t('套餐')}: </Text>
               <Text strong>{selectedPlan.plan?.name}</Text>
+              <Text type="secondary" className="ml-4">{t('类型')}: </Text>
+              {renderPlanType(selectedPlan.plan?.type)}
             </div>
+
+            {/* Quota */}
             <div>
-              <Text type="secondary">{t('当前额度')}: </Text>
-              <Text>{renderQuota(selectedPlan.quota)}</Text>
-            </div>
-            <div>
-              <Text className="block mb-2">{t('调整数量（正数增加，负数减少）')}</Text>
+              <Text className="block mb-2">{t('套餐额度')}</Text>
               <InputNumber
-                placeholder={t('输入调整数量')}
-                value={adjustQuotaAmount}
-                onChange={setAdjustQuotaAmount}
+                placeholder={t('输入套餐额度')}
+                value={editQuota}
+                onChange={setEditQuota}
                 style={{ width: '100%' }}
                 step={500000}
+                min={0}
               />
-              {adjustQuotaAmount !== 0 && (() => {
-                const prompt = renderQuotaWithPrompt(Math.abs(adjustQuotaAmount));
-                return (
-                  <Text type="secondary" className="text-xs mt-1 block">
-                    {prompt && `${prompt} | `}
-                    {t('调整后')}: {renderQuota((selectedPlan.quota || 0) + (adjustQuotaAmount || 0))}
-                  </Text>
-                );
-              })()}
+              {editQuota > 0 && (
+                <Text type="secondary" className="text-xs mt-1 block">
+                  {renderQuotaWithPrompt(editQuota)}
+                </Text>
+              )}
+            </div>
+
+            {/* Expiration */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Text>{t('过期时间')}</Text>
+                <Checkbox
+                  checked={neverExpires}
+                  onChange={(e) => {
+                    setNeverExpires(e.target.checked);
+                    if (e.target.checked) {
+                      // Keep the date value but hide the picker
+                      // Don't set to null to maintain the fallback date
+                    } else if (!editExpiresAt) {
+                      // If somehow the date is null, set default to 30 days from now
+                      const defaultDate = new Date();
+                      defaultDate.setDate(defaultDate.getDate() + 30);
+                      setEditExpiresAt(defaultDate);
+                    }
+                  }}
+                >
+                  {t('永不过期')}
+                </Checkbox>
+              </div>
+              {!neverExpires && (
+                <>
+                  <DatePicker
+                    type="dateTime"
+                    value={editExpiresAt}
+                    onChange={setEditExpiresAt}
+                    style={{ width: '100%' }}
+                    placeholder={t('选择过期时间')}
+                  />
+                  {selectedPlan.expires_at === 0 && (
+                    <Text type="warning" className="text-xs mt-1 block">
+                      {t('原套餐为永不过期，已自动设置为30天后，可修改')}
+                    </Text>
+                  )}
+                </>
+              )}
+              {selectedPlan.expires_at > 0 && (
+                <Text type="secondary" className="text-xs mt-1 block">
+                  {t('当前过期时间')}: {new Date(selectedPlan.expires_at).toLocaleString()}
+                </Text>
+              )}
+            </div>
+
+            {/* Daily Quota Override */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Text>{t('每日限额覆盖')}</Text>
+                <Checkbox
+                  checked={usePlanDefault}
+                  onChange={(e) => {
+                    setUsePlanDefault(e.target.checked);
+                    if (!e.target.checked && editDailyQuotaOverride === null) {
+                      setEditDailyQuotaOverride(0);
+                    }
+                  }}
+                >
+                  {t('使用套餐默认值')}
+                </Checkbox>
+              </div>
+              {!usePlanDefault && (
+                <>
+                  <InputNumber
+                    placeholder={t('输入每日限额（0 = 无限制）')}
+                    value={editDailyQuotaOverride}
+                    onChange={setEditDailyQuotaOverride}
+                    style={{ width: '100%' }}
+                    step={500000}
+                    min={0}
+                  />
+                  {editDailyQuotaOverride > 0 && (
+                    <Text type="secondary" className="text-xs mt-1 block">
+                      {renderQuotaWithPrompt(editDailyQuotaOverride)}
+                    </Text>
+                  )}
+                  {editDailyQuotaOverride === 0 && (
+                    <Text type="warning" className="text-xs mt-1 block">
+                      {t('设置为 0 表示无每日限额限制')}
+                    </Text>
+                  )}
+                </>
+              )}
+              {selectedPlan.plan?.daily_quota_limit && (
+                <Text type="secondary" className="text-xs mt-1 block">
+                  {t('套餐默认每日限额')}: {renderQuota(selectedPlan.plan.daily_quota_limit)}
+                </Text>
+              )}
+            </div>
+
+            {/* Admin Note */}
+            <div>
+              <Text className="block mb-2">{t('管理员备注')}</Text>
+              <TextArea
+                placeholder={t('输入管理员备注（可选）')}
+                value={editAdminNote}
+                onChange={setEditAdminNote}
+                rows={3}
+                maxLength={500}
+                showClear
+              />
             </div>
           </div>
         )}

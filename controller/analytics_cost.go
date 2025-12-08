@@ -82,3 +82,72 @@ func GetModelCostAnalysis(c *gin.Context) {
 
 	common.ApiSuccess(c, result)
 }
+
+// GetChannelQuotaAnalysis returns channel-level quota-based metrics
+// This endpoint uses quota from logs instead of model_price for cost calculation
+func GetChannelQuotaAnalysis(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+
+	// Optional channel filter
+	var channelID *int
+	if channelIDStr := c.Query("channel_id"); channelIDStr != "" {
+		if id, err := strconv.Atoi(channelIDStr); err == nil {
+			channelID = &id
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Invalid channel_id parameter",
+			})
+			return
+		}
+	}
+
+	result, err := service.CalculateChannelQuotaMetrics(timeRange, channelID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"channels":     result.Channels,
+			"summary":      result.Summary,
+			"data_quality": result.DataQuality,
+		},
+	})
+}
+
+// GetQuotaTrend returns daily quota consumption trends
+func GetQuotaTrend(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+
+	result, err := service.CalculateQuotaTrend(timeRange)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"trends": result,
+		},
+	})
+}
+
+// GetChannelDailyQuotaTrend returns daily quota consumption trends by channel
+func GetChannelDailyQuotaTrend(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+
+	result, err := service.CalculateChannelDailyQuotaTrend(timeRange)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": result,
+	})
+}

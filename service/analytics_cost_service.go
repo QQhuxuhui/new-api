@@ -443,3 +443,347 @@ func roundFloat(val float64, precision int) float64 {
 	ratio := math.Pow(10, float64(precision))
 	return math.Round(val*ratio) / ratio
 }
+
+// CalculateChannelQuotaMetrics calculates quota-based analytics for channels
+// This function uses the quota field from logs table instead of model_price
+func CalculateChannelQuotaMetrics(timeRange string, channelID *int) (*dto.ChannelQuotaAnalysisResponse, error) {
+	startTime, endTime := ParseTimeRange(timeRange)
+
+	// Build cache key
+	cacheKey := fmt.Sprintf("%schannel_quota:%s", analyticsCachePrefix, timeRange)
+	if channelID != nil {
+		cacheKey = fmt.Sprintf("%s:%d", cacheKey, *channelID)
+	}
+
+	var result dto.ChannelQuotaAnalysisResponse
+	if getCachedData(cacheKey, &result) {
+		return &result, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Fetch all consume logs in the time range
+	type LogData struct {
+		ChannelId        int
+		Quota            int64
+		PromptTokens     int64
+		CompletionTokens int64
+	}
+
+	var logs []LogData
+	query := model.LOG_DB.WithContext(ctx).Model(&model.Log{}).
+		Select("channel_id, quota, prompt_tokens, completion_tokens").
+		Where("created_at >= ? AND created_at <= ? AND type = ?", startTime, endTime, model.LogTypeConsume)
+
+	if channelID != nil {
+		query = query.Where("channel_id = ?", *channelID)
+	}
+
+	if err := query.Find(&logs).Error; err != nil {
+		return nil, err
+	}
+
+	// Calculate metrics per channel
+	channelMetrics := make(map[int]*dto.ChannelQuotaMetrics)
+	totalLogs := len(logs)
+
+	for _, log := range logs {
+		if _, exists := channelMetrics[log.ChannelId]; !exists {
+			channelMetrics[log.ChannelId] = &dto.ChannelQuotaMetrics{
+				ChannelId: log.ChannelId,
+			}
+		}
+
+		metrics := channelMetrics[log.ChannelId]
+		metrics.TotalRequests++
+		metrics.TotalQuota += log.Quota
+		metrics.PromptTokens += log.PromptTokens
+		metrics.CompletionTokens += log.CompletionTokens
+		metrics.TotalTokens += log.PromptTokens + log.CompletionTokens
+	}
+
+	// Get channel names
+	var channels []model.Channel
+	if err := model.DB.WithContext(ctx).Select("id, name").Find(&channels).Error; err == nil {
+		channelNameMap := make(map[int]string)
+		for _, ch := range channels {
+			channelNameMap[ch.Id] = ch.Name
+		}
+
+		for id, metrics := range channelMetrics {
+			if name, ok := channelNameMap[id]; ok {
+				metrics.ChannelName = name
+			} else {
+				metrics.ChannelName = fmt.Sprintf("Channel %d", id)
+			}
+		}
+	}
+
+	// Calculate averages and USD values
+	var totalRequests int
+	var totalQuota int64
+	var totalQuotaUSD float64
+	result.Channels = make([]dto.ChannelQuotaMetrics, 0, len(channelMetrics))
+
+	for _, metrics := range channelMetrics {
+		// Calculate average quota
+		if metrics.TotalRequests > 0 {
+			metrics.AvgQuota = float64(metrics.TotalQuota) / float64(metrics.TotalRequests)
+		}
+
+		// Convert quota to USD
+		metrics.TotalQuotaUSD = common.QuotaToUSD(int(metrics.TotalQuota))
+		// Don't truncate AvgQuota to int - use direct float64 division to preserve precision
+		metrics.AvgQuotaUSD = metrics.AvgQuota / common.QuotaPerUnit
+
+		totalRequests += metrics.TotalRequests
+		totalQuota += metrics.TotalQuota
+		totalQuotaUSD += metrics.TotalQuotaUSD
+
+		result.Channels = append(result.Channels, *metrics)
+	}
+
+	// Sort channels by total quota descending
+	for i := 0; i < len(result.Channels)-1; i++ {
+		for j := i + 1; j < len(result.Channels); j++ {
+			if result.Channels[i].TotalQuota < result.Channels[j].TotalQuota {
+				result.Channels[i], result.Channels[j] = result.Channels[j], result.Channels[i]
+			}
+		}
+	}
+
+	// Build summary
+	avgQuota := 0.0
+	if totalRequests > 0 {
+		avgQuota = float64(totalQuota) / float64(totalRequests)
+	}
+
+	result.Summary = dto.ChannelQuotaSummary{
+		TotalRequests: totalRequests,
+		TotalQuota:    totalQuota,
+		TotalQuotaUSD: totalQuotaUSD,
+		AvgQuota:      avgQuota,
+		// Don't truncate avgQuota to int - use direct float64 division to preserve precision
+		AvgQuotaUSD:   avgQuota / common.QuotaPerUnit,
+	}
+
+	// Build data quality metrics
+	var dataQuality dto.DataQuality
+	if totalLogs == 0 {
+		// No logs found - set coverage to 0 and show warning
+		dataQuality = dto.DataQuality{
+			TotalLogs:       0,
+			LogsWithPricing: 0,
+			CoveragePercent: 0.0,
+			HasWarning:      true,
+			WarningMessage:  "No consumption logs found in the selected time range. Please check your data or try a different time period.",
+		}
+	} else {
+		// All logs have quota - 100% coverage
+		dataQuality = dto.DataQuality{
+			TotalLogs:       totalLogs,
+			LogsWithPricing: totalLogs,
+			CoveragePercent: 100.0,
+			HasWarning:      false,
+		}
+	}
+	result.DataQuality = dataQuality
+
+	setCachedData(cacheKey, result, analyticsCacheTTLShort)
+	return &result, nil
+}
+
+// CalculateQuotaTrend calculates daily quota consumption trends
+func CalculateQuotaTrend(timeRange string) ([]dto.QuotaTrendPoint, error) {
+	startTime, endTime := ParseTimeRange(timeRange)
+	cacheKey := fmt.Sprintf("%squota_trend:%s", analyticsCachePrefix, timeRange)
+
+	var result []dto.QuotaTrendPoint
+	if getCachedData(cacheKey, &result) {
+		return result, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Fetch all consume logs in the time range
+	type LogData struct {
+		CreatedAt int64
+		Quota     int64
+	}
+
+	var logs []LogData
+	if err := model.LOG_DB.WithContext(ctx).Model(&model.Log{}).
+		Select("created_at, quota").
+		Where("created_at >= ? AND created_at <= ? AND type = ?", startTime, endTime, model.LogTypeConsume).
+		Find(&logs).Error; err != nil {
+		return nil, err
+	}
+
+	// Group by date
+	dailyMetrics := make(map[string]*dto.QuotaTrendPoint)
+
+	// Use Beijing timezone (UTC+8) for date formatting, consistent with ParseTimeRange
+	beijingLocation, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		// Fallback to UTC+8 offset if timezone loading fails
+		beijingLocation = time.FixedZone("CST", 8*3600)
+	}
+
+	for _, log := range logs {
+		// Convert timestamp to Beijing timezone before formatting date
+		dateStr := time.Unix(log.CreatedAt, 0).In(beijingLocation).Format("2006-01-02")
+
+		if _, exists := dailyMetrics[dateStr]; !exists {
+			dailyMetrics[dateStr] = &dto.QuotaTrendPoint{
+				Date: dateStr,
+			}
+		}
+
+		metrics := dailyMetrics[dateStr]
+		metrics.TotalQuota += log.Quota
+		metrics.RequestCount++
+	}
+
+	// Convert map to sorted slice
+	result = make([]dto.QuotaTrendPoint, 0, len(dailyMetrics))
+	for _, metrics := range dailyMetrics {
+		// Calculate average and USD values
+		if metrics.RequestCount > 0 {
+			metrics.AvgQuota = float64(metrics.TotalQuota) / float64(metrics.RequestCount)
+			// Don't truncate AvgQuota to int - use direct float64 division to preserve precision
+			metrics.AvgQuotaUSD = metrics.AvgQuota / common.QuotaPerUnit
+		}
+		metrics.TotalQuotaUSD = common.QuotaToUSD(int(metrics.TotalQuota))
+
+		result = append(result, *metrics)
+	}
+
+	// Sort by date ascending
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[i].Date > result[j].Date {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+
+	setCachedData(cacheKey, result, analyticsCacheTTLMedium)
+	return result, nil
+}
+
+// CalculateChannelDailyQuotaTrend calculates daily quota consumption trends by channel
+func CalculateChannelDailyQuotaTrend(timeRange string) (*dto.ChannelDailyQuotaTrendResponse, error) {
+	startTime, endTime := ParseTimeRange(timeRange)
+	cacheKey := fmt.Sprintf("%schannel_daily_quota_trend:%s", analyticsCachePrefix, timeRange)
+
+	var result dto.ChannelDailyQuotaTrendResponse
+	if getCachedData(cacheKey, &result) {
+		return &result, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get channel names
+	var channels []model.Channel
+	channelNameMap := make(map[int]string)
+	if err := model.DB.WithContext(ctx).Select("id, name").Find(&channels).Error; err == nil {
+		for _, ch := range channels {
+			channelNameMap[ch.Id] = ch.Name
+		}
+	}
+
+	// Use database aggregation with GROUP BY and ORDER BY
+	// Convert timestamp to date using database functions
+	type AggregatedResult struct {
+		Date         string
+		ChannelId    int
+		TotalQuota   int64
+		RequestCount int
+	}
+
+	var aggregatedResults []AggregatedResult
+
+	// Use database-specific date conversion based on LOG database type
+	var query string
+	switch common.LogSqlType {
+	case common.DatabaseTypeMySQL:
+		// MySQL: Use DATE_FORMAT with CONVERT_TZ for timezone conversion
+		query = `
+			SELECT
+				DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'), '%Y-%m-%d') as date,
+				channel_id,
+				SUM(quota) as total_quota,
+				COUNT(*) as request_count
+			FROM logs
+			WHERE created_at >= ? AND created_at <= ? AND type = ?
+			GROUP BY DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'), '%Y-%m-%d'), channel_id
+			ORDER BY date ASC, channel_id ASC
+		`
+	case common.DatabaseTypePostgreSQL:
+		// PostgreSQL: Use to_char with to_timestamp and timezone conversion
+		query = `
+			SELECT
+				to_char(to_timestamp(created_at) at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
+				channel_id,
+				SUM(quota) as total_quota,
+				COUNT(*) as request_count
+			FROM logs
+			WHERE created_at >= ? AND created_at <= ? AND type = ?
+			GROUP BY to_char(to_timestamp(created_at) at time zone 'Asia/Shanghai', 'YYYY-MM-DD'), channel_id
+			ORDER BY date ASC, channel_id ASC
+		`
+	default:
+		// SQLite: Use DATE and DATETIME functions
+		query = `
+			SELECT
+				DATE(DATETIME(created_at, 'unixepoch', '+8 hours')) as date,
+				channel_id,
+				SUM(quota) as total_quota,
+				COUNT(*) as request_count
+			FROM logs
+			WHERE created_at >= ? AND created_at <= ? AND type = ?
+			GROUP BY DATE(DATETIME(created_at, 'unixepoch', '+8 hours')), channel_id
+			ORDER BY date ASC, channel_id ASC
+		`
+	}
+
+	err := model.LOG_DB.WithContext(ctx).Raw(query, startTime, endTime, model.LogTypeConsume).Scan(&aggregatedResults).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert aggregated results to ChannelDailyQuotaPoint
+	result.Trends = make([]dto.ChannelDailyQuotaPoint, 0, len(aggregatedResults))
+	for _, aggResult := range aggregatedResults {
+		point := dto.ChannelDailyQuotaPoint{
+			Date:         aggResult.Date,
+			ChannelId:    aggResult.ChannelId,
+			TotalQuota:   aggResult.TotalQuota,
+			RequestCount: aggResult.RequestCount,
+		}
+
+		// Set channel name
+		if name, ok := channelNameMap[aggResult.ChannelId]; ok {
+			point.ChannelName = name
+		} else {
+			point.ChannelName = fmt.Sprintf("Channel %d", aggResult.ChannelId)
+		}
+
+		// Calculate average quota
+		if aggResult.RequestCount > 0 {
+			point.AvgQuota = float64(aggResult.TotalQuota) / float64(aggResult.RequestCount)
+			point.AvgQuotaUSD = point.AvgQuota / common.QuotaPerUnit
+		}
+
+		// Convert total quota to USD
+		point.TotalQuotaUSD = common.QuotaToUSD(int(aggResult.TotalQuota))
+
+		result.Trends = append(result.Trends, point)
+	}
+
+	setCachedData(cacheKey, result, analyticsCacheTTLMedium)
+	return &result, nil
+}

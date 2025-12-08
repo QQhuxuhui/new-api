@@ -144,6 +144,7 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.GET("/test/:id", controller.TestChannel)
 			channelRoute.GET("/update_balance", controller.UpdateAllChannelsBalance)
 			channelRoute.GET("/update_balance/:id", controller.UpdateChannelBalance)
+			channelRoute.POST("/set_balance/:id", controller.SetChannelBalanceManually)
 			channelRoute.GET("/health", controller.GetAllChannelsHealth)
 			channelRoute.POST("/", controller.AddChannel)
 			channelRoute.PUT("/", controller.UpdateChannel)
@@ -225,6 +226,10 @@ func SetApiRouter(router *gin.Engine) {
 		analyticsRoute.GET("/channel-cost-analysis", controller.GetChannelCostAnalysis)
 		analyticsRoute.GET("/cost-trend", controller.GetCostTrend)
 		analyticsRoute.GET("/model-cost-analysis", controller.GetModelCostAnalysis)
+		// Quota-based analytics endpoints (not requiring model_price)
+		analyticsRoute.GET("/channel-quota-analysis", controller.GetChannelQuotaAnalysis)
+		analyticsRoute.GET("/quota-trend", controller.GetQuotaTrend)
+		analyticsRoute.GET("/channel-daily-quota-trend", controller.GetChannelDailyQuotaTrend)
 		// Plan usage analytics endpoints
 		analyticsRoute.GET("/plan-usage/overview", controller.GetPlanUsageOverview)
 		analyticsRoute.GET("/plan-usage/list", controller.GetPlanUsageList)

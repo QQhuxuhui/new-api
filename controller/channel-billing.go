@@ -451,6 +451,83 @@ func UpdateChannelBalance(c *gin.Context) {
 	})
 }
 
+// SetChannelBalanceManually 手动设置渠道余额
+func SetChannelBalanceManually(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		Balance *float64 `json:"balance" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// 检查balance是否为nil
+	if req.Balance == nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "余额不能为空",
+		})
+		return
+	}
+
+	balance := *req.Balance
+
+	// 先查询渠道是否存在
+	channel, err := model.GetChannelById(id, false)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "渠道不存在",
+		})
+		return
+	}
+
+	// 检查是否为多密钥渠道
+	if channel.ChannelInfo.IsMultiKey {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "多密钥渠道不支持手动设置余额",
+		})
+		return
+	}
+
+	// 使用 map 方式强制更新所有字段，包括零值
+	manualBalance := true
+	updates := map[string]interface{}{
+		"balance":              balance,
+		"balance_updated_time": time.Now().Unix(),
+		"manual_balance":       manualBalance,
+	}
+
+	result := model.DB.Model(&model.Channel{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		common.ApiError(c, result.Error)
+		return
+	}
+
+	// 再次检查是否真的更新了
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "渠道不存在或更新失败",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "余额已手动设置",
+		"balance": balance,
+	})
+}
+
+
 func updateAllChannelsBalance() error {
 	channels, err := model.GetAllChannels(0, 0, true, false)
 	if err != nil {

@@ -387,3 +387,60 @@ type UserConsumptionStats struct {
 	PeakDailyUSD    float64 `json:"peak_daily_usd"`
 	TotalRequests   int     `json:"total_requests"`
 }
+
+// ChannelQuotaMetrics represents quota-based statistics for a channel
+type ChannelQuotaMetrics struct {
+	ChannelId       int     `json:"channel_id"`
+	ChannelName     string  `json:"channel_name"`
+	TotalRequests   int     `json:"total_requests"`
+	TotalQuota      int64   `json:"total_quota"`       // Total quota consumed
+	TotalQuotaUSD   float64 `json:"total_quota_usd"`   // Total quota in USD
+	AvgQuota        float64 `json:"avg_quota"`         // Average quota per request
+	AvgQuotaUSD     float64 `json:"avg_quota_usd"`     // Average quota in USD per request
+	TotalTokens     int64   `json:"total_tokens"`      // Total tokens (prompt + completion)
+	PromptTokens    int64   `json:"prompt_tokens"`     // Total prompt tokens
+	CompletionTokens int64  `json:"completion_tokens"` // Total completion tokens
+}
+
+// QuotaTrendPoint represents quota consumption trend for a specific date
+type QuotaTrendPoint struct {
+	Date          string  `json:"date"`           // YYYY-MM-DD
+	TotalQuota    int64   `json:"total_quota"`    // Total quota consumed
+	TotalQuotaUSD float64 `json:"total_quota_usd"` // Total quota in USD
+	RequestCount  int     `json:"request_count"`  // Number of requests
+	AvgQuota      float64 `json:"avg_quota"`      // Average quota per request
+	AvgQuotaUSD   float64 `json:"avg_quota_usd"`  // Average quota in USD per request
+}
+
+// ChannelQuotaAnalysisResponse represents the complete quota-based channel analysis
+type ChannelQuotaAnalysisResponse struct {
+	Channels    []ChannelQuotaMetrics `json:"channels"`
+	Summary     ChannelQuotaSummary   `json:"summary"`
+	DataQuality DataQuality           `json:"data_quality"`
+}
+
+// ChannelQuotaSummary represents overall quota summary across all channels
+type ChannelQuotaSummary struct {
+	TotalRequests int     `json:"total_requests"`
+	TotalQuota    int64   `json:"total_quota"`
+	TotalQuotaUSD float64 `json:"total_quota_usd"`
+	AvgQuota      float64 `json:"avg_quota"`
+	AvgQuotaUSD   float64 `json:"avg_quota_usd"`
+}
+
+// ChannelDailyQuotaPoint represents daily quota consumption for a single channel
+type ChannelDailyQuotaPoint struct {
+	Date          string  `json:"date"`           // YYYY-MM-DD
+	ChannelId     int     `json:"channel_id"`
+	ChannelName   string  `json:"channel_name"`
+	TotalQuota    int64   `json:"total_quota"`    // Total quota consumed on this day
+	TotalQuotaUSD float64 `json:"total_quota_usd"` // Total quota in USD
+	RequestCount  int     `json:"request_count"`  // Number of requests
+	AvgQuota      float64 `json:"avg_quota"`      // Average quota per request
+	AvgQuotaUSD   float64 `json:"avg_quota_usd"`  // Average quota in USD per request
+}
+
+// ChannelDailyQuotaTrendResponse represents daily quota consumption trends by channel
+type ChannelDailyQuotaTrendResponse struct {
+	Trends []ChannelDailyQuotaPoint `json:"trends"`
+}

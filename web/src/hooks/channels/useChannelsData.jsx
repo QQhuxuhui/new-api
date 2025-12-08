@@ -808,9 +808,29 @@ export const useChannelsData = () => {
       updateChannelProperty(record.id, (channel) => {
         channel.balance = balance;
         channel.balance_updated_time = Date.now() / 1000;
+        channel.manual_balance = false; // 清除手动标记
       });
       showInfo(
         t('通道 ${name} 余额更新成功！').replace('${name}', record.name),
+      );
+    } else {
+      showError(message);
+    }
+  };
+
+  const setChannelBalanceManually = async (record, balance) => {
+    const res = await API.post(`/api/channel/set_balance/${record.id}/`, {
+      balance: balance,
+    });
+    const { success, message } = res.data;
+    if (success) {
+      updateChannelProperty(record.id, (channel) => {
+        channel.balance = balance;
+        channel.balance_updated_time = Date.now() / 1000;
+        channel.manual_balance = true;
+      });
+      showSuccess(
+        t('通道 ${name} 余额已手动设置为 ${balance}').replace('${name}', record.name).replace('${balance}', balance),
       );
     } else {
       showError(message);
@@ -1189,6 +1209,7 @@ export const useChannelsData = () => {
     deleteAllDisabledChannels,
     updateAllChannelsBalance,
     updateChannelBalance,
+    setChannelBalanceManually,
     fixChannelsAbilities,
     testChannel,
     batchTestModels,
