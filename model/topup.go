@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 
+	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
@@ -61,6 +62,7 @@ func Recharge(referenceId string, customerId string) (err error) {
 	}
 
 	var quota float64
+	var alreadyCompleted bool // 标记订单是否已经完成
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -72,6 +74,12 @@ func Recharge(referenceId string, customerId string) (err error) {
 		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", referenceId).First(topUp).Error
 		if err != nil {
 			return errors.New("充值订单不存在")
+		}
+
+		// 幂等处理：订单已成功则直接返回
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyCompleted = true
+			return nil
 		}
 
 		if topUp.Status != common.TopUpStatusPending {
@@ -97,6 +105,19 @@ func Recharge(referenceId string, customerId string) (err error) {
 	if err != nil {
 		return errors.New("充值失败，" + err.Error())
 	}
+
+	// 如果订单已经完成，直接返回，不重复执行缓存和日志
+	if alreadyCompleted {
+		return nil
+	}
+
+	// 异步更新Redis缓存
+	gopool.Go(func() {
+		err := cacheIncrUserQuota(topUp.UserId, int64(quota))
+		if err != nil {
+			common.SysLog("failed to update user quota cache after Stripe recharge: " + err.Error())
+		}
+	})
 
 	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount))
 
@@ -248,6 +269,7 @@ func ManualCompleteTopUp(tradeNo string) error {
 	var userId int
 	var quotaToAdd int
 	var payMoney float64
+	var alreadyCompleted bool // 标记订单是否已经完成
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		topUp := &TopUp{}
@@ -258,6 +280,7 @@ func ManualCompleteTopUp(tradeNo string) error {
 
 		// 幂等处理：已成功直接返回
 		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyCompleted = true
 			return nil
 		}
 
@@ -301,6 +324,19 @@ func ManualCompleteTopUp(tradeNo string) error {
 		return err
 	}
 
+	// 如果订单已经完成，直接返回，不执行缓存和日志
+	if alreadyCompleted {
+		return nil
+	}
+
+	// 异步更新Redis缓存
+	gopool.Go(func() {
+		err := cacheIncrUserQuota(userId, int64(quotaToAdd))
+		if err != nil {
+			common.SysLog("failed to update user quota cache after manual topup: " + err.Error())
+		}
+	})
+
 	// 事务外记录日志，避免阻塞
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney))
 	return nil
@@ -311,6 +347,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	}
 
 	var quota int64
+	var alreadyCompleted bool // 标记订单是否已经完成
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -322,6 +359,12 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", referenceId).First(topUp).Error
 		if err != nil {
 			return errors.New("充值订单不存在")
+		}
+
+		// 幂等处理：订单已成功则直接返回
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyCompleted = true
+			return nil
 		}
 
 		if topUp.Status != common.TopUpStatusPending {
@@ -370,7 +413,93 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		return errors.New("充值失败，" + err.Error())
 	}
 
+	// 如果订单已经完成，直接返回，不重复执行缓存和日志
+	if alreadyCompleted {
+		return nil
+	}
+
+	// 异步更新Redis缓存
+	gopool.Go(func() {
+		err := cacheIncrUserQuota(topUp.UserId, quota)
+		if err != nil {
+			common.SysLog("failed to update user quota cache after Creem recharge: " + err.Error())
+		}
+	})
+
 	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money))
+
+	return nil
+}
+
+// RechargeEpay 易支付充值成功后的处理（使用事务保证原子性）
+func RechargeEpay(referenceId string) (err error) {
+	if referenceId == "" {
+		return errors.New("未提供支付单号")
+	}
+
+	var quota int
+	var alreadyCompleted bool // 标记订单是否已经完成
+	topUp := &TopUp{}
+
+	refCol := "`trade_no`"
+	if common.UsingPostgreSQL {
+		refCol = `"trade_no"`
+	}
+
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", referenceId).First(topUp).Error
+		if err != nil {
+			return errors.New("充值订单不存在")
+		}
+
+		// 幂等处理：订单已成功则直接返回
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyCompleted = true
+			return nil
+		}
+
+		if topUp.Status != common.TopUpStatusPending {
+			return errors.New("充值订单状态错误")
+		}
+
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		err = tx.Save(topUp).Error
+		if err != nil {
+			return err
+		}
+
+		// 计算充值额度（参考原有的计算逻辑）
+		dAmount := decimal.NewFromInt(int64(topUp.Amount))
+		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+		quota = int(dAmount.Mul(dQuotaPerUnit).IntPart())
+
+		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quota)).Error
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return errors.New("充值失败，" + err.Error())
+	}
+
+	// 如果订单已经完成，直接返回，不重复执行缓存和日志
+	if alreadyCompleted {
+		return nil
+	}
+
+	// 异步更新Redis缓存
+	gopool.Go(func() {
+		err := cacheIncrUserQuota(topUp.UserId, int64(quota))
+		if err != nil {
+			common.SysLog("failed to update user quota cache after Epay recharge: " + err.Error())
+		}
+	})
+
+	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用易支付充值成功，充值额度: %v，支付金额：%.2f", logger.FormatQuota(quota), topUp.Money))
 
 	return nil
 }

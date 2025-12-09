@@ -264,27 +264,41 @@ func RecordChannelFailure(channelID int, statusCode int, errorMessage string) er
 	common.SysLog(fmt.Sprintf("Channel %d high failure rate: %s, counting consecutive period",
 		channelID, reason))
 
-	// Increment consecutive failures (now represents consecutive high-failure-rate periods)
+	// Use Lua script to atomically increment and check thresholds (fix TOCTOU race condition)
 	failuresKey := fmt.Sprintf(keyFailures, channelID)
-	failures, err := rdb.Incr(ctx, failuresKey).Result()
+	lastFailureKey := fmt.Sprintf(keyLastFailure, channelID)
+	totalFailuresKey := fmt.Sprintf(keyTotalFailures, channelID)
+
+	// Lua script: atomically increment failures, record timestamp, and return action needed
+	// Returns: 0 = no action, 1 = suspend, 2 = disable
+	luaScript := redis.NewScript(`
+		local failures = redis.call('INCR', KEYS[1])
+		redis.call('SET', KEYS[2], ARGV[1])
+		redis.call('INCR', KEYS[3])
+		local suspendThreshold = tonumber(ARGV[2])
+		local disableThreshold = tonumber(ARGV[3])
+		if failures >= disableThreshold then
+			return 2
+		elseif failures >= suspendThreshold then
+			return 1
+		end
+		return 0
+	`)
+
+	action, err := luaScript.Run(ctx, rdb,
+		[]string{failuresKey, lastFailureKey, totalFailuresKey},
+		time.Now().Unix(), SuspensionThreshold, DisableThreshold,
+	).Int()
+
 	if err != nil {
 		return err
 	}
 
-	// Record timestamp
-	lastFailureKey := fmt.Sprintf(keyLastFailure, channelID)
-	rdb.Set(ctx, lastFailureKey, time.Now().Unix(), 0)
-
-	// Increment total failures
-	totalFailuresKey := fmt.Sprintf(keyTotalFailures, channelID)
-	rdb.Incr(ctx, totalFailuresKey)
-
-	// Check thresholds
-	if failures >= DisableThreshold {
-		// Permanently disable channel
+	// Execute action based on Lua script result
+	switch action {
+	case 2:
 		return disableChannelPermanently(channelID)
-	} else if failures >= SuspensionThreshold {
-		// Temporarily suspend channel
+	case 1:
 		return suspendChannel(channelID)
 	}
 

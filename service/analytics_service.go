@@ -961,3 +961,134 @@ func GetUserBalanceAnalysis(timeRange string, limit int) (*dto.UserBalanceAnalys
 		Rankings:     rankings,
 	}, nil
 }
+
+// GetUserDailyConsumptionTrend returns daily consumption trends grouped by user
+func GetUserDailyConsumptionTrend(timeRange string, userIds []int, username string) (*dto.UserDailyConsumptionTrendResponse, error) {
+	startTime, endTime := ParseTimeRange(timeRange)
+	cacheKey := fmt.Sprintf("%suser_daily_consumption_trend:%s:%v:%s", analyticsCachePrefix, timeRange, userIds, username)
+
+	var result dto.UserDailyConsumptionTrendResponse
+	if getCachedData(cacheKey, &result) {
+		return &result, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get user information
+	var users []model.User
+	userInfoMap := make(map[int]model.User)
+
+	userQuery := model.DB.WithContext(ctx).Select("id, username, display_name")
+
+	// Apply filters
+	if len(userIds) > 0 {
+		userQuery = userQuery.Where("id IN ?", userIds)
+	}
+	if username != "" {
+		userQuery = userQuery.Where("username LIKE ?", "%"+username+"%")
+	}
+
+	if err := userQuery.Find(&users).Error; err != nil {
+		return nil, err
+	}
+
+	if len(users) == 0 {
+		return &dto.UserDailyConsumptionTrendResponse{Trends: []dto.UserDailyConsumptionPoint{}}, nil
+	}
+
+	for _, u := range users {
+		userInfoMap[u.Id] = u
+	}
+
+	// Get user IDs for query
+	filteredUserIds := make([]int, 0, len(users))
+	for _, u := range users {
+		filteredUserIds = append(filteredUserIds, u.Id)
+	}
+
+	// Use database aggregation with GROUP BY and ORDER BY
+	type AggregatedResult struct {
+		Date         string
+		UserId       int
+		TotalQuota   int64
+		RequestCount int
+	}
+
+	var aggregatedResults []AggregatedResult
+
+	// Use database-specific date conversion based on LOG database type
+	var query string
+	switch common.LogSqlType {
+	case common.DatabaseTypeMySQL:
+		query = `
+			SELECT
+				DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'), '%Y-%m-%d') as date,
+				user_id,
+				SUM(quota) as total_quota,
+				COUNT(*) as request_count
+			FROM logs
+			WHERE created_at >= ? AND created_at <= ? AND type = ? AND user_id IN ?
+			GROUP BY DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'), '%Y-%m-%d'), user_id
+			ORDER BY date ASC, user_id ASC
+		`
+	case common.DatabaseTypePostgreSQL:
+		query = `
+			SELECT
+				to_char(to_timestamp(created_at) at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
+				user_id,
+				SUM(quota) as total_quota,
+				COUNT(*) as request_count
+			FROM logs
+			WHERE created_at >= ? AND created_at <= ? AND type = ? AND user_id IN ?
+			GROUP BY to_char(to_timestamp(created_at) at time zone 'Asia/Shanghai', 'YYYY-MM-DD'), user_id
+			ORDER BY date ASC, user_id ASC
+		`
+	default:
+		query = `
+			SELECT
+				DATE(DATETIME(created_at, 'unixepoch', '+8 hours')) as date,
+				user_id,
+				SUM(quota) as total_quota,
+				COUNT(*) as request_count
+			FROM logs
+			WHERE created_at >= ? AND created_at <= ? AND type = ? AND user_id IN (?)
+			GROUP BY DATE(DATETIME(created_at, 'unixepoch', '+8 hours')), user_id
+			ORDER BY date ASC, user_id ASC
+		`
+	}
+
+	err := model.LOG_DB.WithContext(ctx).Raw(query, startTime, endTime, model.LogTypeConsume, filteredUserIds).Scan(&aggregatedResults).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert aggregated results to UserDailyConsumptionPoint
+	result.Trends = make([]dto.UserDailyConsumptionPoint, 0, len(aggregatedResults))
+	for _, aggResult := range aggregatedResults {
+		point := dto.UserDailyConsumptionPoint{
+			Date:         aggResult.Date,
+			UserId:       aggResult.UserId,
+			TotalQuota:   aggResult.TotalQuota,
+			RequestCount: aggResult.RequestCount,
+		}
+
+		// Set user information
+		if user, ok := userInfoMap[aggResult.UserId]; ok {
+			point.Username = user.Username
+			point.DisplayName = user.DisplayName
+		} else {
+			point.Username = fmt.Sprintf("User %d", aggResult.UserId)
+			point.DisplayName = ""
+		}
+
+		// Calculate USD value
+		point.TotalQuotaUSD = common.QuotaToUSD(int(aggResult.TotalQuota))
+
+		result.Trends = append(result.Trends, point)
+	}
+
+	setCachedData(cacheKey, result, analyticsCacheTTLMedium)
+	return &result, nil
+}
+

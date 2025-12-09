@@ -173,7 +173,8 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 			if !common.MemoryCacheEnabled {
 				_ = channel.SaveChannelInfo()
 			} else {
-				// CacheUpdateChannel(channel)
+				// async persist polling index to database for recovery after restart
+				UpdatePollingIndexAsync(channel.Id, channel.ChannelInfo.MultiKeyPollingIndex)
 			}
 		}()
 		// Start from the saved polling index and look for the next enabled key

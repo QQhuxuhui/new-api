@@ -444,3 +444,19 @@ type ChannelDailyQuotaPoint struct {
 type ChannelDailyQuotaTrendResponse struct {
 	Trends []ChannelDailyQuotaPoint `json:"trends"`
 }
+
+// UserDailyConsumptionPoint represents daily consumption data for a single user
+type UserDailyConsumptionPoint struct {
+	Date          string  `json:"date"`            // YYYY-MM-DD
+	UserId        int     `json:"user_id"`
+	Username      string  `json:"username"`
+	DisplayName   string  `json:"display_name"`
+	TotalQuota    int64   `json:"total_quota"`     // Total quota consumed on this day
+	TotalQuotaUSD float64 `json:"total_quota_usd"` // Total quota in USD
+	RequestCount  int     `json:"request_count"`   // Number of requests
+}
+
+// UserDailyConsumptionTrendResponse represents daily consumption trends by user
+type UserDailyConsumptionTrendResponse struct {
+	Trends []UserDailyConsumptionPoint `json:"trends"`
+}

@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -23,6 +24,10 @@ const (
 var batchUpdateStores []map[int]int
 var batchUpdateLocks []sync.Mutex
 
+// pollingIndexStore stores the latest polling index for each channel (uses override, not accumulation)
+var pollingIndexStore = make(map[int]int) // channelId -> pollingIndex
+var pollingIndexLock sync.Mutex
+
 func init() {
 	for i := 0; i < BatchUpdateTypeCount; i++ {
 		batchUpdateStores = append(batchUpdateStores, make(map[int]int))
@@ -37,6 +42,14 @@ func InitBatchUpdater() {
 			batchUpdate()
 		}
 	})
+	// Periodically cleanup stale channel polling locks (every hour)
+	gopool.Go(func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			CleanupChannelPollingLocks()
+			common.SysLog("channel polling locks cleanup completed")
+		}
+	})
 }
 
 func addNewRecord(type_ int, id int, value int) {
@@ -47,6 +60,21 @@ func addNewRecord(type_ int, id int, value int) {
 	} else {
 		batchUpdateStores[type_][id] += value
 	}
+}
+
+// UpdatePollingIndexAsync queues a polling index update for async batch persistence
+// If batch update is disabled, it falls back to synchronous database update
+func UpdatePollingIndexAsync(channelId int, index int) {
+	if !common.BatchUpdateEnabled {
+		// Batch update disabled, fall back to sync update
+		if err := updateChannelPollingIndex(channelId, index); err != nil {
+			common.SysLog(fmt.Sprintf("failed to sync update polling index: channel_id=%d, error=%v", channelId, err))
+		}
+		return
+	}
+	pollingIndexLock.Lock()
+	defer pollingIndexLock.Unlock()
+	pollingIndexStore[channelId] = index
 }
 
 func batchUpdate() {
@@ -62,7 +90,12 @@ func batchUpdate() {
 		batchUpdateLocks[i].Unlock()
 	}
 
-	if !hasData {
+	// also check polling index store
+	pollingIndexLock.Lock()
+	hasPollingData := len(pollingIndexStore) > 0
+	pollingIndexLock.Unlock()
+
+	if !hasData && !hasPollingData {
 		return
 	}
 
@@ -72,16 +105,22 @@ func batchUpdate() {
 		store := batchUpdateStores[i]
 		batchUpdateStores[i] = make(map[int]int)
 		batchUpdateLocks[i].Unlock()
-		// TODO: maybe we can combine updates with same key?
+
+		if len(store) == 0 {
+			continue
+		}
+
+		// Update records one by one; failed records are re-queued for next batch
 		for key, value := range store {
+			var err error
 			switch i {
 			case BatchUpdateTypeUserQuota:
-				err := increaseUserQuota(key, value)
+				err = increaseUserQuota(key, value)
 				if err != nil {
 					common.SysLog("failed to batch update user quota: " + err.Error())
 				}
 			case BatchUpdateTypeTokenQuota:
-				err := increaseTokenQuota(key, value)
+				err = increaseTokenQuota(key, value)
 				if err != nil {
 					common.SysLog("failed to batch update token quota: " + err.Error())
 				}
@@ -92,9 +131,37 @@ func batchUpdate() {
 			case BatchUpdateTypeChannelUsedQuota:
 				updateChannelUsedQuota(key, value)
 			}
+			// Re-queue failed records for retry in next batch
+			if err != nil {
+				addNewRecord(i, key, value)
+			}
 		}
 	}
+
+	// Persist polling indexes
+	pollingIndexLock.Lock()
+	pollingStore := pollingIndexStore
+	pollingIndexStore = make(map[int]int)
+	pollingIndexLock.Unlock()
+	for channelId, index := range pollingStore {
+		err := updateChannelPollingIndex(channelId, index)
+		if err != nil {
+			common.SysLog("failed to batch update polling index: " + err.Error())
+		}
+	}
+
 	common.SysLog("batch update finished")
+}
+
+// updateChannelPollingIndex persists the polling index for a channel to database
+func updateChannelPollingIndex(channelId int, index int) error {
+	var channel Channel
+	err := DB.Select("id", "channel_info").First(&channel, channelId).Error
+	if err != nil {
+		return err
+	}
+	channel.ChannelInfo.MultiKeyPollingIndex = index
+	return DB.Model(&channel).Update("channel_info", channel.ChannelInfo).Error
 }
 
 func RecordExist(err error) (bool, error) {
