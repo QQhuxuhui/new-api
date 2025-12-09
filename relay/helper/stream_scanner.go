@@ -97,27 +97,28 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			pingTicker.Stop()
 		}
 
-		// 2. 设置立即超时，强制中断任何阻塞的写操作
-		_ = rc.SetWriteDeadline(time.Now())
-
-		// 3. 等待所有生产者退出（确保不会再向 taskChan 发送）
+		// 2. 等待所有生产者退出（确保不会再向 taskChan 发送）
 		producerDone := make(chan struct{})
 		go func() {
 			producerWg.Wait()
 			close(producerDone)
 		}()
 
+		producerTimeout := false
 		select {
 		case <-producerDone:
 			// 生产者已全部退出
 		case <-time.After(5 * time.Second):
 			logger.LogError(c, "timeout waiting for producers to exit")
+			producerTimeout = true
+			// 只在超时时强制关闭连接
+			_ = rc.SetWriteDeadline(time.Now())
 		}
 
-		// 4. 关闭任务通道（此时没有生产者会发送了）
+		// 3. 关闭任务通道（此时没有生产者会发送了）
 		close(taskChan)
 
-		// 5. 等待 writer 退出
+		// 4. 等待 writer 退出
 		writerDone := make(chan struct{})
 		go func() {
 			writerWg.Wait()
@@ -129,6 +130,10 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			// writer 已退出
 		case <-time.After(5 * time.Second):
 			logger.LogError(c, "timeout waiting for writer to exit")
+			// 只在超时且之前没设置的情况下强制关闭连接
+			if !producerTimeout {
+				_ = rc.SetWriteDeadline(time.Now())
+			}
 		}
 
 		close(stopChan)
