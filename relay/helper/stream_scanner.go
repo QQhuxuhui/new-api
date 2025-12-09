@@ -25,7 +25,21 @@ const (
 	InitialScannerBufferSize = 64 << 10 // 64KB (64*1024)
 	MaxScannerBufferSize     = 10 << 20 // 10MB (10*1024*1024)
 	DefaultPingInterval      = 10 * time.Second
+	WriteTimeout             = 10 * time.Second
 )
+
+// writeTask 表示一个写任务
+type writeTask struct {
+	taskType   int    // 0: ping, 1: data
+	data       string // 仅 data 任务使用
+	resultChan chan writeResult
+}
+
+// writeResult 表示写任务的结果
+type writeResult struct {
+	success bool
+	err     error
+}
 
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string) bool) {
 
@@ -43,12 +57,13 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
 
 	var (
-		stopChan   = make(chan bool, 3) // 增加缓冲区避免阻塞
+		stopChan   = make(chan bool, 3)      // 增加缓冲区避免阻塞
 		scanner    = bufio.NewScanner(resp.Body)
 		ticker     = time.NewTicker(streamingTimeout)
 		pingTicker *time.Ticker
-		writeMutex sync.Mutex     // Mutex to protect concurrent writes
-		wg         sync.WaitGroup // 用于等待所有 goroutine 退出
+		taskChan   = make(chan writeTask, 10) // 任务队列
+		producerWg sync.WaitGroup             // 生产者（ping + scanner）等待组
+		writerWg   sync.WaitGroup             // 消费者（writer）等待组
 	)
 
 	generalSettings := operation_setting.GetGeneralSetting()
@@ -69,9 +84,12 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		println("ping interval seconds:", int64(pingInterval.Seconds()))
 	}
 
+	// 获取 ResponseController 用于设置写超时
+	rc := http.NewResponseController(c.Writer)
+
 	// 改进资源清理，确保所有 goroutine 正确退出
 	defer func() {
-		// 通知所有 goroutine 停止
+		// 1. 通知所有 goroutine 停止
 		common.SafeSendBool(stopChan, true)
 
 		ticker.Stop()
@@ -79,17 +97,38 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			pingTicker.Stop()
 		}
 
-		// 等待所有 goroutine 退出，最多等待5秒
-		done := make(chan struct{})
+		// 2. 设置立即超时，强制中断任何阻塞的写操作
+		_ = rc.SetWriteDeadline(time.Now())
+
+		// 3. 等待所有生产者退出（确保不会再向 taskChan 发送）
+		producerDone := make(chan struct{})
 		go func() {
-			wg.Wait()
-			close(done)
+			producerWg.Wait()
+			close(producerDone)
 		}()
 
 		select {
-		case <-done:
+		case <-producerDone:
+			// 生产者已全部退出
 		case <-time.After(5 * time.Second):
-			logger.LogError(c, "timeout waiting for goroutines to exit")
+			logger.LogError(c, "timeout waiting for producers to exit")
+		}
+
+		// 4. 关闭任务通道（此时没有生产者会发送了）
+		close(taskChan)
+
+		// 5. 等待 writer 退出
+		writerDone := make(chan struct{})
+		go func() {
+			writerWg.Wait()
+			close(writerDone)
+		}()
+
+		select {
+		case <-writerDone:
+			// writer 已退出
+		case <-time.After(5 * time.Second):
+			logger.LogError(c, "timeout waiting for writer to exit")
 		}
 
 		close(stopChan)
@@ -104,12 +143,84 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	ctx = context.WithValue(ctx, "stop_chan", stopChan)
 
-	// Handle ping data sending with improved error handling
+	// Worker goroutine: 处理所有写操作
+	writerWg.Add(1)
+	gopool.Go(func() {
+		defer func() {
+			writerWg.Done()
+			if r := recover(); r != nil {
+				logger.LogError(c, fmt.Sprintf("writer goroutine panic: %v", r))
+				common.SafeSendBool(stopChan, true)
+			}
+			if common.DebugEnabled {
+				println("writer goroutine exited")
+			}
+		}()
+
+		for {
+			select {
+			case task, ok := <-taskChan:
+				if !ok {
+					// taskChan 已关闭，退出
+					return
+				}
+
+				// 为每个写操作设置超时
+				deadline := time.Now().Add(WriteTimeout)
+				if err := rc.SetWriteDeadline(deadline); err != nil {
+					// 如果设置失败，记录但继续执行
+					if common.DebugEnabled {
+						println("failed to set write deadline:", err.Error())
+					}
+				}
+
+				var result writeResult
+				if task.taskType == 0 {
+					// ping 任务
+					result.err = PingData(c)
+					result.success = result.err == nil
+				} else {
+					// data 任务
+					result.success = dataHandler(task.data)
+				}
+
+				// 清除写超时（设置为零值表示无限制）
+				_ = rc.SetWriteDeadline(time.Time{})
+
+				// 非阻塞发送结果
+				select {
+				case task.resultChan <- result:
+				default:
+					// 如果没有接收者（调用方已超时），忽略
+				}
+
+			case <-stopChan:
+				// 收到停止信号，排空剩余任务后退出
+				for {
+					select {
+					case task, ok := <-taskChan:
+						if !ok {
+							return
+						}
+						// 对剩余任务返回失败
+						select {
+						case task.resultChan <- writeResult{success: false}:
+						default:
+						}
+					default:
+						return
+					}
+				}
+			}
+		}
+	})
+
+	// Handle ping data sending
 	if pingEnabled && pingTicker != nil {
-		wg.Add(1)
+		producerWg.Add(1)
 		gopool.Go(func() {
 			defer func() {
-				wg.Done()
+				producerWg.Done()
 				if r := recover(); r != nil {
 					logger.LogError(c, fmt.Sprintf("ping goroutine panic: %v", r))
 					common.SafeSendBool(stopChan, true)
@@ -120,44 +231,57 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}()
 
 			// 添加超时保护，防止 goroutine 无限运行
-			maxPingDuration := 30 * time.Minute // 最大 ping 持续时间
+			maxPingDuration := 30 * time.Minute
 			pingTimeout := time.NewTimer(maxPingDuration)
 			defer pingTimeout.Stop()
 
 			for {
 				select {
 				case <-pingTicker.C:
-					// 使用超时机制防止写操作阻塞
-					done := make(chan error, 1)
-					go func() {
-						writeMutex.Lock()
-						defer writeMutex.Unlock()
-						done <- PingData(c)
-					}()
+					resultChan := make(chan writeResult, 1)
+					task := writeTask{
+						taskType:   0,
+						resultChan: resultChan,
+					}
 
+					// 发送任务（带取消检查）
 					select {
-					case err := <-done:
-						if err != nil {
-							logger.LogError(c, "ping data error: "+err.Error())
+					case taskChan <- task:
+						// 任务发送成功
+					case <-ctx.Done():
+						return
+					case <-stopChan:
+						return
+					case <-c.Request.Context().Done():
+						return
+					}
+
+					// 等待结果或超时
+					select {
+					case result := <-resultChan:
+						if result.err != nil {
+							logger.LogError(c, "ping data error: "+result.err.Error())
 							return
 						}
 						if common.DebugEnabled {
 							println("ping data sent")
 						}
-					case <-time.After(10 * time.Second):
+					case <-time.After(WriteTimeout):
 						logger.LogError(c, "ping data send timeout")
 						return
 					case <-ctx.Done():
 						return
 					case <-stopChan:
 						return
+					case <-c.Request.Context().Done():
+						return
 					}
+
 				case <-ctx.Done():
 					return
 				case <-stopChan:
 					return
 				case <-c.Request.Context().Done():
-					// 监听客户端断开连接
 					return
 				case <-pingTimeout.C:
 					logger.LogError(c, "ping goroutine max duration reached")
@@ -167,11 +291,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		})
 	}
 
-	// Scanner goroutine with improved error handling
-	wg.Add(1)
+	// Scanner goroutine
+	producerWg.Add(1)
 	common.RelayCtxGo(ctx, func() {
 		defer func() {
-			wg.Done()
+			producerWg.Done()
 			if r := recover(); r != nil {
 				logger.LogError(c, fmt.Sprintf("scanner goroutine panic: %v", r))
 			}
@@ -199,44 +323,73 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				println(data)
 			}
 
-			if len(data) < 6 {
+			if len(data) < 5 {
 				continue
 			}
-			if data[:5] != "data:" && data[:6] != "[DONE]" {
+
+			// 先检查是否是裸 [DONE]（无 data: 前缀）
+			trimmedData := strings.TrimSuffix(data, "\r")
+			if trimmedData == "[DONE]" {
+				if common.DebugEnabled {
+					println("received bare [DONE], stopping scanner")
+				}
+				return
+			}
+
+			// 检查 data: 前缀
+			if !strings.HasPrefix(data, "data:") {
 				continue
 			}
+
+			// 移除 "data:" 前缀并处理
 			data = data[5:]
 			data = strings.TrimLeft(data, " ")
 			data = strings.TrimSuffix(data, "\r")
-			if !strings.HasPrefix(data, "[DONE]") {
-				info.SetFirstResponseTime()
 
-				// 使用超时机制防止写操作阻塞
-				done := make(chan bool, 1)
-				go func() {
-					writeMutex.Lock()
-					defer writeMutex.Unlock()
-					done <- dataHandler(data)
-				}()
-
-				select {
-				case success := <-done:
-					if !success {
-						return
-					}
-				case <-time.After(10 * time.Second):
-					logger.LogError(c, "data handler timeout")
-					return
-				case <-ctx.Done():
-					return
-				case <-stopChan:
-					return
-				}
-			} else {
-				// done, 处理完成标志，直接退出停止读取剩余数据防止出错
+			// 检查是否是 data: [DONE]
+			if data == "[DONE]" || strings.HasPrefix(data, "[DONE]") {
 				if common.DebugEnabled {
 					println("received [DONE], stopping scanner")
 				}
+				return
+			}
+
+			info.SetFirstResponseTime()
+
+			// 创建结果通道并发送任务
+			resultChan := make(chan writeResult, 1)
+			task := writeTask{
+				taskType:   1,
+				data:       data,
+				resultChan: resultChan,
+			}
+
+			// 发送任务到 worker（带取消检查）
+			select {
+			case taskChan <- task:
+				// 任务发送成功
+			case <-ctx.Done():
+				return
+			case <-stopChan:
+				return
+			case <-c.Request.Context().Done():
+				return
+			}
+
+			// 等待结果或超时
+			select {
+			case result := <-resultChan:
+				if !result.success {
+					return
+				}
+			case <-time.After(WriteTimeout):
+				logger.LogError(c, "data handler timeout")
+				return
+			case <-ctx.Done():
+				return
+			case <-stopChan:
+				return
+			case <-c.Request.Context().Done():
 				return
 			}
 		}
