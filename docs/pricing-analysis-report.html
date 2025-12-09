@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API服务定价策略分析报告</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .canvas {
+            width: 1600px;
+            height: 900px;
+            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .content {
+            width: 1520px;
+            height: 820px;
+            display: grid;
+            grid-template-rows: auto 1fr;
+            gap: 24px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header .date {
+            font-size: 14px;
+            color: #64748b;
+            background: #f1f5f9;
+            padding: 8px 16px;
+            border-radius: 20px;
+        }
+
+        /* Main Grid */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 24px;
+            height: 100%;
+        }
+
+        /* Card Base */
+        .card {
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+            border: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-title .icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        /* Cost Structure Card */
+        .cost-structure .icon { background: #dbeafe; }
+
+        .cost-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            background: #f8fafc;
+            border-radius: 12px;
+            margin-bottom: 10px;
+        }
+
+        .cost-item:last-child { margin-bottom: 0; }
+
+        .cost-label {
+            font-size: 14px;
+            color: #475569;
+        }
+
+        .cost-value {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .cost-value.low { color: #10b981; }
+        .cost-value.mid { color: #f59e0b; }
+        .cost-value.high { color: #3b82f6; }
+
+        .cost-tag {
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            margin-left: 8px;
+        }
+
+        .tag-unstable { background: #fee2e2; color: #dc2626; }
+        .tag-stable { background: #dcfce7; color: #16a34a; }
+
+        /* Mixed Cost Card */
+        .mixed-cost .icon { background: #fef3c7; }
+
+        .cost-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .cost-table th {
+            background: #f1f5f9;
+            padding: 10px 8px;
+            text-align: center;
+            font-weight: 600;
+            color: #475569;
+            border-radius: 8px;
+        }
+
+        .cost-table td {
+            padding: 12px 8px;
+            text-align: center;
+            border-bottom: 1px solid #f1f5f9;
+            color: #334155;
+        }
+
+        .highlight-cell {
+            font-weight: 700;
+            color: #7c3aed !important;
+        }
+
+        .conclusion-box {
+            margin-top: auto;
+            padding: 16px;
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .conclusion-box .label {
+            font-size: 12px;
+            color: #92400e;
+            margin-bottom: 4px;
+        }
+
+        .conclusion-box .value {
+            font-size: 24px;
+            font-weight: 800;
+            color: #b45309;
+        }
+
+        /* Pricing Space Card */
+        .pricing-space .icon { background: #dcfce7; }
+
+        .price-bar {
+            position: relative;
+            height: 60px;
+            background: #f1f5f9;
+            border-radius: 12px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+
+        .price-range {
+            position: absolute;
+            left: 20%;
+            right: 30%;
+            top: 10px;
+            bottom: 10px;
+            background: linear-gradient(90deg, #10b981 0%, #34d399 50%, #6ee7b7 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .price-range-text {
+            color: white;
+            font-weight: 700;
+            font-size: 16px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+
+        .price-markers {
+            display: flex;
+            justify-content: space-between;
+            padding: 0 10px;
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .price-point {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: #f8fafc;
+            border-radius: 10px;
+            margin-bottom: 8px;
+        }
+
+        .price-point-label { color: #64748b; font-size: 13px; }
+        .price-point-value { font-weight: 700; color: #334155; }
+
+        /* Package Design Card - spans full width */
+        .package-design {
+            grid-column: 1 / -1;
+        }
+
+        .package-design .icon { background: #ede9fe; }
+
+        .packages-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            flex: 1;
+        }
+
+        .package-card {
+            background: linear-gradient(145deg, #f8fafc 0%, #ffffff 100%);
+            border: 2px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .package-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .package-card.recommended {
+            border-color: #7c3aed;
+            background: linear-gradient(145deg, #faf5ff 0%, #ffffff 100%);
+        }
+
+        .package-card.recommended::before {
+            content: '推荐';
+            position: absolute;
+            top: 12px;
+            right: -28px;
+            background: linear-gradient(135deg, #7c3aed 0%, #9333ea 100%);
+            color: white;
+            font-size: 11px;
+            padding: 4px 32px;
+            transform: rotate(45deg);
+        }
+
+        .package-name {
+            font-size: 18px;
+            font-weight: 700;
+            color: #334155;
+            margin-bottom: 8px;
+        }
+
+        .package-price {
+            font-size: 36px;
+            font-weight: 800;
+            color: #7c3aed;
+            line-height: 1;
+        }
+
+        .package-price span {
+            font-size: 16px;
+            font-weight: 500;
+            color: #94a3b8;
+        }
+
+        .package-quota {
+            margin: 16px 0;
+            padding: 12px;
+            background: #f1f5f9;
+            border-radius: 10px;
+        }
+
+        .package-quota .value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #334155;
+        }
+
+        .package-quota .unit {
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        .package-metrics {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+
+        .metric-label { color: #64748b; }
+        .metric-value { font-weight: 600; color: #334155; }
+        .metric-value.profit { color: #10b981; }
+
+        /* Summary Bar */
+        .summary-bar {
+            grid-column: 1 / -1;
+            display: flex;
+            gap: 24px;
+            padding: 20px 24px;
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            border-radius: 16px;
+            color: white;
+        }
+
+        .summary-item {
+            flex: 1;
+            text-align: center;
+            padding: 0 20px;
+            border-right: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .summary-item:last-child { border-right: none; }
+
+        .summary-label {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-bottom: 4px;
+        }
+
+        .summary-value {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .summary-value.green { color: #34d399; }
+        .summary-value.yellow { color: #fbbf24; }
+        .summary-value.blue { color: #60a5fa; }
+        .summary-value.purple { color: #a78bfa; }
+    </style>
+</head>
+<body>
+    <div class="canvas">
+        <div class="content">
+            <!-- Header -->
+            <div class="header">
+                <h1>API服务定价策略分析报告</h1>
+                <div class="date">生成日期：2025年12月</div>
+            </div>
+
+            <!-- Main Content Grid -->
+            <div class="main-grid">
+                <!-- Cost Structure -->
+                <div class="card cost-structure">
+                    <div class="card-title">
+                        <div class="icon">💰</div>
+                        上游成本结构
+                    </div>
+                    <div class="cost-item">
+                        <div>
+                            <div class="cost-label">订阅渠道</div>
+                            <small style="color: #94a3b8;">398元/月 · 3600美金额度</small>
+                        </div>
+                        <div>
+                            <span class="cost-value low">0.11</span>
+                            <span class="cost-tag tag-unstable">不稳定</span>
+                        </div>
+                    </div>
+                    <div class="cost-item">
+                        <div>
+                            <div class="cost-label">按量渠道</div>
+                            <small style="color: #94a3b8;">稳定兜底渠道</small>
+                        </div>
+                        <div>
+                            <span class="cost-value mid">0.35</span>
+                            <span class="cost-tag tag-stable">稳定</span>
+                        </div>
+                    </div>
+                    <div class="cost-item">
+                        <div>
+                            <div class="cost-label">当前售价（按量）</div>
+                            <small style="color: #94a3b8;">对外统一报价</small>
+                        </div>
+                        <div>
+                            <span class="cost-value high">0.50</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mixed Cost Analysis -->
+                <div class="card mixed-cost">
+                    <div class="card-title">
+                        <div class="icon">📊</div>
+                        混合成本测算
+                    </div>
+                    <table class="cost-table">
+                        <tr>
+                            <th>订阅可用率</th>
+                            <th>按量兜底</th>
+                            <th>混合成本</th>
+                        </tr>
+                        <tr>
+                            <td>80%</td>
+                            <td>252元</td>
+                            <td class="highlight-cell">0.18元</td>
+                        </tr>
+                        <tr>
+                            <td>60%</td>
+                            <td>504元</td>
+                            <td class="highlight-cell">0.25元</td>
+                        </tr>
+                        <tr>
+                            <td>50%</td>
+                            <td>630元</td>
+                            <td class="highlight-cell">0.29元</td>
+                        </tr>
+                    </table>
+                    <div class="conclusion-box">
+                        <div class="label">保守估计混合成本</div>
+                        <div class="value">0.25 ~ 0.30 元/美金</div>
+                    </div>
+                </div>
+
+                <!-- Pricing Space -->
+                <div class="card pricing-space">
+                    <div class="card-title">
+                        <div class="icon">🎯</div>
+                        订阅定价空间
+                    </div>
+                    <div class="price-bar">
+                        <div class="price-range">
+                            <span class="price-range-text">定价区间</span>
+                        </div>
+                    </div>
+                    <div class="price-markers">
+                        <span>0.25</span>
+                        <span>0.30</span>
+                        <span>0.35</span>
+                        <span>0.40</span>
+                        <span>0.45</span>
+                        <span>0.50</span>
+                    </div>
+                    <div style="margin-top: 20px;">
+                        <div class="price-point">
+                            <span class="price-point-label">混合成本</span>
+                            <span class="price-point-value">~0.25元</span>
+                        </div>
+                        <div class="price-point">
+                            <span class="price-point-label">建议售价</span>
+                            <span class="price-point-value" style="color: #7c3aed;">0.35~0.40元</span>
+                        </div>
+                        <div class="price-point">
+                            <span class="price-point-label">对比按量</span>
+                            <span class="price-point-value" style="color: #10b981;">便宜20-30%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Package Design -->
+                <div class="card package-design">
+                    <div class="card-title">
+                        <div class="icon">📦</div>
+                        推荐套餐设计
+                    </div>
+                    <div class="packages-grid">
+                        <div class="package-card">
+                            <div class="package-name">基础版</div>
+                            <div class="package-price">69<span>元/月</span></div>
+                            <div class="package-quota">
+                                <div class="value">180</div>
+                                <div class="unit">美金额度</div>
+                            </div>
+                            <div class="package-metrics">
+                                <div class="metric-row">
+                                    <span class="metric-label">折算单价</span>
+                                    <span class="metric-value">0.38元</span>
+                                </div>
+                                <div class="metric-row">
+                                    <span class="metric-label">预估毛利</span>
+                                    <span class="metric-value profit">~34%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="package-card recommended">
+                            <div class="package-name">标准版</div>
+                            <div class="package-price">129<span>元/月</span></div>
+                            <div class="package-quota">
+                                <div class="value">350</div>
+                                <div class="unit">美金额度</div>
+                            </div>
+                            <div class="package-metrics">
+                                <div class="metric-row">
+                                    <span class="metric-label">折算单价</span>
+                                    <span class="metric-value">0.37元</span>
+                                </div>
+                                <div class="metric-row">
+                                    <span class="metric-label">预估毛利</span>
+                                    <span class="metric-value profit">~32%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="package-card">
+                            <div class="package-name">专业版</div>
+                            <div class="package-price">249<span>元/月</span></div>
+                            <div class="package-quota">
+                                <div class="value">700</div>
+                                <div class="unit">美金额度</div>
+                            </div>
+                            <div class="package-metrics">
+                                <div class="metric-row">
+                                    <span class="metric-label">折算单价</span>
+                                    <span class="metric-value">0.36元</span>
+                                </div>
+                                <div class="metric-row">
+                                    <span class="metric-label">预估毛利</span>
+                                    <span class="metric-value profit">~31%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="package-card">
+                            <div class="package-name">旗舰版</div>
+                            <div class="package-price">449<span>元/月</span></div>
+                            <div class="package-quota">
+                                <div class="value">1300</div>
+                                <div class="unit">美金额度</div>
+                            </div>
+                            <div class="package-metrics">
+                                <div class="metric-row">
+                                    <span class="metric-label">折算单价</span>
+                                    <span class="metric-value">0.35元</span>
+                                </div>
+                                <div class="metric-row">
+                                    <span class="metric-label">预估毛利</span>
+                                    <span class="metric-value profit">~29%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary Bar -->
+                <div class="summary-bar">
+                    <div class="summary-item">
+                        <div class="summary-label">按量定价</div>
+                        <div class="summary-value blue">0.50元/美金</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-label">订阅定价区间</div>
+                        <div class="summary-value purple">0.35~0.38元/美金</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-label">订阅折扣力度</div>
+                        <div class="summary-value green">20~30% OFF</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-label">预估综合毛利</div>
+                        <div class="summary-value yellow">29~34%</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-label">额度用尽后</div>
+                        <div class="summary-value">按量计费 0.50元</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

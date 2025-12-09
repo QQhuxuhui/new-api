@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API服务多元化套餐定价方案</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+            min-height: 100vh;
+            padding: 40px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border-radius: 20px;
+            padding: 32px 40px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 36px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header .badge {
+            display: flex;
+            gap: 12px;
+        }
+
+        .tag {
+            font-size: 14px;
+            padding: 10px 20px;
+            border-radius: 24px;
+            font-weight: 500;
+        }
+
+        .tag-optimized { background: #dcfce7; color: #16a34a; }
+        .tag-date { background: #f1f5f9; color: #64748b; }
+
+        /* Info Cards Row */
+        .info-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .info-card {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 28px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-title .icon {
+            font-size: 24px;
+        }
+
+        /* Cost Model */
+        .cost-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .cost-item {
+            padding: 16px 20px;
+            background: #f8fafc;
+            border-radius: 14px;
+            text-align: center;
+        }
+
+        .cost-item.highlight {
+            background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+            grid-column: 1 / -1;
+        }
+
+        .cost-label {
+            font-size: 13px;
+            color: #64748b;
+            margin-bottom: 6px;
+        }
+
+        .cost-value {
+            font-size: 26px;
+            font-weight: 700;
+        }
+
+        .cost-value.green { color: #10b981; }
+        .cost-value.yellow { color: #f59e0b; }
+        .cost-value.blue { color: #3b82f6; }
+
+        /* User Types */
+        .user-list {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .user-type {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px 20px;
+            background: #f8fafc;
+            border-radius: 14px;
+        }
+
+        .user-icon {
+            font-size: 32px;
+        }
+
+        .user-info {
+            flex: 1;
+        }
+
+        .user-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: #334155;
+        }
+
+        .user-rec {
+            font-size: 14px;
+            color: #64748b;
+        }
+
+        .user-arrow {
+            color: #10b981;
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        /* Key Points */
+        .points-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .point-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 18px;
+            background: #f8fafc;
+            border-radius: 12px;
+            font-size: 14px;
+            color: #475569;
+        }
+
+        .point-check {
+            color: #10b981;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        /* Product Matrix */
+        .matrix-section {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 32px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            margin-bottom: 24px;
+        }
+
+        .matrix-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .matrix-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #334155;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .matrix-legend {
+            display: flex;
+            gap: 24px;
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot-high { background: #10b981; }
+        .dot-mid { background: #f59e0b; }
+        .dot-low { background: #f97316; }
+
+        /* Product Table */
+        .product-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 15px;
+        }
+
+        .product-table th {
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            padding: 16px 14px;
+            text-align: center;
+            font-weight: 600;
+            color: #475569;
+        }
+
+        .product-table th:first-child {
+            text-align: left;
+            padding-left: 24px;
+            border-radius: 12px 0 0 12px;
+        }
+
+        .product-table th:last-child {
+            border-radius: 0 12px 12px 0;
+        }
+
+        .product-table td {
+            padding: 16px 14px;
+            text-align: center;
+            border-bottom: 1px solid #f1f5f9;
+            color: #334155;
+        }
+
+        .product-table td:first-child {
+            text-align: left;
+            padding-left: 24px;
+        }
+
+        .product-table tbody tr:hover td {
+            background: #fafafa;
+        }
+
+        .product-name {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .product-badge {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+
+        .badge-hot { background: #fee2e2; color: #dc2626; }
+        .badge-rec { background: #f3e8ff; color: #7c3aed; }
+        .badge-vip { background: #dbeafe; color: #2563eb; }
+
+        .category-row td {
+            background: linear-gradient(90deg, #f8fafc 0%, #ffffff 100%);
+            font-weight: 600;
+            color: #6366f1;
+            padding: 14px 24px !important;
+            font-size: 14px;
+        }
+
+        .profit-bar {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .profit-fill {
+            height: 10px;
+            border-radius: 5px;
+            min-width: 20px;
+        }
+
+        .profit-high { background: linear-gradient(90deg, #10b981, #34d399); }
+        .profit-mid { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+        .profit-low { background: linear-gradient(90deg, #f97316, #fb923c); }
+
+        .highlight-row td {
+            background: linear-gradient(90deg, #faf5ff 0%, #ffffff 100%) !important;
+        }
+
+        .price-strong {
+            font-weight: 700;
+            color: #7c3aed;
+            font-size: 16px;
+        }
+
+        /* Price Gradient */
+        .gradient-section {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 32px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            margin-bottom: 24px;
+        }
+
+        .gradient-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 28px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .gradient-visual {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 0;
+            overflow-x: auto;
+        }
+
+        .gradient-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            min-width: 80px;
+        }
+
+        .node-price {
+            font-size: 20px;
+            font-weight: 700;
+            color: #334155;
+        }
+
+        .node-circle {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+            text-align: center;
+            line-height: 1.2;
+        }
+
+        .node-label {
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        .circle-1 { background: linear-gradient(135deg, #ef4444, #f97316); }
+        .circle-2 { background: linear-gradient(135deg, #f97316, #f59e0b); }
+        .circle-3 { background: linear-gradient(135deg, #f59e0b, #eab308); }
+        .circle-4 { background: linear-gradient(135deg, #eab308, #84cc16); }
+        .circle-5 { background: linear-gradient(135deg, #84cc16, #22c55e); }
+        .circle-6 { background: linear-gradient(135deg, #22c55e, #10b981); }
+        .circle-7 { background: linear-gradient(135deg, #10b981, #14b8a6); }
+        .circle-8 { background: linear-gradient(135deg, #14b8a6, #06b6d4); }
+        .circle-9 { background: linear-gradient(135deg, #06b6d4, #0ea5e9); }
+
+        .gradient-arrow {
+            color: #cbd5e1;
+            font-size: 28px;
+            margin: 0 8px;
+        }
+
+        .discount-tag {
+            font-size: 12px;
+            color: #10b981;
+            background: #dcfce7;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+
+        /* Bottom Summary */
+        .summary-bar {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 20px;
+        }
+
+        .summary-item {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+            color: white;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .summary-label {
+            font-size: 14px;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+
+        .summary-value {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .summary-value.green { color: #4ade80; }
+        .summary-value.yellow { color: #fbbf24; }
+        .summary-value.blue { color: #60a5fa; }
+        .summary-value.purple { color: #c4b5fd; }
+        .summary-value.pink { color: #f9a8d4; }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 32px 0 0;
+            color: #64748b;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📊 API服务多元化套餐定价方案</h1>
+            <div class="badge">
+                <span class="tag tag-optimized">✨ 优化版 v2.0</span>
+                <span class="tag tag-date">2025年12月</span>
+            </div>
+        </div>
+
+        <!-- Info Cards Row -->
+        <div class="info-row">
+            <!-- Cost Model -->
+            <div class="info-card">
+                <div class="card-title">
+                    <span class="icon">💰</span>
+                    混合成本模型
+                </div>
+                <div class="cost-grid">
+                    <div class="cost-item">
+                        <div class="cost-label">订阅渠道</div>
+                        <div class="cost-value green">0.11元</div>
+                    </div>
+                    <div class="cost-item">
+                        <div class="cost-label">按量渠道</div>
+                        <div class="cost-value yellow">0.35元</div>
+                    </div>
+                    <div class="cost-item">
+                        <div class="cost-label">订阅可用率</div>
+                        <div class="cost-value blue">~60%</div>
+                    </div>
+                    <div class="cost-item">
+                        <div class="cost-label">计算公式</div>
+                        <div style="font-size: 13px; color: #64748b; margin-top: 4px;">0.11×60% + 0.35×40%</div>
+                    </div>
+                    <div class="cost-item highlight">
+                        <div class="cost-label">📌 综合混合成本</div>
+                        <div class="cost-value green">0.22 元/美金</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Types -->
+            <div class="info-card">
+                <div class="card-title">
+                    <span class="icon">👥</span>
+                    用户画像与产品匹配
+                </div>
+                <div class="user-list">
+                    <div class="user-type">
+                        <span class="user-icon">🧘</span>
+                        <div class="user-info">
+                            <div class="user-name">佛系用户</div>
+                            <div class="user-rec">低频、随机、怕浪费</div>
+                        </div>
+                        <span class="user-arrow">→ 按量</span>
+                    </div>
+                    <div class="user-type">
+                        <span class="user-icon">🌊</span>
+                        <div class="user-info">
+                            <div class="user-name">波动用户</div>
+                            <div class="user-rec">时高时低、难预测</div>
+                        </div>
+                        <span class="user-arrow">→ 日/周卡</span>
+                    </div>
+                    <div class="user-type">
+                        <span class="user-icon">🔥</span>
+                        <div class="user-info">
+                            <div class="user-name">高频用户</div>
+                            <div class="user-rec">稳定高用量、成本敏感</div>
+                        </div>
+                        <span class="user-arrow">→ 月卡</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Key Points -->
+            <div class="info-card">
+                <div class="card-title">
+                    <span class="icon">💡</span>
+                    本次优化要点
+                </div>
+                <div class="points-list">
+                    <div class="point-item">
+                        <span class="point-check">✓</span>
+                        日卡降价至0.45元，比按量便宜10%
+                    </div>
+                    <div class="point-item">
+                        <span class="point-check">✓</span>
+                        旗舰月卡加大折扣至34%
+                    </div>
+                    <div class="point-item">
+                        <span class="point-check">✓</span>
+                        套餐超额自动按量计费，简单清晰
+                    </div>
+                    <div class="point-item">
+                        <span class="point-check">✓</span>
+                        价格梯度更平滑，转化更顺畅
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Product Matrix -->
+        <div class="matrix-section">
+            <div class="matrix-header">
+                <div class="matrix-title">
+                    <span>📦</span>
+                    完整产品矩阵（优化版）
+                </div>
+                <div class="matrix-legend">
+                    <div class="legend-item">
+                        <div class="legend-dot dot-high"></div>
+                        <span>高利润 50%+</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot dot-mid"></div>
+                        <span>中利润 40-50%</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot dot-low"></div>
+                        <span>低利润 &lt;40%</span>
+                    </div>
+                </div>
+            </div>
+            <table class="product-table">
+                <thead>
+                    <tr>
+                        <th style="width: 220px;">产品</th>
+                        <th>价格</th>
+                        <th>额度</th>
+                        <th>单价(元/美金)</th>
+                        <th>成本</th>
+                        <th>毛利</th>
+                        <th style="width: 180px;">毛利率</th>
+                        <th>有效期</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- 按量 -->
+                    <tr class="category-row">
+                        <td colspan="8">💳 按量付费</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div class="product-name">
+                                按量付费
+                                <span class="product-badge badge-hot">基准</span>
+                            </div>
+                        </td>
+                        <td>随用随扣</td>
+                        <td>不限</td>
+                        <td class="price-strong">0.50</td>
+                        <td>0.22</td>
+                        <td>0.28</td>
+                        <td>
+                            <div class="profit-bar">
+                                <div class="profit-fill profit-high" style="width: 56px;"></div>
+                                <span><strong>56%</strong></span>
+                            </div>
+                        </td>
+                        <td>永久</td>
+                    </tr>
+                    <!-- 日卡 -->
+                    <tr class="category-row">
+                        <td colspan="8">📅 日卡系列 — 适合波动用户临时高峰</td>
+                    </tr>
+                    <tr>
+                        <td><div class="product-name">日卡</div></td>
+                        <td>18元</td>
+                        <td>40美金</td>
+                        <td class="price-strong">0.45</td>
+                        <td>0.22</td>
+                        <td>0.23</td>
+                        <td>
+                            <div class="profit-bar">
+                                <div class="profit-fill profit-high" style="width: 51px;"></div>
+                                <span>51%</span>
+                            </div>
+                        </td>
+                        <td>24小时</td>
+                    </tr>
+                    <tr>
+                        <td><div class="product-name">3日卡</div></td>
+                        <td>46元</td>
+                        <td>110美金</td>
+                        <td class="price-strong">0.42</td>
+                        <td>0.22</td>
+                        <td>0.20</td>
+                        <td>
+                            <div class="profit-bar">
+                                <div class="profit-fill profit-mid" style="width: 48px;"></div>
+                                <span>48%</span>
+                            </div>
+                        </td>
+                        <td>72小时</td>
+                    </tr>
+                    <!-- 周卡 -->
+                    <tr class="category-row">
+                        <td colspan="8">📆 周卡系列 — 适合短期项目需求</td>
+                    </tr>
+                    <tr>
+                        <td><div class="product-name">周卡</div></td>
+                        <td>55元</td>
+                        <td>140美金</td>
+                        <td class="price-strong">0.39</td>
+                        <td>0.22</td>
+                        <td>0.17</td>
+                        <td>
+                            <div class="profit-bar">
+                                <div class="profit-fill profit-mid" style="width: 44px;"></div>
+                                <span>44%</span>
+                            </div>
+                        </td>
+                        <td>7天</td>
+                    </tr>
+                    <tr>
+                        <td><div class="product-name">双周卡</div></td>
+                        <td>95元</td>
+                        <td>250美金</td>
+                        <td class="price-strong">0.38</td>
+                        <td>0.22</td>
+                        <td>0.16</td>
+                        <td>
+                            <div class="profit-bar">
+                                <div class="profit-fill profit-mid" style="width: 42px;"></div>
+                                <span>42%</span>
+                            </div>
+                        </td>
+                        <td>14天</td>
+                    </tr>
+                    <!-- 月卡 -->
+                    <tr class="category-row">
+                        <td colspan="8">🗓️ 月卡系列 — 适合高频稳定用户</td>
+                    </tr>
+                    <tr>
+                        <td><div class="product-name">基础月卡</div></td>
+                        <td>69元</td>
+                        <td>180美金</td>
+                        <td class="price-strong">0.38</td>
+                        <td>0.22</td>
+                        <td>0.16</td>
+                        <td>
+                            <div class="profit-bar">
+                                <div class="profit-fill profit-mid" style="width: 42px;"></div>
+                                <span>42%</span>
+                            </div>
+                        </td>
+                        <td>30天</td>
+                    </tr>
+                    <tr class="highlight-row">
+                        <td>
+                            <div class="product-name">
+                                标准月卡
+                                <span class="product-badge badge-rec">⭐ 推荐</span>
+                            </div>
+                        </td>
+                        <td>129元</td>
+                        <td>350美金</td>
+                        <td class="price-strong">0.37</td>
+                        <td>0.22</td>
+                        <td>0.15</td>
+                        <td>
+                            <div class="profit-bar">
+                                <div class="profit-fill profit-mid" style="width: 41px;"></div>
+                                <span>41%</span>
+                            </div>
+                        </td>
+                        <td>30天</td>
+                    </tr>
+                    <tr>
+                        <td><div class="product-name">专业月卡</div></td>
+                        <td>239元</td>
+                        <td>700美金</td>
+                        <td class="price-strong">0.34</td>
+                        <td>0.22</td>
+                        <td>0.12</td>
+                        <td>
+                            <div class="profit-bar">
+                                <div class="profit-fill profit-low" style="width: 35px;"></div>
+                                <span>35%</span>
+                            </div>
+                        </td>
+                        <td>30天</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div class="product-name">
+                                旗舰月卡
+                                <span class="product-badge badge-vip">👑 大客户</span>
+                            </div>
+                        </td>
+                        <td>429元</td>
+                        <td>1300美金</td>
+                        <td class="price-strong">0.33</td>
+                        <td>0.22</td>
+                        <td>0.11</td>
+                        <td>
+                            <div class="profit-bar">
+                                <div class="profit-fill profit-low" style="width: 33px;"></div>
+                                <span>33%</span>
+                            </div>
+                        </td>
+                        <td>30天</td>
+                    </tr>
+                    <!-- 超额说明 -->
+                    <tr class="category-row">
+                        <td colspan="8">💡 套餐额度用完后，自动按量计费 0.50元/美金</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Price Gradient -->
+        <div class="gradient-section">
+            <div class="gradient-title">
+                <span>📉</span>
+                价格梯度可视化 — 时间承诺越长，单价越优惠
+            </div>
+            <div class="gradient-visual">
+                <div class="gradient-node">
+                    <div class="node-price">0.50</div>
+                    <div class="node-circle circle-1">按量</div>
+                    <div class="node-label">基准价</div>
+                </div>
+                <span class="gradient-arrow">→</span>
+                <div class="gradient-node">
+                    <div class="node-price">0.45</div>
+                    <div class="node-circle circle-2">日卡</div>
+                    <div class="node-label">24小时</div>
+                    <div class="discount-tag">-10%</div>
+                </div>
+                <span class="gradient-arrow">→</span>
+                <div class="gradient-node">
+                    <div class="node-price">0.42</div>
+                    <div class="node-circle circle-3">3日卡</div>
+                    <div class="node-label">72小时</div>
+                    <div class="discount-tag">-16%</div>
+                </div>
+                <span class="gradient-arrow">→</span>
+                <div class="gradient-node">
+                    <div class="node-price">0.39</div>
+                    <div class="node-circle circle-4">周卡</div>
+                    <div class="node-label">7天</div>
+                    <div class="discount-tag">-22%</div>
+                </div>
+                <span class="gradient-arrow">→</span>
+                <div class="gradient-node">
+                    <div class="node-price">0.38</div>
+                    <div class="node-circle circle-5">双周<br>基础</div>
+                    <div class="node-label">14-30天</div>
+                    <div class="discount-tag">-24%</div>
+                </div>
+                <span class="gradient-arrow">→</span>
+                <div class="gradient-node">
+                    <div class="node-price">0.37</div>
+                    <div class="node-circle circle-6">标准</div>
+                    <div class="node-label">月卡</div>
+                    <div class="discount-tag">-26%</div>
+                </div>
+                <span class="gradient-arrow">→</span>
+                <div class="gradient-node">
+                    <div class="node-price">0.34</div>
+                    <div class="node-circle circle-7">专业</div>
+                    <div class="node-label">月卡</div>
+                    <div class="discount-tag">-32%</div>
+                </div>
+                <span class="gradient-arrow">→</span>
+                <div class="gradient-node">
+                    <div class="node-price">0.33</div>
+                    <div class="node-circle circle-8">旗舰</div>
+                    <div class="node-label">月卡</div>
+                    <div class="discount-tag">-34%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Summary -->
+        <div class="summary-bar">
+            <div class="summary-item">
+                <div class="summary-label">综合混合成本</div>
+                <div class="summary-value green">0.22元/美金</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">按量基准价</div>
+                <div class="summary-value blue">0.50元/美金</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">订阅价格区间</div>
+                <div class="summary-value purple">0.33~0.45元</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">最大折扣力度</div>
+                <div class="summary-value pink">34% OFF</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">毛利率区间</div>
+                <div class="summary-value yellow">33%~56%</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            Generated by Claude · API服务定价策略分析报告
+        </div>
+    </div>
+</body>
+</html>
