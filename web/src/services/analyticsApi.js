@@ -369,6 +369,35 @@ export const AnalyticsAPI = {
       throw error;
     }
   },
+
+  /**
+   * Fetch user daily consumption trend (daily consumption by user)
+   * @param {string} timeRange - Time range: '1d', '7d', '30d', '90d'
+   * @param {Array<number>} userIds - Optional array of user IDs to filter
+   * @param {string} username - Optional username to search
+   * @returns {Promise<Object>}
+   */
+  async fetchUserDailyConsumptionTrend(timeRange = '7d', userIds = [], username = '') {
+    try {
+      const params = { time_range: timeRange };
+      if (userIds && userIds.length > 0) {
+        params.user_ids = userIds;
+      }
+      if (username) {
+        params.username = username;
+      }
+      const response = await API.get(`${BASE_URL}/user-daily-consumption-trend`, {
+        params,
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data.message || 'Failed to fetch user daily consumption trend');
+    } catch (error) {
+      showError(error.message || 'Failed to fetch user daily consumption trend');
+      throw error;
+    }
+  },
 };
 
 export default AnalyticsAPI;

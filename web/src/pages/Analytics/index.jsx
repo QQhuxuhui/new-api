@@ -50,6 +50,7 @@ import BalanceAnalysisTab from './components/BalanceAnalysisTab';
 import CostEfficiencyTab from './components/CostEfficiencyTab';
 import PlanUsageTab from './components/PlanUsageTab';
 import ChannelCostTab from './components/ChannelCostTab';
+import UserConsumptionTab from './components/UserConsumptionTab';
 import MoneyWithDetails from '../../components/analytics/MoneyWithDetails';
 
 const { Title, Text } = Typography;
@@ -458,6 +459,7 @@ const Analytics = () => {
             itemKey="consumption"
           >
             {renderConsumptionTrend()}
+            <UserConsumptionTab timeRange={timeRange} />
           </TabPane>
 
           <TabPane

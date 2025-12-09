@@ -312,3 +312,32 @@ func GetUserConsumptionDetail(c *gin.Context) {
 	})
 }
 
+// GetUserDailyConsumptionTrend returns daily consumption trends grouped by user
+func GetUserDailyConsumptionTrend(c *gin.Context) {
+	timeRange := c.DefaultQuery("time_range", "7d")
+	username := c.DefaultQuery("username", "")
+
+	// Parse user IDs from query parameter
+	// Support both "user_ids" and "user_ids[]" formats (Axios default)
+	var userIds []int
+	userIdsStrArray := c.QueryArray("user_ids")
+	userIdsStrArray = append(userIdsStrArray, c.QueryArray("user_ids[]")...)
+	for _, idStr := range userIdsStrArray {
+		if id, err := strconv.Atoi(idStr); err == nil {
+			userIds = append(userIds, id)
+		}
+	}
+
+	result, err := service.GetUserDailyConsumptionTrend(timeRange, userIds, username)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+	})
+}
+
+
