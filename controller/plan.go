@@ -101,6 +101,17 @@ func AddPlan(c *gin.Context) {
 		return
 	}
 
+	// Validate and set default category
+	if plan.Category == "" {
+		plan.Category = model.PlanCategoryMonthly // 默认为月卡
+	} else if !plan.IsValidCategory() {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的套餐分类",
+		})
+		return
+	}
+
 	// Set defaults
 	if plan.Status == 0 {
 		plan.Status = model.PlanStatusEnabled
@@ -167,11 +178,23 @@ func UpdatePlan(c *gin.Context) {
 		return
 	}
 
+	// Validate and set default category
+	if plan.Category == "" {
+		plan.Category = model.PlanCategoryMonthly // 默认为月卡
+	} else if !plan.IsValidCategory() {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的套餐分类",
+		})
+		return
+	}
+
 	// Update fields
 	existingPlan.Name = plan.Name
 	existingPlan.DisplayName = plan.DisplayName
 	existingPlan.Description = plan.Description
 	existingPlan.Type = plan.Type
+	existingPlan.Category = plan.Category
 	existingPlan.Priority = plan.Priority
 	existingPlan.ChannelGroups = plan.ChannelGroups
 	existingPlan.DefaultQuota = plan.DefaultQuota
@@ -182,6 +205,15 @@ func UpdatePlan(c *gin.Context) {
 	existingPlan.DefaultAllowToggle = plan.DefaultAllowToggle
 	existingPlan.Settings = plan.Settings
 	existingPlan.Status = plan.Status
+	// Pricing fields
+	existingPlan.Price = plan.Price
+	existingPlan.OriginalPrice = plan.OriginalPrice
+	existingPlan.QuotaUSD = plan.QuotaUSD
+	// Queue and sorting
+	existingPlan.QueueSlot = plan.QueueSlot
+	existingPlan.SortOrder = plan.SortOrder
+	// Custom features
+	existingPlan.CustomFeatures = plan.CustomFeatures
 
 	// Sync ChannelGroup from ChannelGroups for backward compatibility
 	// Take the first group from ChannelGroups array and set it as ChannelGroup

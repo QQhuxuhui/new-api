@@ -46,6 +46,7 @@ export default function SettingsHeaderNavModules(props) {
       enabled: true,
       requireAuth: false, // 默认不需要登录鉴权
     },
+    plans: true, // 产品定价（套餐商城）
     docs: true,
     about: true,
   });
@@ -86,6 +87,7 @@ export default function SettingsHeaderNavModules(props) {
         enabled: true,
         requireAuth: false,
       },
+      plans: true,
       docs: true,
       about: true,
     };
@@ -142,6 +144,11 @@ export default function SettingsHeaderNavModules(props) {
           };
         }
 
+        // 确保plans字段存在（向后兼容）
+        if (modules.plans === undefined) {
+          modules.plans = true;
+        }
+
         setHeaderNavModules(modules);
       } catch (error) {
         // 使用默认配置
@@ -152,6 +159,7 @@ export default function SettingsHeaderNavModules(props) {
             enabled: true,
             requireAuth: false,
           },
+          plans: true,
           docs: true,
           about: true,
         };
@@ -177,6 +185,11 @@ export default function SettingsHeaderNavModules(props) {
       title: t('模型广场'),
       description: t('模型定价，需要登录访问'),
       hasSubConfig: true, // 标识该模块有子配置
+    },
+    {
+      key: 'plans',
+      title: t('产品定价'),
+      description: t('套餐商城，展示可购买的套餐'),
     },
     {
       key: 'docs',

@@ -83,6 +83,27 @@ const PlanPricing = () => {
   const [plans, setPlans] = useState([]);
   const [filter, setFilter] = useState('all');
 
+  // 从系统配置获取套餐分类配置
+  const categoriesConfig = useMemo(() => {
+    try {
+      const config = statusState?.status?.PlanCategoriesConfig;
+      if (config) {
+        const parsed = typeof config === 'string' ? JSON.parse(config) : config;
+        return parsed;
+      }
+    } catch (e) {
+      // 忽略解析错误
+    }
+    // 默认配置
+    return {
+      daily: { label: t('日卡'), enabled: true },
+      weekly: { label: t('周卡'), enabled: true },
+      biweekly: { label: t('双周卡'), enabled: true },
+      monthly: { label: t('月卡'), enabled: true },
+      payg: { label: t('按量付费'), enabled: true },
+    };
+  }, [statusState?.status?.PlanCategoriesConfig, t]);
+
   // 从系统配置获取推荐套餐 ID
   const recommendedPlanId = useMemo(() => {
     try {
@@ -170,14 +191,28 @@ const PlanPricing = () => {
 
   // Get plan category configuration
   const getCategoryConfig = (category) => {
-    const categoryConfig = {
-      daily: { label: t('日卡'), color: 'amber' },
-      weekly: { label: t('周卡'), color: 'cyan' },
-      biweekly: { label: t('双周卡'), color: 'teal' },
-      monthly: { label: t('月卡'), color: 'blue' },
-      payg: { label: t('按量付费'), color: 'green' },
+    // 从配置中读取分类信息
+    const configCategory = categoriesConfig[category];
+    if (configCategory && configCategory.enabled) {
+      return {
+        label: configCategory.label,
+        color: getCategoryColor(category) // 保留颜色映射
+      };
+    }
+    // 如果配置中没有或未启用，返回null（不显示此分类）
+    return null;
+  };
+
+  // Get category color (保留原有颜色映射逻辑)
+  const getCategoryColor = (category) => {
+    const colorMap = {
+      daily: 'amber',
+      weekly: 'cyan',
+      biweekly: 'teal',
+      monthly: 'blue',
+      payg: 'green',
     };
-    return categoryConfig[category] || { label: category, color: 'grey' };
+    return colorMap[category] || 'grey';
   };
 
   // Get price unit based on category
@@ -192,21 +227,22 @@ const PlanPricing = () => {
     return unitConfig[category] || '';
   };
 
-  // Extract features from plan（不依赖 renderQuota，直接使用后端字段）
+  // Extract features from plan（混合自动生成和自定义特色）
   const extractFeatures = (plan) => {
     const features = [];
 
+    // 1. 自动生成的系统特色
     // Quota - 使用 formatQuotaDisplay 避免依赖 quota_per_unit
     const quotaDisplay = formatQuotaDisplay(plan.quota_usd, plan.default_quota);
     if (quotaDisplay) {
-      features.push(`${quotaDisplay} ${t('额度')}`);
+      features.push({ text: `${quotaDisplay} ${t('额度')}`, icon: 'check' });
     }
 
     // Validity
     if (plan.validity_days > 0) {
-      features.push(`${t('有效期')} ${plan.validity_days} ${t('天')}`);
+      features.push({ text: `${t('有效期')} ${plan.validity_days} ${t('天')}`, icon: 'check' });
     } else {
-      features.push(t('永久有效'));
+      features.push({ text: t('永久有效'), icon: 'check' });
     }
 
     // Daily limit - 使用 daily_quota_limit_usd 或直接显示数值
@@ -214,17 +250,38 @@ const PlanPricing = () => {
       const dailyDisplay = plan.daily_quota_limit_usd
         ? `$${plan.daily_quota_limit_usd}`
         : formatQuotaDisplay(null, plan.daily_quota_limit) || `${plan.daily_quota_limit}`;
-      features.push(`${t('每日限额')}: ${dailyDisplay}`);
+      features.push({ text: `${t('每日限额')}: ${dailyDisplay}`, icon: 'check' });
     }
 
     // Queue slot
     if (plan.queue_slot === 0) {
-      features.push(t('可叠加使用'));
+      features.push({ text: t('可叠加使用'), icon: 'check' });
     }
 
     // Rate limits
     if (plan.rate_limit_rules && plan.rate_limit_rules !== '') {
-      features.push(t('含速率限制'));
+      features.push({ text: t('含速率限制'), icon: 'info' });
+    }
+
+    // 2. 自定义特色（从 custom_features 字段读取）
+    try {
+      if (plan.custom_features) {
+        const customFeatures = typeof plan.custom_features === 'string'
+          ? JSON.parse(plan.custom_features)
+          : plan.custom_features;
+        if (Array.isArray(customFeatures)) {
+          customFeatures.forEach(feature => {
+            if (feature && feature.text && feature.text.trim() !== '') {
+              features.push({
+                text: feature.text,
+                icon: feature.icon || 'check'
+              });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      // 忽略解析错误
     }
 
     return features;
@@ -248,19 +305,34 @@ const PlanPricing = () => {
     navigate(`/console/topup?plan_id=${planId}`);
   };
 
-  // Category filter options
-  const categoryOptions = [
-    { key: 'all', label: t('全部') },
-    { key: 'daily', label: t('日卡') },
-    { key: 'weekly', label: t('周卡') },
-    { key: 'monthly', label: t('月卡') },
-    { key: 'payg', label: t('按量付费') },
-  ];
+  // Category filter options - 从配置生成
+  const categoryOptions = useMemo(() => {
+    const options = [{ key: 'all', label: t('全部') }];
+
+    // 遍历所有分类，只添加启用的分类
+    Object.keys(categoriesConfig).forEach((key) => {
+      const config = categoriesConfig[key];
+      if (config && config.enabled) {
+        options.push({
+          key: key,
+          label: config.label,
+        });
+      }
+    });
+
+    return options;
+  }, [categoriesConfig, t]);
 
   // Render single plan card
   const renderPlanCard = (plan) => {
     const typeConfig = getPlanTypeConfig(plan.type);
     const categoryConfig = getCategoryConfig(plan.category);
+
+    // 如果分类配置不存在或未启用，不渲染此卡片
+    if (!categoryConfig) {
+      return null;
+    }
+
     const features = extractFeatures(plan);
     const discountPercent = getDiscountPercent(plan.price, plan.original_price);
     const priceUnit = getPriceUnit(plan.category);
@@ -367,16 +439,56 @@ const PlanPricing = () => {
           {/* Features Section */}
           <div className='px-6 py-5'>
             <div className='space-y-3'>
-              {features.map((feature, index) => (
-                <div key={index} className='flex items-center gap-2'>
-                  <div className='w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0'>
-                    <IconTick size='small' className='text-green-600 dark:text-green-400' />
+              {features.map((feature, index) => {
+                // 根据图标类型选择不同的显示样式
+                const getIconConfig = (iconType) => {
+                  switch (iconType) {
+                    case 'check':
+                      return {
+                        bg: 'bg-green-100 dark:bg-green-900/30',
+                        color: 'text-green-600 dark:text-green-400',
+                        icon: '✓'
+                      };
+                    case 'warning':
+                      return {
+                        bg: 'bg-orange-100 dark:bg-orange-900/30',
+                        color: 'text-orange-600 dark:text-orange-400',
+                        icon: '⚠'
+                      };
+                    case 'star':
+                      return {
+                        bg: 'bg-yellow-100 dark:bg-yellow-900/30',
+                        color: 'text-yellow-600 dark:text-yellow-400',
+                        icon: '★'
+                      };
+                    case 'info':
+                      return {
+                        bg: 'bg-blue-100 dark:bg-blue-900/30',
+                        color: 'text-blue-600 dark:text-blue-400',
+                        icon: 'ℹ'
+                      };
+                    default:
+                      return {
+                        bg: 'bg-green-100 dark:bg-green-900/30',
+                        color: 'text-green-600 dark:text-green-400',
+                        icon: '✓'
+                      };
+                  }
+                };
+
+                const iconConfig = getIconConfig(feature.icon);
+
+                return (
+                  <div key={index} className='flex items-center gap-2'>
+                    <div className={`w-5 h-5 rounded-full ${iconConfig.bg} flex items-center justify-center flex-shrink-0`}>
+                      <span className={`text-xs ${iconConfig.color}`}>{iconConfig.icon}</span>
+                    </div>
+                    <Text size='small' className='text-gray-600 dark:text-gray-300'>
+                      {feature.text}
+                    </Text>
                   </div>
-                  <Text size='small' className='text-gray-600 dark:text-gray-300'>
-                    {feature}
-                  </Text>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -484,7 +596,10 @@ const PlanPricing = () => {
           </div>
         ) : filteredPlans.length > 0 ? (
           <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
-            {filteredPlans.map(plan => renderPlanCard(plan))}
+            {filteredPlans.map(plan => {
+              const card = renderPlanCard(plan);
+              return card; // card可能是null（分类未启用）
+            }).filter(Boolean)} {/* 过滤掉null值 */}
           </div>
         ) : (
           <Empty

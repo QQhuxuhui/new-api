@@ -40,6 +40,7 @@ type Plan struct {
 	// Queue control
 	QueueSlot            int     `json:"queue_slot" gorm:"default:1"`             // 0=daily (no queue), 1=occupies queue slot
 	SortOrder            int     `json:"sort_order" gorm:"default:0"`             // Display sort order
+	CustomFeatures       string  `json:"custom_features" gorm:"type:text"`        // JSON array of custom feature descriptions with icons
 	CreatedAt            int64   `json:"created_at" gorm:"autoCreateTime:milli"`
 	UpdatedAt            int64   `json:"updated_at" gorm:"autoUpdateTime:milli"`
 }
@@ -207,22 +208,26 @@ func (p *Plan) Delete() error {
 		return errors.New("套餐ID不能为空")
 	}
 
-	// Check for unmigrated user_plans (without complete snapshots)
-	// Migrated instances have all snapshot fields and are fully independent
+	// Check for active user_plans that don't have complete snapshots
+	// A complete snapshot means the user plan is fully independent and can survive template deletion
+	// We check if there are any ACTIVE user plans with empty critical snapshot fields
 	var count int64
 	if err := DB.Model(&UserPlan{}).
-		Where("plan_id = ? AND (plan_name = ? OR plan_name IS NULL OR plan_type = ? OR plan_type IS NULL)",
-			p.Id, "", "").
+		Where("plan_id = ? AND status = ? AND (plan_name = ? OR plan_name IS NULL OR plan_type = ? OR plan_type IS NULL)",
+			p.Id, UserPlanStatusActive, "", "").
 		Count(&count).Error; err != nil {
 		return err
 	}
 
 	if count > 0 {
-		return errors.New("该套餐模板仍有未完全迁移的用户实例，请等待数据迁移完成")
+		return errors.New("该套餐仍有活跃用户实例未完全快照化，请先等待迁移完成或手动填充快照字段")
 	}
 
-	// Safe to delete - all instances have complete snapshots (display + routing)
-	// Users can continue using their plans without the template
+	// Safe to delete:
+	// 1. No user plans at all, OR
+	// 2. All user plans have complete snapshots (plan_name and plan_type populated), OR
+	// 3. All user plans are non-active (expired/disabled/completed)
+	// Users with complete snapshots can continue using their plans without the template
 	go InvalidateUserPlanCacheByPlanId(p.Id)
 	return DB.Delete(p).Error
 }

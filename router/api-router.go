@@ -26,6 +26,7 @@ func SetApiRouter(router *gin.Engine) {
 		//apiRouter.GET("/midjourney", controller.GetMidjourney)
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
 		apiRouter.GET("/pricing", middleware.TryUserAuth(), controller.GetPricing)
+		apiRouter.GET("/plan/enabled", controller.GetEnabledPlans) // Public access for plan pricing page
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)
 		apiRouter.GET("/reset_password", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SendPasswordResetEmail)
 		apiRouter.POST("/user/reset", middleware.CriticalRateLimit(), controller.ResetPassword)
@@ -305,7 +306,6 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			planRoute.GET("/", controller.GetAllPlans)
 			planRoute.GET("/search", controller.SearchPlans)
-			planRoute.GET("/enabled", controller.GetEnabledPlans)
 			planRoute.GET("/:id", controller.GetPlan)
 			planRoute.POST("/", controller.AddPlan)
 			planRoute.PUT("/", controller.UpdatePlan)
