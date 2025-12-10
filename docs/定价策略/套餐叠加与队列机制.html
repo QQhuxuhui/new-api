@@ -1,0 +1,1587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API服务套餐叠加与队列机制设计方案</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border-radius: 24px;
+            padding: 40px 48px;
+            margin-bottom: 32px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 40px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 12px;
+        }
+
+        .header .subtitle {
+            font-size: 18px;
+            color: #64748b;
+            display: flex;
+            gap: 24px;
+            align-items: center;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .badge-final { background: #dcfce7; color: #16a34a; }
+        .badge-date { background: #f1f5f9; color: #64748b; }
+
+        /* Section */
+        .section {
+            background: #ffffff;
+            border-radius: 24px;
+            padding: 40px;
+            margin-bottom: 32px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .section-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .section-title .icon {
+            font-size: 32px;
+        }
+
+        /* Core Rules */
+        .rules-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+        }
+
+        .rule-card {
+            background: linear-gradient(145deg, #f8fafc 0%, #ffffff 100%);
+            border: 2px solid #e2e8f0;
+            border-radius: 20px;
+            padding: 28px;
+        }
+
+        .rule-card .rule-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .rule-card .rule-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 12px;
+        }
+
+        .rule-card .rule-desc {
+            font-size: 14px;
+            color: #64748b;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .rule-points {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .rule-point {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #475569;
+        }
+
+        .rule-point .check {
+            color: #10b981;
+            font-weight: bold;
+        }
+
+        .rule-point .cross {
+            color: #ef4444;
+            font-weight: bold;
+        }
+
+        /* Priority Flow */
+        .priority-flow {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            border-radius: 20px;
+            padding: 32px;
+            margin-top: 24px;
+        }
+
+        .flow-steps {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .flow-step {
+            flex: 1;
+            min-width: 180px;
+            text-align: center;
+        }
+
+        .flow-box {
+            background: white;
+            border: 3px solid #3b82f6;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 12px;
+        }
+
+        .flow-box .flow-number {
+            font-size: 14px;
+            color: #3b82f6;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .flow-box .flow-name {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 4px;
+        }
+
+        .flow-box .flow-value {
+            font-size: 14px;
+            color: #64748b;
+        }
+
+        .flow-arrow {
+            font-size: 32px;
+            color: #3b82f6;
+        }
+
+        /* Scenario Visual */
+        .scenario-visual {
+            background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+            border-radius: 20px;
+            padding: 32px;
+            margin-bottom: 32px;
+        }
+
+        .scenario-header {
+            text-align: center;
+            margin-bottom: 28px;
+        }
+
+        .scenario-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: #7c3aed;
+            margin-bottom: 8px;
+        }
+
+        .scenario-subtitle {
+            font-size: 15px;
+            color: #9333ea;
+        }
+
+        /* Timeline */
+        .timeline {
+            position: relative;
+            padding: 20px 0;
+        }
+
+        .timeline-line {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(180deg, #a855f7, #7c3aed);
+            transform: translateX(-50%);
+        }
+
+        .timeline-item {
+            position: relative;
+            margin-bottom: 40px;
+            display: flex;
+            align-items: center;
+        }
+
+        .timeline-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .timeline-item.left {
+            justify-content: flex-end;
+            padding-right: calc(50% + 40px);
+        }
+
+        .timeline-item.right {
+            justify-content: flex-start;
+            padding-left: calc(50% + 40px);
+        }
+
+        .timeline-dot {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 24px;
+            height: 24px;
+            background: white;
+            border: 4px solid #7c3aed;
+            border-radius: 50%;
+            z-index: 2;
+        }
+
+        .timeline-content {
+            background: white;
+            border-radius: 16px;
+            padding: 20px 24px;
+            box-shadow: 0 4px 12px rgba(124, 58, 237, 0.15);
+            max-width: 400px;
+        }
+
+        .timeline-label {
+            font-size: 13px;
+            color: #7c3aed;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .timeline-text {
+            font-size: 15px;
+            color: #334155;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .timeline-detail {
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        /* Purchase Flow */
+        .purchase-flow {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-top: 28px;
+        }
+
+        .purchase-card {
+            background: white;
+            border: 2px solid #e9d5ff;
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+        }
+
+        .purchase-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .purchase-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 8px;
+        }
+
+        .purchase-amount {
+            font-size: 24px;
+            font-weight: 700;
+            color: #7c3aed;
+            margin: 12px 0;
+        }
+
+        .purchase-tag {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #fef3c7;
+            color: #92400e;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-top: 8px;
+        }
+
+        /* Queue Visual */
+        .queue-demo {
+            background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
+            border-radius: 20px;
+            padding: 32px;
+            margin-top: 32px;
+        }
+
+        .queue-status {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        .status-box {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+        }
+
+        .status-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+        }
+
+        .status-label {
+            font-size: 14px;
+            color: #64748b;
+            margin-bottom: 8px;
+        }
+
+        .status-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #7c3aed;
+        }
+
+        .queue-list {
+            background: white;
+            border-radius: 16px;
+            padding: 28px;
+        }
+
+        .queue-list-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #7c3aed;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .queue-items {
+            display: grid;
+            gap: 12px;
+        }
+
+        .queue-item {
+            background: linear-gradient(135deg, #faf5ff 0%, #ffffff 100%);
+            border: 2px solid #e9d5ff;
+            border-radius: 12px;
+            padding: 16px 20px;
+            display: grid;
+            grid-template-columns: 50px 1fr 120px;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .queue-position {
+            font-size: 24px;
+            font-weight: 700;
+            color: #7c3aed;
+            text-align: center;
+        }
+
+        .queue-info .queue-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 4px;
+        }
+
+        .queue-info .queue-quota {
+            font-size: 14px;
+            color: #64748b;
+        }
+
+        .queue-time {
+            font-size: 13px;
+            color: #9333ea;
+            font-weight: 500;
+            text-align: right;
+        }
+
+        .queue-limit {
+            text-align: center;
+            margin-top: 20px;
+            padding: 16px;
+            background: white;
+            border-radius: 12px;
+        }
+
+        .queue-limit-text {
+            font-size: 16px;
+            font-weight: 600;
+            color: #7c3aed;
+        }
+
+        /* Error Visual */
+        .error-visual {
+            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+            border-radius: 20px;
+            padding: 32px;
+            text-align: center;
+        }
+
+        .error-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+
+        .error-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #dc2626;
+            margin-bottom: 12px;
+        }
+
+        .error-message {
+            font-size: 16px;
+            color: #991b1b;
+            margin-bottom: 20px;
+        }
+
+        .error-detail {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: left;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        .error-detail-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #fecaca;
+            font-size: 14px;
+        }
+
+        .error-detail-item:last-child {
+            border-bottom: none;
+        }
+
+        .error-detail-label {
+            color: #64748b;
+        }
+
+        .error-detail-value {
+            font-weight: 600;
+            color: #334155;
+        }
+
+        /* Risk Table */
+        .risk-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .risk-table th {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            color: white;
+            padding: 16px;
+            text-align: center;
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .risk-table th:first-child {
+            border-radius: 12px 0 0 0;
+        }
+
+        .risk-table th:last-child {
+            border-radius: 0 12px 0 0;
+        }
+
+        .risk-table td {
+            padding: 14px;
+            text-align: center;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 14px;
+            color: #334155;
+        }
+
+        .risk-table tbody tr:hover td {
+            background: #f8fafc;
+        }
+
+        .risk-value {
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        .risk-high { color: #ef4444; }
+        .risk-mid { color: #f59e0b; }
+        .risk-low { color: #10b981; }
+
+        /* Alert Box */
+        .alert {
+            padding: 20px 24px;
+            border-radius: 12px;
+            margin-top: 20px;
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+
+        .alert-warning {
+            background: #fef3c7;
+            border: 2px solid #fbbf24;
+        }
+
+        .alert-info {
+            background: #dbeafe;
+            border: 2px solid #3b82f6;
+        }
+
+        .alert-success {
+            background: #dcfce7;
+            border: 2px solid #10b981;
+        }
+
+        .alert-icon {
+            font-size: 24px;
+        }
+
+        .alert-content {
+            flex: 1;
+        }
+
+        .alert-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 8px;
+        }
+
+        .alert-text {
+            font-size: 14px;
+            color: #475569;
+            line-height: 1.6;
+        }
+
+        /* Summary Bar */
+        .summary-bar {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 24px;
+            margin-top: 32px;
+        }
+
+        .summary-item {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            border-radius: 20px;
+            padding: 28px;
+            text-align: center;
+            color: white;
+        }
+
+        .summary-label {
+            font-size: 14px;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+
+        .summary-value {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .summary-value.green { color: #4ade80; }
+        .summary-value.blue { color: #60a5fa; }
+        .summary-value.purple { color: #c4b5fd; }
+        .summary-value.yellow { color: #fbbf24; }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            color: white;
+            margin-top: 40px;
+            font-size: 14px;
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .rules-grid {
+                grid-template-columns: 1fr;
+            }
+            .flow-steps {
+                flex-direction: column;
+            }
+            .flow-arrow {
+                transform: rotate(90deg);
+            }
+            .purchase-flow {
+                grid-template-columns: 1fr;
+            }
+            .queue-status {
+                grid-template-columns: 1fr;
+            }
+            .timeline-item.left,
+            .timeline-item.right {
+                padding: 0;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🎯 API服务套餐叠加与队列机制设计方案</h1>
+            <div class="subtitle">
+                <span class="badge badge-final">✅ 最终版</span>
+                <span class="badge badge-date">📅 2025年12月</span>
+                <span style="color: #94a3b8;">业务规则设计 · 队列上限10个</span>
+            </div>
+        </div>
+
+        <!-- Core Rules Section -->
+        <div class="section">
+            <div class="section-title">
+                <span class="icon">📋</span>
+                核心业务规则
+            </div>
+
+            <div class="rules-grid">
+                <!-- Rule 1: Pay As You Go -->
+                <div class="rule-card">
+                    <div class="rule-icon">💳</div>
+                    <div class="rule-title">按量付费</div>
+                    <div class="rule-desc">最灵活的付费方式，充值即用</div>
+                    <div class="rule-points">
+                        <div class="rule-point">
+                            <span class="check">✓</span>
+                            <span>充值即用，不限额</span>
+                        </div>
+                        <div class="rule-point">
+                            <span class="check">✓</span>
+                            <span>单价 0.50元/美金</span>
+                        </div>
+                        <div class="rule-point">
+                            <span class="check">✓</span>
+                            <span>基准定价，无时间限制</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rule 2: Daily Card -->
+                <div class="rule-card" style="border-color: #fbbf24;">
+                    <div class="rule-icon">⚡</div>
+                    <div class="rule-title">日卡（应急加油包）</div>
+                    <div class="rule-desc">临时高峰应急，当天有效</div>
+                    <div class="rule-points">
+                        <div class="rule-point">
+                            <span class="check">✓</span>
+                            <span>可无限叠加</span>
+                        </div>
+                        <div class="rule-point">
+                            <span class="check">✓</span>
+                            <span>仅限当天有效</span>
+                        </div>
+                        <div class="rule-point">
+                            <span class="check">✓</span>
+                            <span>不占用队列</span>
+                        </div>
+                        <div class="rule-point">
+                            <span class="cross">✗</span>
+                            <span>到期清零（23:59:59）</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rule 3: Subscription Queue -->
+                <div class="rule-card" style="border-color: #7c3aed;">
+                    <div class="rule-icon">📦</div>
+                    <div class="rule-title">周卡/月卡（订阅系列）</div>
+                    <div class="rule-desc">长期稳定方案，队列管理</div>
+                    <div class="rule-points">
+                        <div class="rule-point">
+                            <span class="check">✓</span>
+                            <span>队列模式，按购买顺序生效</span>
+                        </div>
+                        <div class="rule-point">
+                            <span class="check">✓</span>
+                            <span>所有套餐共享队列</span>
+                        </div>
+                        <div class="rule-point">
+                            <span class="check">✓</span>
+                            <span>可混合购买不同档次</span>
+                        </div>
+                        <div class="rule-point">
+                            <span class="cross">✗</span>
+                            <span>队列上限10个</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Priority Flow -->
+            <div class="priority-flow">
+                <div style="text-align: center; font-size: 20px; font-weight: 600; color: #1e293b; margin-bottom: 24px;">
+                    ⚙️ 扣费优先级流程
+                </div>
+                <div class="flow-steps">
+                    <div class="flow-step">
+                        <div class="flow-box">
+                            <div class="flow-number">优先级 1</div>
+                            <div class="flow-name">日卡池</div>
+                            <div class="flow-value">今日加油包</div>
+                        </div>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step">
+                        <div class="flow-box">
+                            <div class="flow-number">优先级 2</div>
+                            <div class="flow-name">生效套餐</div>
+                            <div class="flow-value">周卡/月卡</div>
+                        </div>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step">
+                        <div class="flow-box">
+                            <div class="flow-number">优先级 3</div>
+                            <div class="flow-name">按量余额</div>
+                            <div class="flow-value">0.50元/美金</div>
+                        </div>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step">
+                        <div class="flow-box" style="border-color: #ef4444;">
+                            <div class="flow-number" style="color: #ef4444;">失败</div>
+                            <div class="flow-name" style="color: #ef4444;">余额不足</div>
+                            <div class="flow-value">拒绝请求</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 1: Daily Card Stacking -->
+        <div class="section">
+            <div class="section-title">
+                <span class="icon">💡</span>
+                场景演示 1：日卡无限叠加
+            </div>
+
+            <div class="scenario-visual">
+                <div class="scenario-header">
+                    <div class="scenario-title">2025-12-10 一天的日卡使用流程</div>
+                    <div class="scenario-subtitle">用户在高峰期多次购买日卡应急</div>
+                </div>
+
+                <div class="timeline">
+                    <div class="timeline-line"></div>
+
+                    <div class="timeline-item left">
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="timeline-label">08:00 上午</div>
+                            <div class="timeline-text">购买日卡 × 5</div>
+                            <div class="timeline-detail">90元 / 200美金</div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item right">
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="timeline-label">14:00 下午</div>
+                            <div class="timeline-text">购买日卡 × 3</div>
+                            <div class="timeline-detail">54元 / 120美金</div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item left">
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="timeline-label">18:00 傍晚</div>
+                            <div class="timeline-text">购买日卡 × 2</div>
+                            <div class="timeline-detail">36元 / 80美金</div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item right">
+                        <div class="timeline-dot" style="border-color: #10b981; background: #10b981;"></div>
+                        <div class="timeline-content" style="border: 2px solid #10b981;">
+                            <div class="timeline-label" style="color: #10b981;">当前状态</div>
+                            <div class="timeline-text" style="color: #10b981;">今日日卡池总额度</div>
+                            <div class="timeline-detail">400美金 | 已用150美金 | 剩余250美金</div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item left">
+                        <div class="timeline-dot" style="border-color: #ef4444; background: #ef4444;"></div>
+                        <div class="timeline-content" style="border: 2px solid #ef4444;">
+                            <div class="timeline-label" style="color: #ef4444;">23:59:59</div>
+                            <div class="timeline-text" style="color: #ef4444;">日卡到期</div>
+                            <div class="timeline-detail">剩余250美金直接清零 ❌</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert alert-info">
+                <div class="alert-icon">💡</div>
+                <div class="alert-content">
+                    <div class="alert-title">日卡设计理念</div>
+                    <div class="alert-text">
+                        日卡作为"应急加油包"，允许用户在当天高峰期随时购买补充额度。当天有效的限制防止了囤货行为，同时不占用长期套餐队列，保证了应急通道的畅通。
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 2: Mixed Queue -->
+        <div class="section">
+            <div class="section-title">
+                <span class="icon">📊</span>
+                场景演示 2：混合队列购买
+            </div>
+
+            <div class="scenario-visual">
+                <div class="scenario-header">
+                    <div class="scenario-title">用户陆续购买不同档次套餐</div>
+                    <div class="scenario-subtitle">所有套餐进入统一队列，按购买顺序生效</div>
+                </div>
+
+                <div class="purchase-flow">
+                    <div class="purchase-card">
+                        <div class="purchase-icon">🎫</div>
+                        <div class="purchase-title">周卡</div>
+                        <div class="purchase-amount">55元</div>
+                        <div style="font-size: 14px; color: #64748b;">140美金 / 7天</div>
+                        <div class="purchase-tag">进入队列 #1</div>
+                    </div>
+
+                    <div class="purchase-card">
+                        <div class="purchase-icon">🎫</div>
+                        <div class="purchase-title">双周卡</div>
+                        <div class="purchase-amount">95元</div>
+                        <div style="font-size: 14px; color: #64748b;">250美金 / 14天</div>
+                        <div class="purchase-tag">进入队列 #2</div>
+                    </div>
+
+                    <div class="purchase-card">
+                        <div class="purchase-icon">🎟️</div>
+                        <div class="purchase-title">标准月卡</div>
+                        <div class="purchase-amount">129元</div>
+                        <div style="font-size: 14px; color: #64748b;">350美金 / 30天</div>
+                        <div class="purchase-tag">进入队列 #3</div>
+                    </div>
+
+                    <div class="purchase-card">
+                        <div class="purchase-icon">🎟️</div>
+                        <div class="purchase-title">标准月卡</div>
+                        <div class="purchase-amount">129元</div>
+                        <div style="font-size: 14px; color: #64748b;">350美金 / 30天</div>
+                        <div class="purchase-tag">进入队列 #4</div>
+                    </div>
+
+                    <div class="purchase-card">
+                        <div class="purchase-icon">🎖️</div>
+                        <div class="purchase-title">专业月卡</div>
+                        <div class="purchase-amount">249元</div>
+                        <div style="font-size: 14px; color: #64748b;">700美金 / 30天</div>
+                        <div class="purchase-tag">进入队列 #5</div>
+                    </div>
+
+                    <div class="purchase-card">
+                        <div class="purchase-icon">👑</div>
+                        <div class="purchase-title">旗舰月卡</div>
+                        <div class="purchase-amount">449元</div>
+                        <div style="font-size: 14px; color: #64748b;">1300美金 / 30天</div>
+                        <div class="purchase-tag">进入队列 #6</div>
+                    </div>
+
+                    <div class="purchase-card">
+                        <div class="purchase-icon">🎟️</div>
+                        <div class="purchase-title">基础月卡</div>
+                        <div class="purchase-amount">69元</div>
+                        <div style="font-size: 14px; color: #64748b;">180美金 / 30天</div>
+                        <div class="purchase-tag">进入队列 #7</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="queue-demo">
+                <div class="queue-status">
+                    <div class="status-box">
+                        <div class="status-icon">📍</div>
+                        <div class="status-label">当前生效</div>
+                        <div class="status-value">标准月卡</div>
+                        <div style="font-size: 14px; color: #64748b; margin-top: 8px;">350美金 | 剩余5天</div>
+                    </div>
+
+                    <div class="status-box">
+                        <div class="status-icon">⏳</div>
+                        <div class="status-label">队列状态</div>
+                        <div class="status-value">7 / 10</div>
+                        <div style="font-size: 14px; color: #10b981; margin-top: 8px; font-weight: 600;">还可购买3个</div>
+                    </div>
+
+                    <div class="status-box">
+                        <div class="status-icon">📊</div>
+                        <div class="status-label">总额度</div>
+                        <div class="status-value">3,270</div>
+                        <div style="font-size: 14px; color: #64748b; margin-top: 8px;">美金 / 176天</div>
+                    </div>
+                </div>
+
+                <div class="queue-list">
+                    <div class="queue-list-title">⏳ 队列详情（按生效顺序）</div>
+
+                    <div class="queue-items">
+                        <div class="queue-item">
+                            <div class="queue-position">1</div>
+                            <div class="queue-info">
+                                <div class="queue-name">周卡</div>
+                                <div class="queue-quota">140美金 / 7天</div>
+                            </div>
+                            <div class="queue-time">5天后生效</div>
+                        </div>
+
+                        <div class="queue-item">
+                            <div class="queue-position">2</div>
+                            <div class="queue-info">
+                                <div class="queue-name">双周卡</div>
+                                <div class="queue-quota">250美金 / 14天</div>
+                            </div>
+                            <div class="queue-time">12天后生效</div>
+                        </div>
+
+                        <div class="queue-item">
+                            <div class="queue-position">3</div>
+                            <div class="queue-info">
+                                <div class="queue-name">标准月卡</div>
+                                <div class="queue-quota">350美金 / 30天</div>
+                            </div>
+                            <div class="queue-time">26天后生效</div>
+                        </div>
+
+                        <div class="queue-item">
+                            <div class="queue-position">4</div>
+                            <div class="queue-info">
+                                <div class="queue-name">标准月卡</div>
+                                <div class="queue-quota">350美金 / 30天</div>
+                            </div>
+                            <div class="queue-time">56天后生效</div>
+                        </div>
+
+                        <div class="queue-item">
+                            <div class="queue-position">5</div>
+                            <div class="queue-info">
+                                <div class="queue-name">专业月卡</div>
+                                <div class="queue-quota">700美金 / 30天</div>
+                            </div>
+                            <div class="queue-time">86天后生效</div>
+                        </div>
+
+                        <div class="queue-item">
+                            <div class="queue-position">6</div>
+                            <div class="queue-info">
+                                <div class="queue-name">旗舰月卡</div>
+                                <div class="queue-quota">1300美金 / 30天</div>
+                            </div>
+                            <div class="queue-time">116天后生效</div>
+                        </div>
+
+                        <div class="queue-item">
+                            <div class="queue-position">7</div>
+                            <div class="queue-info">
+                                <div class="queue-name">基础月卡</div>
+                                <div class="queue-quota">180美金 / 30天</div>
+                            </div>
+                            <div class="queue-time">146天后生效</div>
+                        </div>
+                    </div>
+
+                    <div class="queue-limit">
+                        <div class="queue-limit-text">💡 队列统计：总金额 1,743元 | 总时长 176天</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert alert-success">
+                <div class="alert-icon">✓</div>
+                <div class="alert-content">
+                    <div class="alert-title">队列机制优势</div>
+                    <div class="alert-text">
+                        统一队列允许用户灵活组合不同档次的套餐，既可以满足长期稳定需求（多个月卡），也可以灵活应对短期需求（周卡）。队列按购买顺序自动生效，用户无需手动管理。
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 3: Queue Full -->
+        <div class="section">
+            <div class="section-title">
+                <span class="icon">⚠️</span>
+                场景演示 3：队列已满拦截
+            </div>
+
+            <div class="scenario-visual">
+                <div class="scenario-header">
+                    <div class="scenario-title">用户尝试购买第11个套餐</div>
+                    <div class="scenario-subtitle">队列已满（10/10），系统自动拦截</div>
+                </div>
+
+                <div class="queue-demo" style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);">
+                    <div class="queue-status">
+                        <div class="status-box" style="border: 2px solid #ef4444;">
+                            <div class="status-icon">⚠️</div>
+                            <div class="status-label">队列状态</div>
+                            <div class="status-value" style="color: #ef4444;">10 / 10</div>
+                            <div style="font-size: 14px; color: #ef4444; margin-top: 8px; font-weight: 600;">已满</div>
+                        </div>
+
+                        <div class="status-box" style="border: 2px solid #ef4444;">
+                            <div class="status-icon">📊</div>
+                            <div class="status-label">队列组合</div>
+                            <div style="font-size: 14px; color: #334155; margin-top: 8px; line-height: 1.8;">
+                                周卡 × 2<br>
+                                标准月卡 × 5<br>
+                                专业月卡 × 2<br>
+                                旗舰月卡 × 1
+                            </div>
+                        </div>
+
+                        <div class="status-box" style="border: 2px solid #ef4444;">
+                            <div class="status-icon">📈</div>
+                            <div class="status-label">总额度</div>
+                            <div class="status-value" style="color: #ef4444;">4,280</div>
+                            <div style="font-size: 14px; color: #64748b; margin-top: 8px;">美金 / 244天</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="error-visual">
+                    <div class="error-icon">🚫</div>
+                    <div class="error-title">购买失败</div>
+                    <div class="error-message">您的套餐队列已达上限（10个）</div>
+
+                    <div class="error-detail">
+                        <div class="error-detail-item">
+                            <span class="error-detail-label">总额度</span>
+                            <span class="error-detail-value">4,280美金</span>
+                        </div>
+                        <div class="error-detail-item">
+                            <span class="error-detail-label">预计可用时长</span>
+                            <span class="error-detail-value">244天</span>
+                        </div>
+                        <div class="error-detail-item">
+                            <span class="error-detail-label">总金额</span>
+                            <span class="error-detail-value">2,158元</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px; padding: 16px; background: white; border-radius: 12px; text-align: left;">
+                        <div style="font-size: 14px; font-weight: 600; color: #7c3aed; margin-bottom: 12px;">💡 解决方案</div>
+                        <div style="font-size: 14px; color: #64748b; line-height: 1.8;">
+                            • 日卡不占队列，可随时购买应急<br>
+                            • 等待队列消耗后再购买长期套餐<br>
+                            • 当前套餐已足够使用244天
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert alert-warning">
+                <div class="alert-icon">⚠️</div>
+                <div class="alert-content">
+                    <div class="alert-title">队列上限设计</div>
+                    <div class="alert-text">
+                        队列上限10个是在用户体验和风险控制之间的平衡点。10个套餐足以覆盖最长300天的服务，同时限制了单用户最大风险敞口在5000元以内。
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Risk Analysis -->
+        <div class="section">
+            <div class="section-title">
+                <span class="icon">📈</span>
+                风险评估与控制
+            </div>
+
+            <h3 style="color: #334155; margin-bottom: 20px; font-size: 20px;">队列上限10个 - 最大囤货能力分析</h3>
+
+            <table class="risk-table">
+                <thead>
+                    <tr>
+                        <th>队列组合</th>
+                        <th>总金额</th>
+                        <th>总额度</th>
+                        <th>总时长</th>
+                        <th>预期成本</th>
+                        <th>预期毛利</th>
+                        <th>毛利率</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>10个基础月卡</td>
+                        <td class="risk-value risk-low">690元</td>
+                        <td>1,800美金</td>
+                        <td>300天</td>
+                        <td>396元</td>
+                        <td>294元</td>
+                        <td class="risk-value risk-low">43%</td>
+                    </tr>
+                    <tr>
+                        <td>10个标准月卡</td>
+                        <td class="risk-value risk-mid">1,290元</td>
+                        <td>3,500美金</td>
+                        <td>300天</td>
+                        <td>770元</td>
+                        <td>520元</td>
+                        <td class="risk-value risk-low">40%</td>
+                    </tr>
+                    <tr>
+                        <td>5标准+5专业</td>
+                        <td class="risk-value risk-mid">1,840元</td>
+                        <td>5,250美金</td>
+                        <td>300天</td>
+                        <td>1,155元</td>
+                        <td>685元</td>
+                        <td class="risk-value risk-mid">37%</td>
+                    </tr>
+                    <tr>
+                        <td>10个专业月卡</td>
+                        <td class="risk-value risk-mid">2,390元</td>
+                        <td>7,000美金</td>
+                        <td>300天</td>
+                        <td>1,540元</td>
+                        <td>850元</td>
+                        <td class="risk-value risk-mid">36%</td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight: 700;">10个旗舰月卡（极限）</td>
+                        <td class="risk-value risk-high">4,290元</td>
+                        <td style="font-weight: 700;">13,000美金</td>
+                        <td style="font-weight: 700;">300天</td>
+                        <td>2,860元</td>
+                        <td>1,430元</td>
+                        <td class="risk-value risk-mid">33%</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-warning">
+                <div class="alert-icon">⚠️</div>
+                <div class="alert-content">
+                    <div class="alert-title">极端风险场景</div>
+                    <div class="alert-text">
+                        <strong>最坏情况：</strong>用户购买10个旗舰月卡（4,290元/13,000美金），如果订阅渠道完全失效，需要按量兜底（0.35元/美金）：<br>
+                        • 最坏成本：13,000 × 0.35 = 4,550元<br>
+                        • 实际亏损：260元（6%）<br>
+                        <br>
+                        <strong>缓解措施：</strong><br>
+                        ✓ 设置单用户最大队列金额限制（建议5000元）<br>
+                        ✓ 监控订阅渠道可用率，提前预警<br>
+                        ✓ 促销活动时单独限购<br>
+                        ✓ 套餐不可退款条款
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="color: #334155; margin: 32px 0 20px; font-size: 20px;">典型用户队列组合建议</h3>
+
+            <table class="risk-table">
+                <thead>
+                    <tr>
+                        <th>用户类型</th>
+                        <th>推荐组合</th>
+                        <th>队列数量</th>
+                        <th>总金额</th>
+                        <th>可用时长</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>小额试用用户</td>
+                        <td>2周卡 + 1基础月卡</td>
+                        <td>3/10</td>
+                        <td>179元</td>
+                        <td>44天</td>
+                    </tr>
+                    <tr>
+                        <td>中度使用用户</td>
+                        <td>5标准月卡</td>
+                        <td>5/10</td>
+                        <td>645元</td>
+                        <td>150天</td>
+                    </tr>
+                    <tr>
+                        <td>重度使用用户</td>
+                        <td>3标准 + 5专业月卡</td>
+                        <td>8/10</td>
+                        <td>1,582元</td>
+                        <td>240天</td>
+                    </tr>
+                    <tr>
+                        <td>大客户</td>
+                        <td>10旗舰月卡</td>
+                        <td>10/10</td>
+                        <td>4,290元</td>
+                        <td>300天</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-success">
+                <div class="alert-icon">✓</div>
+                <div class="alert-content">
+                    <div class="alert-title">风险控制结论</div>
+                    <div class="alert-text">
+                        队列上限10个在风险与用户体验之间取得了良好平衡：<br>
+                        • 单用户最大风险敞口：4,290元/13,000美金/300天<br>
+                        • 即使最坏情况（订阅渠道完全失效），最大亏损仅260元（6%）<br>
+                        • 大部分用户队列在3-5个，风险更低<br>
+                        • 通过金额上限和监控机制可进一步降低风险
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Package Switch Rules -->
+        <div class="section">
+            <div class="section-title">
+                <span class="icon">🔄</span>
+                套餐切换规则
+            </div>
+
+            <div class="scenario-visual">
+                <div class="scenario-header">
+                    <div class="scenario-title">先到先触发：额度用完 OR 日期到期</div>
+                    <div class="scenario-subtitle">满足任一条件即触发套餐切换，用户无缝衔接</div>
+                </div>
+
+                <div class="queue-demo" style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);">
+                    <div class="queue-status">
+                        <div class="status-box" style="border: 2px solid #10b981;">
+                            <div class="status-icon">📦</div>
+                            <div class="status-label">触发条件 1</div>
+                            <div class="status-value" style="color: #10b981; font-size: 20px;">额度用完</div>
+                            <div style="font-size: 14px; color: #064e3b; margin-top: 8px;">立即激活队列下一个</div>
+                        </div>
+
+                        <div class="status-box" style="background: #10b981; color: white;">
+                            <div class="status-icon" style="filter: brightness(0) invert(1);">⚡</div>
+                            <div style="font-size: 24px; font-weight: 700; margin: 12px 0;">OR</div>
+                            <div style="font-size: 14px;">满足任一即触发</div>
+                        </div>
+
+                        <div class="status-box" style="border: 2px solid #10b981;">
+                            <div class="status-icon">📅</div>
+                            <div class="status-label">触发条件 2</div>
+                            <div class="status-value" style="color: #10b981; font-size: 20px;">日期到期</div>
+                            <div style="font-size: 14px; color: #064e3b; margin-top: 8px;">剩余额度清零，激活下一个</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scenario: Quota First -->
+                <div style="margin-top: 32px;">
+                    <h3 style="color: #334155; margin-bottom: 16px; font-size: 18px;">场景A：额度先用完</h3>
+                    <div style="background: white; border-radius: 16px; padding: 24px; border: 2px solid #e2e8f0;">
+                        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px;">
+                            <div style="text-align: center; padding: 12px; background: #dcfce7; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 1</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #10b981;">50$</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #dcfce7; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 2</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #10b981;">40$</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #fef3c7; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 3</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #f59e0b;">50$</div>
+                                <div style="font-size: 10px; color: #92400e;">用完!</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #ede9fe; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 4</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #7c3aed;">新套餐</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #ede9fe; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 5</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #7c3aed;">...</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #f1f5f9; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #94a3b8;">Day 6</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #94a3b8;">-</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #f1f5f9; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #94a3b8;">Day 7</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #94a3b8;">-</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 16px; background: #f0fdf4; border-radius: 12px;">
+                            <span style="font-size: 24px;">✓</span>
+                            <div>
+                                <div style="font-weight: 600; color: #166534;">周卡140美金第3天用完</div>
+                                <div style="font-size: 14px; color: #15803d;">立即激活队列下一个套餐，用户无感知切换</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scenario: Date First -->
+                <div style="margin-top: 24px;">
+                    <h3 style="color: #334155; margin-bottom: 16px; font-size: 18px;">场景B：日期先到期</h3>
+                    <div style="background: white; border-radius: 16px; padding: 24px; border: 2px solid #e2e8f0;">
+                        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px;">
+                            <div style="text-align: center; padding: 12px; background: #dcfce7; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 1</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #10b981;">20$</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #dcfce7; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 2</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #10b981;">15$</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #dcfce7; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 3</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #10b981;">10$</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #dcfce7; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 4</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #10b981;">15$</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #dcfce7; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 5</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #10b981;">10$</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #dcfce7; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 6</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #10b981;">10$</div>
+                            </div>
+                            <div style="text-align: center; padding: 12px; background: #fee2e2; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #64748b;">Day 7</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #ef4444;">到期</div>
+                                <div style="font-size: 10px; color: #dc2626;">剩60$</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 16px; background: #fef2f2; border-radius: 12px;">
+                            <span style="font-size: 24px;">⚠️</span>
+                            <div>
+                                <div style="font-weight: 600; color: #991b1b;">周卡到期，剩余60美金清零</div>
+                                <div style="font-size: 14px; color: #b91c1c;">立即激活队列下一个套餐</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scenario: Queue Empty -->
+                <div style="margin-top: 24px;">
+                    <h3 style="color: #334155; margin-bottom: 16px; font-size: 18px;">场景C：队列为空</h3>
+                    <div style="background: white; border-radius: 16px; padding: 24px; border: 2px solid #e2e8f0;">
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 16px; background: #dbeafe; border-radius: 12px;">
+                            <span style="font-size: 24px;">💡</span>
+                            <div>
+                                <div style="font-weight: 600; color: #1e40af;">套餐用完/到期，但队列为空</div>
+                                <div style="font-size: 14px; color: #1d4ed8;">后续调用自动转为按量计费（0.50元/美金）</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert alert-success">
+                <div class="alert-icon">✓</div>
+                <div class="alert-content">
+                    <div class="alert-title">切换规则总结</div>
+                    <div class="alert-text">
+                        • <strong>额度先用完</strong>：立即激活队列下一个套餐，用户无感知切换<br>
+                        • <strong>日期先到期</strong>：剩余额度清零，立即激活队列下一个套餐<br>
+                        • <strong>队列为空</strong>：自动转按量计费，保证服务不中断
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Daily Limit -->
+        <div class="section">
+            <div class="section-title">
+                <span class="icon">🛡️</span>
+                每日消费上限（防盗刷安全阀）
+            </div>
+
+            <div class="scenario-visual">
+                <div class="scenario-header">
+                    <div class="scenario-title">保护用户资产，防止API密钥泄露造成损失</div>
+                    <div class="scenario-subtitle">正常用户几乎不触发，异常情况及时止损</div>
+                </div>
+
+                <div class="queue-demo" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);">
+                    <div style="text-align: center; margin-bottom: 24px;">
+                        <div style="font-size: 18px; font-weight: 600; color: #92400e; margin-bottom: 8px;">每日消费上限配置</div>
+                        <div style="font-size: 14px; color: #78350f;">由管理员根据实际情况设置</div>
+                    </div>
+
+                    <div class="queue-status">
+                        <div class="status-box" style="border: 2px solid #f59e0b;">
+                            <div class="status-icon">🎫</div>
+                            <div class="status-label">周卡/双周卡</div>
+                            <div class="status-value" style="color: #d97706;">可配置</div>
+                            <div style="font-size: 13px; color: #92400e; margin-top: 8px;">建议：50-100美金/天</div>
+                        </div>
+
+                        <div class="status-box" style="border: 2px solid #f59e0b;">
+                            <div class="status-icon">🎟️</div>
+                            <div class="status-label">基础/标准月卡</div>
+                            <div class="status-value" style="color: #d97706;">可配置</div>
+                            <div style="font-size: 13px; color: #92400e; margin-top: 8px;">建议：100-200美金/天</div>
+                        </div>
+
+                        <div class="status-box" style="border: 2px solid #f59e0b;">
+                            <div class="status-icon">👑</div>
+                            <div class="status-label">专业/旗舰月卡</div>
+                            <div class="status-value" style="color: #d97706;">可配置</div>
+                            <div style="font-size: 13px; color: #92400e; margin-top: 8px;">建议：200-500美金/天</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Trigger Flow -->
+                <div style="margin-top: 32px;">
+                    <h3 style="color: #334155; margin-bottom: 16px; font-size: 18px;">触发日上限后的处理流程</h3>
+                    <div style="background: white; border-radius: 16px; padding: 28px; border: 2px solid #e2e8f0;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;">
+                            <div style="flex: 1; min-width: 200px; text-align: center;">
+                                <div style="width: 80px; height: 80px; background: linear-gradient(135deg, #fee2e2, #fecaca); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 32px;">⚠️</div>
+                                <div style="font-weight: 600; color: #334155;">检测到日上限</div>
+                                <div style="font-size: 13px; color: #64748b; margin-top: 4px;">今日套餐消费达到上限</div>
+                            </div>
+
+                            <div style="font-size: 32px; color: #d1d5db;">→</div>
+
+                            <div style="flex: 1; min-width: 200px; text-align: center;">
+                                <div style="width: 80px; height: 80px; background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 32px;">📧</div>
+                                <div style="font-weight: 600; color: #334155;">发送异常提醒</div>
+                                <div style="font-size: 13px; color: #64748b; margin-top: 4px;">通知用户检查是否被盗刷</div>
+                            </div>
+
+                            <div style="font-size: 32px; color: #d1d5db;">→</div>
+
+                            <div style="flex: 1; min-width: 200px; text-align: center;">
+                                <div style="width: 80px; height: 80px; background: linear-gradient(135deg, #dcfce7, #bbf7d0); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 32px;">💳</div>
+                                <div style="font-weight: 600; color: #334155;">转按量计费</div>
+                                <div style="font-size: 13px; color: #64748b; margin-top: 4px;">后续调用按0.50元/美金计费</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scenario -->
+                <div style="margin-top: 24px;">
+                    <h3 style="color: #334155; margin-bottom: 16px; font-size: 18px;">防盗刷场景示例</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div style="background: white; border-radius: 16px; padding: 24px; border: 2px solid #fee2e2;">
+                            <div style="font-size: 16px; font-weight: 600; color: #dc2626; margin-bottom: 12px;">❌ 无日上限保护</div>
+                            <div style="font-size: 14px; color: #64748b; line-height: 1.8;">
+                                用户API密钥泄露<br>
+                                ↓<br>
+                                攻击者1小时内刷完350美金套餐<br>
+                                ↓<br>
+                                继续刷按量余额500元<br>
+                                ↓<br>
+                                <span style="color: #dc2626; font-weight: 600;">用户损失：套餐 + 500元余额</span>
+                            </div>
+                        </div>
+
+                        <div style="background: white; border-radius: 16px; padding: 24px; border: 2px solid #dcfce7;">
+                            <div style="font-size: 16px; font-weight: 600; color: #16a34a; margin-bottom: 12px;">✓ 有日上限保护</div>
+                            <div style="font-size: 14px; color: #64748b; line-height: 1.8;">
+                                用户API密钥泄露<br>
+                                ↓<br>
+                                攻击者刷到日上限200美金<br>
+                                ↓<br>
+                                触发告警，用户收到通知<br>
+                                ↓<br>
+                                <span style="color: #16a34a; font-weight: 600;">损失止于200美金，及时发现</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert alert-warning">
+                <div class="alert-icon">⚠️</div>
+                <div class="alert-content">
+                    <div class="alert-title">设计原则</div>
+                    <div class="alert-text">
+                        • <strong>上限要足够大</strong>：正常用户几乎不会触发<br>
+                        • <strong>触发后不中断服务</strong>：自动转按量计费，保证正常业务<br>
+                        • <strong>及时通知用户</strong>：发送异常提醒，让用户检查是否被盗刷<br>
+                        • <strong>可配置</strong>：管理员可根据实际情况调整各套餐的日上限
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary -->
+        <div class="summary-bar">
+            <div class="summary-item">
+                <div class="summary-label">队列上限</div>
+                <div class="summary-value purple">10个套餐</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">日卡叠加</div>
+                <div class="summary-value yellow">无限制</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">套餐切换</div>
+                <div class="summary-value blue">先到先触发</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">每日上限</div>
+                <div class="summary-value green">可配置</div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            Generated by Claude · API服务套餐叠加与队列机制设计方案 · 最终版 v1.0
+        </div>
+    </div>
+</body>
+</html>
