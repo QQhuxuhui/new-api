@@ -614,10 +614,39 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 
 func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (err error) {
 	// IMPORTANT: Only deduct from ONE source based on BillingSource
+	// - BillingSource == "daily_pool": Deduct from daily pool ONLY
 	// - BillingSource == "plan": Deduct from plan quota ONLY
 	// - BillingSource == "user_balance" (or empty for backward compat): Deduct from user balance ONLY
 
-	if relayInfo.BillingSource == BillingSourcePlan && relayInfo.UserPlanId > 0 {
+	if relayInfo.BillingSource == BillingSourceDailyPool {
+		// Daily pool billing: Deduct from daily pool ONLY, NOT from user balance
+		// actualQuota = quota (delta) + preConsumedQuota (for daily pool, pre-consume was tracked but not deducted)
+		actualQuota := quota + preConsumedQuota
+
+		if actualQuota > 0 {
+			// Deduct daily pool quota based on actual consumption
+			if err := model.DecreaseDailyPoolQuota(relayInfo.UserId, int64(actualQuota)); err != nil {
+				common.SysLog(fmt.Sprintf("failed to consume daily pool quota for user %d: %v", relayInfo.UserId, err))
+			}
+		} else if actualQuota < 0 {
+			// Refund to daily pool (only if there was actual consumption)
+			if err := model.IncreaseDailyPoolQuota(relayInfo.UserId, int64(-actualQuota)); err != nil {
+				common.SysLog(fmt.Sprintf("failed to refund daily pool quota for user %d: %v", relayInfo.UserId, err))
+			}
+		}
+
+		// Token quota still needs to be consumed (for non-playground, token tracking)
+		if !relayInfo.IsPlayground {
+			if quota > 0 {
+				err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
+			} else {
+				err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, -quota)
+			}
+			if err != nil {
+				return err
+			}
+		}
+	} else if relayInfo.BillingSource == BillingSourcePlan && relayInfo.UserPlanId > 0 {
 		// Plan billing: Deduct from plan quota ONLY, NOT from user balance
 		// actualQuota = quota (delta) + preConsumedQuota (for plan, pre-consume was tracked but not deducted)
 		actualQuota := quota + preConsumedQuota
@@ -683,8 +712,8 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 	}
 
 	// Send quota notification only for user balance billing
-	// Skip for plan billing since UserQuota is not set and user is using plan quota
-	if sendEmail && relayInfo.BillingSource != BillingSourcePlan {
+	// Skip for plan/daily pool billing since UserQuota is not set and user is using plan/pool quota
+	if sendEmail && relayInfo.BillingSource == BillingSourceUserBalance {
 		if (quota + preConsumedQuota) != 0 {
 			checkAndSendQuotaNotify(relayInfo, quota, preConsumedQuota)
 		}

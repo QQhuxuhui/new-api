@@ -14,12 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// BillingSource constants for tracking where quota is deducted from
-const (
-	BillingSourcePlan        = "plan"
-	BillingSourceUserBalance = "user_balance"
-)
-
 func ReturnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
 	if relayInfo.FinalPreConsumedQuota != 0 {
 		logger.LogInfo(c, fmt.Sprintf("用户 %d 请求失败, 返还预扣费额度 %s (计费来源: %s)", relayInfo.UserId, logger.FormatQuota(relayInfo.FinalPreConsumedQuota), relayInfo.BillingSource))
@@ -39,6 +33,22 @@ func ReturnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
 			return
 		}
 
+		// For daily pool billing: Only return token quota, NOT daily pool
+		// Because in daily pool billing path, we only pre-consumed token quota, not daily pool
+		// Daily pool quota is only deducted in PostConsumeQuota
+		if relayInfo.BillingSource == BillingSourceDailyPool {
+			if !relayInfo.IsPlayground && relayInfo.FinalPreConsumedQuota > 0 {
+				gopool.Go(func() {
+					// Only return token quota (daily pool was NOT pre-consumed)
+					err := model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, relayInfo.FinalPreConsumedQuota)
+					if err != nil {
+						common.SysLog("error return pre-consumed token quota for daily pool billing: " + err.Error())
+					}
+				})
+			}
+			return
+		}
+
 		// For user balance billing: Use normal refund flow
 		gopool.Go(func() {
 			relayInfoCopy := *relayInfo
@@ -52,16 +62,39 @@ func ReturnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
 }
 
 // PreConsumeQuota checks if the user has enough quota to pre-consume.
-// It implements plan-priority billing: checks plan quota first, falls back to user balance.
+// It implements three-level billing priority: Daily Pool → Plan → User Balance
+// Uses skip-level billing - if a source is insufficient, skip entirely to next level
 // Sets relayInfo.BillingSource to indicate the quota source.
 func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
-	// Phase 1: Try plan quota first (plan-priority)
+	requiredQuota := int64(preConsumedQuota)
+
+	// Priority 1: Check Daily Pool
+	dailyPoolRemaining, err := model.GetDailyPoolRemaining(relayInfo.UserId)
+	if err == nil && dailyPoolRemaining >= requiredQuota {
+		// Daily pool has sufficient quota
+		relayInfo.BillingSource = BillingSourceDailyPool
+		relayInfo.UserPlanId = 0
+		logger.LogInfo(c, fmt.Sprintf("用户 %d 使用日卡额度, 需要: %s, 可用: %s", relayInfo.UserId, logger.FormatQuota(preConsumedQuota), logger.FormatQuota(int(dailyPoolRemaining))))
+
+		// Pre-consume from token quota
+		if !relayInfo.IsPlayground && !relayInfo.TokenUnlimited {
+			err := PreConsumeTokenQuota(relayInfo, preConsumedQuota)
+			if err != nil {
+				return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+			}
+		}
+
+		relayInfo.FinalPreConsumedQuota = preConsumedQuota
+		return nil
+	}
+
+	// Priority 2: Check Plan Quota
 	if relayInfo.UserPlanId > 0 {
 		// Check plan quota sufficiency
-		planQuotaOK, planErr := checkPlanQuotaSufficient(relayInfo.UserPlanId, int64(preConsumedQuota))
+		planQuotaOK, planErr := checkPlanQuotaSufficient(relayInfo.UserPlanId, requiredQuota)
 		if planErr == nil && planQuotaOK {
 			// Also check daily quota limit before using plan
-			dailyQuotaErr := CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, int64(preConsumedQuota))
+			dailyQuotaErr := CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, requiredQuota)
 			if dailyQuotaErr != nil {
 				// Daily quota exceeded - fall back to user balance or return error
 				logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 每日额度不足: %v, 回退到用户余额", relayInfo.UserId, relayInfo.UserPlanId, dailyQuotaErr))
@@ -96,7 +129,7 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 		}
 	}
 
-	// Phase 2: Fall back to user balance
+	// Priority 3: Fall back to user balance
 	relayInfo.BillingSource = BillingSourceUserBalance
 	relayInfo.UserPlanId = 0 // 清零套餐ID，确保消费日志不会错误地关联到套餐
 

@@ -15,22 +15,50 @@ type UserPlan struct {
 	PlanId            int    `json:"plan_id" gorm:"not null;index"`
 	Quota             int64  `json:"quota" gorm:"default:0"`              // Current available quota
 	UsedQuota         int64  `json:"used_quota" gorm:"default:0"`         // Total used quota
+	OriginalQuota     int64  `json:"original_quota" gorm:"default:0"`     // Original quota when assigned
 	IsCurrent         int    `json:"is_current" gorm:"default:0"`         // 1 = current active plan
 	AutoSwitch        int    `json:"auto_switch" gorm:"default:1"`        // 1 = auto switch to higher priority when available
 	AllowUserSwitch   int    `json:"allow_user_switch" gorm:"default:0"`  // Admin permission: allow user to manually switch
 	AllowUserToggle   int    `json:"allow_user_toggle" gorm:"default:1"`  // Admin permission: allow user to toggle auto-switch
 	Locked            int    `json:"locked" gorm:"default:0"`             // 1 = locked by admin
 	LockedReason      string `json:"locked_reason" gorm:"type:varchar(255)"`
+	LockedAt          int64  `json:"locked_at" gorm:"default:0"`
 	AdminNote         string `json:"admin_note" gorm:"type:text"`
 	StartedAt         int64  `json:"started_at" gorm:"bigint"`            // Plan start time
 	ExpiresAt         int64  `json:"expires_at" gorm:"bigint;index"`      // 0 = never expires
-	Status            int    `json:"status" gorm:"default:1"`             // 1=active, 2=expired, 3=disabled
+	OriginalExpiresAt int64  `json:"original_expires_at" gorm:"default:0"` // Original expiry before admin adjustments
+	Status            int    `json:"status" gorm:"default:1"`             // 1=active, 2=expired, 3=disabled, 4=completed, 5=forfeited, 6=revoked
 	CreatedAt         int64  `json:"created_at" gorm:"autoCreateTime:milli"`
 	UpdatedAt         int64  `json:"updated_at" gorm:"autoUpdateTime:milli"`
+
+	// Queue management fields
+	QueuePosition     int    `json:"queue_position" gorm:"default:0"`    // Position in queue (0 = current/not in queue)
+	PurchaseOrder     int64  `json:"purchase_order" gorm:"default:0"`    // Timestamp for FIFO ordering
+
+	// Admin adjustment tracking
+	AdminAdjustedQuota int64 `json:"admin_adjusted_quota" gorm:"default:0"` // Net admin quota adjustments (+/-)
+	AdminExtendedDays  int   `json:"admin_extended_days" gorm:"default:0"`  // Net admin validity extensions (+/-)
+
+	// Source tracking
+	Source            string `json:"source" gorm:"type:varchar(50);default:'purchase'"` // 'purchase', 'admin_assign', 'redemption', 'gift', 'promotion', 'migration'
+	SourceOrderId     string `json:"source_order_id" gorm:"type:varchar(64)"`           // Related order/redemption ID
+	AssignedBy        int    `json:"assigned_by" gorm:"default:0"`                      // Admin ID who assigned this plan
+	PurchasedAt       int64  `json:"purchased_at" gorm:"default:0"`                     // Purchase timestamp
+
+	// Refund management
+	RefundStatus        string `json:"refund_status" gorm:"type:varchar(20);default:'none'"` // 'none', 'refund_requested', 'refunded', 'rejected'
+	RefundRequestedAt   int64  `json:"refund_requested_at" gorm:"default:0"`
+	RefundProcessedAt   int64  `json:"refund_processed_at" gorm:"default:0"`
+	RefundProcessedBy   int    `json:"refund_processed_by" gorm:"default:0"`
+	RefundRejectReason  string `json:"refund_reject_reason" gorm:"type:varchar(255)"`
 
 	// Override fields - allow per-user customization of plan defaults
 	// -1 means use plan default, 0 means no limit, >0 is custom limit
 	DailyQuotaLimitOverride *int64 `json:"daily_quota_limit_override" gorm:"default:null"` // Override plan's daily quota limit (nil = use plan default)
+
+	// Ban handling
+	PausedAt       int64 `json:"paused_at" gorm:"default:0"`       // When the plan was paused (due to ban)
+	PausedDuration int64 `json:"paused_duration" gorm:"default:0"` // Total paused duration in milliseconds
 
 	// Associations (for preloading)
 	Plan *Plan `json:"plan,omitempty" gorm:"foreignKey:PlanId"`
@@ -39,9 +67,30 @@ type UserPlan struct {
 
 // UserPlan status
 const (
-	UserPlanStatusActive   = 1
-	UserPlanStatusExpired  = 2
-	UserPlanStatusDisabled = 3
+	UserPlanStatusActive    = 1
+	UserPlanStatusExpired   = 2
+	UserPlanStatusDisabled  = 3
+	UserPlanStatusCompleted = 4 // Plan completed (quota exhausted)
+	UserPlanStatusForfeited = 5 // Plan forfeited (permanent ban)
+	UserPlanStatusRevoked   = 6 // Plan revoked by admin
+)
+
+// UserPlan source types
+const (
+	UserPlanSourcePurchase   = "purchase"
+	UserPlanSourceAdminAssign = "admin_assign"
+	UserPlanSourceRedemption = "redemption"
+	UserPlanSourceGift       = "gift"
+	UserPlanSourcePromotion  = "promotion"
+	UserPlanSourceMigration  = "migration"
+)
+
+// Refund status
+const (
+	RefundStatusNone      = "none"
+	RefundStatusRequested = "refund_requested"
+	RefundStatusRefunded  = "refunded"
+	RefundStatusRejected  = "rejected"
 )
 
 func (up *UserPlan) TableName() string {
@@ -102,6 +151,45 @@ func (up *UserPlan) GetEffectiveDailyQuotaLimit() (int64, bool) {
 	}
 
 	return 0, false
+}
+
+// IsInQueue checks if the plan is in the queue (not current)
+func (up *UserPlan) IsInQueue() bool {
+	return up.IsCurrent != 1 && up.QueuePosition > 0
+}
+
+// IsPaused checks if the plan timer is paused (due to ban)
+func (up *UserPlan) IsPaused() bool {
+	return up.PausedAt > 0
+}
+
+// IsRefundable checks if the plan can be refunded
+// Only unactivated queue plans within 7 days of purchase are refundable
+func (up *UserPlan) IsRefundable() bool {
+	if up.IsCurrent == 1 {
+		return false // Activated plans are not refundable
+	}
+	if up.Status != UserPlanStatusActive {
+		return false // Only active plans can be refunded
+	}
+	if up.RefundStatus != RefundStatusNone {
+		return false // Already in refund process
+	}
+	if up.Plan != nil && up.Plan.IsDailyPlan() {
+		return false // Daily cards are not refundable
+	}
+	// Check if within 7 days of purchase
+	purchaseTime := up.PurchasedAt
+	if purchaseTime == 0 {
+		purchaseTime = up.CreatedAt
+	}
+	sevenDaysAgo := time.Now().Add(-7 * 24 * time.Hour).UnixMilli()
+	return purchaseTime >= sevenDaysAgo
+}
+
+// GetRemainingQuota returns the remaining quota
+func (up *UserPlan) GetRemainingQuota() int64 {
+	return up.Quota
 }
 
 // Insert creates a new user plan
@@ -580,3 +668,352 @@ func GetUserPlansAdmin(userId int, pageInfo *common.PageInfo) ([]*UserPlan, int6
 
 	return userPlans, total, nil
 }
+
+// ==================== Queue Management Functions ====================
+
+// MaxQueueSize is the maximum number of plans a user can have in queue
+const MaxQueueSize = 10
+
+// GetUserQueuedPlans returns all non-current plans for a user ordered by purchase order
+func GetUserQueuedPlans(userId int) ([]*UserPlan, error) {
+	var userPlans []*UserPlan
+	err := DB.Preload("Plan").
+		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0", userId, UserPlanStatusActive).
+		Order("purchase_order ASC, queue_position ASC").
+		Find(&userPlans).Error
+	if err != nil {
+		return nil, err
+	}
+	return userPlans, nil
+}
+
+// GetQueueCount returns the number of plans in the user's queue
+func GetQueueCount(userId int) (int64, error) {
+	var count int64
+	err := DB.Model(&UserPlan{}).
+		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0", userId, UserPlanStatusActive).
+		Count(&count).Error
+	return count, err
+}
+
+// CanAddToQueue checks if the user's queue has room for another plan
+func CanAddToQueue(userId int) (bool, int64, error) {
+	count, err := GetQueueCount(userId)
+	if err != nil {
+		return false, 0, err
+	}
+	return count < MaxQueueSize, count, nil
+}
+
+// GetNextQueuePosition returns the next available queue position for a user
+func GetNextQueuePosition(userId int) (int, error) {
+	var maxPos int
+	err := DB.Model(&UserPlan{}).
+		Select("COALESCE(MAX(queue_position), 0)").
+		Where("user_id = ?", userId).
+		Scan(&maxPos).Error
+	if err != nil {
+		return 0, err
+	}
+	return maxPos + 1, nil
+}
+
+// AddPlanToQueue adds a plan to the user's queue
+// If this is the user's first plan, it will be activated immediately
+func AddPlanToQueue(userId int, planId int, quota int64, source string, sourceOrderId string, assignedBy int) (*UserPlan, error) {
+	// Get plan details
+	plan, err := GetPlanById(planId)
+	if err != nil {
+		return nil, errors.New("套餐不存在")
+	}
+	if plan.Status != PlanStatusEnabled {
+		return nil, errors.New("套餐已禁用")
+	}
+
+	// Check if it's a daily plan (doesn't use queue)
+	if plan.IsDailyPlan() {
+		return nil, errors.New("日卡不使用队列系统，请使用日卡购买接口")
+	}
+
+	// Check queue capacity
+	canAdd, _, err := CanAddToQueue(userId)
+	if err != nil {
+		return nil, err
+	}
+	if !canAdd {
+		return nil, errors.New("队列已满 (10/10)，请等待现有套餐消费完成")
+	}
+
+	// Calculate quota and expiry
+	if quota == 0 {
+		quota = plan.DefaultQuota
+	}
+	now := time.Now()
+
+	// Check if user has current plan
+	currentPlan, _ := GetUserCurrentPlan(userId)
+	hasCurrentPlan := currentPlan != nil
+
+	// Get next queue position
+	nextPos, err := GetNextQueuePosition(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create user plan
+	userPlan := &UserPlan{
+		UserId:          userId,
+		PlanId:          planId,
+		Quota:           quota,
+		UsedQuota:       0,
+		OriginalQuota:   quota,
+		IsCurrent:       0, // Will be set to 1 if no current plan
+		AutoSwitch:      1,
+		AllowUserSwitch: plan.DefaultAllowSwitch,
+		AllowUserToggle: plan.DefaultAllowToggle,
+		Locked:          0,
+		Status:          UserPlanStatusActive,
+		QueuePosition:   nextPos,
+		PurchaseOrder:   now.UnixMilli(),
+		Source:          source,
+		SourceOrderId:   sourceOrderId,
+		AssignedBy:      assignedBy,
+		PurchasedAt:     now.UnixMilli(),
+		RefundStatus:    RefundStatusNone,
+	}
+
+	// If no current plan, activate immediately
+	if !hasCurrentPlan {
+		userPlan.IsCurrent = 1
+		userPlan.QueuePosition = 0
+		userPlan.StartedAt = now.UnixMilli()
+		if plan.ValidityDays > 0 {
+			userPlan.ExpiresAt = now.Add(time.Duration(plan.ValidityDays) * 24 * time.Hour).UnixMilli()
+			userPlan.OriginalExpiresAt = userPlan.ExpiresAt
+		}
+	}
+
+	if err := DB.Create(userPlan).Error; err != nil {
+		return nil, err
+	}
+
+	// Invalidate cache
+	InvalidateUserPlanCache(userId)
+
+	// Recalculate queue positions if added to queue
+	if hasCurrentPlan {
+		_ = recalculateQueuePositions(userId)
+	}
+
+	return userPlan, nil
+}
+
+// recalculateQueuePositions reorders queue positions based on purchase order
+func recalculateQueuePositions(userId int) error {
+	var plans []*UserPlan
+	err := DB.Where("user_id = ? AND is_current = 0 AND status = ?", userId, UserPlanStatusActive).
+		Order("purchase_order ASC").
+		Find(&plans).Error
+	if err != nil {
+		return err
+	}
+
+	for i, plan := range plans {
+		newPos := i + 1
+		if plan.QueuePosition != newPos {
+			DB.Model(&UserPlan{}).Where("id = ?", plan.Id).Update("queue_position", newPos)
+		}
+	}
+
+	return nil
+}
+
+// RemovePlanFromQueue removes a plan from the queue and reorders positions
+func RemovePlanFromQueue(userPlanId int) error {
+	var userPlan UserPlan
+	if err := DB.First(&userPlan, userPlanId).Error; err != nil {
+		return errors.New("未找到指定的用户套餐")
+	}
+
+	if userPlan.IsCurrent == 1 {
+		return errors.New("当前使用中的套餐不能从队列移除")
+	}
+
+	userId := userPlan.UserId
+
+	if err := DB.Delete(&userPlan).Error; err != nil {
+		return err
+	}
+
+	// Recalculate queue positions
+	_ = recalculateQueuePositions(userId)
+
+	// Invalidate cache
+	InvalidateUserPlanCache(userId)
+
+	return nil
+}
+
+// ReorderQueue allows admin to reorder a user's plan queue
+// newOrder is a slice of user_plan IDs in the desired order
+func ReorderQueue(userId int, newOrder []int) error {
+	// Verify all IDs belong to this user and are in queue
+	for _, id := range newOrder {
+		var plan UserPlan
+		if err := DB.First(&plan, id).Error; err != nil {
+			return errors.New("套餐不存在: " + string(rune(id)))
+		}
+		if plan.UserId != userId {
+			return errors.New("套餐不属于该用户")
+		}
+		if plan.IsCurrent == 1 {
+			return errors.New("当前套餐不在队列中")
+		}
+	}
+
+	// Update positions
+	for i, id := range newOrder {
+		if err := DB.Model(&UserPlan{}).Where("id = ?", id).Update("queue_position", i+1).Error; err != nil {
+			return err
+		}
+	}
+
+	// Invalidate cache
+	InvalidateUserPlanCache(userId)
+
+	return nil
+}
+
+// GetEstimatedActivationTime calculates when a queued plan might activate
+// Returns Unix timestamp in milliseconds
+func GetEstimatedActivationTime(userPlanId int) (int64, error) {
+	var targetPlan UserPlan
+	if err := DB.Preload("Plan").First(&targetPlan, userPlanId).Error; err != nil {
+		return 0, err
+	}
+
+	if targetPlan.IsCurrent == 1 {
+		return targetPlan.StartedAt, nil // Already active
+	}
+
+	userId := targetPlan.UserId
+	now := time.Now()
+	estimatedTime := now
+
+	// Get current plan
+	currentPlan, err := GetUserCurrentPlan(userId)
+	if err == nil && currentPlan != nil {
+		if currentPlan.ExpiresAt > 0 {
+			expiresAt := time.UnixMilli(currentPlan.ExpiresAt)
+			if expiresAt.After(estimatedTime) {
+				estimatedTime = expiresAt
+			}
+		} else {
+			// No expiry, estimate based on quota usage rate (simplified)
+			// This is a rough estimate
+			estimatedTime = estimatedTime.Add(30 * 24 * time.Hour)
+		}
+	}
+
+	// Get all queue plans before this one
+	var queuePlans []*UserPlan
+	err = DB.Preload("Plan").
+		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND queue_position < ?",
+			userId, UserPlanStatusActive, targetPlan.QueuePosition).
+		Order("queue_position ASC").
+		Find(&queuePlans).Error
+	if err != nil {
+		return 0, err
+	}
+
+	// Add estimated duration for each plan in front
+	for _, plan := range queuePlans {
+		if plan.Plan != nil && plan.Plan.ValidityDays > 0 {
+			estimatedTime = estimatedTime.Add(time.Duration(plan.Plan.ValidityDays) * 24 * time.Hour)
+		} else {
+			// Default estimate for plans without validity
+			estimatedTime = estimatedTime.Add(30 * 24 * time.Hour)
+		}
+	}
+
+	return estimatedTime.UnixMilli(), nil
+}
+
+// ActivateNextQueuedPlan activates the next plan in queue when current plan completes
+func ActivateNextQueuedPlan(userId int) (*UserPlan, error) {
+	// Get next plan in queue
+	var nextPlan UserPlan
+	err := DB.Preload("Plan").
+		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0", userId, UserPlanStatusActive).
+		Order("queue_position ASC").
+		First(&nextPlan).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil // No next plan
+		}
+		return nil, err
+	}
+
+	now := time.Now()
+
+	// Calculate expiry
+	var expiresAt int64
+	if nextPlan.Plan != nil && nextPlan.Plan.ValidityDays > 0 {
+		expiresAt = now.Add(time.Duration(nextPlan.Plan.ValidityDays) * 24 * time.Hour).UnixMilli()
+	}
+
+	// Activate the plan
+	updates := map[string]interface{}{
+		"is_current":          1,
+		"queue_position":      0,
+		"started_at":          now.UnixMilli(),
+		"expires_at":          expiresAt,
+		"original_expires_at": expiresAt,
+		"updated_at":          now.UnixMilli(),
+	}
+
+	if err := DB.Model(&UserPlan{}).Where("id = ?", nextPlan.Id).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+
+	// Recalculate queue positions
+	_ = recalculateQueuePositions(userId)
+
+	// Invalidate cache
+	InvalidateUserPlanCache(userId)
+
+	// Reload the plan
+	return GetUserPlanById(nextPlan.Id)
+}
+
+// CompleteCurrentPlan marks the current plan as completed and activates next
+func CompleteCurrentPlan(userId int, completionStatus int) (*UserPlan, error) {
+	// Get current plan
+	currentPlan, err := GetUserCurrentPlan(userId)
+	if err != nil {
+		return nil, err
+	}
+	if currentPlan == nil {
+		return nil, errors.New("用户没有当前套餐")
+	}
+
+	now := time.Now().UnixMilli()
+
+	// Mark as completed/expired
+	updates := map[string]interface{}{
+		"is_current": 0,
+		"status":     completionStatus,
+		"updated_at": now,
+	}
+
+	if err := DB.Model(&UserPlan{}).Where("id = ?", currentPlan.Id).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+
+	// Invalidate cache
+	InvalidateUserPlanCache(userId)
+
+	// Activate next plan
+	return ActivateNextQueuedPlan(userId)
+}
+
