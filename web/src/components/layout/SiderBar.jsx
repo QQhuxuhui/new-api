@@ -36,6 +36,7 @@ const routerMap = {
   token: '/console/token',
   redemption: '/console/redemption',
   plan: '/console/plan',
+  plans: '/plans',
   topup: '/console/topup',
   user: '/console/user',
   log: '/console/log',
@@ -71,6 +72,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
   const workspaceItems = useMemo(() => {
     const items = [
+      {
+        text: t('套餐商城'),
+        itemKey: 'plans',
+        to: '/plans',
+      },
       {
         text: t('数据看板'),
         itemKey: 'detail',
