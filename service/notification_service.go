@@ -266,10 +266,7 @@ func CheckAndNotifyQuotaLow(userId int, userPlanId int) {
 
 	// Notify if below 20%
 	if remainingPercentage < 20 && userPlan.Quota > 0 {
-		planName := ""
-		if userPlan.Plan != nil {
-			planName = userPlan.Plan.DisplayName
-		}
+		planName := userPlan.GetDisplayName()
 		_ = NotifyQuotaLow(userId, userPlanId, planName, userPlan.Quota, userPlan.OriginalQuota)
 	}
 }

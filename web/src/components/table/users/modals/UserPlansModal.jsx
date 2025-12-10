@@ -828,7 +828,7 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
             {/* Plan Info */}
             <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded">
               <Text type="secondary">{t('套餐')}: </Text>
-              <Text strong>{selectedPlan.plan?.name}</Text>
+              <Text strong>{selectedPlan.plan_display_name || selectedPlan.plan?.display_name || selectedPlan.plan?.name}</Text>
               <Text type="secondary" className="ml-4">{t('类型')}: </Text>
               {renderPlanType(selectedPlan.plan?.type)}
             </div>

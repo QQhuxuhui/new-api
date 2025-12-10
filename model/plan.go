@@ -206,15 +206,23 @@ func (p *Plan) Delete() error {
 	if p.Id == 0 {
 		return errors.New("套餐ID不能为空")
 	}
-	// Check if any user_plans reference this plan
+
+	// Check for unmigrated user_plans (without complete snapshots)
+	// Migrated instances have all snapshot fields and are fully independent
 	var count int64
-	if err := DB.Model(&UserPlan{}).Where("plan_id = ?", p.Id).Count(&count).Error; err != nil {
+	if err := DB.Model(&UserPlan{}).
+		Where("plan_id = ? AND (plan_name = ? OR plan_name IS NULL OR plan_type = ? OR plan_type IS NULL)",
+			p.Id, "", "").
+		Count(&count).Error; err != nil {
 		return err
 	}
+
 	if count > 0 {
-		return errors.New("该套餐已被用户使用，无法删除")
+		return errors.New("该套餐模板仍有未完全迁移的用户实例，请等待数据迁移完成")
 	}
-	// Invalidate cache before delete (though no users should have this plan)
+
+	// Safe to delete - all instances have complete snapshots (display + routing)
+	// Users can continue using their plans without the template
 	go InvalidateUserPlanCacheByPlanId(p.Id)
 	return DB.Delete(p).Error
 }

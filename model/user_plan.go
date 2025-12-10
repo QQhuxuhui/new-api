@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -60,7 +61,23 @@ type UserPlan struct {
 	PausedAt       int64 `json:"paused_at" gorm:"default:0"`       // When the plan was paused (due to ban)
 	PausedDuration int64 `json:"paused_duration" gorm:"default:0"` // Total paused duration in milliseconds
 
-	// Associations (for preloading)
+	// Snapshot fields from Plan template (immutable after assignment)
+	// These fields decouple UserPlan from Plan template lifecycle
+
+	// Display & sorting snapshots (Phase 1 - implemented)
+	PlanName        string `json:"plan_name" gorm:"type:varchar(64);default:''"`
+	PlanDisplayName string `json:"plan_display_name" gorm:"type:varchar(128);default:''"`
+	PlanCategory    string `json:"plan_category" gorm:"type:varchar(20);default:'monthly';index:idx_user_plans_category"`
+	PlanPriority    int    `json:"plan_priority" gorm:"default:0;index:idx_user_plans_priority"`
+
+	// Routing & access control snapshots (Phase 2 - for complete decoupling)
+	PlanType            string `json:"plan_type" gorm:"type:varchar(20);default:''"`           // "subscription", "consumption", "trial", etc.
+	PlanChannelGroup    string `json:"plan_channel_group" gorm:"type:varchar(64);default:''"`  // Legacy single channel group
+	PlanChannelGroups   string `json:"plan_channel_groups" gorm:"type:text"`                    // JSON array: ["group1","group2"]
+	PlanRateLimitRules  string `json:"plan_rate_limit_rules" gorm:"type:text"`                  // JSON serialized rate limit rules
+	PlanDailyQuotaLimit int64  `json:"plan_daily_quota_limit" gorm:"default:-1"`                // -1=unlimited, 0=no daily limit, >0=limit
+
+	// Associations (for preloading - Plan is for admin reference only after migration)
 	Plan *Plan `json:"plan,omitempty" gorm:"foreignKey:PlanId"`
 	User *User `json:"user,omitempty" gorm:"foreignKey:UserId"`
 }
@@ -130,11 +147,129 @@ func (up *UserPlan) IsValid() bool {
 	return up.Status == UserPlanStatusActive && !up.IsExpired() && !up.IsLocked()
 }
 
+// Snapshot field accessors with fallback to Plan template (for backward compatibility)
+// These methods ensure display works even if snapshot fields are not yet populated
+
+// GetDisplayName returns the plan display name from snapshot or falls back to Plan
+func (up *UserPlan) GetDisplayName() string {
+	if up.PlanDisplayName != "" {
+		return up.PlanDisplayName
+	}
+	// Fallback for unmigrated records
+	if up.Plan != nil {
+		return up.Plan.DisplayName
+	}
+	return "Unknown Plan"
+}
+
+// GetCategory returns the plan category from snapshot or falls back to Plan
+func (up *UserPlan) GetCategory() string {
+	if up.PlanCategory != "" {
+		return up.PlanCategory
+	}
+	// Fallback for unmigrated records
+	if up.Plan != nil {
+		return up.Plan.Category
+	}
+	return PlanCategoryMonthly // Default
+}
+
+// GetPriority returns the plan priority from snapshot or falls back to Plan
+func (up *UserPlan) GetPriority() int {
+	if up.PlanName != "" { // Use PlanName as indicator of migrated record
+		return up.PlanPriority
+	}
+	// Fallback for unmigrated records
+	if up.Plan != nil {
+		return up.Plan.Priority
+	}
+	return 0 // Default
+}
+
+// IsDailyPlan checks if this is a daily plan using snapshot category
+func (up *UserPlan) IsDailyPlan() bool {
+	return up.GetCategory() == PlanCategoryDaily
+}
+
+// Routing field accessors with fallback to Plan template (for complete decoupling)
+
+// GetType returns the plan type from snapshot or falls back to Plan
+func (up *UserPlan) GetType() string {
+	if up.PlanName != "" { // Use PlanName as indicator of migrated record
+		return up.PlanType
+	}
+	// Fallback for unmigrated records
+	if up.Plan != nil {
+		return up.Plan.Type
+	}
+	return "subscription" // Default type
+}
+
+// GetChannelGroup returns the channel group from snapshot or falls back to Plan
+func (up *UserPlan) GetChannelGroup() string {
+	if up.PlanName != "" {
+		return up.PlanChannelGroup
+	}
+	// Fallback for unmigrated records
+	if up.Plan != nil {
+		return up.Plan.ChannelGroup
+	}
+	return "" // Default: no specific channel group
+}
+
+// GetChannelGroups returns the channel groups array from snapshot or falls back to Plan
+func (up *UserPlan) GetChannelGroups() []string {
+	if up.PlanName != "" {
+		// Parse JSON from snapshot
+		if up.PlanChannelGroups != "" {
+			var groups []string
+			if err := json.Unmarshal([]byte(up.PlanChannelGroups), &groups); err == nil {
+				return groups
+			}
+		}
+		// Fallback to single group if JSON parse fails
+		if up.PlanChannelGroup != "" {
+			return []string{up.PlanChannelGroup}
+		}
+		return []string{}
+	}
+	// Fallback for unmigrated records
+	if up.Plan != nil {
+		return up.Plan.GetChannelGroupsList()
+	}
+	return []string{}
+}
+
+// GetRateLimitRules returns the rate limit rules from snapshot or falls back to Plan
+func (up *UserPlan) GetRateLimitRules() string {
+	if up.PlanName != "" {
+		return up.PlanRateLimitRules
+	}
+	// Fallback for unmigrated records
+	if up.Plan != nil {
+		return up.Plan.RateLimitRules
+	}
+	return "" // Default: no rate limiting
+}
+
+// GetPlanDailyQuotaLimit returns the plan's daily quota limit from snapshot or falls back to Plan
+// This is different from GetEffectiveDailyQuotaLimit which considers user override
+func (up *UserPlan) GetPlanDailyQuotaLimit() int64 {
+	if up.PlanName != "" {
+		return up.PlanDailyQuotaLimit
+	}
+	// Fallback for unmigrated records
+	if up.Plan != nil {
+		return up.Plan.DailyQuotaLimit
+	}
+	return -1 // Default: unlimited
+}
+
 // GetEffectiveDailyQuotaLimit returns the effective daily quota limit for this user plan
-// Priority: UserPlan override > Plan default
+// Priority: UserPlan override > Plan snapshot > Plan default (for unmigrated records)
 // Returns: (limit, hasLimit)
 // - If override is set (not nil): use override value (0 = no limit, >0 = custom limit)
-// - If override is nil: use plan's daily quota limit
+// - Otherwise: use plan's daily quota limit from snapshot
 func (up *UserPlan) GetEffectiveDailyQuotaLimit() (int64, bool) {
 	// Check if override is set
 	if up.DailyQuotaLimitOverride != nil {
@@ -145,12 +280,16 @@ func (up *UserPlan) GetEffectiveDailyQuotaLimit() (int64, bool) {
 		return limit, true
 	}
 
-	// Fall back to plan default
-	if up.Plan != nil && up.Plan.HasDailyQuotaLimit() {
-		return up.Plan.DailyQuotaLimit, true
+	// Use snapshot/fallback to Plan
+	planLimit := up.GetPlanDailyQuotaLimit()
+	if planLimit == -1 {
+		return 0, false // -1 means unlimited
+	}
+	if planLimit > 0 {
+		return planLimit, true
 	}
 
-	return 0, false
+	return 0, false // 0 means no daily quota system
 }
 
 // IsInQueue checks if the plan is in the queue (not current)
@@ -281,10 +420,9 @@ func GetUserValidPlans(userId int) ([]*UserPlan, error) {
 	now := time.Now().UnixMilli()
 
 	err := DB.Preload("Plan").
-		Joins("JOIN plans ON plans.id = user_plans.plan_id").
-		Where("user_plans.user_id = ? AND user_plans.status = ? AND user_plans.locked != 1 AND (user_plans.expires_at = 0 OR user_plans.expires_at > ?) AND plans.status = ?",
-			userId, UserPlanStatusActive, now, PlanStatusEnabled).
-		Order("plans.priority DESC").
+		Where("user_id = ? AND status = ? AND locked != 1 AND (expires_at = 0 OR expires_at > ?)",
+			userId, UserPlanStatusActive, now).
+		Order("plan_priority DESC, id ASC").
 		Find(&userPlans).Error
 
 	if err != nil {
@@ -297,9 +435,8 @@ func GetUserValidPlans(userId int) ([]*UserPlan, error) {
 func GetUserCurrentPlan(userId int) (*UserPlan, error) {
 	var userPlan UserPlan
 	err := DB.Preload("Plan").
-		Joins("JOIN plans ON plans.id = user_plans.plan_id").
-		Where("user_plans.user_id = ? AND user_plans.is_current = 1 AND user_plans.status = ? AND plans.status = ?",
-			userId, UserPlanStatusActive, PlanStatusEnabled).
+		Where("user_id = ? AND is_current = 1 AND status = ?",
+			userId, UserPlanStatusActive).
 		First(&userPlan).Error
 	if err != nil {
 		return nil, err
@@ -311,9 +448,8 @@ func GetUserCurrentPlan(userId int) (*UserPlan, error) {
 func GetAllUserPlans(userId int) ([]*UserPlan, error) {
 	var userPlans []*UserPlan
 	err := DB.Preload("Plan").
-		Joins("JOIN plans ON plans.id = user_plans.plan_id").
-		Where("user_plans.user_id = ?", userId).
-		Order("plans.priority DESC").
+		Where("user_id = ?", userId).
+		Order("plan_priority DESC, id ASC").
 		Find(&userPlans).Error
 	if err != nil {
 		return nil, err
@@ -327,12 +463,11 @@ func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 	defer InvalidateUserPlanCache(userId)
 
 	return DB.Transaction(func(tx *gorm.DB) error {
-		// First verify the target plan is valid (enabled and user_plan is active)
+		// First verify the target plan is valid (only check user_plan status, not Plan status)
 		var count int64
 		err := tx.Model(&UserPlan{}).
-			Joins("JOIN plans ON plans.id = user_plans.plan_id").
-			Where("user_plans.user_id = ? AND user_plans.plan_id = ? AND user_plans.status = ? AND plans.status = ?",
-				userId, newPlanId, UserPlanStatusActive, PlanStatusEnabled).
+			Where("user_id = ? AND plan_id = ? AND status = ?",
+				userId, newPlanId, UserPlanStatusActive).
 			Count(&count).Error
 		if err != nil {
 			return err
@@ -609,6 +744,17 @@ func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPl
 		StartedAt:       time.Now().UnixMilli(),
 		ExpiresAt:       expiresAt,
 		Status:          UserPlanStatusActive,
+		// Display & sorting snapshots
+		PlanName:        plan.Name,
+		PlanDisplayName: plan.DisplayName,
+		PlanCategory:    plan.Category,
+		PlanPriority:    plan.Priority,
+		// Routing & access control snapshots
+		PlanType:            plan.Type,
+		PlanChannelGroup:    plan.ChannelGroup,
+		PlanChannelGroups:   plan.ChannelGroups,
+		PlanRateLimitRules:  plan.RateLimitRules,
+		PlanDailyQuotaLimit: plan.DailyQuotaLimit,
 	}
 
 	if err := userPlan.Insert(); err != nil {
@@ -780,6 +926,17 @@ func AddPlanToQueue(userId int, planId int, quota int64, source string, sourceOr
 		AssignedBy:      assignedBy,
 		PurchasedAt:     now.UnixMilli(),
 		RefundStatus:    RefundStatusNone,
+		// Display & sorting snapshots
+		PlanName:        plan.Name,
+		PlanDisplayName: plan.DisplayName,
+		PlanCategory:    plan.Category,
+		PlanPriority:    plan.Priority,
+		// Routing & access control snapshots
+		PlanType:            plan.Type,
+		PlanChannelGroup:    plan.ChannelGroup,
+		PlanChannelGroups:   plan.ChannelGroups,
+		PlanRateLimitRules:  plan.RateLimitRules,
+		PlanDailyQuotaLimit: plan.DailyQuotaLimit,
 	}
 
 	// If no current plan, activate immediately

@@ -50,17 +50,19 @@ func (e *RateLimitError) Error() string {
 func newPlanSelectionResult(up *model.UserPlan, switched bool) *PlanSelectionResult {
 	result := &PlanSelectionResult{
 		UserPlan:     up,
-		Plan:         up.Plan,
+		Plan:         up.Plan, // Keep for admin reference, but don't depend on it
 		PlanId:       up.PlanId,
 		UserPlanId:   up.Id,
 		Switched:     switched,
 		AutoSwitched: switched,
 	}
-	if up.Plan != nil {
-		result.PlanName = up.Plan.Name
-		result.ChannelGroup = up.Plan.ChannelGroup // Deprecated, keep for compatibility
-		result.ChannelGroups = up.Plan.GetChannelGroupsList()
-	}
+
+	// Use UserPlan snapshot fields (decoupled from Plan template)
+	// This allows routing to work even if Plan is deleted/disabled
+	result.PlanName = up.GetDisplayName() // Use display name for logging
+	result.ChannelGroup = up.GetChannelGroup() // Deprecated, keep for compatibility
+	result.ChannelGroups = up.GetChannelGroups() // Use snapshot
+
 	return result
 }
 
@@ -179,17 +181,14 @@ func selectHighestPriorityWithQuota(plans []*model.UserPlan) *model.UserPlan {
 // findHigherPriorityPlanWithQuota finds a plan with higher priority than current that has quota
 // This includes checking both total quota and daily quota limit
 func findHigherPriorityPlanWithQuota(plans []*model.UserPlan, current *model.UserPlan) *model.UserPlan {
-	if current == nil || current.Plan == nil {
+	if current == nil {
 		return nil
 	}
-	currentPriority := current.Plan.Priority
+	currentPriority := current.GetPriority()
 
 	// Plans are sorted by priority DESC, so first match with higher priority wins
 	for _, plan := range plans {
-		if plan.Plan == nil {
-			continue
-		}
-		if plan.Plan.Priority > currentPriority && plan.IsValid() && hasPlanAvailableQuota(plan) {
+		if plan.GetPriority() > currentPriority && plan.IsValid() && hasPlanAvailableQuota(plan) {
 			return plan
 		}
 	}
@@ -634,7 +633,21 @@ func SelectPlanWithQuotaChecks(userId int, modelName string, estimatedCostUSD fl
 
 	plan := result.Plan
 	if plan == nil {
-		return result, nil
+		// Plan template可能被删除，使用UserPlan的快照字段构造一个虚拟Plan以继续限流/日配额校验
+		up := result.UserPlan
+		plan = &model.Plan{
+			Id:              result.PlanId,
+			Name:            up.PlanName,
+			DisplayName:     up.GetDisplayName(),
+			Category:        up.GetCategory(),
+			Type:            up.GetType(),
+			Priority:        up.GetPriority(),
+			ChannelGroup:    up.GetChannelGroup(),
+			ChannelGroups:   up.PlanChannelGroups,
+			DailyQuotaLimit: up.GetPlanDailyQuotaLimit(),
+			RateLimitRules:  up.GetRateLimitRules(),
+		}
+		result.Plan = plan
 	}
 
 	// Check rate limits first (most restrictive)

@@ -29,8 +29,10 @@ type UserPlanCacheEntry struct {
 	// User-level override fields
 	DailyQuotaLimitOverride *int64 `json:"daily_quota_limit_override"` // Per-user daily quota limit override
 
-	// Embedded plan info for routing
+	// Embedded plan info for routing and display
 	PlanName            string `json:"plan_name"`
+	PlanDisplayName     string `json:"plan_display_name"`     // Display name snapshot
+	PlanCategory        string `json:"plan_category"`         // Category snapshot (daily, monthly, etc.)
 	PlanType            string `json:"plan_type"`
 	PlanPriority        int    `json:"plan_priority"`
 	PlanChannelGroup    string `json:"plan_channel_group"`    // Deprecated: use PlanChannelGroups
@@ -58,9 +60,22 @@ func (e *UserPlanCacheEntry) ToUserPlan() *UserPlan {
 		ExpiresAt:               e.ExpiresAt,
 		Status:                  e.Status,
 		DailyQuotaLimitOverride: e.DailyQuotaLimitOverride,
+		// Restore snapshot fields directly to UserPlan (critical for GetDisplayName(), IsDailyPlan(), etc.)
+		PlanName:            e.PlanName,
+		PlanDisplayName:     e.PlanDisplayName,
+		PlanCategory:        e.PlanCategory,
+		PlanPriority:        e.PlanPriority,
+		PlanType:            e.PlanType,
+		PlanChannelGroup:    e.PlanChannelGroup,
+		PlanChannelGroups:   e.PlanChannelGroups,
+		PlanRateLimitRules:  e.PlanRateLimitRules,
+		PlanDailyQuotaLimit: e.PlanDailyQuotaLimit,
+		// Keep Plan for admin reference and backward compatibility
 		Plan: &Plan{
 			Id:              e.PlanId,
 			Name:            e.PlanName,
+			DisplayName:     e.PlanDisplayName,
+			Category:        e.PlanCategory,
 			Type:            e.PlanType,
 			Priority:        e.PlanPriority,
 			ChannelGroup:    e.PlanChannelGroup,
@@ -92,14 +107,35 @@ func FromUserPlan(up *UserPlan) *UserPlanCacheEntry {
 		DailyQuotaLimitOverride: up.DailyQuotaLimitOverride,
 	}
 
-	if up.Plan != nil {
+	// Use snapshot fields first (for decoupled display/logic/routing)
+	// Fallback to Plan only for unmigrated records
+	if up.PlanName != "" {
+		// Migrated record - use ALL snapshots (display + routing)
+		entry.PlanName = up.PlanName
+		entry.PlanDisplayName = up.PlanDisplayName
+		entry.PlanCategory = up.PlanCategory
+		entry.PlanPriority = up.PlanPriority
+		entry.PlanType = up.PlanType
+		entry.PlanChannelGroup = up.PlanChannelGroup
+		entry.PlanChannelGroups = up.PlanChannelGroups
+		entry.PlanDailyQuotaLimit = up.PlanDailyQuotaLimit
+		entry.PlanRateLimitRules = up.PlanRateLimitRules
+	} else if up.Plan != nil {
+		// Unmigrated record - fallback to Plan
 		entry.PlanName = up.Plan.Name
-		entry.PlanType = up.Plan.Type
+		entry.PlanDisplayName = up.Plan.DisplayName
+		entry.PlanCategory = up.Plan.Category
 		entry.PlanPriority = up.Plan.Priority
+		entry.PlanType = up.Plan.Type
 		entry.PlanChannelGroup = up.Plan.ChannelGroup
 		entry.PlanChannelGroups = up.Plan.ChannelGroups
 		entry.PlanDailyQuotaLimit = up.Plan.DailyQuotaLimit
 		entry.PlanRateLimitRules = up.Plan.RateLimitRules
+	}
+
+	// PlanStatus is intentionally NOT snapshotted
+	// Status affects NEW assignments only, not existing instances
+	if up.Plan != nil {
 		entry.PlanStatus = up.Plan.Status
 	}
 

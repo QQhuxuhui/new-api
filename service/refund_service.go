@@ -34,7 +34,7 @@ func RequestRefund(userPlanId int, userId int) error {
 		if userPlan.RefundStatus != model.RefundStatusNone {
 			return errors.New("该套餐已在退款流程中")
 		}
-		if userPlan.Plan != nil && userPlan.Plan.IsDailyPlan() {
+		if userPlan.IsDailyPlan() {
 			return errors.New("日卡不支持退款")
 		}
 		// Check 7-day window

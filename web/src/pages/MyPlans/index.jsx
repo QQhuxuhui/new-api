@@ -599,7 +599,7 @@ const MyPlans = () => {
               <div>
                 <div className='flex items-center gap-2 mb-1'>
                   <Title heading={5} className='m-0 text-xl font-bold'>
-                    {plan.display_name || plan.name || t('未知套餐')}
+                    {plan.plan_display_name || plan.display_name || plan.plan?.display_name || plan.name || t('未知套餐')}
                   </Title>
                   {isCurrent && (
                     <Tag 
