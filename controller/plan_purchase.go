@@ -36,20 +36,23 @@ type PayPlanOrderRequest struct {
 func CreatePlanOrder(c *gin.Context) {
 	var req CreatePlanOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ApiError(c, "参数错误: "+err.Error())
+		common.ApiError(c, fmt.Errorf("参数错误: %w", err))
 		return
 	}
 
 	userId := c.GetInt("id")
 	if userId == 0 {
-		common.ApiUnauthorized(c, "未登录")
+		c.JSON(401, gin.H{
+			"success": false,
+			"message": "未登录",
+		})
 		return
 	}
 
 	// Create order
 	order, err := model.CreatePlanOrder(userId, req.PlanId)
 	if err != nil {
-		common.ApiError(c, err.Error())
+		common.ApiError(c, err)
 		return
 	}
 
@@ -79,13 +82,16 @@ func CreatePlanOrder(c *gin.Context) {
 func PayPlanOrder(c *gin.Context) {
 	var req PayPlanOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ApiError(c, "参数错误: "+err.Error())
+		common.ApiError(c, fmt.Errorf("参数错误: %w", err))
 		return
 	}
 
 	userId := c.GetInt("id")
 	if userId == 0 {
-		common.ApiUnauthorized(c, "未登录")
+		c.JSON(401, gin.H{
+			"success": false,
+			"message": "未登录",
+		})
 		return
 	}
 
@@ -173,7 +179,10 @@ var planOrderLocks sync.Map
 func GetMyPlanOrders(c *gin.Context) {
 	userId := c.GetInt("id")
 	if userId == 0 {
-		common.ApiUnauthorized(c, "未登录")
+		c.JSON(401, gin.H{
+			"success": false,
+			"message": "未登录",
+		})
 		return
 	}
 

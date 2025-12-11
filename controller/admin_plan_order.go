@@ -32,7 +32,7 @@ func GetAllPlanOrders(c *gin.Context) {
 
 	orders, total, err := model.GetAllOrders(page, pageSize, status, userId, orderNo)
 	if err != nil {
-		common.ApiError(c, "获取订单列表失败: "+err.Error())
+		common.ApiError(c, fmt.Errorf("获取订单列表失败: %w", err))
 		return
 	}
 
@@ -81,7 +81,7 @@ func GetAllPlanOrders(c *gin.Context) {
 func ManualCompletePlanOrder(c *gin.Context) {
 	orderId, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		common.ApiError(c, "无效的订单ID")
+		common.ApiError(c, errors.New("无效的订单ID"))
 		return
 	}
 
@@ -92,13 +92,13 @@ func ManualCompletePlanOrder(c *gin.Context) {
 	// Load order
 	order, err := model.GetOrderById(orderId)
 	if err != nil {
-		common.ApiError(c, err.Error())
+		common.ApiError(c, err)
 		return
 	}
 
 	// Validate order status (must be 'pending' or 'paid')
 	if order.Status != model.OrderStatusPending && order.Status != model.OrderStatusPaid {
-		common.ApiError(c, fmt.Sprintf("订单状态不允许手动完成: %s", order.Status))
+		common.ApiError(c, fmt.Errorf("订单状态不允许手动完成: %s", order.Status))
 		return
 	}
 
@@ -125,7 +125,7 @@ func ManualCompletePlanOrder(c *gin.Context) {
 	})
 
 	if err != nil {
-		common.ApiError(c, "手动完成订单失败: "+err.Error())
+		common.ApiError(c, fmt.Errorf("手动完成订单失败: %w", err))
 		return
 	}
 
