@@ -126,7 +126,8 @@ const PlanPricing = () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await API.get('/api/plan/enabled');
+      // Filter by purchasable plans only
+      const res = await API.get('/api/plan/enabled?purchasable=true');
       const { success, message, data } = res.data;
       if (success) {
         setPlans(data || []);
@@ -294,15 +295,29 @@ const PlanPricing = () => {
   };
 
   // Handle purchase click
-  const handlePurchase = (planId) => {
+  const handlePurchase = async (plan) => {
     // 检查是否已登录
     if (!isLoggedIn()) {
       // 未登录，跳转到登录页，登录后返回当前页面
       navigate(`/login?redirect=/plans`);
       return;
     }
-    // 已登录，跳转到充值页面购买套餐
-    navigate(`/console/topup?plan_id=${planId}`);
+
+    // 已登录，创建订单
+    try {
+      const res = await API.post('/api/user/plan/purchase/create', {
+        plan_id: plan.id
+      });
+      const { success, message, data } = res.data;
+      if (success) {
+        // 订单创建成功，跳转到订单确认页面
+        navigate(`/console/order-confirm/${data.order_id}`);
+      } else {
+        showError(message || t('创建订单失败'));
+      }
+    } catch (e) {
+      showError(e.message || t('网络错误'));
+    }
   };
 
   // Category filter options - 从配置生成
@@ -499,7 +514,7 @@ const PlanPricing = () => {
               type='primary'
               size='large'
               block
-              onClick={() => handlePurchase(plan.id)}
+              onClick={() => handlePurchase(plan)}
               style={{
                 borderRadius: '12px',
                 height: '48px',

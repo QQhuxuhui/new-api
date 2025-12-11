@@ -281,6 +281,7 @@ func migrateDB() error {
 		&AdminPlanLog{},
 		&UserAssetSnapshot{},
 		&UserNotification{},
+		&PlanOrder{},
 	)
 	if err != nil {
 		return err
@@ -403,6 +404,7 @@ func migrateDBFast() error {
 		{&AdminPlanLog{}, "AdminPlanLog"},
 		{&UserAssetSnapshot{}, "UserAssetSnapshot"},
 		{&UserNotification{}, "UserNotification"},
+		{&PlanOrder{}, "PlanOrder"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

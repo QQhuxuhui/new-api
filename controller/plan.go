@@ -337,11 +337,26 @@ func UpdatePlanStatus(c *gin.Context) {
 
 // GetEnabledPlans returns all enabled plans (for user selection)
 func GetEnabledPlans(c *gin.Context) {
+	// Check if filtering by purchasable
+	purchasable := c.Query("purchasable")
+
 	plans, err := model.GetAllEnabledPlans()
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+
+	// Filter by purchasable if specified
+	if purchasable == "true" || purchasable == "1" {
+		filteredPlans := make([]*model.Plan, 0)
+		for _, plan := range plans {
+			if plan.Purchasable == 1 {
+				filteredPlans = append(filteredPlans, plan)
+			}
+		}
+		plans = filteredPlans
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

@@ -44,6 +44,9 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/stripe/webhook", controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", controller.CreemWebhook)
 
+		// Plan purchase payment callback (no auth required - handled by payment gateway)
+		apiRouter.GET("/plan/purchase/epay/notify", controller.EpayPlanOrderNotify)
+
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.UniversalVerify)
 		apiRouter.GET("/verify/status", middleware.UserAuth(), controller.GetVerificationStatus)
@@ -99,6 +102,11 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/notifications/unread-count", controller.GetUnreadNotificationCount)
 				selfRoute.POST("/notifications/:id/read", controller.MarkNotificationAsRead)
 				selfRoute.POST("/notifications/read-all", controller.MarkAllNotificationsAsRead)
+
+				// Plan purchase routes (user)
+				selfRoute.POST("/plan/purchase/create", controller.CreatePlanOrder)
+				selfRoute.POST("/plan/purchase/pay", middleware.CriticalRateLimit(), controller.PayPlanOrder)
+				selfRoute.GET("/plan/purchase/my-orders", controller.GetMyPlanOrders)
 			}
 
 			adminRoute := userRoute.Group("/")
@@ -107,6 +115,11 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/", controller.GetAllUsers)
 				adminRoute.GET("/topup", controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
+
+				// Plan order management (admin)
+				adminRoute.GET("/plan-orders", controller.GetAllPlanOrders)
+				adminRoute.POST("/plan-orders/:id/complete", controller.ManualCompletePlanOrder)
+
 				adminRoute.GET("/search", controller.SearchUsers)
 				adminRoute.GET("/:id", controller.GetUser)
 				adminRoute.POST("/", controller.CreateUser)

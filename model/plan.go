@@ -41,6 +41,8 @@ type Plan struct {
 	QueueSlot            int     `json:"queue_slot" gorm:"default:1"`             // 0=daily (no queue), 1=occupies queue slot
 	SortOrder            int     `json:"sort_order" gorm:"default:0"`             // Display sort order
 	CustomFeatures       string  `json:"custom_features" gorm:"type:text"`        // JSON array of custom feature descriptions with icons
+	// Purchase control
+	Purchasable          int     `json:"purchasable" gorm:"default:1"`            // 1=can be purchased online, 0=cannot
 	CreatedAt            int64   `json:"created_at" gorm:"autoCreateTime:milli"`
 	UpdatedAt            int64   `json:"updated_at" gorm:"autoUpdateTime:milli"`
 }
