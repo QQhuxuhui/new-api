@@ -594,21 +594,25 @@ const PlanPricing = () => {
               {t('重试')}
             </Button>
           </div>
-        ) : filteredPlans.length > 0 ? (
-          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
-            {filteredPlans.map(plan => {
-              const card = renderPlanCard(plan);
-              return card; // card可能是null（分类未启用）
-            }).filter(Boolean)} {/* 过滤掉null值 */}
-          </div>
-        ) : (
-          <Empty
-            image={<IconBox size='extra-large' className='text-gray-300 text-6xl' />}
-            title={t('暂无可用套餐')}
-            description={t('目前没有可购买的套餐，请稍后再试。')}
-            className='bg-white dark:bg-gray-800 p-12 rounded-3xl shadow-sm'
-          />
-        )}
+        ) : (() => {
+          // 先过滤掉禁用分类的卡片，再判断是否为空
+          const renderedCards = filteredPlans
+            .map(plan => renderPlanCard(plan))
+            .filter(Boolean); // 过滤掉null值（禁用分类的卡片）
+
+          return renderedCards.length > 0 ? (
+            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
+              {renderedCards}
+            </div>
+          ) : (
+            <Empty
+              image={<IconBox size='extra-large' className='text-gray-300 text-6xl' />}
+              title={t('暂无可用套餐')}
+              description={t('目前没有可购买的套餐，请稍后再试。')}
+              className='bg-white dark:bg-gray-800 p-12 rounded-3xl shadow-sm'
+            />
+          );
+        })()}
 
         {/* Info Section */}
         <div className='mt-16'>

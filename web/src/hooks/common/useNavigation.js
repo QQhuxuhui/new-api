@@ -51,11 +51,6 @@ export const useNavigation = (t, docsLink, headerNavModules, tutorialEnabled = t
         itemKey: 'pricing',
         to: '/pricing',
       },
-      {
-        text: t('产品定价'),
-        itemKey: 'plans',
-        to: '/plans',
-      },
       ...(docsLink
         ? [
             {
