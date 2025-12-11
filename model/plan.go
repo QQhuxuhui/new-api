@@ -225,24 +225,12 @@ func (p *Plan) Delete() error {
 		return errors.New("该套餐仍有活跃用户实例未完全快照化，请先等待迁移完成或手动填充快照字段")
 	}
 
-	// Check if there are any orders associated with this plan
-	// Orders are historical records and should never be deleted
-	var orderCount int64
-	if err := DB.Model(&PlanOrder{}).
-		Where("plan_id = ?", p.Id).
-		Count(&orderCount).Error; err != nil {
-		return err
-	}
-
-	if orderCount > 0 {
-		return errors.New("该套餐存在关联订单记录，无法删除。请使用禁用功能来停止使用此套餐")
-	}
-
 	// Safe to delete:
 	// 1. No user plans at all, OR
 	// 2. All user plans have complete snapshots (plan_name and plan_type populated), OR
 	// 3. All user plans are non-active (expired/disabled/completed)
 	// Users with complete snapshots can continue using their plans without the template
+	// PlanOrder foreign key uses OnDelete:SET NULL, so orders will have plan_id set to null
 	go InvalidateUserPlanCacheByPlanId(p.Id)
 	return DB.Delete(p).Error
 }

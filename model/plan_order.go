@@ -45,7 +45,7 @@ type PlanOrder struct {
 
 	// Associations
 	User     *User     `json:"user,omitempty" gorm:"foreignKey:UserId"`
-	Plan     *Plan     `json:"plan,omitempty" gorm:"foreignKey:PlanId"`
+	Plan     *Plan     `json:"plan,omitempty" gorm:"foreignKey:PlanId;constraint:OnDelete:SET NULL,OnUpdate:CASCADE"` // Plan reference for display only
 	UserPlan *UserPlan `json:"user_plan,omitempty" gorm:"foreignKey:UserPlanId"`
 }
 
