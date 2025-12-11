@@ -34,10 +34,9 @@ import {
   Toast,
 } from '@douyinfe/semi-ui';
 import {
-  IconAlipayCircle,
-  IconWechatpay,
   IconClock,
   IconTickCircle,
+  IconCreditCard,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 
@@ -305,13 +304,13 @@ const OrderConfirm = () => {
           >
             <Radio value='alipay' style={{ width: '48%', marginRight: '4%' }}>
               <div className='flex items-center gap-2'>
-                <IconAlipayCircle size='extra-large' />
+                <span style={{ fontSize: '20px' }}>💳</span>
                 <span>{t('支付宝')}</span>
               </div>
             </Radio>
             <Radio value='wechat' style={{ width: '48%' }}>
               <div className='flex items-center gap-2'>
-                <IconWechatpay size='extra-large' />
+                <span style={{ fontSize: '20px' }}>💰</span>
                 <span>{t('微信支付')}</span>
               </div>
             </Radio>
