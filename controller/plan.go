@@ -101,6 +101,17 @@ func AddPlan(c *gin.Context) {
 		return
 	}
 
+	// Validate and set default category
+	if plan.Category == "" {
+		plan.Category = model.PlanCategoryMonthly // 默认为月卡
+	} else if !plan.IsValidCategory() {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的套餐分类",
+		})
+		return
+	}
+
 	// Set defaults
 	if plan.Status == 0 {
 		plan.Status = model.PlanStatusEnabled
@@ -167,11 +178,23 @@ func UpdatePlan(c *gin.Context) {
 		return
 	}
 
+	// Validate and set default category
+	if plan.Category == "" {
+		plan.Category = model.PlanCategoryMonthly // 默认为月卡
+	} else if !plan.IsValidCategory() {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的套餐分类",
+		})
+		return
+	}
+
 	// Update fields
 	existingPlan.Name = plan.Name
 	existingPlan.DisplayName = plan.DisplayName
 	existingPlan.Description = plan.Description
 	existingPlan.Type = plan.Type
+	existingPlan.Category = plan.Category
 	existingPlan.Priority = plan.Priority
 	existingPlan.ChannelGroups = plan.ChannelGroups
 	existingPlan.DefaultQuota = plan.DefaultQuota
@@ -182,6 +205,15 @@ func UpdatePlan(c *gin.Context) {
 	existingPlan.DefaultAllowToggle = plan.DefaultAllowToggle
 	existingPlan.Settings = plan.Settings
 	existingPlan.Status = plan.Status
+	// Pricing fields
+	existingPlan.Price = plan.Price
+	existingPlan.OriginalPrice = plan.OriginalPrice
+	existingPlan.QuotaUSD = plan.QuotaUSD
+	// Queue and sorting
+	existingPlan.QueueSlot = plan.QueueSlot
+	existingPlan.SortOrder = plan.SortOrder
+	// Custom features
+	existingPlan.CustomFeatures = plan.CustomFeatures
 
 	// Sync ChannelGroup from ChannelGroups for backward compatibility
 	// Take the first group from ChannelGroups array and set it as ChannelGroup
@@ -305,11 +337,26 @@ func UpdatePlanStatus(c *gin.Context) {
 
 // GetEnabledPlans returns all enabled plans (for user selection)
 func GetEnabledPlans(c *gin.Context) {
+	// Check if filtering by purchasable
+	purchasable := c.Query("purchasable")
+
 	plans, err := model.GetAllEnabledPlans()
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+
+	// Filter by purchasable if specified
+	if purchasable == "true" || purchasable == "1" {
+		filteredPlans := make([]*model.Plan, 0)
+		for _, plan := range plans {
+			if plan.Purchasable == 1 {
+				filteredPlans = append(filteredPlans, plan)
+			}
+		}
+		plans = filteredPlans
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -350,7 +397,14 @@ func GetUserPlanQuotaStatus(c *gin.Context) {
 	}
 
 	// Get plan info
-	plan, err := model.GetPlanById(userPlan.PlanId)
+	if userPlan.PlanId == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "套餐信息不存在",
+		})
+		return
+	}
+	plan, err := model.GetPlanById(*userPlan.PlanId)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,

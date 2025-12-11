@@ -224,11 +224,15 @@ func GetPlanUsageList(filters *dto.PlanUsageFilters) (*dto.PlanUsageListResponse
 			Where("created_at >= ?", effectiveStartTime).
 			Count(&requestCount)
 
+		planId := 0
+		if r.PlanId != nil {
+			planId = *r.PlanId
+		}
 		item := dto.PlanUsageListItem{
 			UserPlanId:      r.Id,
 			UserId:          r.UserId,
 			Username:        r.Username,
-			PlanId:          r.PlanId,
+			PlanId:          planId,
 			PlanName:        r.PlanName,
 			PlanDisplayName: r.PlanDisplayName,
 			PlanType:        r.PlanType,
@@ -548,7 +552,10 @@ func GetUserDailyUsage(userPlanId int, days int) (*dto.UserDailyUsageResponse, e
 	}
 
 	// Get plan details
-	plan, err := model.GetPlanById(userPlan.PlanId)
+	if userPlan.PlanId == nil {
+		return nil, fmt.Errorf("user plan has no associated plan_id")
+	}
+	plan, err := model.GetPlanById(*userPlan.PlanId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get plan: %w", err)
 	}

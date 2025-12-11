@@ -174,7 +174,10 @@ func getUserPlanConsumption(userId int, startTime, endTime int64, days int) ([]d
 
 	for _, up := range userPlans {
 		// Get plan info
-		plan, err := model.GetPlanById(up.PlanId)
+		if up.PlanId == nil {
+			continue // Skip plans without plan_id
+		}
+		plan, err := model.GetPlanById(*up.PlanId)
 		if err != nil {
 			continue
 		}

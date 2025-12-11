@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { useHeaderBar } from '../../../hooks/common/useHeaderBar';
 import { useNotifications } from '../../../hooks/common/useNotifications';
 import { useNavigation } from '../../../hooks/common/useNavigation';
@@ -76,8 +77,9 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen, onOpenOnboarding }) => {
       />
 
       <div className='w-full px-2'>
-        <div className='flex items-center justify-between h-16'>
-          <div className='flex items-center'>
+        <div className='flex items-center h-16 relative'>
+          {/* 左侧区域 */}
+          <div className='flex items-center flex-1'>
             <MobileMenuButton
               isConsoleRoute={isConsoleRoute}
               isMobile={isMobile}
@@ -98,35 +100,52 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen, onOpenOnboarding }) => {
               isDemoSiteMode={isDemoSiteMode}
               t={t}
             />
+
+            {!isMobile && (
+              <Navigation
+                mainNavLinks={mainNavLinks}
+                isMobile={isMobile}
+                isLoading={isLoading}
+                userState={userState}
+                pricingRequireAuth={pricingRequireAuth}
+                onOpenOnboarding={onOpenOnboarding}
+              />
+            )}
           </div>
 
-          <Navigation
-            mainNavLinks={mainNavLinks}
-            isMobile={isMobile}
-            isLoading={isLoading}
-            userState={userState}
-            pricingRequireAuth={pricingRequireAuth}
-            onOpenOnboarding={onOpenOnboarding}
-          />
+          {/* 中间区域 - 产品定价（绝对居中） */}
+          {!isMobile && !isLoading && headerNavModules?.plans !== false && (
+            <div className='absolute left-1/2 transform -translate-x-1/2'>
+              <Link
+                to={pricingRequireAuth && !userState.user ? '/login' : '/plans'}
+                className='flex-shrink-0 flex items-center gap-1 font-semibold rounded-md transition-all duration-200 ease-in-out no-underline text-semi-color-text-0 hover:text-semi-color-primary p-2 whitespace-nowrap'
+              >
+                <span>{t('产品定价')}</span>
+              </Link>
+            </div>
+          )}
 
-          <ActionButtons
-            isNewYear={isNewYear}
-            unreadCount={unreadCount}
-            onNoticeOpen={handleNoticeOpen}
-            theme={theme}
-            onThemeToggle={handleThemeToggle}
-            currentLang={currentLang}
-            onLanguageChange={handleLanguageChange}
-            userState={userState}
-            isLoading={isLoading}
-            isMobile={isMobile}
-            isSelfUseMode={isSelfUseMode}
-            logout={logout}
-            navigate={navigate}
-            t={t}
-            onOpenOnboarding={onOpenOnboarding}
-            customerServiceQRCode={statusState?.status?.CustomerServiceQRCode}
-          />
+          {/* 右侧区域 */}
+          <div className='flex items-center flex-1 justify-end'>
+            <ActionButtons
+              isNewYear={isNewYear}
+              unreadCount={unreadCount}
+              onNoticeOpen={handleNoticeOpen}
+              theme={theme}
+              onThemeToggle={handleThemeToggle}
+              currentLang={currentLang}
+              onLanguageChange={handleLanguageChange}
+              userState={userState}
+              isLoading={isLoading}
+              isMobile={isMobile}
+              isSelfUseMode={isSelfUseMode}
+              logout={logout}
+              navigate={navigate}
+              t={t}
+              onOpenOnboarding={onOpenOnboarding}
+              customerServiceQRCode={statusState?.status?.CustomerServiceQRCode}
+            />
+          </div>
         </div>
       </div>
     </header>

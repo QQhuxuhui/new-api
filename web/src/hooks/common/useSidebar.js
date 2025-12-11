@@ -46,6 +46,7 @@ export const useSidebar = () => {
     },
     console: {
       enabled: true,
+      plans: true,
       detail: true,
       token: true,
       log: true,

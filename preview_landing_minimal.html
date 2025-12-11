@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spark Code - Minimalist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: '#111827', // Gray 900
+                        accent: '#2563eb', // Blue 600
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        .hero-pattern {
+            background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+    </style>
+</head>
+<body class="bg-white text-gray-900">
+
+    <!-- Navbar -->
+    <nav class="fixed w-full z-50 bg-white/90 backdrop-blur border-b border-gray-100">
+        <div class="max-w-6xl mx-auto px-6 h-16 flex justify-between items-center">
+            <span class="text-xl font-bold tracking-tight">Spark Code.</span>
+            <div class="hidden md:flex gap-8 text-sm font-medium text-gray-600">
+                <a href="#" class="hover:text-black">Product</a>
+                <a href="#" class="hover:text-black">Pricing</a>
+                <a href="#" class="hover:text-black">Docs</a>
+            </div>
+            <div class="flex gap-4">
+                <a href="#" class="text-sm font-medium text-gray-600 hover:text-black py-2">Log in</a>
+                <a href="#" class="text-sm font-medium bg-black text-white px-4 py-2 rounded-lg hover:bg-gray-800 transition">Get API Key</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <header class="pt-32 pb-20 px-6 max-w-6xl mx-auto text-center hero-pattern">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 text-xs font-medium text-gray-600 mb-8">
+            <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+            v3.0 is now available
+        </div>
+        <h1 class="text-5xl md:text-7xl font-bold tracking-tight mb-8 text-gray-900">
+            The unified API for <br class="hidden md:block">
+            <span class="text-gray-400">Generative AI.</span>
+        </h1>
+        <p class="text-xl text-gray-500 max-w-2xl mx-auto mb-10 leading-relaxed">
+            Connect to OpenAI, Claude, and Gemini with a single line of code. 
+            Enterprise-grade reliability, unified billing, and zero latency overhead.
+        </p>
+        <div class="flex justify-center gap-4">
+            <button class="bg-black text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-800 transition shadow-lg shadow-gray-200">
+                Start Building
+            </button>
+            <button class="bg-white text-gray-900 border border-gray-200 px-8 py-4 rounded-lg font-semibold text-lg hover:border-gray-400 transition">
+                Read the Docs
+            </button>
+        </div>
+    </header>
+
+    <!-- Social Proof -->
+    <div class="border-y border-gray-100 bg-gray-50 py-12">
+        <div class="max-w-6xl mx-auto px-6 text-center">
+            <p class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Trusted by engineering teams at</p>
+            <div class="flex flex-wrap justify-center gap-12 opacity-50 grayscale">
+                <!-- Simple placeholders for logos -->
+                <span class="text-xl font-bold font-serif">ACME Corp</span>
+                <span class="text-xl font-bold font-mono">Globex</span>
+                <span class="text-xl font-bold italic">Soylent</span>
+                <span class="text-xl font-bold">Initech</span>
+                <span class="text-xl font-bold font-serif">Umbrella</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Feature Split -->
+    <section class="py-24 max-w-6xl mx-auto px-6">
+        <div class="grid md:grid-cols-2 gap-16 items-center">
+            <div>
+                <h2 class="text-3xl font-bold mb-6">One interface.<br>Every model.</h2>
+                <p class="text-lg text-gray-500 mb-8 leading-relaxed">
+                    Stop rewriting your integration code every time a new model drops. 
+                    Spark Code normalizes inputs and outputs across providers, giving you a 
+                    consistent development experience.
+                </p>
+                <ul class="space-y-4">
+                    <li class="flex items-center gap-3">
+                        <i class="ri-check-line text-green-500 text-xl"></i>
+                        <span class="font-medium text-gray-700">OpenAI Compatible Interface</span>
+                    </li>
+                    <li class="flex items-center gap-3">
+                        <i class="ri-check-line text-green-500 text-xl"></i>
+                        <span class="font-medium text-gray-700">Automatic Retries & Fallbacks</span>
+                    </li>
+                    <li class="flex items-center gap-3">
+                        <i class="ri-check-line text-green-500 text-xl"></i>
+                        <span class="font-medium text-gray-700">Unified Usage Analytics</span>
+                    </li>
+                </ul>
+            </div>
+            <div class="bg-gray-900 rounded-xl p-6 shadow-2xl rotate-1 hover:rotate-0 transition-transform duration-500">
+                <div class="flex gap-2 mb-4 border-b border-gray-800 pb-4">
+                    <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                </div>
+                <pre class="font-mono text-sm text-gray-300 overflow-x-auto"><code><span class="text-purple-400">const</span> <span class="text-blue-400">client</span> = <span class="text-purple-400">new</span> SparkCode({
+  apiKey: <span class="text-green-400">'sk_live_...'</span>
+});
+
+<span class="text-gray-500">// Switch models instantly</span>
+<span class="text-purple-400">const</span> completion = <span class="text-purple-400">await</span> client.chat({
+  model: <span class="text-green-400">'claude-3-opus'</span>, <span class="text-gray-500">// or 'gpt-4'</span>
+  messages: [{ role: <span class="text-green-400">'user'</span>, content: <span class="text-green-400">'Hello!'</span> }]
+});</code></pre>
+            </div>
+        </div>
+    </section>
+
+    <!-- Metrics -->
+    <section class="bg-black text-white py-24">
+        <div class="max-w-6xl mx-auto px-6">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-12 text-center">
+                <div>
+                    <div class="text-4xl font-bold mb-2">99.99%</div>
+                    <div class="text-gray-500 font-medium">Uptime SLA</div>
+                </div>
+                <div>
+                    <div class="text-4xl font-bold mb-2">&lt;40ms</div>
+                    <div class="text-gray-500 font-medium">Added Latency</div>
+                </div>
+                <div>
+                    <div class="text-4xl font-bold mb-2">15+</div>
+                    <div class="text-gray-500 font-medium">Model Providers</div>
+                </div>
+                <div>
+                    <div class="text-4xl font-bold mb-2">24/7</div>
+                    <div class="text-gray-500 font-medium">Expert Support</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-12 px-6 max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center text-sm text-gray-500">
+        <p>&copy; 2025 Spark Code Inc.</p>
+        <div class="flex gap-6 mt-4 md:mt-0">
+            <a href="#" class="hover:text-black">Privacy</a>
+            <a href="#" class="hover:text-black">Terms</a>
+            <a href="#" class="hover:text-black">Twitter</a>
+        </div>
+    </footer>
+</body>
+</html>

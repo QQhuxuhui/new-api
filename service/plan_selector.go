@@ -48,19 +48,25 @@ func (e *RateLimitError) Error() string {
 
 // newPlanSelectionResult creates a PlanSelectionResult from a UserPlan
 func newPlanSelectionResult(up *model.UserPlan, switched bool) *PlanSelectionResult {
+	planId := 0
+	if up.PlanId != nil {
+		planId = *up.PlanId
+	}
 	result := &PlanSelectionResult{
 		UserPlan:     up,
-		Plan:         up.Plan,
-		PlanId:       up.PlanId,
+		Plan:         up.Plan, // Keep for admin reference, but don't depend on it
+		PlanId:       planId,
 		UserPlanId:   up.Id,
 		Switched:     switched,
 		AutoSwitched: switched,
 	}
-	if up.Plan != nil {
-		result.PlanName = up.Plan.Name
-		result.ChannelGroup = up.Plan.ChannelGroup // Deprecated, keep for compatibility
-		result.ChannelGroups = up.Plan.GetChannelGroupsList()
-	}
+
+	// Use UserPlan snapshot fields (decoupled from Plan template)
+	// This allows routing to work even if Plan is deleted/disabled
+	result.PlanName = up.GetDisplayName() // Use display name for logging
+	result.ChannelGroup = up.GetChannelGroup() // Deprecated, keep for compatibility
+	result.ChannelGroups = up.GetChannelGroups() // Use snapshot
+
 	return result
 }
 
@@ -95,7 +101,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 		}
 
 		// Set as current
-		if err := model.SwitchUserCurrentPlan(userId, selectedPlan.PlanId); err != nil {
+		if err := model.SwitchUserCurrentPlan(userId, *selectedPlan.PlanId); err != nil {
 			common.SysLog(fmt.Sprintf("failed to set initial current plan: %v", err))
 		}
 
@@ -114,7 +120,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			// First try higher priority plans
 			higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
 			if higherPlan != nil {
-				if err := model.SwitchUserCurrentPlan(userId, higherPlan.PlanId); err != nil {
+				if err := model.SwitchUserCurrentPlan(userId, *higherPlan.PlanId); err != nil {
 					common.SysLog(fmt.Sprintf("failed to auto-switch to higher priority plan: %v", err))
 				} else {
 					common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to higher priority plan %d",
@@ -126,7 +132,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			// If no higher priority, try any plan with quota (including lower priority)
 			anyPlanWithQuota := selectHighestPriorityWithQuota(validPlans)
 			if anyPlanWithQuota != nil && anyPlanWithQuota.Id != currentPlan.Id {
-				if err := model.SwitchUserCurrentPlan(userId, anyPlanWithQuota.PlanId); err != nil {
+				if err := model.SwitchUserCurrentPlan(userId, *anyPlanWithQuota.PlanId); err != nil {
 					common.SysLog(fmt.Sprintf("failed to auto-switch to available plan: %v", err))
 				} else {
 					common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to available plan %d",
@@ -149,7 +155,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 		higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
 		if higherPlan != nil {
 			// Auto-switch to higher priority plan
-			if err := model.SwitchUserCurrentPlan(userId, higherPlan.PlanId); err != nil {
+			if err := model.SwitchUserCurrentPlan(userId, *higherPlan.PlanId); err != nil {
 				common.SysLog(fmt.Sprintf("failed to auto-switch plan: %v", err))
 				// Continue with current plan on error
 			} else {
@@ -179,17 +185,14 @@ func selectHighestPriorityWithQuota(plans []*model.UserPlan) *model.UserPlan {
 // findHigherPriorityPlanWithQuota finds a plan with higher priority than current that has quota
 // This includes checking both total quota and daily quota limit
 func findHigherPriorityPlanWithQuota(plans []*model.UserPlan, current *model.UserPlan) *model.UserPlan {
-	if current == nil || current.Plan == nil {
+	if current == nil {
 		return nil
 	}
-	currentPriority := current.Plan.Priority
+	currentPriority := current.GetPriority()
 
 	// Plans are sorted by priority DESC, so first match with higher priority wins
 	for _, plan := range plans {
-		if plan.Plan == nil {
-			continue
-		}
-		if plan.Plan.Priority > currentPriority && plan.IsValid() && hasPlanAvailableQuota(plan) {
+		if plan.GetPriority() > currentPriority && plan.IsValid() && hasPlanAvailableQuota(plan) {
 			return plan
 		}
 	}
@@ -583,12 +586,16 @@ func LogPlanSwitch(userId int, fromPlan, toPlan *model.UserPlan, isManual bool) 
 	}
 
 	if fromPlan != nil && fromPlan.Plan != nil {
-		event.FromPlanId = fromPlan.PlanId
+		if fromPlan.PlanId != nil {
+			event.FromPlanId = *fromPlan.PlanId
+		}
 		event.FromPlanName = fromPlan.Plan.Name
 	}
 
 	if toPlan != nil && toPlan.Plan != nil {
-		event.ToPlanId = toPlan.PlanId
+		if toPlan.PlanId != nil {
+			event.ToPlanId = *toPlan.PlanId
+		}
 		event.ToPlanName = toPlan.Plan.Name
 		event.ChannelGroup = toPlan.Plan.ChannelGroup
 	}
@@ -634,7 +641,21 @@ func SelectPlanWithQuotaChecks(userId int, modelName string, estimatedCostUSD fl
 
 	plan := result.Plan
 	if plan == nil {
-		return result, nil
+		// Plan template可能被删除，使用UserPlan的快照字段构造一个虚拟Plan以继续限流/日配额校验
+		up := result.UserPlan
+		plan = &model.Plan{
+			Id:              result.PlanId,
+			Name:            up.PlanName,
+			DisplayName:     up.GetDisplayName(),
+			Category:        up.GetCategory(),
+			Type:            up.GetType(),
+			Priority:        up.GetPriority(),
+			ChannelGroup:    up.GetChannelGroup(),
+			ChannelGroups:   up.PlanChannelGroups,
+			DailyQuotaLimit: up.GetPlanDailyQuotaLimit(),
+			RateLimitRules:  up.GetRateLimitRules(),
+		}
+		result.Plan = plan
 	}
 
 	// Check rate limits first (most restrictive)

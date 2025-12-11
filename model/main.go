@@ -277,6 +277,11 @@ func migrateDB() error {
 		&TwoFABackupCode{},
 		&Plan{},
 		&UserPlan{},
+		&UserDailyPool{},
+		&AdminPlanLog{},
+		&UserAssetSnapshot{},
+		&UserNotification{},
+		&PlanOrder{},
 	)
 	if err != nil {
 		return err
@@ -285,6 +290,85 @@ func migrateDB() error {
 	if err := SeedDefaultPlans(); err != nil {
 		common.SysLog("failed to seed default plans: " + err.Error())
 	}
+	// Migrate UserPlan snapshots after schema migration
+	if err := migrateUserPlanSnapshots(); err != nil {
+		common.SysLog("failed to migrate user plan snapshots: " + err.Error())
+		// Don't fail startup, migration can be retried
+	}
+	return nil
+}
+
+// migrateUserPlanSnapshots populates snapshot fields in existing UserPlan records
+// This migration is idempotent and can be run multiple times safely
+func migrateUserPlanSnapshots() error {
+	common.SysLog("starting user plan snapshot migration...")
+
+	var totalMigrated int
+	batchSize := 100
+
+	// Process in batches to avoid memory issues with large datasets
+	// Check for ANY missing snapshot field to catch both:
+	// 1. Records never migrated (plan_name empty)
+	// 2. Records from Phase 1 missing Phase 2 routing fields (plan_type empty)
+	result := DB.Preload("Plan").
+		Where("plan_name = ? OR plan_name IS NULL OR plan_type = ? OR plan_type IS NULL OR plan_channel_groups = ? OR plan_channel_groups IS NULL",
+			"", "", "").
+		FindInBatches(&[]UserPlan{}, batchSize, func(tx *gorm.DB, batch int) error {
+			var userPlans []UserPlan
+			tx.Find(&userPlans)
+
+			for i := range userPlans {
+				up := &userPlans[i]
+				if up.Plan != nil {
+					// Copy display & sorting snapshot fields from Plan template
+					up.PlanName = up.Plan.Name
+					up.PlanDisplayName = up.Plan.DisplayName
+					up.PlanCategory = up.Plan.Category
+					up.PlanPriority = up.Plan.Priority
+
+					// Copy routing & access control snapshot fields
+					up.PlanType = up.Plan.Type
+					up.PlanChannelGroup = up.Plan.ChannelGroup
+					up.PlanChannelGroups = up.Plan.ChannelGroups // Already JSON string
+					up.PlanRateLimitRules = up.Plan.RateLimitRules
+					up.PlanDailyQuotaLimit = up.Plan.DailyQuotaLimit
+
+					// Update all snapshot fields
+					if err := DB.Model(up).Select(
+						"plan_name",
+						"plan_display_name",
+						"plan_category",
+						"plan_priority",
+						"plan_type",
+						"plan_channel_group",
+						"plan_channel_groups",
+						"plan_rate_limit_rules",
+						"plan_daily_quota_limit",
+					).Updates(up).Error; err != nil {
+						common.SysLog("failed to migrate user plan " + fmt.Sprint(up.Id) + ": " + err.Error())
+						continue
+					}
+					totalMigrated++
+				}
+			}
+
+			if batch > 1 {
+				common.SysLog(fmt.Sprintf("migrated batch %d (%d records so far)", batch, totalMigrated))
+			}
+
+			return nil
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if totalMigrated > 0 {
+		common.SysLog(fmt.Sprintf("user plan snapshot migration completed: %d records updated", totalMigrated))
+	} else {
+		common.SysLog("user plan snapshot migration: no records to migrate")
+	}
+
 	return nil
 }
 
@@ -316,6 +400,11 @@ func migrateDBFast() error {
 		{&TwoFABackupCode{}, "TwoFABackupCode"},
 		{&Plan{}, "Plan"},
 		{&UserPlan{}, "UserPlan"},
+		{&UserDailyPool{}, "UserDailyPool"},
+		{&AdminPlanLog{}, "AdminPlanLog"},
+		{&UserAssetSnapshot{}, "UserAssetSnapshot"},
+		{&UserNotification{}, "UserNotification"},
+		{&PlanOrder{}, "PlanOrder"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

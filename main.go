@@ -95,6 +95,9 @@ func main() {
 	// 启动并发计数清理任务（防止因服务崩溃导致的并发泄漏）
 	service.StartConcurrencyCleanupTask()
 
+	// 启动套餐订单后台任务（订单过期和发放重试）
+	service.StartPlanOrderTasks()
+
 	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
 		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
 		if err != nil {

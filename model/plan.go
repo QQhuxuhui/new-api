@@ -16,24 +16,35 @@ type RateLimitRule struct {
 
 // Plan represents a plan template (admin-managed)
 type Plan struct {
-	Id                   int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name                 string `json:"name" gorm:"type:varchar(64);not null;uniqueIndex"` // 'monthly', 'payg', 'trial'
-	DisplayName          string `json:"display_name" gorm:"type:varchar(128)"`             // '包月套餐', 'Pay-as-you-go'
-	Description          string `json:"description" gorm:"type:text"`
-	Type                 string `json:"type" gorm:"type:varchar(32);not null"`    // 'subscription', 'consumption', 'trial'
-	Priority             int    `json:"priority" gorm:"default:0"`                // Higher = preferred
-	ChannelGroup         string `json:"channel_group" gorm:"type:varchar(64)"`    // Maps to Channel.Group (deprecated, use ChannelGroups)
-	ChannelGroups        string `json:"channel_groups" gorm:"type:text"`          // JSON array of channel groups, e.g., ["group1", "group2"]
-	DefaultQuota         int64  `json:"default_quota" gorm:"default:0"`           // Default quota for new assignments
-	ValidityDays         int    `json:"validity_days" gorm:"default:0"`           // 0 = permanent
-	DailyQuotaLimit      int64  `json:"daily_quota_limit" gorm:"default:0"`       // Daily quota limit for subscription plans (0 = no limit)
-	RateLimitRules       string `json:"rate_limit_rules" gorm:"type:text"`        // JSON array of rate limit rules
-	DefaultAllowSwitch   int    `json:"default_allow_switch" gorm:"default:0"`    // Default permission for user to switch
-	DefaultAllowToggle   int    `json:"default_allow_toggle" gorm:"default:1"`    // Default permission for user to toggle auto-switch
-	Settings             string `json:"settings" gorm:"type:text"`                // JSON for extensibility
-	Status               int    `json:"status" gorm:"default:1"`                  // 1=enabled, 2=disabled
-	CreatedAt            int64  `json:"created_at" gorm:"autoCreateTime:milli"`
-	UpdatedAt            int64  `json:"updated_at" gorm:"autoUpdateTime:milli"`
+	Id                   int     `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name                 string  `json:"name" gorm:"type:varchar(64);not null;uniqueIndex"` // 'monthly', 'payg', 'trial'
+	DisplayName          string  `json:"display_name" gorm:"type:varchar(128)"`             // '包月套餐', 'Pay-as-you-go'
+	Description          string  `json:"description" gorm:"type:text"`
+	Type                 string  `json:"type" gorm:"type:varchar(32);not null"`    // 'subscription', 'consumption', 'trial'
+	Category             string  `json:"category" gorm:"type:varchar(20);default:'monthly'"` // 'daily', 'weekly', 'biweekly', 'monthly', 'payg'
+	Priority             int     `json:"priority" gorm:"default:0"`                // Higher = preferred
+	ChannelGroup         string  `json:"channel_group" gorm:"type:varchar(64)"`    // Maps to Channel.Group (deprecated, use ChannelGroups)
+	ChannelGroups        string  `json:"channel_groups" gorm:"type:text"`          // JSON array of channel groups, e.g., ["group1", "group2"]
+	DefaultQuota         int64   `json:"default_quota" gorm:"default:0"`           // Default quota for new assignments
+	ValidityDays         int     `json:"validity_days" gorm:"default:0"`           // 0 = permanent
+	DailyQuotaLimit      int64   `json:"daily_quota_limit" gorm:"default:0"`       // Daily quota limit for subscription plans (0 = no limit)
+	RateLimitRules       string  `json:"rate_limit_rules" gorm:"type:text"`        // JSON array of rate limit rules
+	DefaultAllowSwitch   int     `json:"default_allow_switch" gorm:"default:0"`    // Default permission for user to switch
+	DefaultAllowToggle   int     `json:"default_allow_toggle" gorm:"default:1"`    // Default permission for user to toggle auto-switch
+	Settings             string  `json:"settings" gorm:"type:text"`                // JSON for extensibility
+	Status               int     `json:"status" gorm:"default:1"`                  // 1=enabled, 2=disabled
+	// Pricing fields
+	Price                float64 `json:"price" gorm:"type:decimal(10,2);default:0"`          // Sale price
+	OriginalPrice        float64 `json:"original_price" gorm:"type:decimal(10,2);default:0"` // Original price (for discount display)
+	QuotaUSD             float64 `json:"quota_usd" gorm:"type:decimal(10,2);default:0"`      // Quota in USD (for display)
+	// Queue control
+	QueueSlot            int     `json:"queue_slot" gorm:"default:1"`             // 0=daily (no queue), 1=occupies queue slot
+	SortOrder            int     `json:"sort_order" gorm:"default:0"`             // Display sort order
+	CustomFeatures       string  `json:"custom_features" gorm:"type:text"`        // JSON array of custom feature descriptions with icons
+	// Purchase control
+	Purchasable          int     `json:"purchasable" gorm:"default:1"`            // 1=can be purchased online, 0=cannot
+	CreatedAt            int64   `json:"created_at" gorm:"autoCreateTime:milli"`
+	UpdatedAt            int64   `json:"updated_at" gorm:"autoUpdateTime:milli"`
 }
 
 // Plan types
@@ -42,6 +53,15 @@ const (
 	PlanTypeConsumption  = "consumption"  // 消费类型（按量付费）
 	PlanTypeTrial        = "trial"        // 试用类型
 	PlanTypeEnterprise   = "enterprise"   // 企业类型
+)
+
+// Plan categories
+const (
+	PlanCategoryDaily    = "daily"    // 日卡
+	PlanCategoryWeekly   = "weekly"   // 周卡
+	PlanCategoryBiweekly = "biweekly" // 双周卡
+	PlanCategoryMonthly  = "monthly"  // 月卡
+	PlanCategoryPayg     = "payg"     // 按量付费
 )
 
 // Plan status
@@ -137,6 +157,26 @@ func (p *Plan) HasRateLimits() bool {
 	return len(p.GetRateLimitRules()) > 0
 }
 
+// IsDailyPlan checks if the plan is a daily card (does not occupy queue)
+func (p *Plan) IsDailyPlan() bool {
+	return p.Category == PlanCategoryDaily || p.QueueSlot == 0
+}
+
+// OccupiesQueueSlot checks if purchasing this plan will take a queue slot
+func (p *Plan) OccupiesQueueSlot() bool {
+	return p.QueueSlot == 1
+}
+
+// IsValidCategory checks if the plan category is valid
+func (p *Plan) IsValidCategory() bool {
+	switch p.Category {
+	case PlanCategoryDaily, PlanCategoryWeekly, PlanCategoryBiweekly, PlanCategoryMonthly, PlanCategoryPayg:
+		return true
+	default:
+		return false
+	}
+}
+
 // Insert creates a new plan
 func (p *Plan) Insert() error {
 	if p.Name == "" {
@@ -169,15 +209,28 @@ func (p *Plan) Delete() error {
 	if p.Id == 0 {
 		return errors.New("套餐ID不能为空")
 	}
-	// Check if any user_plans reference this plan
+
+	// Check for active user_plans that don't have complete snapshots
+	// A complete snapshot means the user plan is fully independent and can survive template deletion
+	// We check if there are any ACTIVE user plans with empty critical snapshot fields
 	var count int64
-	if err := DB.Model(&UserPlan{}).Where("plan_id = ?", p.Id).Count(&count).Error; err != nil {
+	if err := DB.Model(&UserPlan{}).
+		Where("plan_id = ? AND status = ? AND (plan_name = ? OR plan_name IS NULL OR plan_type = ? OR plan_type IS NULL)",
+			p.Id, UserPlanStatusActive, "", "").
+		Count(&count).Error; err != nil {
 		return err
 	}
+
 	if count > 0 {
-		return errors.New("该套餐已被用户使用，无法删除")
+		return errors.New("该套餐仍有活跃用户实例未完全快照化，请先等待迁移完成或手动填充快照字段")
 	}
-	// Invalidate cache before delete (though no users should have this plan)
+
+	// Safe to delete:
+	// 1. No user plans at all, OR
+	// 2. All user plans have complete snapshots (plan_name and plan_type populated), OR
+	// 3. All user plans are non-active (expired/disabled/completed)
+	// Users with complete snapshots can continue using their plans without the template
+	// PlanOrder foreign key uses OnDelete:SET NULL, so orders will have plan_id set to null
 	go InvalidateUserPlanCacheByPlanId(p.Id)
 	return DB.Delete(p).Error
 }

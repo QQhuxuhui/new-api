@@ -341,9 +341,9 @@ func Distribute() func(c *gin.Context) {
 							if userPlanId, ok := planId.(int); ok && userPlanId > 0 {
 								// Load the UserPlan to check auto_switch flag
 								if userPlan, err := model.GetUserPlanById(userPlanId); err == nil {
-									if userPlan.AutoSwitch == 1 {
+									if userPlan.AutoSwitch == 1 && userPlan.PlanId != nil {
 										shouldAttemptFailover = true
-										currentPlanId = userPlan.PlanId
+										currentPlanId = *userPlan.PlanId
 									}
 								}
 							}
@@ -360,10 +360,11 @@ func Distribute() func(c *gin.Context) {
 							logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failover_error=%v", userId, failoverErr))
 						}
 
-						if failoverChannel != nil && failoverPlan != nil {
+						if failoverChannel != nil && failoverPlan != nil && failoverPlan.PlanId != nil {
 							// Successfully found alternative plan with working channel
 							// Switch user to the new plan
-							if switchErr := model.SwitchUserCurrentPlan(userId, failoverPlan.PlanId); switchErr != nil {
+							failoverPlanId := *failoverPlan.PlanId
+							if switchErr := model.SwitchUserCurrentPlan(userId, failoverPlanId); switchErr != nil {
 								logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
 							} else {
 								planName := "unknown"
@@ -371,10 +372,10 @@ func Distribute() func(c *gin.Context) {
 									planName = failoverPlan.Plan.Name
 								}
 								logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d switched from plan=%d to plan=%s(id=%d) reason=channel_unavailable",
-									userId, currentPlanId, planName, failoverPlan.PlanId))
+									userId, currentPlanId, planName, failoverPlanId))
 
 								// Update context with new plan info
-								common.SetContextKey(c, constant.ContextKeyPlanId, failoverPlan.PlanId)
+								common.SetContextKey(c, constant.ContextKeyPlanId, failoverPlanId)
 								common.SetContextKey(c, constant.ContextKeyUserPlanId, failoverPlan.Id)
 								common.SetContextKey(c, constant.ContextKeyPlanName, planName)
 								common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)

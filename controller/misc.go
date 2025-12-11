@@ -101,8 +101,10 @@ func GetStatus(c *gin.Context) {
 		"tutorial":              cs.Tutorial,
 
 		// 模块管理配置
-		"HeaderNavModules":    common.OptionMap["HeaderNavModules"],
-		"SidebarModulesAdmin": common.OptionMap["SidebarModulesAdmin"],
+		"HeaderNavModules":      common.OptionMap["HeaderNavModules"],
+		"SidebarModulesAdmin":   common.OptionMap["SidebarModulesAdmin"],
+		"PlanCategoriesConfig":  common.OptionMap["PlanCategoriesConfig"],
+		"PlanPricingConfig":     common.OptionMap["PlanPricingConfig"],
 
 		"oidc_enabled":                system_setting.GetOIDCSettings().Enabled,
 		"oidc_client_id":              system_setting.GetOIDCSettings().ClientId,

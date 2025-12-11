@@ -33,6 +33,9 @@ import {
   Banner,
   Divider,
   Tooltip,
+  Modal,
+  List,
+  Badge,
 } from '@douyinfe/semi-ui';
 import {
   IconTick,
@@ -46,6 +49,11 @@ import {
   IconCreditCard,
   IconArrowRight,
   IconShoppingBag,
+  IconMoon,
+  IconArrowUp,
+  IconArrowDown,
+  IconUndo,
+  IconList,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess, renderQuota } from '../../helpers';
 
@@ -56,6 +64,12 @@ const MyPlans = () => {
   const [loading, setLoading] = useState(true);
   const [userPlans, setUserPlans] = useState([]);
   const [quotaStatus, setQuotaStatus] = useState(null);
+  const [billingStatus, setBillingStatus] = useState(null);
+  const [showQueueModal, setShowQueueModal] = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [refundPlan, setRefundPlan] = useState(null);
+  const [refundReason, setRefundReason] = useState('');
+  const [refundLoading, setRefundLoading] = useState(false);
 
   // Load user's plans
   const loadMyPlans = useCallback(async () => {
@@ -89,10 +103,24 @@ const MyPlans = () => {
     }
   }, []);
 
+  // Load billing status (includes daily pool and queue)
+  const loadBillingStatus = useCallback(async () => {
+    try {
+      const res = await API.get('/api/my_plans/billing-status');
+      const { success, data } = res.data;
+      if (success && data) {
+        setBillingStatus(data);
+      }
+    } catch (e) {
+      console.error('Failed to load billing status:', e);
+    }
+  }, []);
+
   useEffect(() => {
     loadMyPlans();
     loadQuotaStatus();
-  }, [loadMyPlans, loadQuotaStatus]);
+    loadBillingStatus();
+  }, [loadMyPlans, loadQuotaStatus, loadBillingStatus]);
 
   // Switch to a different plan
   const handleSwitchPlan = async (planId) => {
@@ -131,6 +159,37 @@ const MyPlans = () => {
       showError(e.message);
     }
     setLoading(false);
+  };
+
+  // Request refund for a queued plan
+  const handleRequestRefund = async () => {
+    if (!refundPlan) return;
+    setRefundLoading(true);
+    try {
+      const res = await API.post(`/api/my_plans/${refundPlan.id}/refund`, {
+        reason: refundReason,
+      });
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('退款申请已提交'));
+        setShowRefundModal(false);
+        setRefundPlan(null);
+        setRefundReason('');
+        loadMyPlans();
+        loadBillingStatus();
+      } else {
+        showError(message);
+      }
+    } catch (e) {
+      showError(e.message);
+    }
+    setRefundLoading(false);
+  };
+
+  // Check if it's late night (after 22:00)
+  const isLateNight = () => {
+    const hour = new Date().getHours();
+    return hour >= 22 || hour < 6;
   };
 
   // Render plan type tag
@@ -322,6 +381,152 @@ const MyPlans = () => {
     );
   };
 
+  // Render daily pool status (from billing status)
+  const renderDailyPoolCard = () => {
+    if (!billingStatus || !billingStatus.daily_pool || billingStatus.daily_pool.total === 0) {
+      return null;
+    }
+
+    const { available, total, used, expires_at } = billingStatus.daily_pool;
+    const usedPercent = total > 0 ? (used / total) * 100 : 0;
+    const remainPercent = 100 - usedPercent;
+
+    return (
+      <div className='bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 border border-purple-100 dark:border-purple-900/30 rounded-2xl p-5 shadow-sm'>
+        <div className='flex justify-between items-center mb-4'>
+          <div className='flex items-center gap-3'>
+            <div className='p-2 rounded-xl bg-purple-100 dark:bg-purple-800 text-purple-600 dark:text-purple-200'>
+              <IconBolt size='large' />
+            </div>
+            <div>
+              <Text strong className='text-purple-900 dark:text-purple-100 text-lg'>
+                {t('今日日卡池')}
+              </Text>
+              <Text type='tertiary' size='small' className='block'>
+                {t('有效期至')}: {expires_at}
+              </Text>
+            </div>
+          </div>
+          {isLateNight() && (
+            <Tooltip content={t('当前为深夜时段，日卡将在明日凌晨重置，请合理安排使用')}>
+              <Tag color='orange' type='solid' shape='circle'>
+                <IconMoon className='mr-1' />
+                {t('深夜提醒')}
+              </Tag>
+            </Tooltip>
+          )}
+        </div>
+
+        <div className='grid grid-cols-3 gap-4 mb-4'>
+          <div className='text-center p-3 bg-white/50 dark:bg-gray-800/50 rounded-xl'>
+            <Text type='tertiary' size='small' className='block mb-1'>{t('总额度')}</Text>
+            <Text strong className='text-lg text-purple-700 dark:text-purple-300'>{renderQuota(total)}</Text>
+          </div>
+          <div className='text-center p-3 bg-white/50 dark:bg-gray-800/50 rounded-xl'>
+            <Text type='tertiary' size='small' className='block mb-1'>{t('已使用')}</Text>
+            <Text strong className='text-lg text-orange-600 dark:text-orange-400'>{renderQuota(used)}</Text>
+          </div>
+          <div className='text-center p-3 bg-white/50 dark:bg-gray-800/50 rounded-xl'>
+            <Text type='tertiary' size='small' className='block mb-1'>{t('剩余')}</Text>
+            <Text strong className='text-lg text-green-600 dark:text-green-400'>{renderQuota(available)}</Text>
+          </div>
+        </div>
+
+        <Progress
+          percent={remainPercent}
+          showInfo={false}
+          stroke={remainPercent > 20 ? 'linear-gradient(90deg, #8b5cf6, #ec4899)' : 'var(--semi-color-danger)'}
+          style={{ height: '10px' }}
+        />
+        <div className='flex justify-between mt-2'>
+          <Text type='tertiary' size='small'>
+            {t('使用进度')}: {usedPercent.toFixed(1)}%
+          </Text>
+          <Text strong size='small' className={remainPercent > 20 ? 'text-purple-600' : 'text-red-500'}>
+            {t('剩余')} {remainPercent.toFixed(1)}%
+          </Text>
+        </div>
+      </div>
+    );
+  };
+
+  // Render queued plans
+  const renderQueuedPlansSection = () => {
+    if (!billingStatus || !billingStatus.queued_plans || billingStatus.queued_plans.length === 0) {
+      return null;
+    }
+
+    const queuedPlans = billingStatus.queued_plans;
+
+    return (
+      <Card className='mt-6 rounded-2xl border-none shadow-sm'>
+        <div className='flex justify-between items-center mb-4'>
+          <div className='flex items-center gap-3'>
+            <div className='p-2 rounded-xl bg-indigo-100 dark:bg-indigo-800 text-indigo-600 dark:text-indigo-200'>
+              <IconList size='large' />
+            </div>
+            <div>
+              <Title heading={5} className='m-0'>
+                {t('排队中的套餐')}
+              </Title>
+              <Text type='tertiary' size='small'>
+                {queuedPlans.length} {t('个套餐排队中')}
+              </Text>
+            </div>
+          </div>
+          <Button
+            theme='light'
+            type='tertiary'
+            icon={<IconList />}
+            onClick={() => setShowQueueModal(true)}
+          >
+            {t('查看队列')}
+          </Button>
+        </div>
+
+        <div className='space-y-3'>
+          {queuedPlans.slice(0, 3).map((plan, index) => (
+            <div
+              key={plan.id}
+              className='flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl'
+            >
+              <div className='flex items-center gap-3'>
+                <Badge count={plan.queue_position} type='primary' />
+                <div>
+                  <Text strong>{plan.name}</Text>
+                  <Text type='tertiary' size='small' className='block'>
+                    {t('额度')}: {renderQuota(plan.quota)}
+                  </Text>
+                </div>
+              </div>
+              {plan.is_refundable && (
+                <Tooltip content={t('申请退款')}>
+                  <Button
+                    size='small'
+                    type='warning'
+                    theme='light'
+                    icon={<IconUndo />}
+                    onClick={() => {
+                      setRefundPlan(plan);
+                      setShowRefundModal(true);
+                    }}
+                  />
+                </Tooltip>
+              )}
+            </div>
+          ))}
+          {queuedPlans.length > 3 && (
+            <div className='text-center'>
+              <Button theme='borderless' onClick={() => setShowQueueModal(true)}>
+                {t('查看全部')} {queuedPlans.length} {t('个套餐')}
+              </Button>
+            </div>
+          )}
+        </div>
+      </Card>
+    );
+  };
+
   // Render expiration info
   const renderExpiration = (userPlan) => {
     if (!userPlan.expires_at) {
@@ -394,7 +599,7 @@ const MyPlans = () => {
               <div>
                 <div className='flex items-center gap-2 mb-1'>
                   <Title heading={5} className='m-0 text-xl font-bold'>
-                    {plan.display_name || plan.name || t('未知套餐')}
+                    {plan.plan_display_name || plan.display_name || plan.plan?.display_name || plan.name || t('未知套餐')}
                   </Title>
                   {isCurrent && (
                     <Tag 
@@ -572,6 +777,7 @@ const MyPlans = () => {
             onClick={() => {
               loadMyPlans();
               loadQuotaStatus();
+              loadBillingStatus();
             }}
             loading={loading}
             style={{ borderRadius: '12px', height: '40px', padding: '0 20px' }}
@@ -610,6 +816,11 @@ const MyPlans = () => {
           </div>
         )}
 
+        {/* Daily Pool Card (if has daily pool) */}
+        <div className='mb-8'>
+          {renderDailyPoolCard()}
+        </div>
+
         {/* Plans List */}
         <Spin spinning={loading} size="large" tip={t('加载套餐信息...')}>
           {userPlans.length > 0 ? (
@@ -632,6 +843,9 @@ const MyPlans = () => {
                   .filter((p) => p.is_current !== 1)
                   .map((userPlan) => renderPlanCard(userPlan))}
               </div>
+
+              {/* Queued Plans Section */}
+              {renderQueuedPlansSection()}
             </div>
           ) : (
             <div className='mt-12'>
@@ -650,6 +864,118 @@ const MyPlans = () => {
            <p>{t('套餐额度仅供参考，具体扣费以实际使用量为准')}</p>
         </div>
       </div>
+
+      {/* Queue Details Modal */}
+      <Modal
+        title={t('套餐队列详情')}
+        visible={showQueueModal}
+        onCancel={() => setShowQueueModal(false)}
+        footer={
+          <Button onClick={() => setShowQueueModal(false)}>
+            {t('关闭')}
+          </Button>
+        }
+        width={600}
+      >
+        <div className='mb-4'>
+          <Banner
+            type='info'
+            description={t('套餐将按照队列顺序自动激活。当前套餐额度耗尽或过期后，下一个套餐将自动生效。')}
+          />
+        </div>
+        {billingStatus?.queued_plans && billingStatus.queued_plans.length > 0 ? (
+          <List
+            dataSource={billingStatus.queued_plans}
+            renderItem={(plan) => (
+              <List.Item
+                key={plan.id}
+                main={
+                  <div className='flex items-center justify-between w-full'>
+                    <div className='flex items-center gap-3'>
+                      <Badge count={plan.queue_position} type='primary' />
+                      <div>
+                        <Text strong>{plan.name}</Text>
+                        <div className='flex items-center gap-2 mt-1'>
+                          <Tag size='small' color='blue'>
+                            {t('额度')}: {renderQuota(plan.quota)}
+                          </Tag>
+                          {plan.estimated_activation_time > 0 && (
+                            <Tag size='small' color='grey'>
+                              {t('预计激活')}: {new Date(plan.estimated_activation_time).toLocaleDateString()}
+                            </Tag>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {plan.is_refundable && (
+                      <Button
+                        size='small'
+                        type='warning'
+                        theme='light'
+                        icon={<IconUndo />}
+                        onClick={() => {
+                          setRefundPlan(plan);
+                          setShowRefundModal(true);
+                          setShowQueueModal(false);
+                        }}
+                      >
+                        {t('申请退款')}
+                      </Button>
+                    )}
+                  </div>
+                }
+              />
+            )}
+          />
+        ) : (
+          <Empty description={t('暂无排队中的套餐')} />
+        )}
+      </Modal>
+
+      {/* Refund Request Modal */}
+      <Modal
+        title={t('申请退款')}
+        visible={showRefundModal}
+        onCancel={() => {
+          setShowRefundModal(false);
+          setRefundPlan(null);
+          setRefundReason('');
+        }}
+        onOk={handleRequestRefund}
+        okText={t('提交申请')}
+        cancelText={t('取消')}
+        confirmLoading={refundLoading}
+      >
+        {refundPlan && (
+          <div className='space-y-4'>
+            <Banner
+              type='warning'
+              description={t('退款申请提交后需等待管理员审核。审核通过后，退款将原路返还。')}
+            />
+            <div className='p-4 bg-gray-50 dark:bg-gray-800 rounded-xl'>
+              <Text type='secondary'>{t('套餐名称')}:</Text>
+              <Text strong className='ml-2'>{refundPlan.name}</Text>
+              <br />
+              <Text type='secondary'>{t('剩余额度')}:</Text>
+              <Text strong className='ml-2'>{renderQuota(refundPlan.quota)}</Text>
+              <br />
+              <Text type='secondary'>{t('队列位置')}:</Text>
+              <Text strong className='ml-2'>#{refundPlan.queue_position}</Text>
+            </div>
+            <div>
+              <Text className='block mb-2'>{t('退款原因')} ({t('可选')})</Text>
+              <textarea
+                className='w-full p-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 resize-none'
+                rows={3}
+                placeholder={t('请输入退款原因...')}
+                value={refundReason}
+                onChange={(e) => setRefundReason(e.target.value)}
+                maxLength={500}
+              />
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

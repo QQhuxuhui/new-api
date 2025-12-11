@@ -114,6 +114,15 @@ const PlansTable = () => {
     { value: PLAN_TYPES.ENTERPRISE, label: t('企业套餐') },
   ];
 
+  // Plan category options
+  const planCategoryOptions = [
+    { value: 'daily', label: t('日卡') },
+    { value: 'weekly', label: t('周卡') },
+    { value: 'biweekly', label: t('双周卡') },
+    { value: 'monthly', label: t('月卡') },
+    { value: 'payg', label: t('按量付费') },
+  ];
+
   // Get plan type label
   const getPlanTypeLabel = (type) => {
     const option = planTypeOptions.find(opt => opt.value === type);
@@ -308,10 +317,19 @@ const PlansTable = () => {
         rate_limit_rules_array = [];
       }
 
+      // Parse custom_features
+      let custom_features_array = [];
+      try {
+        custom_features_array = editingPlan.custom_features ? JSON.parse(editingPlan.custom_features) : [];
+      } catch (e) {
+        custom_features_array = [];
+      }
+
       return {
         ...editingPlan,
         channel_groups: channel_groups_array,
         rate_limit_rules: rate_limit_rules_array,
+        custom_features: custom_features_array,
         // Convert int (0/1) to boolean for Switch component
         default_allow_switch: editingPlan.default_allow_switch === 1,
         default_allow_toggle: editingPlan.default_allow_toggle === 1,
@@ -320,6 +338,7 @@ const PlansTable = () => {
     return {
       status: PLAN_STATUS.ENABLED,
       type: PLAN_TYPES.CONSUMPTION,
+      category: 'monthly', // 默认为月卡
       priority: 0,
       default_quota: 0,
       daily_quota_limit: 0,
@@ -328,6 +347,7 @@ const PlansTable = () => {
       default_allow_toggle: true,
       channel_groups: [],
       rate_limit_rules: [],
+      custom_features: [],
     };
   };
 
@@ -344,6 +364,9 @@ const PlansTable = () => {
       channel_groups: JSON.stringify(values.channel_groups || []),
       rate_limit_rules: JSON.stringify(
         (values.rate_limit_rules || []).filter(r => r && r.window_hours > 0 && r.max_amount > 0)
+      ),
+      custom_features: JSON.stringify(
+        (values.custom_features || []).filter(f => f && f.text && f.text.trim() !== '')
       ),
       default_allow_switch: values.default_allow_switch ? 1 : 0,
       default_allow_toggle: values.default_allow_toggle ? 1 : 0,
@@ -502,6 +525,13 @@ const PlansTable = () => {
             optionList={planTypeOptions}
             rules={[{ required: true, message: t('请选择套餐类型') }]}
           />
+          <Form.Select
+            field='category'
+            label={t('套餐分类')}
+            optionList={planCategoryOptions}
+            rules={[{ required: true, message: t('请选择套餐分类') }]}
+            extraText={t('日卡不占队列槽位，可与其他套餐叠加使用')}
+          />
           <Form.InputNumber
             field='priority'
             label={t('优先级')}
@@ -606,6 +636,53 @@ const PlansTable = () => {
             placeholder={t('请输入套餐描述')}
             rows={3}
           />
+
+          {/* Custom Features */}
+          <Form.Label text={t('自定义特色说明')} />
+          <div style={{ marginBottom: '8px', fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+            {t('除了系统自动生成的特色（额度、有效期等），你还可以添加自定义特色说明')}
+          </div>
+          <ArrayField field='custom_features'>
+            {({ add, arrayFields }) => (
+              <div>
+                {arrayFields.map((field, index) => (
+                  <div key={field.key} className="flex items-start mb-2 gap-2">
+                    <Form.Select
+                      field={`${field.field}[icon]`}
+                      placeholder={t('选择图标')}
+                      style={{ width: 120 }}
+                      noLabel
+                      optionList={[
+                        { value: 'check', label: '✓ ' + t('对号') },
+                        { value: 'warning', label: '⚠ ' + t('警告') },
+                        { value: 'star', label: '★ ' + t('星标') },
+                        { value: 'info', label: 'ℹ ' + t('信息') },
+                      ]}
+                    />
+                    <Form.Input
+                      field={`${field.field}[text]`}
+                      placeholder={t('输入特色说明文字')}
+                      style={{ flex: 1 }}
+                      noLabel
+                    />
+                    <Button
+                      icon={<IconMinusCircle />}
+                      type="danger"
+                      size="small"
+                      onClick={field.remove}
+                    />
+                  </div>
+                ))}
+                <Button
+                  icon={<IconPlusCircle />}
+                  onClick={() => add({ icon: 'check', text: '' })}
+                  size="small"
+                >
+                  {t('添加特色说明')}
+                </Button>
+              </div>
+            )}
+          </ArrayField>
         </Form>
       </Modal>
     </Card>

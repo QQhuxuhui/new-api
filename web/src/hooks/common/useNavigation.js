@@ -26,6 +26,7 @@ export const useNavigation = (t, docsLink, headerNavModules, tutorialEnabled = t
       home: true,
       console: true,
       pricing: true,
+      plans: true,
       docs: true,
       tutorial: true,
       about: true,

@@ -25,7 +25,7 @@ func GetFailoverCandidates(userId, excludePlanId int) ([]*model.UserPlan, error)
 	// Filter out the current plan, locked plans, and plans without available quota
 	var candidates []*model.UserPlan
 	for _, plan := range validPlans {
-		if plan.PlanId == excludePlanId || plan.IsLocked() {
+		if (plan.PlanId != nil && *plan.PlanId == excludePlanId) || plan.IsLocked() {
 			continue
 		}
 
@@ -175,7 +175,9 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 
 	triedPlanIds := make([]int, len(candidates))
 	for i, c := range candidates {
-		triedPlanIds[i] = c.PlanId
+		if c.PlanId != nil {
+			triedPlanIds[i] = *c.PlanId
+		}
 	}
 	logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d all_failover_attempts_failed tried_plans=%v",
 		userId, triedPlanIds))
@@ -221,12 +223,16 @@ func ShouldAttemptCrossplanFailover(c *gin.Context) (bool, int, int) {
 	}
 
 	// Check if AutoSwitch is enabled for this user plan
+	planId := 0
+	if userPlan.PlanId != nil {
+		planId = *userPlan.PlanId
+	}
 	if userPlan.AutoSwitch != 1 {
-		logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d plan=%d auto_switch disabled, skipping failover", userId, userPlan.PlanId))
+		logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d plan=%d auto_switch disabled, skipping failover", userId, planId))
 		return false, 0, userId
 	}
 
-	return true, userPlan.PlanId, userId
+	return true, planId, userId
 }
 
 // AttemptCrossplanFailoverAfterRetry tries to failover to alternative plans after all retries failed
@@ -260,9 +266,11 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 	}
 
 	// Successfully found alternative plan - switch user to it
-	if switchErr := model.SwitchUserCurrentPlan(userId, failoverPlan.PlanId); switchErr != nil {
-		logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
-		// Continue anyway - channel was found, we can still use it even if plan switch failed
+	if failoverPlan.PlanId != nil {
+		if switchErr := model.SwitchUserCurrentPlan(userId, *failoverPlan.PlanId); switchErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
+			// Continue anyway - channel was found, we can still use it even if plan switch failed
+		}
 	}
 
 	planName := "unknown"
@@ -274,7 +282,9 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 		userId, currentPlanId, planName, failoverPlan.PlanId, failoverChannel.Id))
 
 	// Update context with new plan info
-	common.SetContextKey(c, constant.ContextKeyPlanId, failoverPlan.PlanId)
+	if failoverPlan.PlanId != nil {
+		common.SetContextKey(c, constant.ContextKeyPlanId, *failoverPlan.PlanId)
+	}
 	common.SetContextKey(c, constant.ContextKeyUserPlanId, failoverPlan.Id)
 	common.SetContextKey(c, constant.ContextKeyPlanName, planName)
 	common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
@@ -355,7 +365,9 @@ func UpdateRelayInfoForCrossplanFailover(c *gin.Context, relayInfo *relaycommon.
 
 	// Update plan-related fields in relayInfo
 	relayInfo.UserPlanId = newUserPlan.Id
-	relayInfo.PlanId = newUserPlan.PlanId
+	if newUserPlan.PlanId != nil {
+		relayInfo.PlanId = *newUserPlan.PlanId
+	}
 
 	// Set billing source to plan since we're switching to a new plan with available quota
 	relayInfo.BillingSource = BillingSourcePlan

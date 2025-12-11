@@ -41,6 +41,7 @@ import Chat from './pages/Chat';
 import Chat2Link from './pages/Chat2Link';
 import Midjourney from './pages/Midjourney';
 import Pricing from './pages/Pricing';
+import PlanPricing from './pages/PlanPricing';
 import Task from './pages/Task';
 import ModelPage from './pages/Model';
 import Playground from './pages/Playground';
@@ -49,6 +50,9 @@ import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
 import SetupCheck from './components/layout/SetupCheck';
 import MyPlans from './pages/MyPlans';
+import OrderConfirm from './pages/OrderConfirm';
+import MyOrders from './pages/MyOrders';
+import AdminOrders from './pages/AdminOrders';
 
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -149,6 +153,14 @@ function App() {
           element={
             <AdminRoute>
               <Plan />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/admin/plan-orders'
+          element={
+            <AdminRoute>
+              <AdminOrders />
             </AdminRoute>
           }
         />
@@ -271,6 +283,26 @@ function App() {
           }
         />
         <Route
+          path='/console/order-confirm/:orderId'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <OrderConfirm />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/my-orders'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <MyOrders />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
           path='/console/log'
           element={
             <PrivateRoute>
@@ -325,6 +357,14 @@ function App() {
                 <Pricing />
               </Suspense>
             )
+          }
+        />
+        <Route
+          path='/plans'
+          element={
+            <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+              <PlanPricing />
+            </Suspense>
           }
         />
         <Route

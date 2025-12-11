@@ -47,6 +47,9 @@ import {
   DatePicker,
   TextArea,
   Checkbox,
+  Tabs,
+  TabPane,
+  Banner,
 } from '@douyinfe/semi-ui';
 import {
   IconPlus,
@@ -57,6 +60,10 @@ import {
   IconEdit,
   IconRefresh,
   IconTick,
+  IconBolt,
+  IconList,
+  IconArrowUp,
+  IconArrowDown,
 } from '@douyinfe/semi-icons';
 
 const { Text, Title } = Typography;
@@ -72,6 +79,13 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [assignPlanId, setAssignPlanId] = useState(null);
   const [assignQuota, setAssignQuota] = useState(0);
+  const [activeTab, setActiveTab] = useState('plans');
+
+  // Daily Pool states
+  const [dailyPool, setDailyPool] = useState(null);
+  const [showDailyPoolModal, setShowDailyPoolModal] = useState(false);
+  const [dailyPoolQuota, setDailyPoolQuota] = useState(0);
+  const [dailyPoolMode, setDailyPoolMode] = useState('adjust'); // 'adjust' or 'create'
 
   // Edit form states
   const [editQuota, setEditQuota] = useState(null);
@@ -113,12 +127,28 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
     }
   }, []);
 
+  // Load user's daily pool
+  const loadDailyPool = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await API.get(`/api/daily_pool/user/${user.id}`);
+      const { success, data } = res.data;
+      if (success) {
+        setDailyPool(data);
+      }
+    } catch (e) {
+      // Silent fail - user may not have daily pool
+      setDailyPool(null);
+    }
+  }, [user?.id]);
+
   useEffect(() => {
     if (visible && user?.id) {
       loadUserPlans();
       loadAllPlans();
+      loadDailyPool();
     }
-  }, [visible, user?.id, loadUserPlans, loadAllPlans]);
+  }, [visible, user?.id, loadUserPlans, loadAllPlans, loadDailyPool]);
 
   // Assign plan to user
   const handleAssignPlan = async () => {
@@ -160,6 +190,52 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
       const { success, message } = res.data;
       if (success) {
         showSuccess(t('套餐移除成功'));
+        loadUserPlans();
+      } else {
+        showError(message);
+      }
+    } catch (e) {
+      showError(e.message);
+    }
+    setLoading(false);
+  };
+
+  // Create or adjust daily pool
+  const handleDailyPoolSubmit = async () => {
+    setLoading(true);
+    try {
+      const endpoint = `/api/daily_pool/user/${user.id}`;
+      const method = dailyPoolMode === 'create' ? 'post' : 'put';
+
+      // POST expects 'total_quota', PUT expects 'amount'
+      const payload = dailyPoolMode === 'create'
+        ? { total_quota: dailyPoolQuota }
+        : { amount: dailyPoolQuota };
+
+      const res = await API[method](endpoint, payload);
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t(dailyPoolMode === 'create' ? '日卡池创建成功' : '日卡池调整成功'));
+        setShowDailyPoolModal(false);
+        setDailyPoolQuota(0);
+        loadDailyPool();
+      } else {
+        showError(message);
+      }
+    } catch (e) {
+      showError(e.message);
+    }
+    setLoading(false);
+  };
+
+  // Revoke a plan (move to queue or remove)
+  const handleRevokePlan = async (userPlan) => {
+    setLoading(true);
+    try {
+      const res = await API.post(`/api/user_plan/${userPlan.id}/revoke`);
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('套餐已撤销'));
         loadUserPlans();
       } else {
         showError(message);
@@ -431,6 +507,20 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
       width: 80,
     },
     {
+      title: t('队列位置'),
+      dataIndex: 'queue_position',
+      width: 100,
+      render: (value, record) => {
+        if (record.is_current === 1) {
+          return <Tag color='green' size='small'>{t('当前使用中')}</Tag>;
+        }
+        if (value > 0) {
+          return <Tag color='blue' size='small'>#{value}</Tag>;
+        }
+        return <Tag color='grey' size='small'>{t('未排队')}</Tag>;
+      },
+    },
+    {
       title: t('允许切换'),
       dataIndex: 'can_switch',
       width: 100,
@@ -475,9 +565,9 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
     {
       title: t('操作'),
       key: 'actions',
-      width: 200,
+      width: 280,
       render: (_, record) => (
-        <Space>
+        <Space wrap>
           {record.is_current !== 1 && (
             <Popconfirm
               title={t('确认切换为当前套餐？')}
@@ -503,6 +593,17 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
           >
             {record.locked === 1 ? t('解锁') : t('锁定')}
           </Button>
+          {record.is_current === 1 && (
+            <Popconfirm
+              title={t('确认撤销当前套餐？')}
+              content={t('撤销后将自动切换到下一个排队套餐')}
+              onConfirm={() => handleRevokePlan(record)}
+            >
+              <Button size="small" icon={<IconArrowDown />} type="tertiary">
+                {t('撤销')}
+              </Button>
+            </Popconfirm>
+          )}
           <Popconfirm
             title={t('确认移除该套餐？')}
             onConfirm={() => handleRemovePlan(record)}
@@ -567,29 +668,103 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
       >
         <Spin spinning={loading}>
           <div className="p-4">
-            <Card className="!rounded-2xl shadow-sm border-0">
-              <div className="flex items-center justify-between mb-4">
-                <Text className="text-lg font-medium">
-                  {t('用户套餐列表')}
-                </Text>
-                <Text type="secondary" className="text-sm">
-                  {t('共')} {userPlans.length} {t('个套餐')}
-                </Text>
-              </div>
+            <Tabs activeKey={activeTab} onChange={setActiveTab}>
+              <TabPane tab={<span><IconList className="mr-1" />{t('套餐管理')}</span>} itemKey="plans">
+                <Card className="!rounded-2xl shadow-sm border-0 mt-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <Text className="text-lg font-medium">
+                      {t('用户套餐列表')}
+                    </Text>
+                    <Text type="secondary" className="text-sm">
+                      {t('共')} {userPlans.length} {t('个套餐')}
+                    </Text>
+                  </div>
 
-              {userPlans.length > 0 ? (
-                <Table
-                  columns={columns}
-                  dataSource={userPlans}
-                  rowKey="id"
-                  pagination={false}
-                  size="small"
-                  scroll={{ x: 'max-content' }}
-                />
-              ) : (
-                <Empty description={t('该用户尚未分配任何套餐')} />
-              )}
-            </Card>
+                  {userPlans.length > 0 ? (
+                    <Table
+                      columns={columns}
+                      dataSource={userPlans}
+                      rowKey="id"
+                      pagination={false}
+                      size="small"
+                      scroll={{ x: 'max-content' }}
+                    />
+                  ) : (
+                    <Empty description={t('该用户尚未分配任何套餐')} />
+                  )}
+                </Card>
+              </TabPane>
+
+              <TabPane tab={<span><IconBolt className="mr-1" />{t('日卡池')}</span>} itemKey="daily_pool">
+                <Card className="!rounded-2xl shadow-sm border-0 mt-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <Text className="text-lg font-medium">
+                      {t('今日日卡池')}
+                    </Text>
+                    {dailyPool ? (
+                      <Button
+                        size="small"
+                        icon={<IconEdit />}
+                        onClick={() => {
+                          setDailyPoolMode('adjust');
+                          setDailyPoolQuota(0);
+                          setShowDailyPoolModal(true);
+                        }}
+                      >
+                        {t('调整额度')}
+                      </Button>
+                    ) : (
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<IconPlus />}
+                        onClick={() => {
+                          setDailyPoolMode('create');
+                          setDailyPoolQuota(0);
+                          setShowDailyPoolModal(true);
+                        }}
+                      >
+                        {t('创建日卡池')}
+                      </Button>
+                    )}
+                  </div>
+
+                  {dailyPool ? (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl text-center">
+                          <Text type="secondary" size="small" className="block mb-1">{t('总额度')}</Text>
+                          <Text strong className="text-lg">{renderQuota(dailyPool.total_quota)}</Text>
+                        </div>
+                        <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-xl text-center">
+                          <Text type="secondary" size="small" className="block mb-1">{t('已使用')}</Text>
+                          <Text strong className="text-lg text-orange-600">{renderQuota(dailyPool.used_quota)}</Text>
+                        </div>
+                        <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl text-center">
+                          <Text type="secondary" size="small" className="block mb-1">{t('剩余')}</Text>
+                          <Text strong className="text-lg text-green-600">{renderQuota(dailyPool.total_quota - dailyPool.used_quota)}</Text>
+                        </div>
+                      </div>
+                      <Progress
+                        percent={dailyPool.total_quota > 0 ? ((dailyPool.total_quota - dailyPool.used_quota) / dailyPool.total_quota * 100) : 0}
+                        showInfo
+                        format={(percent) => `${percent.toFixed(1)}%`}
+                        stroke={dailyPool.total_quota > 0 && ((dailyPool.total_quota - dailyPool.used_quota) / dailyPool.total_quota) > 0.2 ? 'var(--semi-color-success)' : 'var(--semi-color-danger)'}
+                      />
+                      <div className="flex justify-between text-sm">
+                        <Text type="tertiary">{t('日期')}: {dailyPool.date}</Text>
+                        <Text type="tertiary">{t('有效期至')}: 23:59:59</Text>
+                      </div>
+                    </div>
+                  ) : (
+                    <Empty
+                      description={t('该用户今日没有日卡池')}
+                      image={<IconBolt size="extra-large" style={{ color: 'var(--semi-color-text-2)' }} />}
+                    />
+                  )}
+                </Card>
+              </TabPane>
+            </Tabs>
           </div>
         </Spin>
       </SideSheet>
@@ -653,7 +828,7 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
             {/* Plan Info */}
             <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded">
               <Text type="secondary">{t('套餐')}: </Text>
-              <Text strong>{selectedPlan.plan?.name}</Text>
+              <Text strong>{selectedPlan.plan_display_name || selectedPlan.plan?.display_name || selectedPlan.plan?.name}</Text>
               <Text type="secondary" className="ml-4">{t('类型')}: </Text>
               {renderPlanType(selectedPlan.plan?.type)}
             </div>
@@ -780,6 +955,63 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Daily Pool Modal */}
+      <Modal
+        title={dailyPoolMode === 'create' ? t('创建日卡池') : t('调整日卡池额度')}
+        visible={showDailyPoolModal}
+        onOk={handleDailyPoolSubmit}
+        onCancel={() => {
+          setShowDailyPoolModal(false);
+          setDailyPoolQuota(0);
+        }}
+        confirmLoading={loading}
+      >
+        <div className="space-y-4">
+          {dailyPoolMode === 'create' ? (
+            <Banner
+              type="info"
+              description={t('为用户创建今日日卡池。日卡池将在今日 23:59:59 过期。')}
+            />
+          ) : (
+            <Banner
+              type="info"
+              description={t('调整日卡池额度（正数增加，负数减少）')}
+            />
+          )}
+
+          {dailyPool && dailyPoolMode === 'adjust' && (
+            <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded">
+              <Text type="secondary">{t('当前总额度')}: </Text>
+              <Text strong>{renderQuota(dailyPool.total_quota)}</Text>
+              <br />
+              <Text type="secondary">{t('当前剩余')}: </Text>
+              <Text strong>{renderQuota(dailyPool.total_quota - dailyPool.used_quota)}</Text>
+            </div>
+          )}
+
+          <div>
+            <Text className="block mb-2">
+              {dailyPoolMode === 'create' ? t('初始额度') : t('调整额度')}
+            </Text>
+            <InputNumber
+              placeholder={dailyPoolMode === 'create' ? t('输入初始额度') : t('输入调整额度（正负数）')}
+              value={dailyPoolQuota}
+              onChange={setDailyPoolQuota}
+              style={{ width: '100%' }}
+              step={500000}
+            />
+            {dailyPoolQuota !== 0 && (
+              <Text type="secondary" className="text-xs mt-1 block">
+                {renderQuotaWithPrompt(Math.abs(dailyPoolQuota))}
+                {dailyPoolMode === 'adjust' && dailyPoolQuota < 0 && (
+                  <Text type="warning" className="ml-2">{t('将减少额度')}</Text>
+                )}
+              </Text>
+            )}
+          </div>
+        </div>
       </Modal>
     </>
   );

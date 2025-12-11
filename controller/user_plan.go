@@ -593,10 +593,15 @@ func convertToUserPlanResponse(up *model.UserPlan) *UserPlanResponse {
 	// Calculate effective daily limit
 	effectiveLimit, _ := up.GetEffectiveDailyQuotaLimit()
 
+	planId := 0
+	if up.PlanId != nil {
+		planId = *up.PlanId
+	}
+
 	return &UserPlanResponse{
 		Id:                      up.Id,
 		UserId:                  up.UserId,
-		PlanId:                  up.PlanId,
+		PlanId:                  planId,
 		Quota:                   up.Quota,
 		UsedQuota:               up.UsedQuota,
 		IsCurrent:               up.IsCurrent,
@@ -641,5 +646,642 @@ func GetUserPlansForUser(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data":    responsePlans,
+	})
+}
+
+// ==================== Admin Queue Management Endpoints ====================
+
+// AdminReorderQueue allows admin to reorder a user's plan queue
+func AdminReorderQueue(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		Order []int `json:"order" binding:"required"` // Array of user_plan IDs in desired order
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = model.ReorderQueue(userId, req.Order)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Log admin action
+	adminId := c.GetInt("id")
+	adminUsername := c.GetString("username")
+	_ = model.LogAdminAction(
+		adminId,
+		adminUsername,
+		model.AdminLogTargetUserPlan,
+		0,
+		userId,
+		"",
+		model.AdminActionReorderQueue,
+		"重排队列",
+		map[string]interface{}{},
+		map[string]interface{}{"new_order": req.Order},
+		fmt.Sprintf("重新排列用户 %d 的套餐队列", userId),
+		c.ClientIP(),
+		"",
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "队列排序成功",
+	})
+}
+
+// AdminRemoveFromQueue removes a plan from queue (admin)
+func AdminRemoveFromQueue(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Get user plan before removal for logging
+	userPlan, err := model.GetUserPlanById(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = model.RemovePlanFromQueue(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Log admin action
+	adminId := c.GetInt("id")
+	adminUsername := c.GetString("username")
+	_ = model.LogAdminAction(
+		adminId,
+		adminUsername,
+		model.AdminLogTargetUserPlan,
+		id,
+		userPlan.UserId,
+		"",
+		model.AdminActionRemoveFromQueue,
+		"移出队列",
+		map[string]interface{}{"queue_position": userPlan.QueuePosition},
+		map[string]interface{}{"queue_position": 0},
+		fmt.Sprintf("将套餐从用户 %d 的队列中移除", userPlan.UserId),
+		c.ClientIP(),
+		"",
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "已从队列移除",
+	})
+}
+
+// AdminRevokePlan revokes (cancels) a user plan (admin)
+func AdminRevokePlan(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	// Get user plan before revocation for logging
+	userPlan, err := model.GetUserPlanById(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	now := time.Now().UnixMilli()
+	wasCurrent := userPlan.IsCurrent == 1
+
+	// Update plan to revoked status
+	updates := map[string]interface{}{
+		"status":     model.UserPlanStatusRevoked,
+		"is_current": 0,
+		"updated_at": now,
+	}
+	if userPlan.QueuePosition > 0 {
+		updates["queue_position"] = 0
+	}
+
+	err = model.DB.Model(&model.UserPlan{}).
+		Where("id = ?", id).
+		Updates(updates).Error
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Invalidate cache
+	model.InvalidateUserPlanCache(userPlan.UserId)
+
+	// If this was the current plan, activate next in queue
+	var nextPlan *model.UserPlan
+	if wasCurrent {
+		nextPlan, _ = model.ActivateNextQueuedPlan(userPlan.UserId)
+	} else {
+		// Recalculate queue positions
+		model.DB.Exec(`
+			UPDATE user_plans
+			SET queue_position = (
+				SELECT COUNT(*) FROM (
+					SELECT id FROM user_plans
+					WHERE user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND purchase_order < user_plans.purchase_order
+				) AS t
+			) + 1
+			WHERE user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0
+		`, userPlan.UserId, model.UserPlanStatusActive, userPlan.UserId, model.UserPlanStatusActive)
+	}
+
+	// Log admin action
+	adminId := c.GetInt("id")
+	adminUsername := c.GetString("username")
+	_ = model.LogAdminAction(
+		adminId,
+		adminUsername,
+		model.AdminLogTargetUserPlan,
+		id,
+		userPlan.UserId,
+		"",
+		model.AdminActionRevokePlan,
+		"撤销套餐",
+		map[string]interface{}{
+			"status":     userPlan.Status,
+			"quota":      userPlan.Quota,
+			"is_current": userPlan.IsCurrent,
+		},
+		map[string]interface{}{
+			"status": model.UserPlanStatusRevoked,
+			"reason": req.Reason,
+		},
+		fmt.Sprintf("撤销用户套餐，剩余额度 %d 作废，原因: %s", userPlan.Quota, req.Reason),
+		c.ClientIP(),
+		"",
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"message":   "套餐已撤销",
+		"next_plan": nextPlan,
+	})
+}
+
+// ==================== Admin Daily Pool Endpoints ====================
+
+// AdminGetUserDailyPool gets a user's current daily pool (admin)
+func AdminGetUserDailyPool(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	dailyPool, err := model.GetTodayDailyPool(userId)
+	if err != nil {
+		// Real query error - return error to frontend
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "查询日卡池失败: " + err.Error(),
+		})
+		return
+	}
+
+	// No error but no pool exists - this is valid (user has no daily pool today)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    dailyPool, // Will be null if no pool exists
+	})
+}
+
+// AdminAdjustDailyPool adjusts a user's daily pool (admin)
+func AdminAdjustDailyPool(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		Amount int64  `json:"amount" binding:"required"` // Positive to add, negative to reduce
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Get current daily pool
+	dailyPool, _ := model.GetTodayDailyPool(userId)
+	var oldQuota int64 = 0
+	if dailyPool != nil {
+		oldQuota = dailyPool.TotalQuota
+	}
+
+	if req.Amount > 0 {
+		// Add to daily pool
+		err = model.IncreaseDailyPoolQuota(userId, req.Amount)
+	} else if req.Amount < 0 {
+		// Reduce daily pool
+		err = model.DecreaseDailyPoolQuota(userId, -req.Amount)
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "调整额度不能为0",
+		})
+		return
+	}
+
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Get updated pool
+	updatedPool, _ := model.GetTodayDailyPool(userId)
+	var newQuota int64 = 0
+	if updatedPool != nil {
+		newQuota = updatedPool.TotalQuota
+	}
+
+	// Log admin action
+	adminId := c.GetInt("id")
+	adminUsername := c.GetString("username")
+	_ = model.LogAdminAction(
+		adminId,
+		adminUsername,
+		model.AdminLogTargetUserDailyPool,
+		userId,
+		userId,
+		"",
+		model.AdminActionAdjustDailyPool,
+		"调整日卡额度",
+		map[string]interface{}{"total_quota": oldQuota},
+		map[string]interface{}{"total_quota": newQuota, "adjustment": req.Amount},
+		fmt.Sprintf("调整用户 %d 日卡额度 %+d，原因: %s", userId, req.Amount, req.Reason),
+		c.ClientIP(),
+		"",
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"message":    "日卡额度调整成功",
+		"daily_pool": updatedPool,
+	})
+}
+
+// AdminCreateDailyPool creates a daily pool for a user (admin)
+func AdminCreateDailyPool(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		TotalQuota int64  `json:"total_quota" binding:"required"`
+		Reason     string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	if req.TotalQuota <= 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "日卡额度必须大于0",
+		})
+		return
+	}
+
+	// Check if daily pool already exists
+	existingPool, _ := model.GetTodayDailyPool(userId)
+	if existingPool != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "今日日卡额度已存在，请使用调整功能",
+		})
+		return
+	}
+
+	// Create new daily pool
+	dailyPool := &model.UserDailyPool{
+		UserId:     userId,
+		Date:       model.GetTodayDate(),
+		TotalQuota: req.TotalQuota,
+		UsedQuota:  0,
+	}
+	err = model.DB.Create(dailyPool).Error
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Log admin action
+	adminId := c.GetInt("id")
+	adminUsername := c.GetString("username")
+	_ = model.LogAdminAction(
+		adminId,
+		adminUsername,
+		model.AdminLogTargetUserDailyPool,
+		dailyPool.Id,
+		userId,
+		"",
+		model.AdminActionCreateDailyPool,
+		"创建日卡额度",
+		map[string]interface{}{},
+		map[string]interface{}{"total_quota": req.TotalQuota},
+		fmt.Sprintf("为用户 %d 创建日卡额度 %d，原因: %s", userId, req.TotalQuota, req.Reason),
+		c.ClientIP(),
+		"",
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"message":    "日卡额度创建成功",
+		"daily_pool": dailyPool,
+	})
+}
+
+// ==================== Admin Refund Endpoints ====================
+
+// AdminGetPendingRefunds gets all pending refund requests (admin)
+func AdminGetPendingRefunds(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	refunds, total, err := service.GetPendingRefunds(page, pageSize)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"items": refunds,
+			"total": total,
+		},
+	})
+}
+
+// AdminApproveRefund approves a refund request (admin)
+func AdminApproveRefund(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	adminId := c.GetInt("id")
+	adminUsername := c.GetString("username")
+
+	result, err := service.ApproveRefund(id, adminId, adminUsername, c.ClientIP())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": result.Message,
+		"data":    result,
+	})
+}
+
+// AdminRejectRefund rejects a refund request (admin)
+func AdminRejectRefund(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	adminId := c.GetInt("id")
+	adminUsername := c.GetString("username")
+
+	err = service.RejectRefund(id, adminId, adminUsername, req.Reason, c.ClientIP())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "退款申请已拒绝",
+	})
+}
+
+// ==================== User Refund Endpoints ====================
+
+// UserRequestRefund allows user to request refund for a queued plan
+func UserRequestRefund(c *gin.Context) {
+	userId := c.GetInt("id")
+	userPlanId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = service.RequestRefund(userPlanId, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "退款申请已提交，请等待管理员审核",
+	})
+}
+
+// UserGetRefundHistory gets user's refund history
+func UserGetRefundHistory(c *gin.Context) {
+	userId := c.GetInt("id")
+
+	history, err := service.GetUserRefundHistory(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    history,
+	})
+}
+
+// ==================== User Queue Endpoints ====================
+
+// UserGetQueuedPlans gets user's queued plans
+func UserGetQueuedPlans(c *gin.Context) {
+	userId := c.GetInt("id")
+
+	plans, err := model.GetUserQueuedPlans(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Convert to response format
+	responsePlans := make([]*UserPlanResponse, len(plans))
+	for i, plan := range plans {
+		responsePlans[i] = convertToUserPlanResponse(plan)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    responsePlans,
+	})
+}
+
+// UserGetBillingStatus gets user's complete billing status
+func UserGetBillingStatus(c *gin.Context) {
+	userId := c.GetInt("id")
+
+	status, err := service.GetUserBillingStatus(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    status,
+	})
+}
+
+// ==================== Admin Asset Restoration Endpoints ====================
+
+// AdminGetAssetSnapshots gets asset snapshots for a user (admin)
+func AdminGetAssetSnapshots(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var snapshots []*model.UserAssetSnapshot
+	err = model.DB.Where("user_id = ?", userId).
+		Order("created_at DESC").
+		Find(&snapshots).Error
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    snapshots,
+	})
+}
+
+// AdminRestoreFromSnapshot restores user assets from a snapshot (admin)
+func AdminRestoreFromSnapshot(c *gin.Context) {
+	snapshotId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req service.RestoreOptions
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Use defaults if no body provided
+		req = service.RestoreOptions{
+			RestoreCurrentPlan: true,
+			RestoreQueuePlans:  []int{}, // Restore all
+			RestoreBalance:     false,
+			AdjustExpiry:       true,
+		}
+	}
+
+	adminId := c.GetInt("id")
+	adminUsername := c.GetString("username")
+
+	err = service.RestoreFromSnapshot(snapshotId, &req, adminId, adminUsername, c.ClientIP())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "资产已恢复",
+	})
+}
+
+// ==================== Admin Log Endpoints ====================
+
+// AdminGetPlanOperationLogs gets admin operation logs (admin)
+func AdminGetPlanOperationLogs(c *gin.Context) {
+	userId, _ := strconv.Atoi(c.Query("user_id"))
+	targetType := c.Query("target_type")
+	action := c.Query("action")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	var logs []*model.AdminPlanLog
+	var total int64
+
+	query := model.DB.Model(&model.AdminPlanLog{})
+	if userId > 0 {
+		query = query.Where("target_user_id = ?", userId)
+	}
+	if targetType != "" {
+		query = query.Where("target_type = ?", targetType)
+	}
+	if action != "" {
+		query = query.Where("action = ?", action)
+	}
+
+	err := query.Count(&total).Error
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = query.Order("created_at DESC").
+		Limit(pageSize).
+		Offset((page - 1) * pageSize).
+		Find(&logs).Error
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"items": logs,
+			"total": total,
+		},
 	})
 }

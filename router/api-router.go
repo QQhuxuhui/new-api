@@ -26,6 +26,7 @@ func SetApiRouter(router *gin.Engine) {
 		//apiRouter.GET("/midjourney", controller.GetMidjourney)
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
 		apiRouter.GET("/pricing", middleware.TryUserAuth(), controller.GetPricing)
+		apiRouter.GET("/plan/enabled", controller.GetEnabledPlans) // Public access for plan pricing page
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)
 		apiRouter.GET("/reset_password", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SendPasswordResetEmail)
 		apiRouter.POST("/user/reset", middleware.CriticalRateLimit(), controller.ResetPassword)
@@ -42,6 +43,9 @@ func SetApiRouter(router *gin.Engine) {
 
 		apiRouter.POST("/stripe/webhook", controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", controller.CreemWebhook)
+
+		// Plan purchase payment callback (no auth required - handled by payment gateway)
+		apiRouter.GET("/plan/purchase/epay/notify", controller.EpayPlanOrderNotify)
 
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.UniversalVerify)
@@ -92,6 +96,17 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/2fa/enable", controller.Enable2FA)
 				selfRoute.POST("/2fa/disable", controller.Disable2FA)
 				selfRoute.POST("/2fa/backup_codes", controller.RegenerateBackupCodes)
+
+				// Notification routes
+				selfRoute.GET("/notifications", controller.GetMyNotifications)
+				selfRoute.GET("/notifications/unread-count", controller.GetUnreadNotificationCount)
+				selfRoute.POST("/notifications/:id/read", controller.MarkNotificationAsRead)
+				selfRoute.POST("/notifications/read-all", controller.MarkAllNotificationsAsRead)
+
+				// Plan purchase routes (user)
+				selfRoute.POST("/plan/purchase/create", controller.CreatePlanOrder)
+				selfRoute.POST("/plan/purchase/pay", middleware.CriticalRateLimit(), controller.PayPlanOrder)
+				selfRoute.GET("/plan/purchase/my-orders", controller.GetMyPlanOrders)
 			}
 
 			adminRoute := userRoute.Group("/")
@@ -100,6 +115,11 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/", controller.GetAllUsers)
 				adminRoute.GET("/topup", controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
+
+				// Plan order management (admin)
+				adminRoute.GET("/plan-orders", controller.GetAllPlanOrders)
+				adminRoute.POST("/plan-orders/:id/complete", controller.ManualCompletePlanOrder)
+
 				adminRoute.GET("/search", controller.SearchUsers)
 				adminRoute.GET("/:id", controller.GetUser)
 				adminRoute.POST("/", controller.CreateUser)
@@ -299,7 +319,6 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			planRoute.GET("/", controller.GetAllPlans)
 			planRoute.GET("/search", controller.SearchPlans)
-			planRoute.GET("/enabled", controller.GetEnabledPlans)
 			planRoute.GET("/:id", controller.GetPlan)
 			planRoute.POST("/", controller.AddPlan)
 			planRoute.PUT("/", controller.UpdatePlan)
@@ -326,6 +345,43 @@ func SetApiRouter(router *gin.Engine) {
 			userPlanAdminRoute.POST("/:id/add_quota", controller.AdminAddQuota)
 			userPlanAdminRoute.DELETE("/:id/daily_quota_override", controller.AdminClearDailyQuotaOverride) // Clear daily quota override
 			userPlanAdminRoute.GET("/:id/quota-status", controller.GetUserPlanQuotaStatus)
+			// Queue management
+			userPlanAdminRoute.POST("/user/:user_id/queue/reorder", controller.AdminReorderQueue)
+			userPlanAdminRoute.DELETE("/:id/queue", controller.AdminRemoveFromQueue)
+			userPlanAdminRoute.POST("/:id/revoke", controller.AdminRevokePlan)
+		}
+
+		// Daily pool management routes (admin)
+		dailyPoolAdminRoute := apiRouter.Group("/daily_pool")
+		dailyPoolAdminRoute.Use(middleware.AdminAuth())
+		{
+			dailyPoolAdminRoute.GET("/user/:user_id", controller.AdminGetUserDailyPool)
+			dailyPoolAdminRoute.PUT("/user/:user_id", controller.AdminAdjustDailyPool)
+			dailyPoolAdminRoute.POST("/user/:user_id", controller.AdminCreateDailyPool)
+		}
+
+		// Refund management routes (admin)
+		refundAdminRoute := apiRouter.Group("/refund")
+		refundAdminRoute.Use(middleware.AdminAuth())
+		{
+			refundAdminRoute.GET("/pending", controller.AdminGetPendingRefunds)
+			refundAdminRoute.POST("/:id/approve", controller.AdminApproveRefund)
+			refundAdminRoute.POST("/:id/reject", controller.AdminRejectRefund)
+		}
+
+		// Asset snapshot routes (admin)
+		snapshotAdminRoute := apiRouter.Group("/asset_snapshot")
+		snapshotAdminRoute.Use(middleware.AdminAuth())
+		{
+			snapshotAdminRoute.GET("/user/:user_id", controller.AdminGetAssetSnapshots)
+			snapshotAdminRoute.POST("/:id/restore", controller.AdminRestoreFromSnapshot)
+		}
+
+		// Admin plan operation logs
+		planLogRoute := apiRouter.Group("/plan_log")
+		planLogRoute.Use(middleware.AdminAuth())
+		{
+			planLogRoute.GET("/", controller.AdminGetPlanOperationLogs)
 		}
 
 		// User plan routes (user)
@@ -336,6 +392,10 @@ func SetApiRouter(router *gin.Engine) {
 			userPlanRoute.POST("/switch", controller.UserSwitchPlan)
 			userPlanRoute.PUT("/:id/auto_switch", controller.UserToggleAutoSwitch)
 			userPlanRoute.GET("/quota-status", controller.GetCurrentPlanQuotaStatus)
+			userPlanRoute.GET("/queue", controller.UserGetQueuedPlans)
+			userPlanRoute.GET("/billing-status", controller.UserGetBillingStatus)
+			userPlanRoute.POST("/:id/refund", controller.UserRequestRefund)
+			userPlanRoute.GET("/refund-history", controller.UserGetRefundHistory)
 		}
 
 		// Plan migration routes (root admin only)

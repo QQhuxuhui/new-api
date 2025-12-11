@@ -113,9 +113,10 @@ func MigrateExistingUsers(dryRun bool) (*MigrationResult, error) {
 		}
 
 		// Create user_plan with user's current quota
+		planIdPtr := plan.Id
 		userPlan := &UserPlan{
 			UserId:          user.Id,
-			PlanId:          plan.Id,
+			PlanId:          &planIdPtr,
 			Quota:           int64(user.Quota),     // Transfer user's current quota
 			UsedQuota:       int64(user.UsedQuota), // Transfer used quota for historical tracking
 			IsCurrent:       1,                      // Set as current plan
@@ -172,9 +173,10 @@ func MigrateSingleUser(userId int) error {
 
 	// Create user_plan
 	now := time.Now().UnixMilli()
+	planIdPtr := plan.Id
 	userPlan := &UserPlan{
 		UserId:          user.Id,
-		PlanId:          plan.Id,
+		PlanId:          &planIdPtr,
 		Quota:           int64(user.Quota),
 		UsedQuota:       int64(user.UsedQuota),
 		IsCurrent:       1,

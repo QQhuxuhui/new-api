@@ -75,6 +75,7 @@ import {
   Package,
   Activity,
   CalendarDays,
+  ShoppingBag,
 } from 'lucide-react';
 
 // 获取侧边栏Lucide图标组件
@@ -113,6 +114,8 @@ export function getLucideIcon(key, selected = false) {
       return <Gift {...commonProps} color={iconColor} />;
     case 'plan':
       return <CalendarDays {...commonProps} color={iconColor} />;
+    case 'plans':
+      return <ShoppingBag {...commonProps} color={iconColor} />;
     case 'user':
     case 'personal':
       return <User {...commonProps} color={iconColor} />;
