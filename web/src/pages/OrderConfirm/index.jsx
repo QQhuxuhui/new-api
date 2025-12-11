@@ -37,7 +37,7 @@ import {
   IconAlipayCircle,
   IconWechatpay,
   IconClock,
-  IconCheckCircle,
+  IconTickCircle,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 
@@ -178,7 +178,7 @@ const OrderConfirm = () => {
       <div className='min-h-screen bg-[var(--semi-color-bg-0)] py-12 px-4'>
         <div className='max-w-2xl mx-auto'>
           <Card className='text-center p-12'>
-            <IconCheckCircle size='extra-large' style={{ fontSize: 80, color: 'var(--semi-color-success)' }} />
+            <IconTickCircle size='extra-large' style={{ fontSize: 80, color: 'var(--semi-color-success)' }} />
             <Title heading={3} className='mt-6 mb-4'>{t('支付成功')}</Title>
             <Text type='secondary' className='block mb-8'>
               {t('您的套餐已成功开通，可以开始使用了')}
