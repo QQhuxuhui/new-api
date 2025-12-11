@@ -225,12 +225,31 @@ func (p *Plan) Delete() error {
 		return errors.New("该套餐仍有活跃用户实例未完全快照化，请先等待迁移完成或手动填充快照字段")
 	}
 
-	// Safe to delete:
+	// Check for unfinished orders (pending or paid)
+	// Orders in these states still need the plan configuration for delivery
+	var unfinishedOrderCount int64
+	if err := DB.Model(&PlanOrder{}).
+		Where("plan_id = ? AND status IN (?, ?)", p.Id, OrderStatusPending, OrderStatusPaid).
+		Count(&unfinishedOrderCount).Error; err != nil {
+		return err
+	}
+
+	if unfinishedOrderCount > 0 {
+		return errors.New("该套餐有未完成订单，无法删除。请等待订单完成或手动取消订单后再删除")
+	}
+
+	// Safe to delete when:
 	// 1. No user plans at all, OR
 	// 2. All user plans have complete snapshots (plan_name and plan_type populated), OR
 	// 3. All user plans are non-active (expired/disabled/completed)
-	// Users with complete snapshots can continue using their plans without the template
-	// PlanOrder foreign key uses OnDelete:SET NULL, so orders will have plan_id set to null
+	// AND
+	// 4. No pending or paid orders (delivered/expired/cancelled orders are OK)
+	//
+	// When a plan is deleted:
+	// - Active UserPlans with complete snapshots continue working independently
+	// - Completed PlanOrders' plan_id is set to NULL (foreign key ON DELETE SET NULL)
+	// - Completed PlanOrders use snapshot fields for display (plan_name, plan_display_name)
+	// - Pending/paid orders are protected by the check above
 	go InvalidateUserPlanCacheByPlanId(p.Id)
 	return DB.Delete(p).Error
 }

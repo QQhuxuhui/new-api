@@ -39,9 +39,15 @@ func DeliverPlan(orderId int, tx *gorm.DB) error {
 		return nil
 	}
 
+	// Validate plan_id is present (defensive check)
+	// This should always be true for paid orders, as Plan.Delete() prevents deleting plans with paid orders
+	if order.PlanId == nil {
+		return errors.New("订单关联的套餐已被删除，无法发货")
+	}
+
 	// Load plan details
 	var plan model.Plan
-	err = db.Where("id = ?", order.PlanId).First(&plan).Error
+	err = db.Where("id = ?", *order.PlanId).First(&plan).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("套餐不存在")

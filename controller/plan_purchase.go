@@ -57,7 +57,7 @@ func CreatePlanOrder(c *gin.Context) {
 
 	// Load plan info for response
 	var plan model.Plan
-	if err := model.DB.Where("id = ?", order.PlanId).First(&plan).Error; err == nil {
+	if order.PlanId != nil && model.DB.Where("id = ?", *order.PlanId).First(&plan).Error == nil {
 		// Return order with plan info
 		response := gin.H{
 			"order_id":       order.Id,
@@ -136,10 +136,18 @@ func PayPlanOrder(c *gin.Context) {
 	returnUrl, _ := url.Parse(system_setting.ServerAddress + "/console/orders")
 	notifyUrl, _ := url.Parse(callBackAddress + "/api/plan/purchase/epay/notify")
 
+	// Generate payment name
+	paymentName := "Plan Purchase"
+	if order.PlanId != nil {
+		paymentName = fmt.Sprintf("Plan-%d", *order.PlanId)
+	} else if order.PlanDisplayName != "" {
+		paymentName = order.PlanDisplayName
+	}
+
 	uri, params, err := client.Purchase(&epay.PurchaseArgs{
 		Type:           req.PaymentMethod,
 		ServiceTradeNo: order.OrderNo,
-		Name:           fmt.Sprintf("Plan-%d", order.PlanId),
+		Name:           paymentName,
 		Money:          strconv.FormatFloat(order.FinalPrice, 'f', 2, 64),
 		Device:         epay.PC,
 		NotifyUrl:      notifyUrl,
@@ -218,8 +226,11 @@ func GetMyPlanOrders(c *gin.Context) {
 			"delivered_at":   order.DeliveredAt,
 		}
 
-		// Add plan name if available
-		if order.Plan != nil {
+		// Prefer snapshot fields over Plan relation
+		// Plan relation may be null if plan template was deleted
+		if order.PlanDisplayName != "" {
+			orderInfo["plan_name"] = order.PlanDisplayName
+		} else if order.Plan != nil {
 			orderInfo["plan_name"] = order.Plan.DisplayName
 		}
 

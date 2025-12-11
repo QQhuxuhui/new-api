@@ -16,12 +16,16 @@ type PlanOrder struct {
 	Id            int     `json:"id" gorm:"primaryKey;autoIncrement"`
 	OrderNo       string  `json:"order_no" gorm:"type:varchar(64);uniqueIndex;not null"` // Unique order number
 	UserId        int     `json:"user_id" gorm:"not null;index"`
-	PlanId        int     `json:"plan_id" gorm:"not null;index"` // Reference to Plan.Id (not Name)
+	PlanId        *int    `json:"plan_id" gorm:"index"` // Reference to Plan.Id (nullable for completed orders when plan deleted)
 
 	// Price snapshot (preserve at purchase time)
 	PlanPrice         float64 `json:"plan_price" gorm:"type:decimal(10,2);not null"`          // Actual sale price
 	PlanOriginalPrice float64 `json:"plan_original_price" gorm:"type:decimal(10,2);default:0"` // Original price before discount
 	FinalPrice        float64 `json:"final_price" gorm:"type:decimal(10,2);not null"`         // Final payment amount
+
+	// Plan info snapshot (preserve plan details at purchase time)
+	PlanName        string `json:"plan_name" gorm:"type:varchar(255)"`         // Plan name snapshot
+	PlanDisplayName string `json:"plan_display_name" gorm:"type:varchar(255)"` // Plan display name snapshot
 
 	// Payment information
 	PaymentMethod  string `json:"payment_method" gorm:"type:varchar(50)"`   // alipay, wechat, stripe, creem
@@ -141,13 +145,16 @@ func CreatePlanOrder(userId int, planId int) (*PlanOrder, error) {
 		now := time.Now().UnixMilli()
 		expiredAt := now + (OrderExpirationMinutes * 60 * 1000) // 30 minutes from now
 
+		planIdPtr := plan.Id
 		order = &PlanOrder{
 			OrderNo:            orderNo,
 			UserId:             userId,
-			PlanId:             plan.Id,
+			PlanId:             &planIdPtr,
 			PlanPrice:          planPrice,
 			PlanOriginalPrice:  originalPrice,
 			FinalPrice:         finalPrice,
+			PlanName:           plan.Name,        // Save plan name snapshot
+			PlanDisplayName:    plan.DisplayName, // Save plan display name snapshot
 			Status:             OrderStatusPending,
 			CreatedAt:          now,
 			ExpiredAt:          expiredAt,

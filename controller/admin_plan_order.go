@@ -61,8 +61,11 @@ func GetAllPlanOrders(c *gin.Context) {
 			orderInfo["user_email"] = order.User.Email
 		}
 
-		// Add plan info if available
-		if order.Plan != nil {
+		// Prefer snapshot fields over Plan relation
+		// Plan relation may be null if plan template was deleted
+		if order.PlanDisplayName != "" {
+			orderInfo["plan_name"] = order.PlanDisplayName
+		} else if order.Plan != nil {
 			orderInfo["plan_name"] = order.Plan.DisplayName
 		}
 
