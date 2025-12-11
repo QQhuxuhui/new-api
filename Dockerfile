@@ -1,4 +1,4 @@
-FROM oven/bun:latest AS builder
+FROM oven/bun:1.1.42 AS builder
 
 WORKDIR /build
 COPY web/package.json .
