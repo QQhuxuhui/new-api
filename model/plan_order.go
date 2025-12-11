@@ -2,7 +2,6 @@ package model
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
