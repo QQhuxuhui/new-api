@@ -57,9 +57,13 @@ func CheckDailyQuotaBeforeConsume(userPlanId int, quotaAmount int64) error {
 	}
 
 	// Get the plan details for the user plan
-	plan, err := model.GetPlanById(userPlan.PlanId)
+	if userPlan.PlanId == nil {
+		common.SysLog(fmt.Sprintf("user plan %d has no associated plan_id", userPlanId))
+		return nil
+	}
+	plan, err := model.GetPlanById(*userPlan.PlanId)
 	if err != nil {
-		common.SysLog(fmt.Sprintf("failed to get plan %d for daily quota check: %v", userPlan.PlanId, err))
+		common.SysLog(fmt.Sprintf("failed to get plan %d for daily quota check: %v", *userPlan.PlanId, err))
 		return nil
 	}
 	userPlan.Plan = plan

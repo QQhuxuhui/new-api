@@ -48,10 +48,14 @@ func (e *RateLimitError) Error() string {
 
 // newPlanSelectionResult creates a PlanSelectionResult from a UserPlan
 func newPlanSelectionResult(up *model.UserPlan, switched bool) *PlanSelectionResult {
+	planId := 0
+	if up.PlanId != nil {
+		planId = *up.PlanId
+	}
 	result := &PlanSelectionResult{
 		UserPlan:     up,
 		Plan:         up.Plan, // Keep for admin reference, but don't depend on it
-		PlanId:       up.PlanId,
+		PlanId:       planId,
 		UserPlanId:   up.Id,
 		Switched:     switched,
 		AutoSwitched: switched,
@@ -97,7 +101,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 		}
 
 		// Set as current
-		if err := model.SwitchUserCurrentPlan(userId, selectedPlan.PlanId); err != nil {
+		if err := model.SwitchUserCurrentPlan(userId, *selectedPlan.PlanId); err != nil {
 			common.SysLog(fmt.Sprintf("failed to set initial current plan: %v", err))
 		}
 
@@ -116,7 +120,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			// First try higher priority plans
 			higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
 			if higherPlan != nil {
-				if err := model.SwitchUserCurrentPlan(userId, higherPlan.PlanId); err != nil {
+				if err := model.SwitchUserCurrentPlan(userId, *higherPlan.PlanId); err != nil {
 					common.SysLog(fmt.Sprintf("failed to auto-switch to higher priority plan: %v", err))
 				} else {
 					common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to higher priority plan %d",
@@ -128,7 +132,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			// If no higher priority, try any plan with quota (including lower priority)
 			anyPlanWithQuota := selectHighestPriorityWithQuota(validPlans)
 			if anyPlanWithQuota != nil && anyPlanWithQuota.Id != currentPlan.Id {
-				if err := model.SwitchUserCurrentPlan(userId, anyPlanWithQuota.PlanId); err != nil {
+				if err := model.SwitchUserCurrentPlan(userId, *anyPlanWithQuota.PlanId); err != nil {
 					common.SysLog(fmt.Sprintf("failed to auto-switch to available plan: %v", err))
 				} else {
 					common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to available plan %d",
@@ -151,7 +155,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 		higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
 		if higherPlan != nil {
 			// Auto-switch to higher priority plan
-			if err := model.SwitchUserCurrentPlan(userId, higherPlan.PlanId); err != nil {
+			if err := model.SwitchUserCurrentPlan(userId, *higherPlan.PlanId); err != nil {
 				common.SysLog(fmt.Sprintf("failed to auto-switch plan: %v", err))
 				// Continue with current plan on error
 			} else {
@@ -582,12 +586,16 @@ func LogPlanSwitch(userId int, fromPlan, toPlan *model.UserPlan, isManual bool) 
 	}
 
 	if fromPlan != nil && fromPlan.Plan != nil {
-		event.FromPlanId = fromPlan.PlanId
+		if fromPlan.PlanId != nil {
+			event.FromPlanId = *fromPlan.PlanId
+		}
 		event.FromPlanName = fromPlan.Plan.Name
 	}
 
 	if toPlan != nil && toPlan.Plan != nil {
-		event.ToPlanId = toPlan.PlanId
+		if toPlan.PlanId != nil {
+			event.ToPlanId = *toPlan.PlanId
+		}
 		event.ToPlanName = toPlan.Plan.Name
 		event.ChannelGroup = toPlan.Plan.ChannelGroup
 	}

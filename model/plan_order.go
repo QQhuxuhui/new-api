@@ -38,7 +38,7 @@ type PlanOrder struct {
 	CancelledAt int64 `json:"cancelled_at"`                     // Cancellation time
 
 	// Relationships
-	UserPlanId int `json:"user_plan_id"` // Created UserPlan instance ID
+	UserPlanId *int `json:"user_plan_id"` // Created UserPlan instance ID (nil = not yet delivered)
 
 	// Delivery retry tracking
 	DeliveryRetryCount int `json:"delivery_retry_count" gorm:"default:0"` // Number of delivery retry attempts
@@ -331,7 +331,7 @@ func GetFailedDeliveryOrders(maxRetries int) ([]*PlanOrder, error) {
 
 	var orders []*PlanOrder
 	err := DB.Where(
-		"status = ? AND paid_at < ? AND user_plan_id = 0 AND delivery_retry_count < ?",
+		"status = ? AND paid_at < ? AND (user_plan_id IS NULL OR user_plan_id = 0) AND delivery_retry_count < ?",
 		OrderStatusPaid,
 		cutoff,
 		maxRetries,

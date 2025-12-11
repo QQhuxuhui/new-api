@@ -44,10 +44,11 @@ type UserPlanCacheEntry struct {
 
 // ToUserPlan converts cache entry back to UserPlan with embedded Plan
 func (e *UserPlanCacheEntry) ToUserPlan() *UserPlan {
+	planId := e.PlanId // Create a variable to take address of
 	return &UserPlan{
 		Id:                      e.Id,
 		UserId:                  e.UserId,
-		PlanId:                  e.PlanId,
+		PlanId:                  &planId,
 		Quota:                   e.Quota,
 		UsedQuota:               e.UsedQuota,
 		IsCurrent:               e.IsCurrent,
@@ -89,10 +90,14 @@ func (e *UserPlanCacheEntry) ToUserPlan() *UserPlan {
 
 // FromUserPlan creates a cache entry from UserPlan
 func FromUserPlan(up *UserPlan) *UserPlanCacheEntry {
+	planId := 0
+	if up.PlanId != nil {
+		planId = *up.PlanId
+	}
 	entry := &UserPlanCacheEntry{
 		Id:                      up.Id,
 		UserId:                  up.UserId,
-		PlanId:                  up.PlanId,
+		PlanId:                  planId,
 		Quota:                   up.Quota,
 		UsedQuota:               up.UsedQuota,
 		IsCurrent:               up.IsCurrent,

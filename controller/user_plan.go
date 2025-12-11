@@ -593,10 +593,15 @@ func convertToUserPlanResponse(up *model.UserPlan) *UserPlanResponse {
 	// Calculate effective daily limit
 	effectiveLimit, _ := up.GetEffectiveDailyQuotaLimit()
 
+	planId := 0
+	if up.PlanId != nil {
+		planId = *up.PlanId
+	}
+
 	return &UserPlanResponse{
 		Id:                      up.Id,
 		UserId:                  up.UserId,
-		PlanId:                  up.PlanId,
+		PlanId:                  planId,
 		Quota:                   up.Quota,
 		UsedQuota:               up.UsedQuota,
 		IsCurrent:               up.IsCurrent,

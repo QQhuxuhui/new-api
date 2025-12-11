@@ -13,7 +13,7 @@ import (
 type UserPlan struct {
 	Id                int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	UserId            int    `json:"user_id" gorm:"not null;index"`
-	PlanId            int    `json:"plan_id" gorm:"not null;index"`
+	PlanId            *int   `json:"plan_id" gorm:"index"` // Nullable after snapshot migration - for admin reference only
 	Quota             int64  `json:"quota" gorm:"default:0"`              // Current available quota
 	UsedQuota         int64  `json:"used_quota" gorm:"default:0"`         // Total used quota
 	OriginalQuota     int64  `json:"original_quota" gorm:"default:0"`     // Original quota when assigned
@@ -78,7 +78,7 @@ type UserPlan struct {
 	PlanDailyQuotaLimit int64  `json:"plan_daily_quota_limit" gorm:"default:-1"`                // -1=unlimited, 0=no daily limit, >0=limit
 
 	// Associations (for preloading - Plan is for admin reference only after migration)
-	Plan *Plan `json:"plan,omitempty" gorm:"foreignKey:PlanId"`
+	Plan *Plan `json:"plan,omitempty" gorm:"foreignKey:PlanId;constraint:OnDelete:SET NULL,OnUpdate:CASCADE"`
 	User *User `json:"user,omitempty" gorm:"foreignKey:UserId"`
 }
 
@@ -336,13 +336,13 @@ func (up *UserPlan) Insert() error {
 	if up.UserId == 0 {
 		return errors.New("用户ID不能为空")
 	}
-	if up.PlanId == 0 {
+	if up.PlanId == nil || *up.PlanId == 0 {
 		return errors.New("套餐ID不能为空")
 	}
 
 	// Check if user plan already exists
 	var count int64
-	if err := DB.Model(&UserPlan{}).Where("user_id = ? AND plan_id = ?", up.UserId, up.PlanId).Count(&count).Error; err != nil {
+	if err := DB.Model(&UserPlan{}).Where("user_id = ? AND plan_id = ?", up.UserId, *up.PlanId).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
@@ -733,7 +733,7 @@ func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPl
 
 	userPlan := &UserPlan{
 		UserId:          userId,
-		PlanId:          planId,
+		PlanId:          &planId,
 		Quota:           quota,
 		UsedQuota:       0,
 		IsCurrent:       0,
@@ -909,7 +909,7 @@ func AddPlanToQueue(userId int, planId int, quota int64, source string, sourceOr
 	// Create user plan
 	userPlan := &UserPlan{
 		UserId:          userId,
-		PlanId:          planId,
+		PlanId:          &planId,
 		Quota:           quota,
 		UsedQuota:       0,
 		OriginalQuota:   quota,

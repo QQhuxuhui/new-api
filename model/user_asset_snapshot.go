@@ -127,9 +127,13 @@ func CreateAssetSnapshot(userId int, snapshotType string) (*UserAssetSnapshot, e
 				remainingDays = 0
 			}
 		}
+		planId := 0
+		if currentPlan.PlanId != nil {
+			planId = *currentPlan.PlanId
+		}
 		snapshotData.CurrentPlan = &UserPlanSnapshot{
 			UserPlanId:    currentPlan.Id,
-			PlanId:        currentPlan.PlanId,
+			PlanId:        planId,
 			PlanName:      planName,
 			Quota:         currentPlan.Quota,
 			UsedQuota:     currentPlan.UsedQuota,
@@ -158,9 +162,13 @@ func CreateAssetSnapshot(userId int, snapshotType string) (*UserAssetSnapshot, e
 					remainingDays = 0
 				}
 			}
+			qpPlanId := 0
+			if qp.PlanId != nil {
+				qpPlanId = *qp.PlanId
+			}
 			snapshotData.QueuePlans = append(snapshotData.QueuePlans, &UserPlanSnapshot{
 				UserPlanId:    qp.Id,
-				PlanId:        qp.PlanId,
+				PlanId:        qpPlanId,
 				PlanName:      planName,
 				Quota:         qp.Quota,
 				UsedQuota:     qp.UsedQuota,

@@ -84,7 +84,10 @@ func ApproveRefund(userPlanId int, adminId int, adminUsername string, ipAddress 
 	}
 
 	// Get plan details for price info
-	plan, err := model.GetPlanById(userPlan.PlanId)
+	if userPlan.PlanId == nil {
+		return nil, errors.New("该套餐没有关联的套餐ID")
+	}
+	plan, err := model.GetPlanById(*userPlan.PlanId)
 	if err != nil {
 		return nil, errors.New("获取套餐信息失败")
 	}

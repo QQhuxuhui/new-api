@@ -34,8 +34,8 @@ func DeliverPlan(orderId int, tx *gorm.DB) error {
 	}
 
 	// Idempotency check: if already delivered, return success
-	if order.UserPlanId > 0 {
-		common.SysLog(fmt.Sprintf("order %d already delivered to user_plan_id %d", orderId, order.UserPlanId))
+	if order.UserPlanId != nil && *order.UserPlanId > 0 {
+		common.SysLog(fmt.Sprintf("order %d already delivered to user_plan_id %d", orderId, *order.UserPlanId))
 		return nil
 	}
 
@@ -101,9 +101,10 @@ func DeliverPlan(orderId int, tx *gorm.DB) error {
 	}
 
 	// Create UserPlan instance
+	planIdPtr := plan.Id
 	userPlan := &model.UserPlan{
 		UserId:              order.UserId,
-		PlanId:              plan.Id,
+		PlanId:              &planIdPtr,
 		Quota:               plan.DefaultQuota,
 		UsedQuota:           0,
 		OriginalQuota:       plan.DefaultQuota,

@@ -278,7 +278,7 @@ func redeemToPlan(tx *gorm.DB, redemption *Redemption, userId int) (*RedeemResul
 	// User doesn't have this plan - create new assignment
 	userPlan := &UserPlan{
 		UserId:          userId,
-		PlanId:          redemption.PlanId,
+		PlanId:          &redemption.PlanId,
 		Quota:           int64(redemption.Quota),
 		UsedQuota:       0,
 		IsCurrent:       0,

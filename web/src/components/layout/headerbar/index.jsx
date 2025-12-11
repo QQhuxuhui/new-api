@@ -114,7 +114,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen, onOpenOnboarding }) => {
           </div>
 
           {/* 中间区域 - 产品定价（绝对居中） */}
-          {!isMobile && !isLoading && (
+          {!isMobile && !isLoading && headerNavModules?.plans !== false && (
             <div className='absolute left-1/2 transform -translate-x-1/2'>
               <Link
                 to={pricingRequireAuth && !userState.user ? '/login' : '/plans'}

@@ -397,7 +397,14 @@ func GetUserPlanQuotaStatus(c *gin.Context) {
 	}
 
 	// Get plan info
-	plan, err := model.GetPlanById(userPlan.PlanId)
+	if userPlan.PlanId == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "套餐信息不存在",
+		})
+		return
+	}
+	plan, err := model.GetPlanById(*userPlan.PlanId)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
