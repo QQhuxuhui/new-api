@@ -12,7 +12,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	planservice "github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/Calcium-Ion/go-epay/epay"
@@ -98,38 +97,38 @@ func PayPlanOrder(c *gin.Context) {
 	// Load order
 	order, err := model.GetOrderById(req.OrderId)
 	if err != nil {
-		common.ApiError(c, err.Error())
+		common.ApiError(c, err)
 		return
 	}
 
 	// Verify order belongs to user
 	if order.UserId != userId {
-		common.ApiError(c, "订单不属于当前用户")
+		common.ApiError(c, errors.New("订单不属于当前用户"))
 		return
 	}
 
 	// Verify order status
 	if order.Status != model.OrderStatusPending {
-		common.ApiError(c, fmt.Sprintf("订单状态错误: %s", order.Status))
+		common.ApiError(c, fmt.Errorf("订单状态错误: %s", order.Status))
 		return
 	}
 
 	// Verify order not expired
 	if time.Now().UnixMilli() > order.ExpiredAt {
-		common.ApiError(c, "订单已过期")
+		common.ApiError(c, errors.New("订单已过期"))
 		return
 	}
 
 	// Verify payment method
 	if req.PaymentMethod != model.PaymentMethodAlipay && req.PaymentMethod != model.PaymentMethodWechat {
-		common.ApiError(c, "不支持的支付方式")
+		common.ApiError(c, errors.New("不支持的支付方式"))
 		return
 	}
 
 	// Initiate Epay payment
 	client := GetEpayClient()
 	if client == nil {
-		common.ApiError(c, "支付服务未配置")
+		common.ApiError(c, errors.New("支付服务未配置"))
 		return
 	}
 
@@ -148,7 +147,7 @@ func PayPlanOrder(c *gin.Context) {
 	})
 
 	if err != nil {
-		common.ApiError(c, "拉起支付失败: "+err.Error())
+		common.ApiError(c, fmt.Errorf("拉起支付失败: %w", err))
 		return
 	}
 
@@ -159,7 +158,7 @@ func PayPlanOrder(c *gin.Context) {
 	}).Error
 
 	if err != nil {
-		common.ApiError(c, "更新订单失败")
+		common.ApiError(c, errors.New("更新订单失败"))
 		return
 	}
 
@@ -198,7 +197,7 @@ func GetMyPlanOrders(c *gin.Context) {
 
 	orders, total, err := model.GetUserOrders(userId, page, pageSize)
 	if err != nil {
-		common.ApiError(c, "获取订单列表失败: "+err.Error())
+		common.ApiError(c, fmt.Errorf("获取订单列表失败: %w", err))
 		return
 	}
 
