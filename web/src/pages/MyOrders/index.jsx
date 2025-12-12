@@ -28,12 +28,14 @@ import {
   Typography,
   Empty,
   Spin,
+  Modal,
+  Space,
 } from '@douyinfe/semi-ui';
 import {
   IconRefresh,
   IconShoppingBag,
 } from '@douyinfe/semi-icons';
-import { API, showError, timestamp2string } from '../../helpers';
+import { API, showError, showSuccess, timestamp2string } from '../../helpers';
 
 const { Title } = Typography;
 
@@ -73,6 +75,33 @@ const MyOrders = () => {
   useEffect(() => {
     loadOrders(1);
   }, []);
+
+  // Cancel order
+  const handleCancelOrder = (orderId, orderNo) => {
+    Modal.confirm({
+      title: t('取消订单'),
+      content: t('确定要取消订单 {{orderNo}} 吗？取消后无法恢复。', { orderNo }),
+      okText: t('确认取消'),
+      cancelText: t('返回'),
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const res = await API.post('/api/user/plan/purchase/cancel', {
+            order_id: orderId,
+          });
+          const { success, message } = res.data;
+          if (success) {
+            showSuccess(t('订单已取消'));
+            loadOrders(pagination.currentPage);
+          } else {
+            showError(message || t('取消失败'));
+          }
+        } catch (e) {
+          showError(e.message || t('网络错误'));
+        }
+      },
+    });
+  };
 
   // Get status tag
   const getStatusTag = (status) => {
@@ -136,21 +165,30 @@ const MyOrders = () => {
     {
       title: t('操作'),
       key: 'action',
-      width: 120,
+      width: 180,
       render: (_, record) => {
         if (record.status === 'pending') {
           const now = Date.now();
           const isExpired = record.expired_at && now > record.expired_at;
           if (!isExpired) {
             return (
-              <Button
-                size='small'
-                theme='solid'
-                type='primary'
-                onClick={() => navigate(`/console/order-confirm/${record.order_id}`)}
-              >
-                {t('继续支付')}
-              </Button>
+              <Space>
+                <Button
+                  size='small'
+                  theme='solid'
+                  type='primary'
+                  onClick={() => navigate(`/console/order-confirm/${record.order_id}`)}
+                >
+                  {t('继续支付')}
+                </Button>
+                <Button
+                  size='small'
+                  type='danger'
+                  onClick={() => handleCancelOrder(record.order_id, record.order_no)}
+                >
+                  {t('取消')}
+                </Button>
+              </Space>
             );
           }
         }

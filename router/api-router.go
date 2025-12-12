@@ -107,6 +107,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/plan/purchase/create", controller.CreatePlanOrder)
 				selfRoute.POST("/plan/purchase/pay", middleware.CriticalRateLimit(), controller.PayPlanOrder)
 				selfRoute.GET("/plan/purchase/my-orders", controller.GetMyPlanOrders)
+				selfRoute.POST("/plan/purchase/cancel", controller.CancelPlanOrder)
 			}
 
 			adminRoute := userRoute.Group("/")

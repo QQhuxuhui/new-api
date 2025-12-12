@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -22,6 +23,11 @@ import (
 func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 
 	info.InitChannelMeta(c)
+
+	// 调试日志：确认 InitChannelMeta 后的令牌信息
+	maskedKey := maskClaudeApiKey(info.ApiKey)
+	logger.LogInfo(c, fmt.Sprintf("[TokenDebug] ClaudeHelper: InitChannelMeta 后, 渠道 #%d, RelayInfo令牌: %s",
+		info.ChannelId, maskedKey))
 
 	claudeReq, ok := info.Request.(*dto.ClaudeRequest)
 
@@ -163,4 +169,12 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	service.PostClaudeConsumeQuota(c, info, usage.(*dto.Usage))
 	return nil
+}
+
+// maskClaudeApiKey 对 API Key 进行脱敏，显示前4位和后4位
+func maskClaudeApiKey(key string) string {
+	if len(key) <= 8 {
+		return "***"
+	}
+	return key[:4] + "***" + key[len(key)-4:]
 }

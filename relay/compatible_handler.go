@@ -28,6 +28,11 @@ import (
 func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 
+	// 调试日志：确认 InitChannelMeta 后的令牌信息
+	maskedKey := maskApiKey(info.ApiKey)
+	logger.LogInfo(c, fmt.Sprintf("[TokenDebug] TextHelper: InitChannelMeta 后, 渠道 #%d, RelayInfo令牌: %s",
+		info.ChannelId, maskedKey))
+
 	textReq, ok := info.Request.(*dto.GeneralOpenAIRequest)
 	if !ok {
 		return types.NewErrorWithStatusCode(fmt.Errorf("invalid request type, expected dto.GeneralOpenAIRequest, got %T", info.Request), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
@@ -489,4 +494,12 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+}
+
+// maskApiKey 对 API Key 进行脱敏，显示前4位和后4位
+func maskApiKey(key string) string {
+	if len(key) <= 8 {
+		return "***"
+	}
+	return key[:4] + "***" + key[len(key)-4:]
 }

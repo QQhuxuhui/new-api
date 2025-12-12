@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -75,15 +74,6 @@ const OrderExpirationMinutes = 30
 
 func (po *PlanOrder) TableName() string {
 	return "plan_orders"
-}
-
-// orderLocks stores in-memory locks for each order to prevent concurrent processing
-var orderLocks sync.Map
-
-// getOrderLock returns a lock for the given order ID or trade number
-func getOrderLock(key string) *sync.Mutex {
-	lock, _ := orderLocks.LoadOrStore(key, &sync.Mutex{})
-	return lock.(*sync.Mutex)
 }
 
 // GenerateOrderNo generates a unique order number
@@ -176,12 +166,31 @@ func CreatePlanOrder(userId int, planId int) (*PlanOrder, error) {
 }
 
 // ValidateQueueCapacity checks if user has < 10 active plans
+// This is the non-transactional version, suitable for order creation (non-critical check)
 func ValidateQueueCapacity(userId int) error {
-	var count int64
-	err := DB.Model(&UserPlan{}).
-		Where("user_id = ? AND status = ?", userId, UserPlanStatusActive).
-		Count(&count).Error
+	return ValidateQueueCapacityWithTx(userId, nil, false)
+}
 
+// ValidateQueueCapacityWithTx checks if user has < 10 active plans with transaction support
+// When useLock is true, it acquires a row-level lock on user's plans to prevent race conditions
+// This should be used during delivery to ensure atomicity of validation and plan creation
+func ValidateQueueCapacityWithTx(userId int, tx *gorm.DB, useLock bool) error {
+	db := DB
+	if tx != nil {
+		db = tx
+	}
+
+	var count int64
+	query := db.Model(&UserPlan{}).
+		Where("user_id = ? AND status = ?", userId, UserPlanStatusActive)
+
+	// Use row-level lock when in transaction to prevent concurrent plan creation
+	if useLock && tx != nil {
+		// Lock all active plans for this user to prevent concurrent delivery
+		query = query.Set("gorm:query_option", "FOR UPDATE")
+	}
+
+	err := query.Count(&count).Error
 	if err != nil {
 		return err
 	}
@@ -314,11 +323,12 @@ func GetAllOrders(page int, pageSize int, status string, userId int, orderNo str
 }
 
 // ExpireOldOrders marks old pending orders as expired
+// Uses expired_at field directly instead of calculating from created_at
 func ExpireOldOrders() error {
-	cutoff := time.Now().UnixMilli() - (OrderExpirationMinutes * 60 * 1000)
+	now := time.Now().UnixMilli()
 
 	result := DB.Model(&PlanOrder{}).
-		Where("status = ? AND created_at < ?", OrderStatusPending, cutoff).
+		Where("status = ? AND expired_at < ?", OrderStatusPending, now).
 		Update("status", OrderStatusExpired)
 
 	if result.Error != nil {
@@ -352,4 +362,43 @@ func IncrementDeliveryRetryCount(orderId int) error {
 	return DB.Model(&PlanOrder{}).
 		Where("id = ?", orderId).
 		Update("delivery_retry_count", gorm.Expr("delivery_retry_count + 1")).Error
+}
+
+// CancelOrder cancels a pending order
+// Only pending orders can be cancelled by users
+func CancelOrder(orderId int, userId int) error {
+	now := time.Now().UnixMilli()
+
+	result := DB.Model(&PlanOrder{}).
+		Where("id = ? AND user_id = ? AND status = ?", orderId, userId, OrderStatusPending).
+		Updates(map[string]interface{}{
+			"status":       OrderStatusCancelled,
+			"cancelled_at": now,
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		// Check if order exists and belongs to user
+		var order PlanOrder
+		err := DB.Where("id = ?", orderId).First(&order).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("订单不存在")
+			}
+			return err
+		}
+		if order.UserId != userId {
+			return errors.New("无权操作此订单")
+		}
+		if order.Status != OrderStatusPending {
+			return fmt.Errorf("只能取消待支付订单,当前状态: %s", order.Status)
+		}
+		return errors.New("取消订单失败")
+	}
+
+	common.SysLog(fmt.Sprintf("order cancelled: order_id=%d, user_id=%d", orderId, userId))
+	return nil
 }

@@ -114,7 +114,8 @@ func FromUserPlan(up *UserPlan) *UserPlanCacheEntry {
 
 	// Use snapshot fields first (for decoupled display/logic/routing)
 	// Fallback to Plan only for unmigrated records
-	if up.PlanName != "" {
+	// Note: This mirrors HasCompleteSnapshot() logic - both PlanName and PlanType must be set
+	if up.HasCompleteSnapshot() {
 		// Migrated record - use ALL snapshots (display + routing)
 		entry.PlanName = up.PlanName
 		entry.PlanDisplayName = up.PlanDisplayName

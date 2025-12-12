@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/url"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -195,9 +195,6 @@ func PayPlanOrder(c *gin.Context) {
 	})
 }
 
-// orderLocks stores order locks to prevent concurrent payment processing
-var planOrderLocks sync.Map
-
 // GetMyPlanOrders returns the current user's plan orders
 func GetMyPlanOrders(c *gin.Context) {
 	userId := c.GetInt("id")
@@ -261,6 +258,39 @@ func GetMyPlanOrders(c *gin.Context) {
 	})
 }
 
+// CancelPlanOrderRequest is the request struct for cancelling a plan order
+type CancelPlanOrderRequest struct {
+	OrderId int `json:"order_id" binding:"required"`
+}
+
+// CancelPlanOrder cancels a pending plan order
+func CancelPlanOrder(c *gin.Context) {
+	var req CancelPlanOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, fmt.Errorf("参数错误: %w", err))
+		return
+	}
+
+	userId := c.GetInt("id")
+	if userId == 0 {
+		c.JSON(401, gin.H{
+			"success": false,
+			"message": "未登录",
+		})
+		return
+	}
+
+	err := model.CancelOrder(req.OrderId, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"message": "订单已取消",
+	})
+}
+
 // EpayPlanOrderNotify handles Epay payment callback for plan orders
 func EpayPlanOrderNotify(c *gin.Context) {
 	params := lo.Reduce(lo.Keys(c.Request.URL.Query()), func(r map[string]string, t string, i int) map[string]string {
@@ -290,10 +320,9 @@ func EpayPlanOrderNotify(c *gin.Context) {
 		return
 	}
 
-	// Lock order for concurrent safety
+	// Lock order for concurrent safety using LockManager (with TTL-based cleanup)
 	orderNo := verifyInfo.ServiceTradeNo
-	lock, _ := planOrderLocks.LoadOrStore(orderNo, &sync.Mutex{})
-	orderLock := lock.(*sync.Mutex)
+	orderLock := common.PlanOrderLockManager.GetLock(orderNo)
 	orderLock.Lock()
 	defer orderLock.Unlock()
 
@@ -316,26 +345,47 @@ func EpayPlanOrderNotify(c *gin.Context) {
 			return err
 		}
 
-		// Verify payment amount matches order
+		// Verify payment amount matches order (use tolerance for floating point comparison)
 		paymentAmount, _ := strconv.ParseFloat(verifyInfo.Money, 64)
-		if paymentAmount != order.FinalPrice {
+		// Allow 0.01 (1 cent) tolerance for floating point precision issues
+		if math.Abs(paymentAmount-order.FinalPrice) > 0.01 {
 			log.Printf("plan order payment amount mismatch: expected=%.2f, got=%.2f, order_no=%s",
 				order.FinalPrice, paymentAmount, orderNo)
 			return errors.New("支付金额不匹配")
 		}
 
-		// Idempotency check
-		if order.Status != model.OrderStatusPending {
+		// Idempotency check - handle different order statuses
+		switch order.Status {
+		case model.OrderStatusPending:
+			// Normal flow - continue to process payment
+		case model.OrderStatusPaid, model.OrderStatusDelivered:
+			// Already processed successfully - idempotent return
 			log.Printf("plan order already processed: order_no=%s, status=%s", orderNo, order.Status)
-			return nil // Already processed, return success
+			return nil
+		case model.OrderStatusCancelled:
+			// CRITICAL: User cancelled the order but payment still went through
+			// This can happen if user cancels after initiating payment but before callback
+			// We should treat this as a valid payment and deliver the plan
+			log.Printf("ALERT: payment received for cancelled order: order_no=%s, amount=%.2f. Processing as valid payment.",
+				orderNo, paymentAmount)
+			// Continue to process - update status to paid and deliver
+		default:
+			// Unknown status - log warning and process as new payment
+			log.Printf("WARNING: unexpected order status during payment callback: order_no=%s, status=%s",
+				orderNo, order.Status)
 		}
 
 		// Update order to paid
+		// Clear cancelled_at if order was previously cancelled to avoid statistics ambiguity
 		now := time.Now().UnixMilli()
-		err = tx.Model(&order).Updates(map[string]interface{}{
+		updateFields := map[string]interface{}{
 			"status":  model.OrderStatusPaid,
 			"paid_at": now,
-		}).Error
+		}
+		if order.Status == model.OrderStatusCancelled {
+			updateFields["cancelled_at"] = 0 // Clear cancellation time
+		}
+		err = tx.Model(&order).Updates(updateFields).Error
 		if err != nil {
 			return err
 		}
