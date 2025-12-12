@@ -114,6 +114,44 @@ func (up *UserPlan) TableName() string {
 	return "user_plans"
 }
 
+// MarshalJSON customizes JSON serialization to ensure Plan info is always available
+// If Plan is nil (deleted), create a virtual Plan from snapshot fields for frontend compatibility
+func (up *UserPlan) MarshalJSON() ([]byte, error) {
+	// Create a type alias to avoid infinite recursion
+	type Alias UserPlan
+
+	// If Plan is nil but we have complete snapshot data, create a virtual Plan for frontend
+	// Use value copy to avoid concurrent modification issues
+	if up.Plan == nil && up.HasCompleteSnapshot() {
+		virtualPlan := &Plan{
+			Id:              -1, // Negative ID indicates this is a virtual plan from snapshot
+			Name:            up.PlanName,
+			DisplayName:     up.PlanDisplayName,
+			Type:            up.PlanType,
+			Category:        up.PlanCategory,
+			Priority:        up.PlanPriority,
+			ChannelGroup:    up.PlanChannelGroup,
+			ChannelGroups:   up.PlanChannelGroups,
+			RateLimitRules:  up.PlanRateLimitRules,
+			DailyQuotaLimit: up.PlanDailyQuotaLimit,
+			Status:          PlanStatusDisabled, // Mark as disabled since original template is deleted
+		}
+
+		// Create a copy with virtual plan to avoid data race
+		alias := (*Alias)(up)
+		// Use anonymous struct to embed alias and override Plan field
+		return json.Marshal(&struct {
+			*Alias
+			Plan *Plan `json:"plan"`
+		}{
+			Alias: alias,
+			Plan:  virtualPlan,
+		})
+	}
+
+	return json.Marshal((*Alias)(up))
+}
+
 // HasQuota checks if the user plan has available quota
 func (up *UserPlan) HasQuota() bool {
 	return up.Quota > 0
@@ -150,6 +188,19 @@ func (up *UserPlan) IsValid() bool {
 // Snapshot field accessors with fallback to Plan template (for backward compatibility)
 // These methods ensure display works even if snapshot fields are not yet populated
 
+// HasCompleteSnapshot checks if the user plan has all critical snapshot fields populated
+// This is the single source of truth for determining if a UserPlan can operate independently
+// without needing the Plan template. Used for:
+// - Determining if Plan can be safely deleted
+// - Deciding whether to use snapshot fields vs Plan fallback
+// - Validating migration completeness
+func (up *UserPlan) HasCompleteSnapshot() bool {
+	// Phase 1 (display) + Phase 2 (routing) critical fields must be populated
+	// PlanName is the primary indicator - if it's set, other fields should also be set
+	// PlanType is critical for routing logic
+	return up.PlanName != "" && up.PlanType != ""
+}
+
 // GetDisplayName returns the plan display name from snapshot or falls back to Plan
 func (up *UserPlan) GetDisplayName() string {
 	if up.PlanDisplayName != "" {
@@ -176,7 +227,7 @@ func (up *UserPlan) GetCategory() string {
 
 // GetPriority returns the plan priority from snapshot or falls back to Plan
 func (up *UserPlan) GetPriority() int {
-	if up.PlanName != "" { // Use PlanName as indicator of migrated record
+	if up.HasCompleteSnapshot() {
 		return up.PlanPriority
 	}
 	// Fallback for unmigrated records
@@ -195,7 +246,7 @@ func (up *UserPlan) IsDailyPlan() bool {
 
 // GetType returns the plan type from snapshot or falls back to Plan
 func (up *UserPlan) GetType() string {
-	if up.PlanName != "" { // Use PlanName as indicator of migrated record
+	if up.HasCompleteSnapshot() {
 		return up.PlanType
 	}
 	// Fallback for unmigrated records
@@ -207,7 +258,7 @@ func (up *UserPlan) GetType() string {
 
 // GetChannelGroup returns the channel group from snapshot or falls back to Plan
 func (up *UserPlan) GetChannelGroup() string {
-	if up.PlanName != "" {
+	if up.HasCompleteSnapshot() {
 		return up.PlanChannelGroup
 	}
 	// Fallback for unmigrated records
@@ -219,7 +270,7 @@ func (up *UserPlan) GetChannelGroup() string {
 
 // GetChannelGroups returns the channel groups array from snapshot or falls back to Plan
 func (up *UserPlan) GetChannelGroups() []string {
-	if up.PlanName != "" {
+	if up.HasCompleteSnapshot() {
 		// Parse JSON from snapshot
 		if up.PlanChannelGroups != "" {
 			var groups []string
@@ -242,7 +293,7 @@ func (up *UserPlan) GetChannelGroups() []string {
 
 // GetRateLimitRules returns the rate limit rules from snapshot or falls back to Plan
 func (up *UserPlan) GetRateLimitRules() string {
-	if up.PlanName != "" {
+	if up.HasCompleteSnapshot() {
 		return up.PlanRateLimitRules
 	}
 	// Fallback for unmigrated records
@@ -255,7 +306,7 @@ func (up *UserPlan) GetRateLimitRules() string {
 // GetPlanDailyQuotaLimit returns the plan's daily quota limit from snapshot or falls back to Plan
 // This is different from GetEffectiveDailyQuotaLimit which considers user override
 func (up *UserPlan) GetPlanDailyQuotaLimit() int64 {
-	if up.PlanName != "" {
+	if up.HasCompleteSnapshot() {
 		return up.PlanDailyQuotaLimit
 	}
 	// Fallback for unmigrated records
@@ -458,6 +509,7 @@ func GetAllUserPlans(userId int) ([]*UserPlan, error) {
 }
 
 // SwitchUserCurrentPlan atomically switches the current plan for a user
+// DEPRECATED: Use SwitchToUserPlan instead, especially when plan_id might be NULL
 func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 	// Invalidate cache after switch
 	defer InvalidateUserPlanCache(userId)
@@ -486,6 +538,45 @@ func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 		// Set new plan as current
 		result := tx.Model(&UserPlan{}).
 			Where("user_id = ? AND plan_id = ? AND status = ?", userId, newPlanId, UserPlanStatusActive).
+			Update("is_current", 1)
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		return nil
+	})
+}
+
+// SwitchToUserPlan atomically switches to a user plan by user_plan.id
+// This function works correctly even when plan_id is NULL (plan template deleted)
+func SwitchToUserPlan(userId int, userPlanId int) error {
+	// Invalidate cache after switch
+	defer InvalidateUserPlanCache(userId)
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		// First verify the target user plan is valid
+		var targetPlan UserPlan
+		err := tx.Where("id = ? AND user_id = ? AND status = ?",
+			userPlanId, userId, UserPlanStatusActive).
+			First(&targetPlan).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("未找到指定的用户套餐或套餐不可用")
+			}
+			return err
+		}
+
+		// Clear current flag on all user plans
+		if err := tx.Model(&UserPlan{}).
+			Where("user_id = ? AND is_current = 1", userId).
+			Update("is_current", 0).Error; err != nil {
+			return err
+		}
+
+		// Set new plan as current
+		result := tx.Model(&UserPlan{}).
+			Where("id = ?", userPlanId).
 			Update("is_current", 1)
 
 		if result.Error != nil {

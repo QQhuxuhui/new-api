@@ -344,17 +344,33 @@ func CovertGemini2OpenAI(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 			var contentMap map[string]interface{}
 			contentStr := message.StringContent()
 
-			// 1. 尝试解析为 JSON 对象
-			if err := json.Unmarshal([]byte(contentStr), &contentMap); err != nil {
-				// 2. 如果失败，尝试解析为 JSON 数组
-				var contentSlice []interface{}
-				if err := json.Unmarshal([]byte(contentStr), &contentSlice); err == nil {
-					// 如果是数组，包装成对象
-					contentMap = map[string]interface{}{"result": contentSlice}
-				} else {
-					// 3. 如果再次失败，作为纯文本处理
+			// Optimize: Check first character to determine JSON type before parsing
+			trimmedContent := strings.TrimSpace(contentStr)
+			if len(trimmedContent) > 0 {
+				firstChar := trimmedContent[0]
+				switch firstChar {
+				case '{':
+					// JSON object - parse once
+					if err := json.Unmarshal([]byte(contentStr), &contentMap); err != nil {
+						// Malformed JSON object, treat as text
+						contentMap = map[string]interface{}{"content": contentStr}
+					}
+				case '[':
+					// JSON array - parse once and wrap
+					var contentSlice []interface{}
+					if err := json.Unmarshal([]byte(contentStr), &contentSlice); err == nil {
+						contentMap = map[string]interface{}{"result": contentSlice}
+					} else {
+						// Malformed JSON array, treat as text
+						contentMap = map[string]interface{}{"content": contentStr}
+					}
+				default:
+					// Plain text - no parsing needed
 					contentMap = map[string]interface{}{"content": contentStr}
 				}
+			} else {
+				// Empty content
+				contentMap = map[string]interface{}{"content": contentStr}
 			}
 
 			functionResp := &dto.GeminiFunctionResponse{
@@ -937,22 +953,33 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 			return false
 		}
 
+		// Check if this chunk has actual content to send
+		hasContent := false
+		hasFinishReason := false
+
 		for _, candidate := range geminiResponse.Candidates {
+			if candidate.FinishReason != nil {
+				hasFinishReason = true
+			}
 			for _, part := range candidate.Content.Parts {
 				if part.InlineData != nil && part.InlineData.MimeType != "" {
 					imageCount++
+					hasContent = true
 				}
 				if part.Text != "" {
 					responseText.WriteString(part.Text)
+					hasContent = true
+				}
+				if part.FunctionCall != nil {
+					hasContent = true
+				}
+				if part.ExecutableCode != nil || part.CodeExecutionResult != nil {
+					hasContent = true
 				}
 			}
 		}
 
-		response, isStop := streamResponseGeminiChat2OpenAI(&geminiResponse)
-
-		response.Id = id
-		response.Created = createAt
-		response.Model = info.UpstreamModelName
+		// Update usage metadata (lightweight operation)
 		if geminiResponse.UsageMetadata.TotalTokenCount != 0 {
 			usage.PromptTokens = geminiResponse.UsageMetadata.PromptTokenCount
 			usage.CompletionTokens = geminiResponse.UsageMetadata.CandidatesTokenCount
@@ -966,6 +993,19 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 				}
 			}
 		}
+
+		// Skip conversion and sending if no actual content changes
+		if !hasContent && !hasFinishReason {
+			return true
+		}
+
+		// Only convert when we have content to send
+		response, isStop := streamResponseGeminiChat2OpenAI(&geminiResponse)
+
+		response.Id = id
+		response.Created = createAt
+		response.Model = info.UpstreamModelName
+
 		logger.LogDebug(c, fmt.Sprintf("info.SendResponseCount = %d", info.SendResponseCount))
 		if info.SendResponseCount == 0 {
 			// send first response

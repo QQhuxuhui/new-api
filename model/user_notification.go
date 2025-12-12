@@ -34,6 +34,7 @@ const (
 	NotificationTypePlanLocked     = "plan_locked"      // Admin locked plan
 	NotificationTypePlanUnlocked   = "plan_unlocked"    // Admin unlocked plan
 	NotificationTypeDailyPoolLow   = "daily_pool_low"   // Daily pool < 20%
+	NotificationTypeDeliveryFailed = "delivery_failed"  // Plan delivery failed (admin)
 )
 
 // Notification levels
@@ -162,4 +163,37 @@ func HasRecentNotification(userId int, notificationType string, withinMinutes in
 		Where("user_id = ? AND type = ? AND created_at > ?", userId, notificationType, cutoffTime).
 		Count(&count).Error
 	return count > 0, err
+}
+
+// GetAdminUserIds returns all admin and root user IDs
+func GetAdminUserIds() ([]int, error) {
+	var userIds []int
+	err := DB.Model(&User{}).
+		Where("role >= ?", 10). // RoleAdminUser = 10
+		Pluck("id", &userIds).Error
+	return userIds, err
+}
+
+// CreateNotificationForAdmins creates a notification for all admin users
+func CreateNotificationForAdmins(notificationType, title, content, level string, extraData string) error {
+	adminIds, err := GetAdminUserIds()
+	if err != nil {
+		return err
+	}
+
+	for _, adminId := range adminIds {
+		notification := &UserNotification{
+			UserId:    adminId,
+			Type:      notificationType,
+			Title:     title,
+			Content:   content,
+			Level:     level,
+			ExtraData: extraData,
+		}
+		if err := notification.Insert(); err != nil {
+			// Log error but continue with other admins
+			continue
+		}
+	}
+	return nil
 }

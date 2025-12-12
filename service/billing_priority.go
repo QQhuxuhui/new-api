@@ -209,7 +209,10 @@ func GetUserBillingStatus(userId int) (*UserBillingStatus, error) {
 	currentPlan, err := model.GetUserCurrentPlan(userId)
 	if err == nil && currentPlan != nil {
 		status.CurrentPlan.Id = currentPlan.Id
-		if currentPlan.Plan != nil {
+		// Use snapshot fields first (works even when Plan is deleted), then fallback to Plan
+		if currentPlan.PlanDisplayName != "" {
+			status.CurrentPlan.Name = currentPlan.PlanDisplayName
+		} else if currentPlan.Plan != nil {
 			status.CurrentPlan.Name = currentPlan.Plan.DisplayName
 		}
 		status.CurrentPlan.Quota = currentPlan.Quota
@@ -240,7 +243,10 @@ func GetUserBillingStatus(userId int) (*UserBillingStatus, error) {
 
 		for i, qp := range queuedPlans {
 			status.QueuedPlans[i].Id = qp.Id
-			if qp.Plan != nil {
+			// Use snapshot fields first (works even when Plan is deleted), then fallback to Plan
+			if qp.PlanDisplayName != "" {
+				status.QueuedPlans[i].Name = qp.PlanDisplayName
+			} else if qp.Plan != nil {
 				status.QueuedPlans[i].Name = qp.Plan.DisplayName
 			}
 			status.QueuedPlans[i].Quota = qp.Quota

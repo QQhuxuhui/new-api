@@ -198,8 +198,8 @@ func (p *Plan) Update() error {
 	p.UpdatedAt = time.Now().UnixMilli()
 	err := DB.Model(p).Updates(p).Error
 	if err == nil {
-		// Invalidate cache for all users who have this plan
-		go InvalidateUserPlanCacheByPlanId(p.Id)
+		// Invalidate cache for all users who have this plan (synchronous to ensure consistency)
+		InvalidateUserPlanCacheByPlanId(p.Id)
 	}
 	return err
 }
@@ -213,6 +213,7 @@ func (p *Plan) Delete() error {
 	// Check for active user_plans that don't have complete snapshots
 	// A complete snapshot means the user plan is fully independent and can survive template deletion
 	// We check if there are any ACTIVE user plans with empty critical snapshot fields
+	// Note: This query mirrors the HasCompleteSnapshot() logic in UserPlan
 	var count int64
 	if err := DB.Model(&UserPlan{}).
 		Where("plan_id = ? AND status = ? AND (plan_name = ? OR plan_name IS NULL OR plan_type = ? OR plan_type IS NULL)",
@@ -250,7 +251,9 @@ func (p *Plan) Delete() error {
 	// - Completed PlanOrders' plan_id is set to NULL (foreign key ON DELETE SET NULL)
 	// - Completed PlanOrders use snapshot fields for display (plan_name, plan_display_name)
 	// - Pending/paid orders are protected by the check above
-	go InvalidateUserPlanCacheByPlanId(p.Id)
+
+	// Invalidate cache BEFORE delete to ensure no stale data is served (synchronous)
+	InvalidateUserPlanCacheByPlanId(p.Id)
 	return DB.Delete(p).Error
 }
 
@@ -346,8 +349,8 @@ func UpdatePlanStatus(id int, status int) error {
 	}
 	err := DB.Model(&Plan{}).Where("id = ?", id).Update("status", status).Error
 	if err == nil {
-		// Invalidate cache for all users who have this plan
-		go InvalidateUserPlanCacheByPlanId(id)
+		// Invalidate cache for all users who have this plan (synchronous to ensure consistency)
+		InvalidateUserPlanCacheByPlanId(id)
 	}
 	return err
 }

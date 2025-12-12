@@ -49,8 +49,68 @@ const OrderConfirm = () => {
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [order, setOrder] = useState(null);
-  const [paymentMethod, setPaymentMethod] = useState('alipay');
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [paymentMethods, setPaymentMethods] = useState([]);
   const [countdown, setCountdown] = useState(0);
+
+  // Load payment methods configuration
+  const loadPaymentMethods = async () => {
+    try {
+      const res = await API.get('/api/user/topup/info');
+      const { success, data } = res.data;
+      if (success && data && data.pay_methods && Array.isArray(data.pay_methods)) {
+        // IMPORTANT: Epay SDK only accepts 'alipay' and 'wxpay', NOT 'wechat'
+        // Filter and normalize payment methods:
+        // 1. Only keep alipay and wxpay/wechat
+        // 2. Convert 'wechat' to 'wxpay' for Epay compatibility
+        // 3. Deduplicate if both wxpay and wechat exist
+        const methodMap = new Map();
+
+        data.pay_methods.forEach(method => {
+          if (method.type === 'alipay') {
+            methodMap.set('alipay', method);
+          } else if (method.type === 'wxpay' || method.type === 'wechat') {
+            // Normalize to wxpay (Epay only accepts 'wxpay')
+            if (!methodMap.has('wxpay')) {
+              methodMap.set('wxpay', {
+                ...method,
+                type: 'wxpay',
+                name: method.name || '微信支付'
+              });
+            }
+          }
+        });
+
+        const methods = Array.from(methodMap.values());
+
+        if (methods.length > 0) {
+          setPaymentMethods(methods);
+          // Set first method as default
+          setPaymentMethod(methods[0].type);
+        } else {
+          // No Epay standard payment methods configured
+          setPaymentMethods([]);
+          setPaymentMethod('');
+          showError(t('暂无可用支付方式，请联系管理员配置支付宝或微信支付'));
+        }
+      } else {
+        // Fallback to default methods
+        setPaymentMethods([
+          { name: '支付宝', type: 'alipay', color: 'rgba(var(--semi-blue-5), 1)' },
+          { name: '微信支付', type: 'wxpay', color: 'rgba(var(--semi-green-5), 1)' },
+        ]);
+        setPaymentMethod('alipay');
+      }
+    } catch (e) {
+      console.error('Failed to load payment methods:', e);
+      // Fallback to default methods
+      setPaymentMethods([
+        { name: '支付宝', type: 'alipay', color: 'rgba(var(--semi-blue-5), 1)' },
+        { name: '微信支付', type: 'wxpay', color: 'rgba(var(--semi-green-5), 1)' },
+      ]);
+      setPaymentMethod('alipay');
+    }
+  };
 
   // Load order details
   const loadOrder = async () => {
@@ -85,6 +145,7 @@ const OrderConfirm = () => {
   useEffect(() => {
     if (orderId) {
       loadOrder();
+      loadPaymentMethods();
     }
   }, [orderId]);
 
@@ -113,6 +174,24 @@ const OrderConfirm = () => {
 
     if (countdown <= 0) {
       showError(t('订单已过期'));
+      return;
+    }
+
+    // Validate payment method is selected
+    if (!paymentMethod) {
+      showError(t('请选择支付方式'));
+      return;
+    }
+
+    // Validate payment method is in available methods
+    if (paymentMethods.length === 0) {
+      showError(t('暂无可用支付方式'));
+      return;
+    }
+
+    const isValidMethod = paymentMethods.some(m => m.type === paymentMethod);
+    if (!isValidMethod) {
+      showError(t('所选支付方式不可用'));
       return;
     }
 
@@ -295,26 +374,39 @@ const OrderConfirm = () => {
 
         {/* Payment Method Card */}
         <Card title={t('支付方式')} className='mb-6'>
-          <RadioGroup
-            type='button'
-            buttonSize='large'
-            value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value)}
-            style={{ width: '100%' }}
-          >
-            <Radio value='alipay' style={{ width: '48%', marginRight: '4%' }}>
-              <div className='flex items-center gap-2'>
-                <span style={{ fontSize: '20px' }}>💳</span>
-                <span>{t('支付宝')}</span>
-              </div>
-            </Radio>
-            <Radio value='wechat' style={{ width: '48%' }}>
-              <div className='flex items-center gap-2'>
-                <span style={{ fontSize: '20px' }}>💰</span>
-                <span>{t('微信支付')}</span>
-              </div>
-            </Radio>
-          </RadioGroup>
+          {paymentMethods.length > 0 ? (
+            <RadioGroup
+              type='button'
+              buttonSize='large'
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value)}
+              style={{ width: '100%' }}
+            >
+              {paymentMethods.map((method, index) => (
+                <Radio
+                  key={method.type}
+                  value={method.type}
+                  style={{
+                    width: paymentMethods.length === 1 ? '100%' : '48%',
+                    marginRight: index % 2 === 0 ? '4%' : '0',
+                    marginBottom: '8px'
+                  }}
+                >
+                  <div className='flex items-center gap-2'>
+                    <span style={{ fontSize: '20px' }}>
+                      {method.type === 'alipay' ? '💳' : '💰'}
+                    </span>
+                    <span>{method.name || t(method.type)}</span>
+                  </div>
+                </Radio>
+              ))}
+            </RadioGroup>
+          ) : (
+            <Banner
+              type='warning'
+              description={t('暂无可用支付方式，请联系管理员配置')}
+            />
+          )}
         </Card>
 
         {/* Action Buttons */}
@@ -333,7 +425,7 @@ const OrderConfirm = () => {
             size='large'
             loading={paying}
             onClick={handlePay}
-            disabled={countdown <= 0}
+            disabled={countdown <= 0 || !paymentMethod || paymentMethods.length === 0}
           >
             {t('确认支付')}
           </Button>

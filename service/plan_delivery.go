@@ -55,12 +55,13 @@ func DeliverPlan(orderId int, tx *gorm.DB) error {
 		return err
 	}
 
-	// Final queue capacity check (defensive - should have been validated at order creation)
-	err = model.ValidateQueueCapacity(order.UserId)
+	// Final queue capacity check with row-level lock to prevent race conditions
+	// This ensures that concurrent deliveries cannot exceed the 10-plan limit
+	// The lock is held until the transaction commits, blocking other concurrent deliveries for this user
+	err = model.ValidateQueueCapacityWithTx(order.UserId, db, true)
 	if err != nil {
-		common.SysLog(fmt.Sprintf("delivery failed for order %d: queue full", orderId))
-		// Don't return error - let retry mechanism handle this
-		// The order remains in 'paid' status and will be retried
+		common.SysLog(fmt.Sprintf("delivery failed for order %d: queue full (with lock)", orderId))
+		// Return error to trigger retry mechanism
 		return err
 	}
 
@@ -189,7 +190,9 @@ func RetryFailedDeliveries() {
 	common.SysLog(fmt.Sprintf("retrying delivery for %d failed orders", len(orders)))
 
 	for _, order := range orders {
-		// Increment retry count first
+		// Increment retry count first and calculate actual attempt number
+		// Note: order.DeliveryRetryCount is the OLD value before increment
+		actualAttempt := order.DeliveryRetryCount + 1
 		err := model.IncrementDeliveryRetryCount(order.Id)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("failed to increment retry count for order %d: %v", order.Id, err))
@@ -203,10 +206,12 @@ func RetryFailedDeliveries() {
 
 		if err != nil {
 			common.SysLog(fmt.Sprintf("delivery retry failed for order %d (attempt %d/%d): %v",
-				order.Id, order.DeliveryRetryCount+1, maxRetries, err))
+				order.Id, actualAttempt, maxRetries, err))
 
 			// If max retries reached, send admin notification
-			if order.DeliveryRetryCount+1 >= maxRetries {
+			if actualAttempt >= maxRetries {
+				// Update order with correct retry count for notification
+				order.DeliveryRetryCount = actualAttempt
 				SendDeliveryFailureNotification(order)
 			}
 		} else {
@@ -217,8 +222,22 @@ func RetryFailedDeliveries() {
 
 // SendDeliveryFailureNotification sends a notification to admin about failed delivery
 func SendDeliveryFailureNotification(order *model.PlanOrder) {
-	// TODO: Implement admin notification system
-	// For now, just log the failure
+	// Log the failure
 	common.SysLog(fmt.Sprintf("ALERT: delivery failed after max retries for order %d (user_id=%d, order_no=%s)",
 		order.Id, order.UserId, order.OrderNo))
+
+	// Get plan name from order snapshot
+	planName := order.PlanDisplayName
+	if planName == "" {
+		planName = order.PlanName
+	}
+	if planName == "" {
+		planName = "未知套餐"
+	}
+
+	// Send notification to all admins
+	err := NotifyDeliveryFailedToAdmins(order.Id, order.OrderNo, order.UserId, planName, order.DeliveryRetryCount)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("failed to send delivery failure notification: %v", err))
+	}
 }

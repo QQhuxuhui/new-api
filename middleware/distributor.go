@@ -147,13 +147,11 @@ func Distribute() func(c *gin.Context) {
 						}
 
 						// Use plan's channel groups (support multiple groups)
-						var channelGroups []string
-						if planResult.Plan != nil {
-							channelGroups = planResult.Plan.GetChannelGroupsList()
-							if len(channelGroups) == 0 && planResult.ChannelGroup != "" {
-								// Fallback to old single field
-								channelGroups = []string{planResult.ChannelGroup}
-							}
+						// Use ChannelGroups from PlanSelectionResult which already contains snapshot data
+						channelGroups := planResult.ChannelGroups
+						if len(channelGroups) == 0 && planResult.ChannelGroup != "" {
+							// Fallback to old single field
+							channelGroups = []string{planResult.ChannelGroup}
 						}
 						if len(channelGroups) > 0 {
 							// Set plan groups for channel selection
@@ -333,62 +331,71 @@ func Distribute() func(c *gin.Context) {
 					// Check if we should attempt plan failover
 					// Only trigger if: 1) Plan system enabled, 2) User has plan, 3) Auto-switch enabled
 					shouldAttemptFailover := false
-					currentPlanId := 0
 
 					if common.PlanSystemEnabled && userId > 0 {
 						// Get current plan ID and auto-switch setting
 						if planId, exists := common.GetContextKey(c, constant.ContextKeyUserPlanId); exists {
 							if userPlanId, ok := planId.(int); ok && userPlanId > 0 {
 								// Load the UserPlan to check auto_switch flag
+								// Note: No need to check PlanId != nil, deleted plans can still failover
 								if userPlan, err := model.GetUserPlanById(userPlanId); err == nil {
-									if userPlan.AutoSwitch == 1 && userPlan.PlanId != nil {
+									if userPlan.AutoSwitch == 1 {
 										shouldAttemptFailover = true
-										currentPlanId = *userPlan.PlanId
 									}
 								}
 							}
 						}
 					}
 
-					if shouldAttemptFailover && currentPlanId > 0 {
-						logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d current_plan=%d all_channels_unavailable attempting_failover", userId, currentPlanId))
+					if shouldAttemptFailover {
+						logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d all_channels_unavailable attempting_failover", userId))
+
+						// Get current user_plan_id for failover exclusion
+						currentUserPlanId := 0
+						if userPlanIdVal, exists := common.GetContextKey(c, constant.ContextKeyUserPlanId); exists {
+							if upId, ok := userPlanIdVal.(int); ok {
+								currentUserPlanId = upId
+							}
+						}
 
 						// Attempt to find alternative plan with available channels
-						failoverChannel, failoverPlan, failoverGroup, failoverErr := service.AttemptPlanFailover(c, userId, currentPlanId, modelRequest.Model)
+						// Pass user_plan.id as excludePlanId to support deleted plans (plan_id can be NULL)
+						failoverChannel, failoverPlan, failoverGroup, failoverErr := service.AttemptPlanFailover(c, userId, currentUserPlanId, modelRequest.Model)
 
 						if failoverErr != nil {
 							logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failover_error=%v", userId, failoverErr))
 						}
 
-						if failoverChannel != nil && failoverPlan != nil && failoverPlan.PlanId != nil {
+						if failoverChannel != nil && failoverPlan != nil {
 							// Successfully found alternative plan with working channel
-							// Switch user to the new plan
-							failoverPlanId := *failoverPlan.PlanId
-							if switchErr := model.SwitchUserCurrentPlan(userId, failoverPlanId); switchErr != nil {
+							// Switch user to the new plan using SwitchToUserPlan (supports NULL plan_id)
+							if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id); switchErr != nil {
 								logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
 							} else {
-								planName := "unknown"
-								if failoverPlan.Plan != nil {
-									planName = failoverPlan.Plan.Name
+								planName := failoverPlan.GetDisplayName()
+								planId := 0
+								if failoverPlan.PlanId != nil {
+									planId = *failoverPlan.PlanId
 								}
-								logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d switched from plan=%d to plan=%s(id=%d) reason=channel_unavailable",
-									userId, currentPlanId, planName, failoverPlanId))
+								logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d switched to plan=%s(id=%d,user_plan=%d) reason=channel_unavailable",
+									userId, planName, planId, failoverPlan.Id))
 
 								// Update context with new plan info
-								common.SetContextKey(c, constant.ContextKeyPlanId, failoverPlanId)
+								if failoverPlan.PlanId != nil {
+									common.SetContextKey(c, constant.ContextKeyPlanId, *failoverPlan.PlanId)
+								}
 								common.SetContextKey(c, constant.ContextKeyUserPlanId, failoverPlan.Id)
 								common.SetContextKey(c, constant.ContextKeyPlanName, planName)
 								common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
 
 								// Update channel groups in context
-								if failoverPlan.Plan != nil {
-									channelGroups := failoverPlan.Plan.GetChannelGroupsList()
-									if len(channelGroups) > 0 {
-										common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
-										// Use the actual group where the channel was found
-										common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
-										common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
-									}
+								// Use UserPlan snapshot fields for channel groups
+								channelGroups := failoverPlan.GetChannelGroups()
+								if len(channelGroups) > 0 {
+									common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
+									// Use the actual group where the channel was found
+									common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+									common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
 								}
 
 								// Use the failover channel

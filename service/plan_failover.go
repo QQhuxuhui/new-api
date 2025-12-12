@@ -15,6 +15,7 @@ import (
 // GetFailoverCandidates returns all valid user plans excluding the current plan
 // Plans are sorted by priority (descending) for failover attempts
 // Note: Checks both total quota (HasQuota) and daily quota limits
+// excludePlanId: can be either user_plan.id or plan_id depending on caller context
 func GetFailoverCandidates(userId, excludePlanId int) ([]*model.UserPlan, error) {
 	// Get user's valid plans (active, not expired, not locked)
 	validPlans, err := model.CachedGetUserValidPlans(userId)
@@ -25,7 +26,10 @@ func GetFailoverCandidates(userId, excludePlanId int) ([]*model.UserPlan, error)
 	// Filter out the current plan, locked plans, and plans without available quota
 	var candidates []*model.UserPlan
 	for _, plan := range validPlans {
-		if (plan.PlanId != nil && *plan.PlanId == excludePlanId) || plan.IsLocked() {
+		// Skip if this is the current plan (check both user_plan.id and plan_id for compatibility)
+		isCurrentPlan := plan.Id == excludePlanId ||
+			(plan.PlanId != nil && *plan.PlanId == excludePlanId)
+		if isCurrentPlan || plan.IsLocked() {
 			continue
 		}
 
@@ -90,23 +94,19 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 
 	// Try each candidate plan in priority order
 	for _, candidate := range candidates {
-		planName := "unknown"
-		channelGroups := []string{}
-
-		if candidate.Plan != nil {
-			planName = candidate.Plan.Name
-			channelGroups = candidate.Plan.GetChannelGroupsList()
-		}
+		planName := candidate.GetDisplayName()
+		// Use UserPlan snapshot fields for channel groups
+		channelGroups := candidate.GetChannelGroups()
 
 		// Skip if plan has no channel groups configured
 		if len(channelGroups) == 0 {
 			logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) skipped: no channel groups configured",
-				userId, planName, candidate.PlanId))
+				userId, planName, candidate.Id))
 			continue
 		}
 
 		logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d trying plan=%s(id=%d) groups=%v",
-			userId, planName, candidate.PlanId, channelGroups))
+			userId, planName, candidate.Id, channelGroups))
 
 		// Try each channel group in this plan
 		for _, group := range channelGroups {
@@ -187,11 +187,12 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 
 // ShouldAttemptCrossplanFailover checks if cross-plan failover should be attempted
 // This is called after all retries within current plan have failed
-// Returns: shouldAttempt, currentPlanId, userId
+// Returns: shouldAttempt, currentUserPlanId, userId
 // Conditions for failover:
 // 1. Plan system is enabled
 // 2. User has a valid user ID
 // 3. User has a current plan with AutoSwitch enabled
+// Note: Returns user_plan.id instead of plan_id to support deleted plans (plan_id can be NULL)
 func ShouldAttemptCrossplanFailover(c *gin.Context) (bool, int, int) {
 	// Condition 1: Plan system must be enabled
 	if !common.PlanSystemEnabled {
@@ -232,7 +233,8 @@ func ShouldAttemptCrossplanFailover(c *gin.Context) (bool, int, int) {
 		return false, 0, userId
 	}
 
-	return true, planId, userId
+	// Return user_plan.id instead of plan_id to support deleted plans
+	return true, userPlanId, userId
 }
 
 // AttemptCrossplanFailoverAfterRetry tries to failover to alternative plans after all retries failed
@@ -245,15 +247,17 @@ func ShouldAttemptCrossplanFailover(c *gin.Context) (bool, int, int) {
 // 4. Returns the channel ready for use
 func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*model.Channel, *model.UserPlan, string, bool) {
 	// Check if we should attempt failover
-	shouldAttempt, currentPlanId, userId := ShouldAttemptCrossplanFailover(c)
-	if !shouldAttempt || currentPlanId == 0 {
+	// Note: currentUserPlanId is now user_plan.id instead of plan_id
+	shouldAttempt, currentUserPlanId, userId := ShouldAttemptCrossplanFailover(c)
+	if !shouldAttempt {
 		return nil, nil, "", false
 	}
 
-	logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d current_plan=%d initiating cross-plan failover after retry exhaustion", userId, currentPlanId))
+	logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d current_user_plan=%d initiating cross-plan failover after retry exhaustion", userId, currentUserPlanId))
 
 	// Attempt to find alternative plan with available channels
-	failoverChannel, failoverPlan, failoverGroup, failoverErr := AttemptPlanFailover(c, userId, currentPlanId, modelName)
+	// Pass user_plan.id as excludePlanId - GetFailoverCandidates already handles both user_plan.id and plan_id
+	failoverChannel, failoverPlan, failoverGroup, failoverErr := AttemptPlanFailover(c, userId, currentUserPlanId, modelName)
 
 	if failoverErr != nil {
 		logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] user=%d failover_error=%v", userId, failoverErr))
@@ -266,20 +270,25 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 	}
 
 	// Successfully found alternative plan - switch user to it
+	// Use SwitchToUserPlan which works with user_plan.id (supports NULL plan_id)
+	if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id); switchErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
+		// Continue anyway - channel was found, we can still use it even if plan switch failed
+	}
+
+	// Get plan name for logging - use snapshot fields first (works even when Plan is deleted)
+	planName := failoverPlan.GetDisplayName()
+	if planName == "" {
+		planName = "unknown"
+	}
+
+	planId := 0
 	if failoverPlan.PlanId != nil {
-		if switchErr := model.SwitchUserCurrentPlan(userId, *failoverPlan.PlanId); switchErr != nil {
-			logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
-			// Continue anyway - channel was found, we can still use it even if plan switch failed
-		}
+		planId = *failoverPlan.PlanId
 	}
 
-	planName := "unknown"
-	if failoverPlan.Plan != nil {
-		planName = failoverPlan.Plan.Name
-	}
-
-	logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d switched from plan=%d to plan=%s(id=%d) channel=%d reason=retry_exhaustion",
-		userId, currentPlanId, planName, failoverPlan.PlanId, failoverChannel.Id))
+	logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d switched from user_plan=%d to plan=%s(id=%d,user_plan=%d) channel=%d reason=retry_exhaustion",
+		userId, currentUserPlanId, planName, planId, failoverPlan.Id, failoverChannel.Id))
 
 	// Update context with new plan info
 	if failoverPlan.PlanId != nil {
@@ -290,13 +299,12 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 	common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
 
 	// Update channel groups in context
-	if failoverPlan.Plan != nil {
-		channelGroups := failoverPlan.Plan.GetChannelGroupsList()
-		if len(channelGroups) > 0 {
-			common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
-			common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
-			common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
-		}
+	// Use UserPlan snapshot fields for channel groups
+	channelGroups := failoverPlan.GetChannelGroups()
+	if len(channelGroups) > 0 {
+		common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
+		common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
 	}
 
 	return failoverChannel, failoverPlan, failoverGroup, true

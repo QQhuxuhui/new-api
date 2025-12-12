@@ -100,8 +100,8 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			return nil, ErrNoPlanAvailable
 		}
 
-		// Set as current
-		if err := model.SwitchUserCurrentPlan(userId, *selectedPlan.PlanId); err != nil {
+		// Set as current - use SwitchToUserPlan (works with NULL plan_id)
+		if err := model.SwitchToUserPlan(userId, selectedPlan.Id); err != nil {
 			common.SysLog(fmt.Sprintf("failed to set initial current plan: %v", err))
 		}
 
@@ -120,11 +120,12 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			// First try higher priority plans
 			higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
 			if higherPlan != nil {
-				if err := model.SwitchUserCurrentPlan(userId, *higherPlan.PlanId); err != nil {
+				// Use SwitchToUserPlan (works with NULL plan_id)
+				if err := model.SwitchToUserPlan(userId, higherPlan.Id); err != nil {
 					common.SysLog(fmt.Sprintf("failed to auto-switch to higher priority plan: %v", err))
 				} else {
 					common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to higher priority plan %d",
-						userId, currentPlan.PlanId, higherPlan.PlanId))
+						userId, currentPlan.Id, higherPlan.Id))
 					return newPlanSelectionResult(higherPlan, true), nil
 				}
 			}
@@ -132,11 +133,12 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			// If no higher priority, try any plan with quota (including lower priority)
 			anyPlanWithQuota := selectHighestPriorityWithQuota(validPlans)
 			if anyPlanWithQuota != nil && anyPlanWithQuota.Id != currentPlan.Id {
-				if err := model.SwitchUserCurrentPlan(userId, *anyPlanWithQuota.PlanId); err != nil {
+				// Use SwitchToUserPlan (works with NULL plan_id)
+				if err := model.SwitchToUserPlan(userId, anyPlanWithQuota.Id); err != nil {
 					common.SysLog(fmt.Sprintf("failed to auto-switch to available plan: %v", err))
 				} else {
 					common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to available plan %d",
-						userId, currentPlan.PlanId, anyPlanWithQuota.PlanId))
+						userId, currentPlan.Id, anyPlanWithQuota.Id))
 					return newPlanSelectionResult(anyPlanWithQuota, true), nil
 				}
 			}
@@ -585,19 +587,35 @@ func LogPlanSwitch(userId int, fromPlan, toPlan *model.UserPlan, isManual bool) 
 		event.EventType = PlanEventAutoSwitch
 	}
 
-	if fromPlan != nil && fromPlan.Plan != nil {
+	if fromPlan != nil {
 		if fromPlan.PlanId != nil {
 			event.FromPlanId = *fromPlan.PlanId
 		}
-		event.FromPlanName = fromPlan.Plan.Name
+		// Use snapshot fields first (works even when Plan is deleted)
+		if fromPlan.PlanName != "" {
+			event.FromPlanName = fromPlan.PlanName
+		} else if fromPlan.Plan != nil {
+			event.FromPlanName = fromPlan.Plan.Name
+		}
 	}
 
-	if toPlan != nil && toPlan.Plan != nil {
+	if toPlan != nil {
 		if toPlan.PlanId != nil {
 			event.ToPlanId = *toPlan.PlanId
 		}
-		event.ToPlanName = toPlan.Plan.Name
-		event.ChannelGroup = toPlan.Plan.ChannelGroup
+		// Use snapshot fields first (works even when Plan is deleted)
+		if toPlan.PlanName != "" {
+			event.ToPlanName = toPlan.PlanName
+		} else if toPlan.Plan != nil {
+			event.ToPlanName = toPlan.Plan.Name
+		}
+		// Use snapshot for channel group
+		channelGroups := toPlan.GetChannelGroups()
+		if len(channelGroups) > 0 {
+			event.ChannelGroup = channelGroups[0]
+		} else if toPlan.Plan != nil {
+			event.ChannelGroup = toPlan.Plan.ChannelGroup
+		}
 	}
 
 	LogPlanSelectionEvent(event)

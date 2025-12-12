@@ -586,6 +586,13 @@ type UserPlanResponse struct {
 	DailyQuotaLimitOverride *int64       `json:"daily_quota_limit_override"` // Per-user daily quota limit override (nil = use plan default)
 	EffectiveDailyLimit     int64        `json:"effective_daily_limit"`      // Computed effective daily limit
 	Plan                    *model.Plan  `json:"plan,omitempty"`
+
+	// Snapshot fields from UserPlan - for frontend display when Plan is deleted
+	PlanName        string `json:"plan_name"`
+	PlanDisplayName string `json:"plan_display_name"`
+	PlanCategory    string `json:"plan_category"`
+	PlanType        string `json:"plan_type"`
+	PlanPriority    int    `json:"plan_priority"`
 }
 
 // convertToUserPlanResponse converts UserPlan to UserPlanResponse with mapped field names
@@ -619,6 +626,13 @@ func convertToUserPlanResponse(up *model.UserPlan) *UserPlanResponse {
 		DailyQuotaLimitOverride: up.DailyQuotaLimitOverride,
 		EffectiveDailyLimit:     effectiveLimit,
 		Plan:                    up.Plan,
+
+		// Include snapshot fields for frontend display (works even when Plan is deleted)
+		PlanName:        up.PlanName,
+		PlanDisplayName: up.PlanDisplayName,
+		PlanCategory:    up.PlanCategory,
+		PlanType:        up.PlanType,
+		PlanPriority:    up.PlanPriority,
 	}
 }
 

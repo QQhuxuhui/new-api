@@ -290,3 +290,26 @@ func CheckAndNotifyDailyPoolLow(userId int) {
 		_ = NotifyDailyPoolLow(userId, remaining, dailyPool.TotalQuota)
 	}
 }
+
+// NotifyDeliveryFailedToAdmins sends notification to all admins when plan delivery fails after max retries
+func NotifyDeliveryFailedToAdmins(orderId int, orderNo string, userId int, planName string, retryCount int) error {
+	title := "订单发货失败告警"
+	content := fmt.Sprintf("订单 %s 发货失败，已重试 %d 次仍未成功。订单ID: %d，用户ID: %d，套餐: %s。请手动处理。",
+		orderNo, retryCount, orderId, userId, planName)
+
+	extraData, _ := json.Marshal(map[string]interface{}{
+		"order_id":    orderId,
+		"order_no":    orderNo,
+		"user_id":     userId,
+		"plan_name":   planName,
+		"retry_count": retryCount,
+	})
+
+	return model.CreateNotificationForAdmins(
+		model.NotificationTypeDeliveryFailed,
+		title,
+		content,
+		model.NotificationLevelError,
+		string(extraData),
+	)
+}

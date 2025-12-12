@@ -172,6 +172,18 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		addUsedChannel(c, channel.Id)
+
+		// 调试日志：记录重试时的渠道和令牌信息
+		contextKey := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
+		maskedKey := maskApiKeyForDebug(contextKey)
+		if i > 0 {
+			logger.LogInfo(c, fmt.Sprintf("[TokenDebug] 重试 %d: 切换到渠道 #%d (%s), Context令牌: %s",
+				i, channel.Id, channel.Name, maskedKey))
+		} else {
+			logger.LogInfo(c, fmt.Sprintf("[TokenDebug] 首次请求: 渠道 #%d (%s), Context令牌: %s",
+				channel.Id, channel.Name, maskedKey))
+		}
+
 		requestBody, _ := common.GetRequestBody(c)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 
@@ -446,6 +458,14 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveError(), tokenId, 0, false, userGroup, other)
 	}
 
+}
+
+// maskApiKeyForDebug 对 API Key 进行脱敏，显示前4位和后4位
+func maskApiKeyForDebug(key string) string {
+	if len(key) <= 8 {
+		return "***"
+	}
+	return key[:4] + "***" + key[len(key)-4:]
 }
 
 func RelayMidjourney(c *gin.Context) {
