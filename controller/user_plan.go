@@ -592,6 +592,7 @@ type UserPlanResponse struct {
 	PlanDisplayName string `json:"plan_display_name"`
 	PlanCategory    string `json:"plan_category"`
 	PlanType        string `json:"plan_type"`
+	PlanPriority    int    `json:"plan_priority"`
 }
 
 // convertToUserPlanResponse converts UserPlan to UserPlanResponse with mapped field names
@@ -631,6 +632,7 @@ func convertToUserPlanResponse(up *model.UserPlan) *UserPlanResponse {
 		PlanDisplayName: up.PlanDisplayName,
 		PlanCategory:    up.PlanCategory,
 		PlanType:        up.PlanType,
+		PlanPriority:    up.PlanPriority,
 	}
 }
 

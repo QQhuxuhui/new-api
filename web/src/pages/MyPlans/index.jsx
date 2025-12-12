@@ -599,7 +599,7 @@ const MyPlans = () => {
               <div>
                 <div className='flex items-center gap-2 mb-1'>
                   <Title heading={5} className='m-0 text-xl font-bold'>
-                    {userPlan.plan_display_name || plan.display_name || plan.name || t('未知套餐')}
+                    {userPlan.plan_display_name || userPlan.plan_name || plan.display_name || plan.name || t('未知套餐')}
                   </Title>
                   {isCurrent && (
                     <Tag 
@@ -620,10 +620,10 @@ const MyPlans = () => {
                   )}
                 </div>
                 <Space className='flex-wrap gap-y-2 mt-2'>
-                  {renderPlanType(plan.type)}
+                  {renderPlanType(userPlan.plan_type || plan.type)}
                   {renderExpiration(userPlan)}
                   <Tag className='bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300' shape='circle' type="ghost">
-                    {t('优先级')}: {plan.priority || 0}
+                    {t('优先级')}: {userPlan.plan_priority ?? plan.priority ?? 0}
                   </Tag>
                 </Space>
               </div>
@@ -793,7 +793,7 @@ const MyPlans = () => {
                <Text type="secondary" className="mb-1">{t('当前套餐')}</Text>
                <div className="flex items-center gap-2">
                  <div className="w-2 h-8 rounded-full bg-blue-500"></div>
-                 <Title heading={4} className="m-0 truncate">{currentPlan.plan?.display_name || currentPlan.plan?.name}</Title>
+                 <Title heading={4} className="m-0 truncate">{currentPlan.plan_display_name || currentPlan.plan_name || currentPlan.plan?.display_name || currentPlan.plan?.name || t('未知套餐')}</Title>
                </div>
             </div>
             <div className='bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl p-5 rounded-2xl shadow-lg border border-white/20 flex flex-col justify-center'>

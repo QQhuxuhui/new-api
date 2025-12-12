@@ -393,13 +393,8 @@ func GetQuotaLimitStatus(userPlan *model.UserPlan) (*QuotaLimitStatus, error) {
 		TotalQuotaRemain: userPlan.Quota, // Remaining = Quota (Quota is remaining amount)
 	}
 
-	if userPlan.Plan == nil {
-		return status, nil
-	}
-
-	plan := userPlan.Plan
-
-	// Daily quota status - use effective limit (UserPlan override > Plan default)
+	// Daily quota status - use effective limit (UserPlan override > Plan snapshot > Plan default)
+	// This works even when Plan is nil (deleted) because it uses snapshot fields
 	dailyLimit, hasLimit := userPlan.GetEffectiveDailyQuotaLimit()
 	if hasLimit {
 		status.DailyQuotaLimit = dailyLimit
@@ -421,9 +416,9 @@ func GetQuotaLimitStatus(userPlan *model.UserPlan) (*QuotaLimitStatus, error) {
 		status.DailyResetTime = tomorrow.Unix()
 	}
 
-	// Rate limit status
-	if plan.HasRateLimits() {
-		canProceed, waitSec, message := CheckRateLimits(plan, userPlan.Id, 0) // Check with 0 to get current status
+	// Rate limit status - only check if Plan is available (rate limits are not snapshotted)
+	if userPlan.Plan != nil && userPlan.Plan.HasRateLimits() {
+		canProceed, waitSec, message := CheckRateLimits(userPlan.Plan, userPlan.Id, 0) // Check with 0 to get current status
 		if !canProceed {
 			status.RateLimited = true
 			status.RateLimitWaitSec = waitSec
