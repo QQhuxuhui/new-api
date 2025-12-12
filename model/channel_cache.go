@@ -182,11 +182,13 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	// get the priority for the given retry number
 	var sumWeight = 0
 	var targetChannels []*Channel
+	var suspendedCount = 0
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
 			if channel.GetPriority() == targetPriority {
 				// Filter out suspended channels using health tracking
 				if !IsChannelHealthy(channelId) {
+					suspendedCount++
 					continue
 				}
 				sumWeight += channel.GetWeight()
@@ -200,7 +202,9 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	if len(targetChannels) == 0 {
 		// Return nil (not error) to allow retry with next priority
 		// Error would stop the retry loop in relay controller
-		common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (all suspended)", targetPriority, group, model))
+		// Log detailed info for debugging: total channels for model, priorities available, suspended count
+		common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended_at_priority=%d)",
+			targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount))
 		return nil, nil
 	}
 
@@ -297,15 +301,19 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 	// get the priority for the given retry number, excluding already tried channels
 	var sumWeight = 0
 	var targetChannels []*Channel
+	var suspendedCount = 0
+	var excludedCount = 0
 	for _, channelId := range channels {
 		// Skip if this channel was already tried
 		if excludeIds != nil && excludeIds[channelId] {
+			excludedCount++
 			continue
 		}
 		if channel, ok := channelsIDM[channelId]; ok {
 			if channel.GetPriority() == targetPriority {
 				// Filter out suspended channels using health tracking
 				if !IsChannelHealthy(channelId) {
+					suspendedCount++
 					continue
 				}
 				sumWeight += channel.GetWeight()
@@ -318,6 +326,9 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 
 	if len(targetChannels) == 0 {
 		// No more channels at this priority level (all tried or suspended)
+		// Log detailed info for debugging
+		common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d)",
+			targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount))
 		return nil, nil
 	}
 

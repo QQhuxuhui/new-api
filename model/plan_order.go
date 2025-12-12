@@ -128,6 +128,12 @@ func CreatePlanOrder(userId int, planId int) (*PlanOrder, error) {
 		}
 		finalPrice := planPrice
 
+		// 4.1 Validate price - cannot purchase 0-price plan through payment
+		// Note: 0-price plans should be assigned by admin, not purchased
+		if finalPrice <= 0 {
+			return errors.New("该套餐价格未设置，请联系管理员")
+		}
+
 		// 5. Generate unique order number
 		orderNo := GenerateOrderNo(userId)
 

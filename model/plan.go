@@ -192,12 +192,23 @@ func (p *Plan) Insert() error {
 }
 
 // Update updates an existing plan
+// Note: Uses Select to explicitly include zero-value fields like Purchasable=0, ShowInPricing=0
 func (p *Plan) Update() error {
 	if p.Id == 0 {
 		return errors.New("套餐ID不能为空")
 	}
 	p.UpdatedAt = time.Now().UnixMilli()
-	err := DB.Model(p).Updates(p).Error
+	// Use Select to explicitly update all fields including zero values
+	// GORM's Updates() by default ignores zero-value fields, which breaks
+	// boolean-like fields stored as int (0/1) like Purchasable and ShowInPricing
+	err := DB.Model(p).Select(
+		"name", "display_name", "description", "type", "category", "priority",
+		"channel_group", "channel_groups", "default_quota", "validity_days",
+		"daily_quota_limit", "rate_limit_rules", "default_allow_switch",
+		"default_allow_toggle", "settings", "status", "price", "original_price",
+		"quota_usd", "queue_slot", "sort_order", "custom_features",
+		"purchasable", "show_in_pricing", "updated_at",
+	).Updates(p).Error
 	if err == nil {
 		// Invalidate cache for all users who have this plan (synchronous to ensure consistency)
 		InvalidateUserPlanCacheByPlanId(p.Id)
@@ -377,6 +388,8 @@ func IsPlanNameExists(name string, excludeId int) bool {
 }
 
 // SeedDefaultPlans creates default plans if they don't exist
+// Note: Default plans are NOT purchasable and NOT shown in pricing page
+// Admin must explicitly configure price, purchasable, and show_in_pricing fields
 func SeedDefaultPlans() error {
 	defaultPlans := []Plan{
 		{
@@ -391,11 +404,13 @@ func SeedDefaultPlans() error {
 			DefaultAllowSwitch: 1,
 			DefaultAllowToggle: 1,
 			Status:             PlanStatusEnabled,
+			Purchasable:        0, // Not purchasable by default - admin must configure
+			ShowInPricing:      0, // Not shown in pricing page by default
 		},
 		{
 			Name:               "monthly",
 			DisplayName:        "包月套餐",
-			Description:        "包月订阅套餐",
+			Description:        "包月订阅套餐，管理员需配置价格后方可上架",
 			Type:               PlanTypeSubscription,
 			Priority:           100,
 			ChannelGroup:       "monthly",
@@ -404,6 +419,8 @@ func SeedDefaultPlans() error {
 			DefaultAllowSwitch: 0,
 			DefaultAllowToggle: 1,
 			Status:             PlanStatusEnabled,
+			Purchasable:        0, // Not purchasable by default - admin must set price first
+			ShowInPricing:      0, // Not shown in pricing page by default
 		},
 		{
 			Name:               "payg",
@@ -417,6 +434,8 @@ func SeedDefaultPlans() error {
 			DefaultAllowSwitch: 1,
 			DefaultAllowToggle: 1,
 			Status:             PlanStatusEnabled,
+			Purchasable:        0, // Not purchasable by default
+			ShowInPricing:      0, // Not shown in pricing page by default
 		},
 		{
 			Name:               "trial",
@@ -430,6 +449,8 @@ func SeedDefaultPlans() error {
 			DefaultAllowSwitch: 0,
 			DefaultAllowToggle: 0,
 			Status:             PlanStatusDisabled, // Disabled by default, admin enables if needed
+			Purchasable:        0,                  // Not purchasable by default
+			ShowInPricing:      0,                  // Not shown in pricing page by default
 		},
 	}
 

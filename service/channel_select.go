@@ -23,6 +23,7 @@ func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 		if groups, ok := planGroups.([]string); ok && len(groups) > 0 {
 			// Iterate through all plan groups (similar to auto mode)
 			var lastErr error
+			var needsRetry bool // Track if any group returned nil (needs retry at next priority)
 			for _, planGroup := range groups {
 				logger.LogDebug(c, "Plan selecting group:", planGroup)
 				channel, lastErr = model.GetRandomSatisfiedChannel(planGroup, modelName, retry)
@@ -37,8 +38,10 @@ func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 					return nil, planGroup, lastErr
 				}
 
-				// No error but no channel - try next group
+				// No error but no channel - mark for retry and try next group
+				// This means current priority has no healthy channels but there may be other priorities
 				if channel == nil {
+					needsRetry = true
 					continue
 				}
 
@@ -48,9 +51,17 @@ func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 				logger.LogDebug(c, "Plan selected group:", planGroup)
 				break
 			}
-			// If no channel found and we saw exhausted error, return it
-			if channel == nil && lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
-				return nil, selectGroup, lastErr
+			// If any group returned nil (needs retry), return nil to trigger retry at next priority
+			// Only return ErrPriorityExhausted if ALL groups have exhausted their priorities
+			if channel == nil {
+				if needsRetry {
+					// At least one group has more priorities to try
+					return nil, selectGroup, nil
+				}
+				// All groups exhausted their priorities
+				if lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
+					return nil, selectGroup, lastErr
+				}
 			}
 			return channel, selectGroup, nil
 		}
@@ -105,6 +116,7 @@ func CacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 		if groups, ok := planGroups.([]string); ok && len(groups) > 0 {
 			// Iterate through all plan groups (similar to auto mode)
 			var lastErr error
+			var needsRetry bool // Track if any group returned nil (needs retry at next priority)
 			for _, planGroup := range groups {
 				logger.LogDebug(c, "Plan selecting group (excluding tried):", planGroup)
 				channel, lastErr = model.GetRandomSatisfiedChannelExcluding(planGroup, modelName, retry, excludeIds)
@@ -119,8 +131,10 @@ func CacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 					return nil, planGroup, lastErr
 				}
 
-				// No error but no channel - try next group
+				// No error but no channel - mark for retry and try next group
+				// This means current priority has no healthy channels but there may be other priorities
 				if channel == nil {
+					needsRetry = true
 					continue
 				}
 
@@ -130,9 +144,17 @@ func CacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 				logger.LogDebug(c, "Plan selected group:", planGroup)
 				break
 			}
-			// If no channel found and we saw exhausted error, return it
-			if channel == nil && lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
-				return nil, selectGroup, lastErr
+			// If any group returned nil (needs retry), return nil to trigger retry at next priority
+			// Only return ErrPriorityExhausted if ALL groups have exhausted their priorities
+			if channel == nil {
+				if needsRetry {
+					// At least one group has more priorities to try
+					return nil, selectGroup, nil
+				}
+				// All groups exhausted their priorities
+				if lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
+					return nil, selectGroup, lastErr
+				}
 			}
 			return channel, selectGroup, nil
 		}
