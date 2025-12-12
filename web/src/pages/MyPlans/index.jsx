@@ -493,7 +493,7 @@ const MyPlans = () => {
               <div className='flex items-center gap-3'>
                 <Badge count={plan.queue_position} type='primary' />
                 <div>
-                  <Text strong>{plan.name}</Text>
+                  <Text strong>{plan.plan_display_name || plan.plan_name || plan.plan?.display_name || t('未知套餐')}</Text>
                   <Text type='tertiary' size='small' className='block'>
                     {t('额度')}: {renderQuota(plan.quota)}
                   </Text>
@@ -599,7 +599,7 @@ const MyPlans = () => {
               <div>
                 <div className='flex items-center gap-2 mb-1'>
                   <Title heading={5} className='m-0 text-xl font-bold'>
-                    {plan.plan_display_name || plan.display_name || plan.plan?.display_name || plan.name || t('未知套餐')}
+                    {userPlan.plan_display_name || plan.display_name || plan.name || t('未知套餐')}
                   </Title>
                   {isCurrent && (
                     <Tag 
@@ -894,7 +894,7 @@ const MyPlans = () => {
                     <div className='flex items-center gap-3'>
                       <Badge count={plan.queue_position} type='primary' />
                       <div>
-                        <Text strong>{plan.name}</Text>
+                        <Text strong>{plan.plan_display_name || plan.plan_name || plan.plan?.display_name || t('未知套餐')}</Text>
                         <div className='flex items-center gap-2 mt-1'>
                           <Tag size='small' color='blue'>
                             {t('额度')}: {renderQuota(plan.quota)}
