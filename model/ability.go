@@ -73,15 +73,15 @@ func getPriority(group string, model string, retry int) (int, error) {
 	}
 
 	if len(priorities) == 0 {
-		// 如果没有查询到优先级，则返回错误
-		return 0, errors.New("数据库一致性被破坏")
+		// If no priorities found, return ErrPriorityExhausted to prevent infinite retry loops
+		return 0, ErrPriorityExhausted
 	}
 
-	// 确定要使用的优先级
+	// Determine which priority to use
 	var priorityToUse int
 	if retry >= len(priorities) {
-		// 如果重试次数大于优先级数，则使用最小的优先级
-		priorityToUse = priorities[len(priorities)-1]
+		// If retry exceeds available priority levels, all priorities have been tried
+		return 0, ErrPriorityExhausted
 	} else {
 		priorityToUse = priorities[retry]
 	}
@@ -137,7 +137,9 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 			}
 		}
 	} else {
-		return nil, nil
+		// Return ErrPriorityExhausted to indicate no channels support this model
+		// This prevents infinite retry loops when calling non-existent models (DB mode)
+		return nil, ErrPriorityExhausted
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err

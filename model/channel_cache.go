@@ -147,7 +147,9 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 
 	if len(channels) == 0 {
-		return nil, nil
+		// Return ErrPriorityExhausted to indicate no channels support this model
+		// This prevents infinite retry loops when calling non-existent models
+		return nil, ErrPriorityExhausted
 	}
 
 	if len(channels) == 1 {
@@ -256,7 +258,9 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 	}
 
 	if len(channels) == 0 {
-		return nil, nil
+		// Return ErrPriorityExhausted to indicate no channels support this model
+		// This prevents infinite retry loops when calling non-existent models
+		return nil, ErrPriorityExhausted
 	}
 
 	// For single channel, check if it's excluded
