@@ -119,10 +119,26 @@ func PayPlanOrder(c *gin.Context) {
 		return
 	}
 
-	// Verify payment method
-	if req.PaymentMethod != model.PaymentMethodAlipay && req.PaymentMethod != model.PaymentMethodWechat {
-		common.ApiError(c, errors.New("不支持的支付方式"))
+	// Verify payment method is Epay-supported type
+	// Plan purchase only supports Epay standard payment methods
+	// Note: Epay only accepts 'alipay' and 'wxpay', NOT 'wechat'
+	epayPaymentMethods := []string{"alipay", "wxpay", "wechat"}
+	isValidEpayMethod := false
+	for _, method := range epayPaymentMethods {
+		if req.PaymentMethod == method {
+			isValidEpayMethod = true
+			break
+		}
+	}
+	if !isValidEpayMethod {
+		common.ApiError(c, fmt.Errorf("套餐购买仅支持支付宝或微信支付，不支持: %s", req.PaymentMethod))
 		return
+	}
+
+	// Convert 'wechat' to 'wxpay' for Epay SDK compatibility
+	epayPaymentMethod := req.PaymentMethod
+	if epayPaymentMethod == "wechat" {
+		epayPaymentMethod = "wxpay"
 	}
 
 	// Initiate Epay payment
@@ -145,7 +161,7 @@ func PayPlanOrder(c *gin.Context) {
 	}
 
 	uri, params, err := client.Purchase(&epay.PurchaseArgs{
-		Type:           req.PaymentMethod,
+		Type:           epayPaymentMethod, // Use converted payment method (wechat -> wxpay)
 		ServiceTradeNo: order.OrderNo,
 		Name:           paymentName,
 		Money:          strconv.FormatFloat(order.FinalPrice, 'f', 2, 64),
