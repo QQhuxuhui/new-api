@@ -502,17 +502,19 @@ func GetMyPlans(c *gin.Context) {
 }
 
 // UserSwitchPlan allows user to switch their current plan
+// Uses user_plan_id (instance ID) instead of plan_id (template ID)
+// This supports switching to plans where the template was deleted
 func UserSwitchPlan(c *gin.Context) {
 	userId := c.GetInt("id")
 	var req struct {
-		PlanId int `json:"plan_id" binding:"required"`
+		UserPlanId int `json:"user_plan_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	err := service.UserSwitchPlan(userId, req.PlanId)
+	err := service.UserSwitchPlanByUserPlanId(userId, req.UserPlanId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -520,7 +522,7 @@ func UserSwitchPlan(c *gin.Context) {
 
 	// Clear sticky sessions to ensure new plan's channels are used immediately
 	sessionManager := &service.SessionManager{}
-	common.SysLog(fmt.Sprintf("[SessionClear] user=%d clearing sticky sessions on plan switch to plan_id=%d", userId, req.PlanId))
+	common.SysLog(fmt.Sprintf("[SessionClear] user=%d clearing sticky sessions on plan switch to user_plan_id=%d", userId, req.UserPlanId))
 
 	if clearErr := sessionManager.UnbindAllUserSessionsByUserId(userId); clearErr != nil {
 		common.SysLog(fmt.Sprintf("[SessionClear] user=%d failed to clear sessions: %v", userId, clearErr))

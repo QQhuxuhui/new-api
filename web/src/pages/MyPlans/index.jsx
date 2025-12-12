@@ -122,11 +122,11 @@ const MyPlans = () => {
     loadBillingStatus();
   }, [loadMyPlans, loadQuotaStatus, loadBillingStatus]);
 
-  // Switch to a different plan
-  const handleSwitchPlan = async (planId) => {
+  // Switch to a different plan (uses user_plan_id, not plan_id)
+  const handleSwitchPlan = async (userPlanId) => {
     setLoading(true);
     try {
-      const res = await API.post('/api/my_plans/switch', { plan_id: planId });
+      const res = await API.post('/api/my_plans/switch', { user_plan_id: userPlanId });
       const { success, message } = res.data;
       if (success) {
         showSuccess(t('套餐切换成功'));
@@ -634,7 +634,7 @@ const MyPlans = () => {
               <Popconfirm
                 title={t('确认切换到此套餐？')}
                 content={t('切换后将使用此套餐的额度和渠道配置')}
-                onConfirm={() => handleSwitchPlan(userPlan.plan_id)}
+                onConfirm={() => handleSwitchPlan(userPlan.id)}
                 okType="primary"
               >
                 <Button 
@@ -712,7 +712,7 @@ const MyPlans = () => {
                 <Popconfirm
                   title={t('确认切换到此套餐？')}
                   content={t('切换后将使用此套餐的额度和渠道配置')}
-                  onConfirm={() => handleSwitchPlan(userPlan.plan_id)}
+                  onConfirm={() => handleSwitchPlan(userPlan.id)}
                   okType="primary"
                 >
                   <Button 

@@ -278,6 +278,48 @@ func UserSwitchPlan(userId int, targetPlanId int) error {
 	return model.SwitchUserCurrentPlan(userId, targetPlanId)
 }
 
+// UserSwitchPlanByUserPlanId allows a user to manually switch to a specific user_plan instance
+// This is preferred over UserSwitchPlan as it supports plans where the template was deleted
+func UserSwitchPlanByUserPlanId(userId int, targetUserPlanId int) error {
+	// Get current plan to check permissions
+	currentPlan, err := model.GetUserCurrentPlan(userId)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("failed to get current plan: %w", err)
+	}
+
+	// Get target user plan by ID
+	targetUserPlan, err := model.GetUserPlanById(targetUserPlanId)
+	if err != nil {
+		return fmt.Errorf("target plan not found: %w", err)
+	}
+
+	// Verify ownership
+	if targetUserPlan.UserId != userId {
+		return errors.New("plan does not belong to user")
+	}
+
+	// Check if target plan is valid
+	if !targetUserPlan.IsValid() {
+		return errors.New("target plan is not available")
+	}
+
+	// Check permission - either from current plan or target plan
+	canSwitch := false
+	if currentPlan != nil && currentPlan.CanUserSwitch() {
+		canSwitch = true
+	}
+	if targetUserPlan.CanUserSwitch() {
+		canSwitch = true
+	}
+
+	if !canSwitch {
+		return errors.New("you don't have permission to switch plans")
+	}
+
+	// Perform switch using user_plan_id (supports NULL plan_id)
+	return model.SwitchToUserPlan(userId, targetUserPlanId)
+}
+
 // UserToggleAutoSwitch allows a user to toggle auto-switch on their current plan
 func UserToggleAutoSwitch(userId int, userPlanId int, enabled bool) error {
 	userPlan, err := model.GetUserPlanById(userPlanId)
