@@ -587,19 +587,35 @@ func LogPlanSwitch(userId int, fromPlan, toPlan *model.UserPlan, isManual bool) 
 		event.EventType = PlanEventAutoSwitch
 	}
 
-	if fromPlan != nil && fromPlan.Plan != nil {
+	if fromPlan != nil {
 		if fromPlan.PlanId != nil {
 			event.FromPlanId = *fromPlan.PlanId
 		}
-		event.FromPlanName = fromPlan.Plan.Name
+		// Use snapshot fields first (works even when Plan is deleted)
+		if fromPlan.PlanName != "" {
+			event.FromPlanName = fromPlan.PlanName
+		} else if fromPlan.Plan != nil {
+			event.FromPlanName = fromPlan.Plan.Name
+		}
 	}
 
-	if toPlan != nil && toPlan.Plan != nil {
+	if toPlan != nil {
 		if toPlan.PlanId != nil {
 			event.ToPlanId = *toPlan.PlanId
 		}
-		event.ToPlanName = toPlan.Plan.Name
-		event.ChannelGroup = toPlan.Plan.ChannelGroup
+		// Use snapshot fields first (works even when Plan is deleted)
+		if toPlan.PlanName != "" {
+			event.ToPlanName = toPlan.PlanName
+		} else if toPlan.Plan != nil {
+			event.ToPlanName = toPlan.Plan.Name
+		}
+		// Use snapshot for channel group
+		channelGroups := toPlan.GetChannelGroups()
+		if len(channelGroups) > 0 {
+			event.ChannelGroup = channelGroups[0]
+		} else if toPlan.Plan != nil {
+			event.ChannelGroup = toPlan.Plan.ChannelGroup
+		}
 	}
 
 	LogPlanSelectionEvent(event)

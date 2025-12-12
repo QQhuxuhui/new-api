@@ -276,9 +276,10 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 		// Continue anyway - channel was found, we can still use it even if plan switch failed
 	}
 
-	planName := "unknown"
-	if failoverPlan.Plan != nil {
-		planName = failoverPlan.Plan.Name
+	// Get plan name for logging - use snapshot fields first (works even when Plan is deleted)
+	planName := failoverPlan.GetDisplayName()
+	if planName == "" {
+		planName = "unknown"
 	}
 
 	planId := 0
