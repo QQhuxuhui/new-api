@@ -214,6 +214,9 @@ func UpdatePlan(c *gin.Context) {
 	existingPlan.SortOrder = plan.SortOrder
 	// Custom features
 	existingPlan.CustomFeatures = plan.CustomFeatures
+	// Purchase control
+	existingPlan.Purchasable = plan.Purchasable
+	existingPlan.ShowInPricing = plan.ShowInPricing
 
 	// Sync ChannelGroup from ChannelGroups for backward compatibility
 	// Take the first group from ChannelGroups array and set it as ChannelGroup

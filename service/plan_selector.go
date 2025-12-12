@@ -155,18 +155,15 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 	// 6. Check for smart auto-switch (upgrade to higher priority if available)
 	if currentPlan.AutoSwitch == 1 {
 		higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
-		if higherPlan != nil && higherPlan.PlanId != nil {
-			// Auto-switch to higher priority plan
-			if err := model.SwitchUserCurrentPlan(userId, *higherPlan.PlanId); err != nil {
+		if higherPlan != nil {
+			// Auto-switch to higher priority plan using user_plan.id (not plan_id)
+			// This works even when plan_id is NULL after snapshot migration
+			if err := model.SwitchToUserPlan(userId, higherPlan.Id); err != nil {
 				common.SysLog(fmt.Sprintf("failed to auto-switch plan: %v", err))
 				// Continue with current plan on error
 			} else {
-				currentPlanIdStr := "nil"
-				if currentPlan.PlanId != nil {
-					currentPlanIdStr = fmt.Sprintf("%d", *currentPlan.PlanId)
-				}
-				common.SysLog(fmt.Sprintf("user %d auto-switched from plan %s to plan %d",
-					userId, currentPlanIdStr, *higherPlan.PlanId))
+				common.SysLog(fmt.Sprintf("user %d auto-switched from user_plan %d to user_plan %d",
+					userId, currentPlan.Id, higherPlan.Id))
 				return newPlanSelectionResult(higherPlan, true), nil
 			}
 		}
