@@ -35,6 +35,7 @@ import {
   Empty,
   Tooltip,
   ArrayField,
+  Divider,
 } from '@douyinfe/semi-ui';
 import {
   IconPlus,
@@ -250,6 +251,29 @@ const PlansTable = () => {
       render: (days) => days === 0 ? t('永久') : `${days} ${t('天')}`,
     },
     {
+      title: t('价格'),
+      dataIndex: 'price',
+      width: 100,
+      render: (price, record) => (
+        <div>
+          <span className="font-medium">${price || 0}</span>
+          {record.original_price > 0 && record.original_price > price && (
+            <span className="text-gray-400 line-through ml-1 text-xs">${record.original_price}</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      title: t('定价页'),
+      dataIndex: 'show_in_pricing',
+      width: 80,
+      render: (showInPricing) => (
+        <Tag color={showInPricing === 1 ? 'green' : 'grey'} size="small">
+          {showInPricing === 1 ? t('显示') : t('隐藏')}
+        </Tag>
+      ),
+    },
+    {
       title: t('状态'),
       dataIndex: 'status',
       width: 100,
@@ -333,6 +357,8 @@ const PlansTable = () => {
         // Convert int (0/1) to boolean for Switch component
         default_allow_switch: editingPlan.default_allow_switch === 1,
         default_allow_toggle: editingPlan.default_allow_toggle === 1,
+        purchasable: editingPlan.purchasable === 1,
+        show_in_pricing: editingPlan.show_in_pricing === 1,
       };
     }
     return {
@@ -345,6 +371,12 @@ const PlansTable = () => {
       validity_days: 0,
       default_allow_switch: true,
       default_allow_toggle: true,
+      purchasable: true,
+      show_in_pricing: true,
+      price: 0,
+      original_price: 0,
+      quota_usd: 0,
+      sort_order: 0,
       channel_groups: [],
       rate_limit_rules: [],
       custom_features: [],
@@ -370,6 +402,8 @@ const PlansTable = () => {
       ),
       default_allow_switch: values.default_allow_switch ? 1 : 0,
       default_allow_toggle: values.default_allow_toggle ? 1 : 0,
+      purchasable: values.purchasable ? 1 : 0,
+      show_in_pricing: values.show_in_pricing ? 1 : 0,
     };
 
     let success = false;
@@ -635,6 +669,59 @@ const PlansTable = () => {
             label={t('描述')}
             placeholder={t('请输入套餐描述')}
             rows={3}
+          />
+
+          {/* Pricing Settings */}
+          <Divider margin='12px'>{t('价格设置')}</Divider>
+          <Form.InputNumber
+            field='price'
+            label={t('销售价格')}
+            placeholder={t('请输入销售价格')}
+            min={0}
+            precision={2}
+            prefix="$"
+          />
+          <Form.InputNumber
+            field='original_price'
+            label={t('原价')}
+            placeholder={t('原价（用于显示折扣，可选）')}
+            min={0}
+            precision={2}
+            prefix="$"
+            extraText={t('设置后会显示折扣标签，留空或为0则不显示')}
+          />
+          <Form.InputNumber
+            field='quota_usd'
+            label={t('额度美元值')}
+            placeholder={t('套餐额度对应的美元价值')}
+            min={0}
+            precision={2}
+            prefix="$"
+            extraText={t('用于在定价页面显示套餐额度的美元价值')}
+          />
+
+          {/* Display Settings */}
+          <Divider margin='12px'>{t('显示设置')}</Divider>
+          <Form.Switch
+            field='purchasable'
+            label={t('允许购买')}
+            checkedText={t('是')}
+            uncheckedText={t('否')}
+            helpText={t('关闭后用户无法在线购买此套餐，仅管理员可手动分配')}
+          />
+          <Form.Switch
+            field='show_in_pricing'
+            label={t('显示在定价页')}
+            checkedText={t('是')}
+            uncheckedText={t('否')}
+            helpText={t('控制是否在产品定价页面显示此套餐，独立于套餐启用状态')}
+          />
+          <Form.InputNumber
+            field='sort_order'
+            label={t('排序顺序')}
+            placeholder={t('数值越小越靠前')}
+            min={0}
+            extraText={t('用于控制套餐在定价页面的显示顺序')}
           />
 
           {/* Custom Features */}

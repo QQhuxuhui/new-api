@@ -43,6 +43,7 @@ type Plan struct {
 	CustomFeatures       string  `json:"custom_features" gorm:"type:text"`        // JSON array of custom feature descriptions with icons
 	// Purchase control
 	Purchasable          int     `json:"purchasable" gorm:"default:1"`            // 1=can be purchased online, 0=cannot
+	ShowInPricing        int     `json:"show_in_pricing" gorm:"default:1"`        // 1=show in pricing page, 0=hide (independent of status)
 	CreatedAt            int64   `json:"created_at" gorm:"autoCreateTime:milli"`
 	UpdatedAt            int64   `json:"updated_at" gorm:"autoUpdateTime:milli"`
 }

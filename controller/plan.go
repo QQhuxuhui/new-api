@@ -346,11 +346,13 @@ func GetEnabledPlans(c *gin.Context) {
 		return
 	}
 
-	// Filter by purchasable if specified
+	// Filter by purchasable and show_in_pricing if specified
+	// purchasable=true means the plan should be shown in pricing page and can be purchased
 	if purchasable == "true" || purchasable == "1" {
 		filteredPlans := make([]*model.Plan, 0)
 		for _, plan := range plans {
-			if plan.Purchasable == 1 {
+			// Must be purchasable AND visible in pricing page
+			if plan.Purchasable == 1 && plan.ShowInPricing == 1 {
 				filteredPlans = append(filteredPlans, plan)
 			}
 		}
