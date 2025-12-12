@@ -114,6 +114,36 @@ func (up *UserPlan) TableName() string {
 	return "user_plans"
 }
 
+// MarshalJSON customizes JSON serialization to ensure Plan info is always available
+// If Plan is nil (deleted), create a virtual Plan from snapshot fields for frontend compatibility
+func (up *UserPlan) MarshalJSON() ([]byte, error) {
+	// Create a type alias to avoid infinite recursion
+	type Alias UserPlan
+
+	// If Plan is nil but we have snapshot data, create a virtual Plan for frontend
+	if up.Plan == nil && up.PlanName != "" {
+		virtualPlan := &Plan{
+			Id:                -1, // Negative ID indicates this is a virtual plan from snapshot
+			Name:              up.PlanName,
+			DisplayName:       up.PlanDisplayName,
+			Type:              up.PlanType,
+			Category:          up.PlanCategory,
+			Priority:          up.PlanPriority,
+			ChannelGroup:      up.PlanChannelGroup,
+			ChannelGroups:     up.PlanChannelGroups,
+			RateLimitRules:    up.PlanRateLimitRules,
+			DailyQuotaLimit:   up.PlanDailyQuotaLimit,
+			Status:            PlanStatusDisabled, // Mark as disabled since original template is deleted
+		}
+
+		// Temporarily set the Plan for serialization
+		up.Plan = virtualPlan
+		defer func() { up.Plan = nil }() // Reset after serialization
+	}
+
+	return json.Marshal((*Alias)(up))
+}
+
 // HasQuota checks if the user plan has available quota
 func (up *UserPlan) HasQuota() bool {
 	return up.Quota > 0
@@ -458,6 +488,7 @@ func GetAllUserPlans(userId int) ([]*UserPlan, error) {
 }
 
 // SwitchUserCurrentPlan atomically switches the current plan for a user
+// DEPRECATED: Use SwitchToUserPlan instead, especially when plan_id might be NULL
 func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 	// Invalidate cache after switch
 	defer InvalidateUserPlanCache(userId)
@@ -486,6 +517,45 @@ func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 		// Set new plan as current
 		result := tx.Model(&UserPlan{}).
 			Where("user_id = ? AND plan_id = ? AND status = ?", userId, newPlanId, UserPlanStatusActive).
+			Update("is_current", 1)
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		return nil
+	})
+}
+
+// SwitchToUserPlan atomically switches to a user plan by user_plan.id
+// This function works correctly even when plan_id is NULL (plan template deleted)
+func SwitchToUserPlan(userId int, userPlanId int) error {
+	// Invalidate cache after switch
+	defer InvalidateUserPlanCache(userId)
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		// First verify the target user plan is valid
+		var targetPlan UserPlan
+		err := tx.Where("id = ? AND user_id = ? AND status = ?",
+			userPlanId, userId, UserPlanStatusActive).
+			First(&targetPlan).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("未找到指定的用户套餐或套餐不可用")
+			}
+			return err
+		}
+
+		// Clear current flag on all user plans
+		if err := tx.Model(&UserPlan{}).
+			Where("user_id = ? AND is_current = 1", userId).
+			Update("is_current", 0).Error; err != nil {
+			return err
+		}
+
+		// Set new plan as current
+		result := tx.Model(&UserPlan{}).
+			Where("id = ?", userPlanId).
 			Update("is_current", 1)
 
 		if result.Error != nil {
