@@ -30,7 +30,6 @@ import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import {
   Button,
   Modal,
-  SideSheet,
   Space,
   Spin,
   Typography,
@@ -53,7 +52,6 @@ import {
 } from '@douyinfe/semi-ui';
 import {
   IconPlus,
-  IconClose,
   IconLock,
   IconUnlock,
   IconDelete,
@@ -628,8 +626,7 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
 
   return (
     <>
-      <SideSheet
-        placement="right"
+      <Modal
         title={
           <Space>
             <Tag color="blue" shape="circle">
@@ -640,43 +637,37 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
             </Title>
           </Space>
         }
-        bodyStyle={{ padding: 0 }}
         visible={visible}
-        width={isMobile ? '100%' : 900}
-        footer={
-          <div className="flex justify-end bg-white">
-            <Space>
-              <Button
-                theme="solid"
-                onClick={() => setShowAssignModal(true)}
-                icon={<IconPlus />}
-              >
-                {t('分配套餐')}
-              </Button>
-              <Button
-                theme="light"
-                type="tertiary"
-                onClick={() => loadUserPlans()}
-                icon={<IconRefresh />}
-              >
-                {t('刷新')}
-              </Button>
-              <Button
-                theme="light"
-                type="primary"
-                onClick={onClose}
-                icon={<IconClose />}
-              >
-                {t('关闭')}
-              </Button>
-            </Space>
-          </div>
-        }
-        closeIcon={null}
         onCancel={onClose}
+        footer={
+          <Space>
+            <Button
+              theme="solid"
+              onClick={() => setShowAssignModal(true)}
+              icon={<IconPlus />}
+            >
+              {t('分配套餐')}
+            </Button>
+            <Button
+              type="tertiary"
+              onClick={() => loadUserPlans()}
+              icon={<IconRefresh />}
+            >
+              {t('刷新')}
+            </Button>
+            <Button
+              type="primary"
+              onClick={onClose}
+            >
+              {t('关闭')}
+            </Button>
+          </Space>
+        }
+        style={{ width: isMobile ? '95%' : '90%', maxWidth: 1400 }}
+        bodyStyle={{ maxHeight: '70vh', overflowY: 'auto' }}
       >
         <Spin spinning={loading}>
-          <div className="p-4">
+          <div>
             <Tabs activeKey={activeTab} onChange={setActiveTab}>
               <TabPane tab={<span><IconList className="mr-1" />{t('套餐管理')}</span>} itemKey="plans">
                 <Card className="!rounded-2xl shadow-sm border-0 mt-4">
@@ -776,7 +767,7 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
             </Tabs>
           </div>
         </Spin>
-      </SideSheet>
+      </Modal>
 
       {/* Assign Plan Modal */}
       <Modal
