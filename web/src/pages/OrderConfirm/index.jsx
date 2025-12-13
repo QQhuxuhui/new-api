@@ -388,11 +388,11 @@ const OrderConfirm = () => {
               <>
                 <div className='flex justify-between'>
                   <Text type='secondary'>{t('原价')}</Text>
-                  <Text delete type='tertiary'>${order.original_price.toFixed(2)}</Text>
+                  <Text delete type='tertiary'>¥{order.original_price.toFixed(2)}</Text>
                 </div>
                 <div className='flex justify-between'>
                   <Text type='secondary'>{t('优惠')}</Text>
-                  <Text type='success'>-${discount.toFixed(2)}</Text>
+                  <Text type='success'>-¥{discount.toFixed(2)}</Text>
                 </div>
                 <Divider margin='12px' />
               </>
@@ -404,7 +404,7 @@ const OrderConfirm = () => {
                 strong
                 style={{ fontSize: 24, color: 'var(--semi-color-primary)' }}
               >
-                ${order.final_price.toFixed(2)}
+                ¥{order.final_price.toFixed(2)}
               </Text>
             </div>
           </div>

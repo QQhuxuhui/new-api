@@ -423,6 +423,28 @@ const PlansTable = () => {
   const [formPlanType, setFormPlanType] = useState(PLAN_TYPES.CONSUMPTION);
   const [formDefaultQuota, setFormDefaultQuota] = useState(0);
   const [formDailyQuotaLimit, setFormDailyQuotaLimit] = useState(0);
+  const [formQuotaUsd, setFormQuotaUsd] = useState(0);
+  const [formDailyQuotaLimitUsd, setFormDailyQuotaLimitUsd] = useState(0);
+
+  // Helper function to convert USD to token quota
+  const convertUsdToQuota = (usdAmount) => {
+    let quotaPerUnit = localStorage.getItem('quota_per_unit');
+    quotaPerUnit = parseFloat(quotaPerUnit);
+    if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) {
+      return 0;
+    }
+    return Math.round(usdAmount * quotaPerUnit);
+  };
+
+  // Helper function to convert token quota to USD
+  const convertQuotaToUsd = (quota) => {
+    let quotaPerUnit = localStorage.getItem('quota_per_unit');
+    quotaPerUnit = parseFloat(quotaPerUnit);
+    if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) {
+      return 0;
+    }
+    return quota / quotaPerUnit;
+  };
 
   // Update formPlanType when editing an existing plan
   useEffect(() => {
@@ -431,11 +453,16 @@ const PlansTable = () => {
       setFormPlanType(editingPlan.type || PLAN_TYPES.CONSUMPTION);
       setFormDefaultQuota(editingPlan.default_quota || 0);
       setFormDailyQuotaLimit(editingPlan.daily_quota_limit || 0);
+      // Calculate USD values from quota
+      setFormQuotaUsd(convertQuotaToUsd(editingPlan.default_quota || 0));
+      setFormDailyQuotaLimitUsd(convertQuotaToUsd(editingPlan.daily_quota_limit || 0));
     } else if (showEdit && (!editingPlan || !editingPlan.id)) {
       // Creating new plan - reset to default
       setFormPlanType(PLAN_TYPES.CONSUMPTION);
       setFormDefaultQuota(0);
       setFormDailyQuotaLimit(0);
+      setFormQuotaUsd(0);
+      setFormDailyQuotaLimitUsd(0);
     }
   }, [showEdit, editingPlan]);
 
@@ -582,23 +609,59 @@ const PlansTable = () => {
             filter
           />
           <Form.InputNumber
-            field='default_quota'
+            field='default_quota_usd'
             label={t('默认额度')}
-            placeholder={t('分配给用户的默认额度')}
+            placeholder={t('请输入消费额度（美金）')}
             min={0}
-            extraText={renderQuotaWithPrompt(formDefaultQuota)}
+            precision={2}
+            prefix="$"
+            extraText={t('套餐包含的消费额度（美元）')}
+            initValue={formQuotaUsd}
+            onChange={(value) => {
+              setFormQuotaUsd(value || 0);
+              // Auto-calculate token quota
+              const tokenQuota = convertUsdToQuota(value || 0);
+              setFormDefaultQuota(tokenQuota);
+              if (editFormApi) {
+                editFormApi.setValue('default_quota', tokenQuota);
+              }
+            }}
+          />
+          <Form.InputNumber
+            field='default_quota'
+            style={{ display: 'none' }}
+            initValue={formDefaultQuota}
           />
 
           {/* Daily Quota Limit - only for subscription plans */}
           {formPlanType === PLAN_TYPES.SUBSCRIPTION && (
-            <Form.InputNumber
-              field='daily_quota_limit'
-              label={t('每日限额')}
-              placeholder={t('每日最大消费额度（0表示无限制）')}
-              min={0}
-              suffix={t('（订阅套餐）')}
-              extraText={renderQuotaWithPrompt(formDailyQuotaLimit)}
-            />
+            <>
+              <Form.InputNumber
+                field='daily_quota_limit_usd'
+                label={t('每日限额')}
+                placeholder={t('请输入每日限额（美金）')}
+                min={0}
+                precision={2}
+                prefix="$"
+                suffix={t('（订阅套餐）')}
+                extraText={t('每日最大消费额度，0表示无限制')}
+                initValue={formDailyQuotaLimitUsd}
+                onChange={(value) => {
+                  setFormDailyQuotaLimitUsd(value || 0);
+                  // Auto-calculate token quota
+                  const tokenQuota = convertUsdToQuota(value || 0);
+                  setFormDailyQuotaLimit(tokenQuota);
+                  if (editFormApi) {
+                    editFormApi.setValue('daily_quota_limit', tokenQuota);
+                  }
+                }}
+              />
+              <Form.InputNumber
+                field='daily_quota_limit'
+                style={{ display: 'none' }}
+                initValue={formDailyQuotaLimit}
+              />
+            </>
           )}
 
           {/* Rate Limit Rules */}
@@ -679,7 +742,7 @@ const PlansTable = () => {
             placeholder={t('请输入销售价格')}
             min={0}
             precision={2}
-            prefix="$"
+            prefix="¥"
           />
           <Form.InputNumber
             field='original_price'
@@ -687,7 +750,7 @@ const PlansTable = () => {
             placeholder={t('原价（用于显示折扣，可选）')}
             min={0}
             precision={2}
-            prefix="$"
+            prefix="¥"
             extraText={t('设置后会显示折扣标签，留空或为0则不显示')}
           />
           <Form.InputNumber

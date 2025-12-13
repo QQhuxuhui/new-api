@@ -55,11 +55,11 @@ const isLoggedIn = () => {
   return !!user;
 };
 
-// 格式化额度显示（不依赖 quota_per_unit 配置）
+// 格式化额度显示（显示美元金额）
 const formatQuotaDisplay = (quotaUsd, defaultQuota) => {
   // 优先使用 quota_usd（后端直接提供的美元金额）
   if (quotaUsd && quotaUsd > 0) {
-    return `¥${quotaUsd}`;
+    return `$${quotaUsd}`;
   }
   // 否则显示原始 tokens 数值
   if (defaultQuota && defaultQuota > 0) {
@@ -228,43 +228,11 @@ const PlanPricing = () => {
     return unitConfig[category] || '';
   };
 
-  // Extract features from plan（混合自动生成和自定义特色）
+  // Extract features from plan（只显示自定义特色）
   const extractFeatures = (plan) => {
     const features = [];
 
-    // 1. 自动生成的系统特色
-    // Quota - 使用 formatQuotaDisplay 避免依赖 quota_per_unit
-    const quotaDisplay = formatQuotaDisplay(plan.quota_usd, plan.default_quota);
-    if (quotaDisplay) {
-      features.push({ text: `${quotaDisplay} ${t('额度')}`, icon: 'check' });
-    }
-
-    // Validity
-    if (plan.validity_days > 0) {
-      features.push({ text: `${t('有效期')} ${plan.validity_days} ${t('天')}`, icon: 'check' });
-    } else {
-      features.push({ text: t('永久有效'), icon: 'check' });
-    }
-
-    // Daily limit - 使用 daily_quota_limit_usd 或直接显示数值
-    if (plan.daily_quota_limit > 0) {
-      const dailyDisplay = plan.daily_quota_limit_usd
-        ? `¥${plan.daily_quota_limit_usd}`
-        : formatQuotaDisplay(null, plan.daily_quota_limit) || `${plan.daily_quota_limit}`;
-      features.push({ text: `${t('每日限额')}: ${dailyDisplay}`, icon: 'check' });
-    }
-
-    // Queue slot
-    if (plan.queue_slot === 0) {
-      features.push({ text: t('可叠加使用'), icon: 'check' });
-    }
-
-    // Rate limits
-    if (plan.rate_limit_rules && plan.rate_limit_rules !== '') {
-      features.push({ text: t('含速率限制'), icon: 'info' });
-    }
-
-    // 2. 自定义特色（从 custom_features 字段读取）
+    // 只显示自定义特色（从 custom_features 字段读取）
     try {
       if (plan.custom_features) {
         const customFeatures = typeof plan.custom_features === 'string'
@@ -442,6 +410,21 @@ const PlanPricing = () => {
                 {priceUnit}
               </Text>
             </div>
+
+            {/* Consumption Quota */}
+            {(() => {
+              const quotaDisplay = formatQuotaDisplay(plan.quota_usd, plan.default_quota);
+              if (quotaDisplay) {
+                return (
+                  <div className='mt-2'>
+                    <Text type='secondary' size='small'>
+                      {t('消费额度')}: <span className='font-medium'>{quotaDisplay}</span>
+                    </Text>
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {/* Description */}
             {plan.description && (
