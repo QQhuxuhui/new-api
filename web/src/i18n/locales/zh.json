@@ -103,6 +103,7 @@
     "Passkey 注册成功": "Passkey 注册成功",
     "Passkey 登录": "Passkey 登录",
     "Ping间隔（秒）": "Ping间隔（秒）",
+    "paymentWindowOpened": "支付页面已在新窗口打开，如未看到请检查浏览器是否拦截了弹窗",
     "price_xxx 的商品价格 ID，新建产品后可获得": "price_xxx 的商品价格 ID，新建产品后可获得",
     "Reasoning Effort": "Reasoning Effort",
     "safety_identifier 字段用于帮助 OpenAI 识别可能违反使用政策的应用程序用户。默认关闭以保护用户隐私": "safety_identifier 字段用于帮助 OpenAI 识别可能违反使用政策的应用程序用户。默认关闭以保护用户隐私",

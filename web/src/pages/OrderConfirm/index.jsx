@@ -229,15 +229,21 @@ const OrderConfirm = () => {
           document.body.appendChild(form);
           form.submit();
           document.body.removeChild(form);
-          // Show popup blocker warning for _blank submission
+
           if (!isSafari) {
+            // For _blank submission, reset paying state to allow retry
+            // User stays on current page, can close payment window and retry
+            shouldResetPaying = true;
+            // Show popup blocker warning
             Toast.info({
-              content: t('支付页面已在新窗口打开，如未看到请检查浏览器是否拦截了弹窗'),
+              content: t('paymentWindowOpened'),
               duration: 5,
             });
+          } else {
+            // For Safari same-page POST navigation, keep button disabled
+            // Prevents double-click before page redirect
+            shouldResetPaying = false;
           }
-          // For _blank submission, reset paying state to allow retry
-          shouldResetPaying = true;
         } else if (data.payment_url) {
           // Fallback: direct URL navigation (for payment methods that support it)
           // This will navigate away from current page, so keep paying=true to prevent double-click

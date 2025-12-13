@@ -105,6 +105,7 @@
     "Passkey 注册成功": "Passkeyの登録に成功しました",
     "Passkey 登录": "Passkeyログイン",
     "Ping间隔（秒）": "Ping間隔（秒）",
+    "paymentWindowOpened": "お支払いページが新しいウィンドウで開かれました。表示されない場合はブラウザのポップアップブロックをご確認ください",
     "price_xxx 的商品价格 ID，新建产品后可获得": "price_xxx の料金ID。新規製品の作成後に取得できます",
     "Reasoning Effort": "Reasoning Effort",
     "safety_identifier 字段用于帮助 OpenAI 识别可能违反使用政策的应用程序用户。默认关闭以保护用户隐私": "safety_identifierフィールドは、OpenAIが利用ポリシーに違反する可能性のあるアプリユーザーを特定するために使用されます。ユーザーのプライバシーを保護するため、デフォルトでは無効です",
