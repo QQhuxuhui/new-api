@@ -59,7 +59,7 @@ const isLoggedIn = () => {
 const formatQuotaDisplay = (quotaUsd, defaultQuota) => {
   // 优先使用 quota_usd（后端直接提供的美元金额）
   if (quotaUsd && quotaUsd > 0) {
-    return `$${quotaUsd}`;
+    return `¥${quotaUsd}`;
   }
   // 否则显示原始 tokens 数值
   if (defaultQuota && defaultQuota > 0) {
@@ -249,7 +249,7 @@ const PlanPricing = () => {
     // Daily limit - 使用 daily_quota_limit_usd 或直接显示数值
     if (plan.daily_quota_limit > 0) {
       const dailyDisplay = plan.daily_quota_limit_usd
-        ? `$${plan.daily_quota_limit_usd}`
+        ? `¥${plan.daily_quota_limit_usd}`
         : formatQuotaDisplay(null, plan.daily_quota_limit) || `${plan.daily_quota_limit}`;
       features.push({ text: `${t('每日限额')}: ${dailyDisplay}`, icon: 'check' });
     }
@@ -429,14 +429,14 @@ const PlanPricing = () => {
               {/* Original Price */}
               {discountPercent > 0 && (
                 <Text delete type='tertiary' className='text-lg'>
-                  ${plan.original_price}
+                  ¥{plan.original_price}
                 </Text>
               )}
             </div>
 
             <div className='flex items-baseline mt-1'>
               <Text className='text-3xl font-bold text-gray-900 dark:text-white'>
-                ${plan.price}
+                ¥{plan.price}
               </Text>
               <Text type='tertiary' className='ml-1'>
                 {priceUnit}

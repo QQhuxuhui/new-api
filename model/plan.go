@@ -11,41 +11,41 @@ import (
 // RateLimitRule defines a rate limit rule for a plan
 type RateLimitRule struct {
 	WindowHours int     `json:"window_hours"` // Time window in hours
-	MaxAmount   float64 `json:"max_amount"`   // Maximum amount in USD
+	MaxAmount   float64 `json:"max_amount"`   // Maximum amount in CNY (人民币)
 }
 
 // Plan represents a plan template (admin-managed)
 type Plan struct {
-	Id                   int     `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name                 string  `json:"name" gorm:"type:varchar(64);not null;uniqueIndex"` // 'monthly', 'payg', 'trial'
-	DisplayName          string  `json:"display_name" gorm:"type:varchar(128)"`             // '包月套餐', 'Pay-as-you-go'
-	Description          string  `json:"description" gorm:"type:text"`
-	Type                 string  `json:"type" gorm:"type:varchar(32);not null"`    // 'subscription', 'consumption', 'trial'
-	Category             string  `json:"category" gorm:"type:varchar(20);default:'monthly'"` // 'daily', 'weekly', 'biweekly', 'monthly', 'payg'
-	Priority             int     `json:"priority" gorm:"default:0"`                // Higher = preferred
-	ChannelGroup         string  `json:"channel_group" gorm:"type:varchar(64)"`    // Maps to Channel.Group (deprecated, use ChannelGroups)
-	ChannelGroups        string  `json:"channel_groups" gorm:"type:text"`          // JSON array of channel groups, e.g., ["group1", "group2"]
-	DefaultQuota         int64   `json:"default_quota" gorm:"default:0"`           // Default quota for new assignments
-	ValidityDays         int     `json:"validity_days" gorm:"default:0"`           // 0 = permanent
-	DailyQuotaLimit      int64   `json:"daily_quota_limit" gorm:"default:0"`       // Daily quota limit for subscription plans (0 = no limit)
-	RateLimitRules       string  `json:"rate_limit_rules" gorm:"type:text"`        // JSON array of rate limit rules
-	DefaultAllowSwitch   int     `json:"default_allow_switch" gorm:"default:0"`    // Default permission for user to switch
-	DefaultAllowToggle   int     `json:"default_allow_toggle" gorm:"default:1"`    // Default permission for user to toggle auto-switch
-	Settings             string  `json:"settings" gorm:"type:text"`                // JSON for extensibility
-	Status               int     `json:"status" gorm:"default:1"`                  // 1=enabled, 2=disabled
-	// Pricing fields
-	Price                float64 `json:"price" gorm:"type:decimal(10,2);default:0"`          // Sale price
-	OriginalPrice        float64 `json:"original_price" gorm:"type:decimal(10,2);default:0"` // Original price (for discount display)
-	QuotaUSD             float64 `json:"quota_usd" gorm:"type:decimal(10,2);default:0"`      // Quota in USD (for display)
+	Id                 int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name               string `json:"name" gorm:"type:varchar(64);not null;uniqueIndex"` // 'monthly', 'payg', 'trial'
+	DisplayName        string `json:"display_name" gorm:"type:varchar(128)"`             // '包月套餐', 'Pay-as-you-go'
+	Description        string `json:"description" gorm:"type:text"`
+	Type               string `json:"type" gorm:"type:varchar(32);not null"`              // 'subscription', 'consumption', 'trial'
+	Category           string `json:"category" gorm:"type:varchar(20);default:'monthly'"` // 'daily', 'weekly', 'biweekly', 'monthly', 'payg'
+	Priority           int    `json:"priority" gorm:"default:0"`                          // Higher = preferred
+	ChannelGroup       string `json:"channel_group" gorm:"type:varchar(64)"`              // Maps to Channel.Group (deprecated, use ChannelGroups)
+	ChannelGroups      string `json:"channel_groups" gorm:"type:text"`                    // JSON array of channel groups, e.g., ["group1", "group2"]
+	DefaultQuota       int64  `json:"default_quota" gorm:"default:0"`                     // Default quota for new assignments
+	ValidityDays       int    `json:"validity_days" gorm:"default:0"`                     // 0 = permanent
+	DailyQuotaLimit    int64  `json:"daily_quota_limit" gorm:"default:0"`                 // Daily quota limit for subscription plans (0 = no limit)
+	RateLimitRules     string `json:"rate_limit_rules" gorm:"type:text"`                  // JSON array of rate limit rules
+	DefaultAllowSwitch int    `json:"default_allow_switch" gorm:"default:0"`              // Default permission for user to switch
+	DefaultAllowToggle int    `json:"default_allow_toggle" gorm:"default:1"`              // Default permission for user to toggle auto-switch
+	Settings           string `json:"settings" gorm:"type:text"`                          // JSON for extensibility
+	Status             int    `json:"status" gorm:"default:1"`                            // 1=enabled, 2=disabled
+	// Pricing fields (denominated in CNY/人民币)
+	Price         float64 `json:"price" gorm:"type:decimal(10,2);default:0"`          // Sale price (人民币)
+	OriginalPrice float64 `json:"original_price" gorm:"type:decimal(10,2);default:0"` // Original price before discount (人民币)
+	QuotaUSD      float64 `json:"quota_usd" gorm:"type:decimal(10,2);default:0"`      // Quota amount display (人民币)
 	// Queue control
-	QueueSlot            int     `json:"queue_slot" gorm:"default:1"`             // 0=daily (no queue), 1=occupies queue slot
-	SortOrder            int     `json:"sort_order" gorm:"default:0"`             // Display sort order
-	CustomFeatures       string  `json:"custom_features" gorm:"type:text"`        // JSON array of custom feature descriptions with icons
+	QueueSlot      int    `json:"queue_slot" gorm:"default:1"`      // 0=daily (no queue), 1=occupies queue slot
+	SortOrder      int    `json:"sort_order" gorm:"default:0"`      // Display sort order
+	CustomFeatures string `json:"custom_features" gorm:"type:text"` // JSON array of custom feature descriptions with icons
 	// Purchase control
-	Purchasable          int     `json:"purchasable" gorm:"default:1"`            // 1=can be purchased online, 0=cannot
-	ShowInPricing        int     `json:"show_in_pricing" gorm:"default:1"`        // 1=show in pricing page, 0=hide (independent of status)
-	CreatedAt            int64   `json:"created_at" gorm:"autoCreateTime:milli"`
-	UpdatedAt            int64   `json:"updated_at" gorm:"autoUpdateTime:milli"`
+	Purchasable   int   `json:"purchasable" gorm:"default:1"`     // 1=can be purchased online, 0=cannot
+	ShowInPricing int   `json:"show_in_pricing" gorm:"default:1"` // 1=show in pricing page, 0=hide (independent of status)
+	CreatedAt     int64 `json:"created_at" gorm:"autoCreateTime:milli"`
+	UpdatedAt     int64 `json:"updated_at" gorm:"autoUpdateTime:milli"`
 }
 
 // Plan types

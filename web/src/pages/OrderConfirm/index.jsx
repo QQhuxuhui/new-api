@@ -196,6 +196,7 @@ const OrderConfirm = () => {
     }
 
     setPaying(true);
+    let shouldResetPaying = true; // Control whether to reset paying state in finally
     try {
       const res = await API.post('/api/user/plan/purchase/pay', {
         order_id: order.order_id,
@@ -203,14 +204,21 @@ const OrderConfirm = () => {
       });
       const { success, message, data } = res.data;
       if (success && data) {
-        // Open payment URL in new window
-        if (data.payment_url) {
-          window.location.href = data.payment_url;
-        } else if (data.params) {
-          // Handle payment form submission
+        // IMPORTANT: Must use form submission with params, not direct URL navigation
+        // Epay SDK returns payment_url (action) and params (form fields)
+        // Direct navigation to payment_url without params will fail with missing parameters error
+        if (data.payment_url && data.params) {
+          // Handle payment form submission (standard Epay flow)
           const form = document.createElement('form');
           form.method = 'POST';
-          form.action = data.url || '';
+          form.action = data.payment_url;
+          // Check if Safari to handle target differently
+          const isSafari =
+            navigator.userAgent.indexOf('Safari') > -1 &&
+            navigator.userAgent.indexOf('Chrome') < 1;
+          if (!isSafari) {
+            form.target = '_blank';
+          }
           Object.keys(data.params).forEach(key => {
             const input = document.createElement('input');
             input.type = 'hidden';
@@ -220,14 +228,44 @@ const OrderConfirm = () => {
           });
           document.body.appendChild(form);
           form.submit();
+          document.body.removeChild(form);
+
+          if (!isSafari) {
+            // For _blank submission, reset paying state to allow retry
+            // User stays on current page, can close payment window and retry
+            shouldResetPaying = true;
+            // Show popup blocker warning
+            Toast.info({
+              content: t('paymentWindowOpened'),
+              duration: 5,
+            });
+          } else {
+            // For Safari same-page POST navigation, keep button disabled
+            // Prevents double-click before page redirect
+            shouldResetPaying = false;
+          }
+        } else if (data.payment_url) {
+          // Fallback: direct URL navigation (for payment methods that support it)
+          // This will navigate away from current page, so keep paying=true to prevent double-click
+          shouldResetPaying = false;
+          window.location.href = data.payment_url;
+          // Note: finally block will execute before navigation, but shouldResetPaying=false prevents reset
+        } else {
+          showError(t('支付数据格式错误'));
         }
       } else {
         showError(message || t('支付失败'));
-        setPaying(false);
       }
     } catch (e) {
       showError(e.message || t('网络错误'));
-      setPaying(false);
+    } finally {
+      // Reset paying state to allow retry, but only if not doing whole page navigation
+      // IMPORTANT: For _blank form submission, user stays on current page
+      // If payment window is closed or blocked, user can click again
+      // For whole page navigation, keep paying=true to prevent double-click before redirect
+      if (shouldResetPaying) {
+        setPaying(false);
+      }
     }
   };
 

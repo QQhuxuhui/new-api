@@ -107,6 +107,7 @@
     "Passkey 注册成功": "Enregistrement du Passkey réussi",
     "Passkey 登录": "Connexion avec Passkey",
     "Ping间隔（秒）": "Intervalle de ping (secondes)",
+    "paymentWindowOpened": "La page de paiement a été ouverte dans une nouvelle fenêtre. Si vous ne la voyez pas, veuillez vérifier si votre navigateur a bloqué la fenêtre contextuelle",
     "price_xxx 的商品价格 ID，新建产品后可获得": "ID de prix du produit price_xxx, peut être obtenu après la création d'un nouveau produit",
     "Reasoning Effort": "Effort de raisonnement",
     "safety_identifier 字段用于帮助 OpenAI 识别可能违反使用政策的应用程序用户。默认关闭以保护用户隐私": "Le champ safety_identifier aide OpenAI à identifier les utilisateurs d'applications susceptibles de violer les politiques d'utilisation. Désactivé par défaut pour protéger la confidentialité des utilisateurs",
