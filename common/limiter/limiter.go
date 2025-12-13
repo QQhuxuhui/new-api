@@ -52,6 +52,28 @@ func (rl *RedisLimiter) Allow(ctx context.Context, key string, opts ...Option) (
 		opt(config)
 	}
 
+	// 检查 SHA 是否为空，如果为空则尝试重新加载脚本
+	if rl.limitScriptSHA == "" {
+		limitSHA, loadErr := rl.client.ScriptLoad(ctx, rateLimitScript).Result()
+		if loadErr != nil {
+			common.SysLog(fmt.Sprintf("Failed to reload rate limit script: %v, falling back to Eval", loadErr))
+			// Fallback 到直接执行脚本
+			result, err := rl.client.Eval(
+				ctx,
+				rateLimitScript,
+				[]string{key},
+				config.Requested,
+				config.Rate,
+				config.Capacity,
+			).Int()
+			if err != nil {
+				return false, fmt.Errorf("rate limit failed (eval fallback): %w", err)
+			}
+			return result == 1, nil
+		}
+		rl.limitScriptSHA = limitSHA
+	}
+
 	// 执行限流
 	result, err := rl.client.EvalSha(
 		ctx,
@@ -63,6 +85,24 @@ func (rl *RedisLimiter) Allow(ctx context.Context, key string, opts ...Option) (
 	).Int()
 
 	if err != nil {
+		// 检查是否是 NOSCRIPT 错误（脚本已过期或被清除）
+		if err.Error() == "NOSCRIPT No matching script. Please use EVAL." {
+			common.SysLog("Rate limit script SHA expired, reloading and retrying with Eval")
+			// 清空 SHA 并使用 Eval fallback
+			rl.limitScriptSHA = ""
+			result, evalErr := rl.client.Eval(
+				ctx,
+				rateLimitScript,
+				[]string{key},
+				config.Requested,
+				config.Rate,
+				config.Capacity,
+			).Int()
+			if evalErr != nil {
+				return false, fmt.Errorf("rate limit failed (eval fallback after NOSCRIPT): %w", evalErr)
+			}
+			return result == 1, nil
+		}
 		return false, fmt.Errorf("rate limit failed: %w", err)
 	}
 	return result == 1, nil

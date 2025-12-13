@@ -199,8 +199,23 @@ func GitHubBind(c *gin.Context) {
 	}
 	session := sessions.Default(c)
 	id := session.Get("id")
-	// id := c.GetInt("id")  // critical bug!
-	user.Id = id.(int)
+	// 检查会话是否存在且 id 类型正确
+	if id == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "会话已过期，请重新登录",
+		})
+		return
+	}
+	userId, ok := id.(int)
+	if !ok || userId <= 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "会话信息无效，请重新登录",
+		})
+		return
+	}
+	user.Id = userId
 	err = user.FillUserById()
 	if err != nil {
 		common.ApiError(c, err)
