@@ -134,6 +134,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 		taskErr = service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
 		return
 	}
+	// 确保响应体被关闭，防止连接泄漏
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	// handle response
 	if resp != nil && resp.StatusCode != http.StatusOK {
 		responseBody, _ := io.ReadAll(resp.Body)
