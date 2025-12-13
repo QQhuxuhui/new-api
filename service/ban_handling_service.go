@@ -141,9 +141,9 @@ func OnUnban(userId int, adminId int, adminUsername string, ipAddress string) er
 			"",
 		)
 
-		// Check if plan expired during ban
-		if currentPlan.ExpiresAt > 0 && currentPlan.ExpiresAt < now {
-			// Plan expired during ban, need to switch to next
+		// Check if plan expired even after extending (use newExpiresAt, not old ExpiresAt)
+		if newExpiresAt > 0 && newExpiresAt < now {
+			// Plan expired during ban even after extension, need to switch to next
 			_, _ = model.CompleteCurrentPlan(userId, model.UserPlanStatusExpired)
 		}
 	}
@@ -399,17 +399,19 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 		"",
 	)
 
-	// Recalculate queue positions
+	// Recalculate queue positions to ensure sequential numbering
+	// while preserving restored queue_position order
 	_ = model.DB.Exec(`
+		WITH ranked AS (
+			SELECT id, ROW_NUMBER() OVER (ORDER BY queue_position ASC, purchase_order ASC) as new_pos
+			FROM user_plans
+			WHERE user_id = ? AND is_current = 0 AND status = ?
+		)
 		UPDATE user_plans
-		SET queue_position = (
-			SELECT COUNT(*) FROM (
-				SELECT id FROM user_plans
-				WHERE user_id = ? AND is_current = 0 AND status = ? AND purchase_order < user_plans.purchase_order
-			) AS t
-		) + 1
-		WHERE user_id = ? AND is_current = 0 AND status = ?
-	`, userId, model.UserPlanStatusActive, userId, model.UserPlanStatusActive)
+		SET queue_position = ranked.new_pos
+		FROM ranked
+		WHERE user_plans.id = ranked.id
+	`, userId, model.UserPlanStatusActive)
 
 	// Invalidate cache
 	model.InvalidateUserPlanCache(userId)

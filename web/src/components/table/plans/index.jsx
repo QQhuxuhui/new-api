@@ -256,9 +256,9 @@ const PlansTable = () => {
       width: 100,
       render: (price, record) => (
         <div>
-          <span className="font-medium">${price || 0}</span>
+          <span className="font-medium">¥{price || 0}</span>
           {record.original_price > 0 && record.original_price > price && (
-            <span className="text-gray-400 line-through ml-1 text-xs">${record.original_price}</span>
+            <span className="text-gray-400 line-through ml-1 text-xs">¥{record.original_price}</span>
           )}
         </div>
       ),

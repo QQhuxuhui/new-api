@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -13,45 +14,45 @@ import (
 type UserPlan struct {
 	Id                int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	UserId            int    `json:"user_id" gorm:"not null;index"`
-	PlanId            *int   `json:"plan_id" gorm:"index"` // Nullable after snapshot migration - for admin reference only
-	Quota             int64  `json:"quota" gorm:"default:0"`              // Current available quota
-	UsedQuota         int64  `json:"used_quota" gorm:"default:0"`         // Total used quota
-	OriginalQuota     int64  `json:"original_quota" gorm:"default:0"`     // Original quota when assigned
-	IsCurrent         int    `json:"is_current" gorm:"default:0"`         // 1 = current active plan
-	AutoSwitch        int    `json:"auto_switch" gorm:"default:1"`        // 1 = auto switch to higher priority when available
-	AllowUserSwitch   int    `json:"allow_user_switch" gorm:"default:0"`  // Admin permission: allow user to manually switch
-	AllowUserToggle   int    `json:"allow_user_toggle" gorm:"default:1"`  // Admin permission: allow user to toggle auto-switch
-	Locked            int    `json:"locked" gorm:"default:0"`             // 1 = locked by admin
+	PlanId            *int   `json:"plan_id" gorm:"index"`               // Nullable after snapshot migration - for admin reference only
+	Quota             int64  `json:"quota" gorm:"default:0"`             // Current available quota
+	UsedQuota         int64  `json:"used_quota" gorm:"default:0"`        // Total used quota
+	OriginalQuota     int64  `json:"original_quota" gorm:"default:0"`    // Original quota when assigned
+	IsCurrent         int    `json:"is_current" gorm:"default:0"`        // 1 = current active plan
+	AutoSwitch        int    `json:"auto_switch" gorm:"default:1"`       // 1 = auto switch to higher priority when available
+	AllowUserSwitch   int    `json:"allow_user_switch" gorm:"default:0"` // Admin permission: allow user to manually switch
+	AllowUserToggle   int    `json:"allow_user_toggle" gorm:"default:1"` // Admin permission: allow user to toggle auto-switch
+	Locked            int    `json:"locked" gorm:"default:0"`            // 1 = locked by admin
 	LockedReason      string `json:"locked_reason" gorm:"type:varchar(255)"`
 	LockedAt          int64  `json:"locked_at" gorm:"default:0"`
 	AdminNote         string `json:"admin_note" gorm:"type:text"`
-	StartedAt         int64  `json:"started_at" gorm:"bigint"`            // Plan start time
-	ExpiresAt         int64  `json:"expires_at" gorm:"bigint;index"`      // 0 = never expires
+	StartedAt         int64  `json:"started_at" gorm:"bigint"`             // Plan start time
+	ExpiresAt         int64  `json:"expires_at" gorm:"bigint;index"`       // 0 = never expires
 	OriginalExpiresAt int64  `json:"original_expires_at" gorm:"default:0"` // Original expiry before admin adjustments
-	Status            int    `json:"status" gorm:"default:1"`             // 1=active, 2=expired, 3=disabled, 4=completed, 5=forfeited, 6=revoked
+	Status            int    `json:"status" gorm:"default:1"`              // 1=active, 2=expired, 3=disabled, 4=completed, 5=forfeited, 6=revoked
 	CreatedAt         int64  `json:"created_at" gorm:"autoCreateTime:milli"`
 	UpdatedAt         int64  `json:"updated_at" gorm:"autoUpdateTime:milli"`
 
 	// Queue management fields
-	QueuePosition     int    `json:"queue_position" gorm:"default:0"`    // Position in queue (0 = current/not in queue)
-	PurchaseOrder     int64  `json:"purchase_order" gorm:"default:0"`    // Timestamp for FIFO ordering
+	QueuePosition int   `json:"queue_position" gorm:"default:0"` // Position in queue (0 = current/not in queue)
+	PurchaseOrder int64 `json:"purchase_order" gorm:"default:0"` // Timestamp for FIFO ordering
 
 	// Admin adjustment tracking
 	AdminAdjustedQuota int64 `json:"admin_adjusted_quota" gorm:"default:0"` // Net admin quota adjustments (+/-)
 	AdminExtendedDays  int   `json:"admin_extended_days" gorm:"default:0"`  // Net admin validity extensions (+/-)
 
 	// Source tracking
-	Source            string `json:"source" gorm:"type:varchar(50);default:'purchase'"` // 'purchase', 'admin_assign', 'redemption', 'gift', 'promotion', 'migration'
-	SourceOrderId     string `json:"source_order_id" gorm:"type:varchar(64)"`           // Related order/redemption ID
-	AssignedBy        int    `json:"assigned_by" gorm:"default:0"`                      // Admin ID who assigned this plan
-	PurchasedAt       int64  `json:"purchased_at" gorm:"default:0"`                     // Purchase timestamp
+	Source        string `json:"source" gorm:"type:varchar(50);default:'purchase'"` // 'purchase', 'admin_assign', 'redemption', 'gift', 'promotion', 'migration'
+	SourceOrderId string `json:"source_order_id" gorm:"type:varchar(64)"`           // Related order/redemption ID
+	AssignedBy    int    `json:"assigned_by" gorm:"default:0"`                      // Admin ID who assigned this plan
+	PurchasedAt   int64  `json:"purchased_at" gorm:"default:0"`                     // Purchase timestamp
 
 	// Refund management
-	RefundStatus        string `json:"refund_status" gorm:"type:varchar(20);default:'none'"` // 'none', 'refund_requested', 'refunded', 'rejected'
-	RefundRequestedAt   int64  `json:"refund_requested_at" gorm:"default:0"`
-	RefundProcessedAt   int64  `json:"refund_processed_at" gorm:"default:0"`
-	RefundProcessedBy   int    `json:"refund_processed_by" gorm:"default:0"`
-	RefundRejectReason  string `json:"refund_reject_reason" gorm:"type:varchar(255)"`
+	RefundStatus       string `json:"refund_status" gorm:"type:varchar(20);default:'none'"` // 'none', 'refund_requested', 'refunded', 'rejected'
+	RefundRequestedAt  int64  `json:"refund_requested_at" gorm:"default:0"`
+	RefundProcessedAt  int64  `json:"refund_processed_at" gorm:"default:0"`
+	RefundProcessedBy  int    `json:"refund_processed_by" gorm:"default:0"`
+	RefundRejectReason string `json:"refund_reject_reason" gorm:"type:varchar(255)"`
 
 	// Override fields - allow per-user customization of plan defaults
 	// -1 means use plan default, 0 means no limit, >0 is custom limit
@@ -71,11 +72,11 @@ type UserPlan struct {
 	PlanPriority    int    `json:"plan_priority" gorm:"default:0;index:idx_user_plans_priority"`
 
 	// Routing & access control snapshots (Phase 2 - for complete decoupling)
-	PlanType            string `json:"plan_type" gorm:"type:varchar(20);default:''"`           // "subscription", "consumption", "trial", etc.
-	PlanChannelGroup    string `json:"plan_channel_group" gorm:"type:varchar(64);default:''"`  // Legacy single channel group
-	PlanChannelGroups   string `json:"plan_channel_groups" gorm:"type:text"`                    // JSON array: ["group1","group2"]
-	PlanRateLimitRules  string `json:"plan_rate_limit_rules" gorm:"type:text"`                  // JSON serialized rate limit rules
-	PlanDailyQuotaLimit int64  `json:"plan_daily_quota_limit" gorm:"default:-1"`                // -1=unlimited, 0=no daily limit, >0=limit
+	PlanType            string `json:"plan_type" gorm:"type:varchar(20);default:''"`          // "subscription", "consumption", "trial", etc.
+	PlanChannelGroup    string `json:"plan_channel_group" gorm:"type:varchar(64);default:''"` // Legacy single channel group
+	PlanChannelGroups   string `json:"plan_channel_groups" gorm:"type:text"`                  // JSON array: ["group1","group2"]
+	PlanRateLimitRules  string `json:"plan_rate_limit_rules" gorm:"type:text"`                // JSON serialized rate limit rules
+	PlanDailyQuotaLimit int64  `json:"plan_daily_quota_limit" gorm:"default:-1"`              // -1=unlimited, 0=no daily limit, >0=limit
 
 	// Associations (for preloading - Plan is for admin reference only after migration)
 	Plan *Plan `json:"plan,omitempty" gorm:"foreignKey:PlanId;constraint:OnDelete:SET NULL,OnUpdate:CASCADE"`
@@ -94,12 +95,12 @@ const (
 
 // UserPlan source types
 const (
-	UserPlanSourcePurchase   = "purchase"
+	UserPlanSourcePurchase    = "purchase"
 	UserPlanSourceAdminAssign = "admin_assign"
-	UserPlanSourceRedemption = "redemption"
-	UserPlanSourceGift       = "gift"
-	UserPlanSourcePromotion  = "promotion"
-	UserPlanSourceMigration  = "migration"
+	UserPlanSourceRedemption  = "redemption"
+	UserPlanSourceGift        = "gift"
+	UserPlanSourcePromotion   = "promotion"
+	UserPlanSourceMigration   = "migration"
 )
 
 // Refund status
@@ -911,12 +912,12 @@ func GetUserPlansAdmin(userId int, pageInfo *common.PageInfo) ([]*UserPlan, int6
 // MaxQueueSize is the maximum number of plans a user can have in queue
 const MaxQueueSize = 10
 
-// GetUserQueuedPlans returns all non-current plans for a user ordered by purchase order
+// GetUserQueuedPlans returns all non-current plans for a user ordered by queue position
 func GetUserQueuedPlans(userId int) ([]*UserPlan, error) {
 	var userPlans []*UserPlan
 	err := DB.Preload("Plan").
 		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0", userId, UserPlanStatusActive).
-		Order("purchase_order ASC, queue_position ASC").
+		Order("queue_position ASC, purchase_order ASC").
 		Find(&userPlans).Error
 	if err != nil {
 		return nil, err
@@ -1056,11 +1057,12 @@ func AddPlanToQueue(userId int, planId int, quota int64, source string, sourceOr
 	return userPlan, nil
 }
 
-// recalculateQueuePositions reorders queue positions based on purchase order
+// recalculateQueuePositions reorders queue positions to ensure sequential numbering
+// while preserving relative order (based on existing queue_position)
 func recalculateQueuePositions(userId int) error {
 	var plans []*UserPlan
 	err := DB.Where("user_id = ? AND is_current = 0 AND status = ?", userId, UserPlanStatusActive).
-		Order("purchase_order ASC").
+		Order("queue_position ASC, purchase_order ASC").
 		Find(&plans).Error
 	if err != nil {
 		return err
@@ -1109,7 +1111,7 @@ func ReorderQueue(userId int, newOrder []int) error {
 	for _, id := range newOrder {
 		var plan UserPlan
 		if err := DB.First(&plan, id).Error; err != nil {
-			return errors.New("套餐不存在: " + string(rune(id)))
+			return errors.New("套餐不存在: " + strconv.Itoa(id))
 		}
 		if plan.UserId != userId {
 			return errors.New("套餐不属于该用户")
@@ -1264,4 +1266,3 @@ func CompleteCurrentPlan(userId int, completionStatus int) (*UserPlan, error) {
 	// Activate next plan
 	return ActivateNextQueuedPlan(userId)
 }
-
