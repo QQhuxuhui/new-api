@@ -478,10 +478,11 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
   const columns = [
     {
       title: t('套餐名称'),
-      dataIndex: ['plan', 'name'],
+      dataIndex: 'plan_display_name',
       render: (text, record) => (
         <Space>
-          {text || t('未知套餐')}
+          {/* 优先使用快照数据，fallback 到实时数据 */}
+          {text || record.plan_name || record.plan?.display_name || record.plan?.name || t('未知套餐')}
           {record.is_current === 1 && (
             <Tag color="green" size="small">{t('当前')}</Tag>
           )}
@@ -493,8 +494,12 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
     },
     {
       title: t('类型'),
-      dataIndex: ['plan', 'type'],
-      render: (text) => renderPlanType(text),
+      dataIndex: 'plan_type',
+      render: (text, record) => {
+        // 优先使用快照数据，fallback 到实时数据
+        const type = text || record.plan?.type;
+        return renderPlanType(type);
+      },
     },
     {
       title: t('额度'),
@@ -503,7 +508,11 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
     },
     {
       title: t('优先级'),
-      dataIndex: ['plan', 'priority'],
+      dataIndex: 'plan_priority',
+      render: (text, record) => {
+        // 优先使用快照数据，fallback 到实时数据
+        return text !== undefined ? text : record.plan?.priority;
+      },
       width: 80,
     },
     {
@@ -828,9 +837,11 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
             {/* Plan Info */}
             <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded">
               <Text type="secondary">{t('套餐')}: </Text>
-              <Text strong>{selectedPlan.plan_display_name || selectedPlan.plan?.display_name || selectedPlan.plan?.name}</Text>
+              {/* 优先使用快照数据 */}
+              <Text strong>{selectedPlan.plan_display_name || selectedPlan.plan_name || selectedPlan.plan?.display_name || selectedPlan.plan?.name}</Text>
               <Text type="secondary" className="ml-4">{t('类型')}: </Text>
-              {renderPlanType(selectedPlan.plan?.type)}
+              {/* 优先使用快照数据 */}
+              {renderPlanType(selectedPlan.plan_type || selectedPlan.plan?.type)}
             </div>
 
             {/* Quota */}
