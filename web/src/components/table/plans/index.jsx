@@ -425,12 +425,27 @@ const PlansTable = () => {
   const [formDailyQuotaLimit, setFormDailyQuotaLimit] = useState(0);
   const [formQuotaUsd, setFormQuotaUsd] = useState(0);
   const [formDailyQuotaLimitUsd, setFormDailyQuotaLimitUsd] = useState(0);
+  const [quotaPerUnit, setQuotaPerUnit] = useState(null);
+
+  // Load quota_per_unit from localStorage
+  useEffect(() => {
+    const loadQuotaPerUnit = () => {
+      const value = localStorage.getItem('quota_per_unit');
+      const parsed = parseFloat(value);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        setQuotaPerUnit(parsed);
+      } else {
+        setQuotaPerUnit(null);
+        showError(t('系统配置错误：quota_per_unit 未设置或无效，请联系管理员配置'));
+      }
+    };
+    loadQuotaPerUnit();
+  }, []);
 
   // Helper function to convert USD to token quota
   const convertUsdToQuota = (usdAmount) => {
-    let quotaPerUnit = localStorage.getItem('quota_per_unit');
-    quotaPerUnit = parseFloat(quotaPerUnit);
-    if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) {
+    if (!quotaPerUnit || quotaPerUnit <= 0) {
+      showError(t('无法转换额度：系统配置 quota_per_unit 无效'));
       return 0;
     }
     return Math.round(usdAmount * quotaPerUnit);
@@ -438,9 +453,7 @@ const PlansTable = () => {
 
   // Helper function to convert token quota to USD
   const convertQuotaToUsd = (quota) => {
-    let quotaPerUnit = localStorage.getItem('quota_per_unit');
-    quotaPerUnit = parseFloat(quotaPerUnit);
-    if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) {
+    if (!quotaPerUnit || quotaPerUnit <= 0) {
       return 0;
     }
     return quota / quotaPerUnit;
@@ -615,8 +628,9 @@ const PlansTable = () => {
             min={0}
             precision={2}
             prefix="$"
-            extraText={t('套餐包含的消费额度（美元）')}
+            extraText={quotaPerUnit ? t('套餐包含的消费额度（美元）') : t('⚠️ 系统配置 quota_per_unit 无效，无法输入')}
             initValue={formQuotaUsd}
+            disabled={!quotaPerUnit}
             onChange={(value) => {
               setFormQuotaUsd(value || 0);
               // Auto-calculate token quota
@@ -644,8 +658,9 @@ const PlansTable = () => {
                 precision={2}
                 prefix="$"
                 suffix={t('（订阅套餐）')}
-                extraText={t('每日最大消费额度，0表示无限制')}
+                extraText={quotaPerUnit ? t('每日最大消费额度，0表示无限制') : t('⚠️ 系统配置 quota_per_unit 无效，无法输入')}
                 initValue={formDailyQuotaLimitUsd}
+                disabled={!quotaPerUnit}
                 onChange={(value) => {
                   setFormDailyQuotaLimitUsd(value || 0);
                   // Auto-calculate token quota

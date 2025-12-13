@@ -44,7 +44,7 @@ import {
   IconGift,
   IconRefresh,
 } from '@douyinfe/semi-icons';
-import { API, showError } from '../../helpers';
+import { API, showError, convertUSDToCurrency } from '../../helpers';
 import { StatusContext } from '../../context/Status';
 
 const { Title, Text } = Typography;
@@ -55,11 +55,12 @@ const isLoggedIn = () => {
   return !!user;
 };
 
-// 格式化额度显示（显示美元金额）
+// 格式化额度显示（遵循系统货币配置）
 const formatQuotaDisplay = (quotaUsd, defaultQuota) => {
   // 优先使用 quota_usd（后端直接提供的美元金额）
   if (quotaUsd && quotaUsd > 0) {
-    return `$${quotaUsd}`;
+    // 使用系统的货币配置转换美元金额
+    return convertUSDToCurrency(quotaUsd);
   }
   // 否则显示原始 tokens 数值
   if (defaultQuota && defaultQuota > 0) {
