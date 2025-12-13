@@ -261,6 +261,11 @@ func UserSwitchPlan(userId int, targetPlanId int) error {
 		return errors.New("target plan is not available")
 	}
 
+	// CRITICAL: Check if target plan is in queue - queued plans cannot be manually switched
+	if targetUserPlan.QueuePosition > 0 {
+		return errors.New("cannot switch to a queued plan - queued plans will automatically activate when ready")
+	}
+
 	// Check permission - either from current plan or target plan
 	canSwitch := false
 	if currentPlan != nil && currentPlan.CanUserSwitch() {
@@ -301,6 +306,11 @@ func UserSwitchPlanByUserPlanId(userId int, targetUserPlanId int) error {
 	// Check if target plan is valid
 	if !targetUserPlan.IsValid() {
 		return errors.New("target plan is not available")
+	}
+
+	// CRITICAL: Check if target plan is in queue - queued plans cannot be manually switched
+	if targetUserPlan.QueuePosition > 0 {
+		return errors.New("cannot switch to a queued plan - queued plans will automatically activate when ready")
 	}
 
 	// Check permission - either from current plan or target plan

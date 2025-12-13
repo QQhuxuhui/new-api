@@ -569,6 +569,7 @@ const MyPlans = () => {
     const canSwitch = userPlan.can_switch === 1;
     const canToggleAuto = userPlan.can_toggle_auto === 1;
     const autoSwitchEnabled = userPlan.auto_switch === 1;
+    const isQueued = (userPlan.queue_position || 0) > 0; // 在排队中
     const plan = userPlan.plan || {};
 
     return (
@@ -630,17 +631,17 @@ const MyPlans = () => {
             </div>
 
             {/* Switch Action (Top Right for Desktop) */}
-            {!isCurrent && canSwitch && !isLocked && (
+            {!isCurrent && canSwitch && !isLocked && !isQueued && (
               <Popconfirm
                 title={t('确认切换到此套餐？')}
                 content={t('切换后将使用此套餐的额度和渠道配置')}
                 onConfirm={() => handleSwitchPlan(userPlan.id)}
                 okType="primary"
               >
-                <Button 
-                  theme='light' 
-                  type='primary' 
-                  icon={<IconArrowRight />} 
+                <Button
+                  theme='light'
+                  type='primary'
+                  icon={<IconArrowRight />}
                   iconPosition="right"
                   className='hidden md:flex bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200'
                   style={{ borderRadius: '12px' }}
@@ -708,16 +709,16 @@ const MyPlans = () => {
 
             <div className='w-full sm:w-auto flex justify-end'>
                {/* Mobile Switch Button */}
-              {!isCurrent && canSwitch && !isLocked && (
+              {!isCurrent && canSwitch && !isLocked && !isQueued && (
                 <Popconfirm
                   title={t('确认切换到此套餐？')}
                   content={t('切换后将使用此套餐的额度和渠道配置')}
                   onConfirm={() => handleSwitchPlan(userPlan.id)}
                   okType="primary"
                 >
-                  <Button 
-                    theme='solid' 
-                    type='primary' 
+                  <Button
+                    theme='solid'
+                    type='primary'
                     block
                     className='md:hidden w-full'
                     style={{ borderRadius: '12px', height: '40px' }}
@@ -726,15 +727,24 @@ const MyPlans = () => {
                   </Button>
                 </Popconfirm>
               )}
-              
-              {!isCurrent && !canSwitch && !isLocked && (
+
+              {!isCurrent && !canSwitch && !isLocked && !isQueued && (
                 <Tooltip content={t('请联系管理员或满足特定条件后切换')}>
                   <Tag color='grey' style={{ borderRadius: '8px', padding: '6px 12px' }}>
                     {t('暂不可手动切换')}
                   </Tag>
                 </Tooltip>
               )}
-              
+
+              {!isCurrent && isQueued && (
+                <Tooltip content={t('排队中的套餐将在当前套餐耗尽或过期后自动激活，无法手动切换')}>
+                  <Tag color='blue' style={{ borderRadius: '8px', padding: '6px 12px' }}>
+                    <IconClock className='mr-1' />
+                    {t('排队中')} #{userPlan.queue_position}
+                  </Tag>
+                </Tooltip>
+              )}
+
               {isLocked && (
                 <Tag color='red' style={{ borderRadius: '8px', padding: '6px 12px' }}>
                   {t('套餐锁定中')}
