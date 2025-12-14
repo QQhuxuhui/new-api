@@ -57,6 +57,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       enabled: true,
       topup: true,
       myplans: true,
+      'my-orders': true,
       personal: true,
     },
     admin: {
@@ -64,6 +65,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       channel: true,
       models: true,
       plan: true,
+      'plan-orders': true,
       redemption: true,
       user: true,
       analytics: true,
@@ -119,6 +121,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         enabled: true,
         topup: true,
         myplans: true,
+        'my-orders': true,
         personal: true,
       },
       admin: {
@@ -126,6 +129,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         channel: true,
         models: true,
         plan: true,
+        'plan-orders': true,
         redemption: true,
         user: true,
         analytics: true,
@@ -199,12 +203,13 @@ export default function SettingsSidebarModulesAdmin(props) {
       midjourney: true,
       task: true,
     },
-    personal: { enabled: true, topup: true, myplans: true, personal: true },
+    personal: { enabled: true, topup: true, myplans: true, 'my-orders': true, personal: true },
     admin: {
       enabled: true,
       channel: true,
       models: true,
       plan: true,
+      'plan-orders': true,
       redemption: true,
       user: true,
       analytics: true,
@@ -263,6 +268,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       modules: [
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
         { key: 'myplans', title: t('我的套餐'), description: t('用户套餐管理') },
+        { key: 'my-orders', title: t('我的订单'), description: t('套餐购买订单') },
         {
           key: 'personal',
           title: t('个人设置'),
@@ -278,6 +284,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
         { key: 'plan', title: t('套餐管理'), description: t('套餐配置管理') },
+        { key: 'plan-orders', title: t('套餐订单'), description: t('套餐订单管理') },
         {
           key: 'redemption',
           title: t('兑换码管理'),

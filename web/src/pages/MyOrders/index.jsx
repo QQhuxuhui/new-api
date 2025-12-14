@@ -137,7 +137,7 @@ const MyOrders = () => {
       width: 120,
       render: (price) => (
         <span style={{ fontWeight: 600, color: 'var(--semi-color-primary)' }}>
-          ${price?.toFixed(2) || '0.00'}
+          ¥{price?.toFixed(2) || '0.00'}
         </span>
       ),
     },

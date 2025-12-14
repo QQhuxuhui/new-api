@@ -94,6 +94,8 @@ export default function SettingsSidebarModulesUser() {
       defaultConfig.personal = {
         enabled: true,
         topup: isSidebarModuleAllowed('personal', 'topup'),
+        myplans: isSidebarModuleAllowed('personal', 'myplans'),
+        'my-orders': isSidebarModuleAllowed('personal', 'my-orders'),
         personal: isSidebarModuleAllowed('personal', 'personal'),
       };
     }
@@ -308,6 +310,8 @@ export default function SettingsSidebarModulesUser() {
       description: t('用户个人功能'),
       modules: [
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
+        { key: 'myplans', title: t('我的套餐'), description: t('用户套餐管理') },
+        { key: 'my-orders', title: t('我的订单'), description: t('套餐购买订单') },
         {
           key: 'personal',
           title: t('个人设置'),

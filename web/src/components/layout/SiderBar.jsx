@@ -36,6 +36,7 @@ const routerMap = {
   token: '/console/token',
   redemption: '/console/redemption',
   plan: '/console/plan',
+  'plan-orders': '/console/admin/plan-orders',
   plans: '/plans',
   topup: '/console/topup',
   user: '/console/user',
@@ -50,6 +51,7 @@ const routerMap = {
   playground: '/console/playground',
   personal: '/console/personal',
   myplans: '/console/myplans',
+  'my-orders': '/console/my-orders',
   analytics: '/console/analytics',
 };
 
@@ -137,6 +139,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/myplans',
       },
       {
+        text: t('我的订单'),
+        itemKey: 'my-orders',
+        to: '/my-orders',
+      },
+      {
         text: t('个人设置'),
         itemKey: 'personal',
         to: '/personal',
@@ -170,6 +177,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('套餐管理'),
         itemKey: 'plan',
         to: '/console/plan',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('套餐订单'),
+        itemKey: 'plan-orders',
+        to: '/console/admin/plan-orders',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

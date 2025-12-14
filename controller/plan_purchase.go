@@ -149,7 +149,7 @@ func PayPlanOrder(c *gin.Context) {
 	}
 
 	callBackAddress := planservice.GetCallbackAddress()
-	returnUrl, _ := url.Parse(system_setting.ServerAddress + "/console/orders")
+	returnUrl, _ := url.Parse(system_setting.ServerAddress + "/console/my-orders")
 	notifyUrl, _ := url.Parse(callBackAddress + "/api/plan/purchase/epay/notify")
 
 	// Generate payment name

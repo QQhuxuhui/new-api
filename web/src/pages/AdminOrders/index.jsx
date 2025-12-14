@@ -179,7 +179,7 @@ const AdminOrders = () => {
       width: 100,
       render: (price) => (
         <span style={{ fontWeight: 600 }}>
-          ${price?.toFixed(2) || '0.00'}
+          ¥{price?.toFixed(2) || '0.00'}
         </span>
       ),
     },
