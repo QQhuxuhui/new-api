@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -866,15 +867,41 @@ func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPl
 
 // RemovePlanFromUser removes a plan from a user
 func RemovePlanFromUser(userId, planId int) error {
-	result := DB.Where("user_id = ? AND plan_id = ?", userId, planId).Delete(&UserPlan{})
+	// 1. 查找要删除的套餐
+	var userPlan UserPlan
+	err := DB.Where("user_id = ? AND plan_id = ?", userId, planId).First(&userPlan).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("未找到指定的用户套餐")
+		}
+		return err
+	}
+
+	// 2. 检查是否有关联订单（仅作日志记录，不阻止删除）
+	var orderCount int64
+	DB.Model(&PlanOrder{}).Where("user_plan_id = ?", userPlan.Id).Count(&orderCount)
+
+	if orderCount > 0 {
+		common.SysLog(
+			fmt.Sprintf("删除用户套餐 ID=%d（用户ID=%d, 套餐ID=%d, 套餐名=%s），关联 %d 个订单（订单的 user_plan_id 将自动设为 NULL，订单快照数据保留完整）",
+				userPlan.Id, userId, planId, userPlan.PlanName, orderCount),
+		)
+	} else {
+		common.SysLog(
+			fmt.Sprintf("删除用户套餐 ID=%d（用户ID=%d, 套餐ID=%d, 套餐名=%s），无关联订单",
+				userPlan.Id, userId, planId, userPlan.PlanName),
+		)
+	}
+
+	// 3. 删除套餐（外键约束会自动将订单的 user_plan_id 设为 NULL）
+	result := DB.Delete(&userPlan)
 	if result.Error != nil {
 		return result.Error
 	}
-	if result.RowsAffected == 0 {
-		return errors.New("未找到指定的用户套餐")
-	}
-	// Invalidate cache after successful deletion
+
+	// 4. 清理缓存
 	InvalidateUserPlanCache(userId)
+
 	return nil
 }
 

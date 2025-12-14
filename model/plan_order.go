@@ -23,8 +23,12 @@ type PlanOrder struct {
 	FinalPrice        float64 `json:"final_price" gorm:"type:decimal(10,2);not null"`         // Final payment amount
 
 	// Plan info snapshot (preserve plan details at purchase time)
-	PlanName        string `json:"plan_name" gorm:"type:varchar(255)"`         // Plan name snapshot
-	PlanDisplayName string `json:"plan_display_name" gorm:"type:varchar(255)"` // Plan display name snapshot
+	PlanName         string `json:"plan_name" gorm:"type:varchar(255)"`         // Plan name snapshot
+	PlanDisplayName  string `json:"plan_display_name" gorm:"type:varchar(255)"` // Plan display name snapshot
+	PlanQuota        int64  `json:"plan_quota"`                                 // Plan quota snapshot
+	PlanValidityDays int    `json:"plan_validity_days"`                         // Plan validity days snapshot (0 = permanent)
+	PlanCategory     string `json:"plan_category" gorm:"type:varchar(20)"`      // Plan category snapshot (daily/weekly/monthly/payg)
+	PlanType         string `json:"plan_type" gorm:"type:varchar(20)"`          // Plan type snapshot (subscription/consumption/trial/enterprise)
 
 	// Payment information
 	PaymentMethod  string `json:"payment_method" gorm:"type:varchar(50)"`   // alipay, wechat, stripe, creem
@@ -149,8 +153,12 @@ func CreatePlanOrder(userId int, planId int) (*PlanOrder, error) {
 			PlanPrice:          planPrice,
 			PlanOriginalPrice:  originalPrice,
 			FinalPrice:         finalPrice,
-			PlanName:           plan.Name,        // Save plan name snapshot
-			PlanDisplayName:    plan.DisplayName, // Save plan display name snapshot
+			PlanName:           plan.Name,           // Save plan name snapshot
+			PlanDisplayName:    plan.DisplayName,    // Save plan display name snapshot
+			PlanQuota:          plan.DefaultQuota,   // Save plan quota snapshot
+			PlanValidityDays:   plan.ValidityDays,   // Save plan validity days snapshot
+			PlanCategory:       plan.Category,       // Save plan category snapshot
+			PlanType:           plan.Type,           // Save plan type snapshot
 			Status:             OrderStatusPending,
 			CreatedAt:          now,
 			ExpiredAt:          expiredAt,
