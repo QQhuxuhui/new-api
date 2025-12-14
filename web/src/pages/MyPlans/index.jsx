@@ -499,7 +499,8 @@ const MyPlans = () => {
                   </Text>
                 </div>
               </div>
-              {plan.is_refundable && (
+              {/* 暂时隐藏退款按钮 - 平台暂不支持用户自主退款 */}
+              {false && plan.is_refundable && (
                 <Tooltip content={t('申请退款')}>
                   <Button
                     size='small'
@@ -917,7 +918,8 @@ const MyPlans = () => {
                         </div>
                       </div>
                     </div>
-                    {plan.is_refundable && (
+                    {/* 暂时隐藏退款按钮 - 平台暂不支持用户自主退款 */}
+                    {false && plan.is_refundable && (
                       <Button
                         size='small'
                         type='warning'

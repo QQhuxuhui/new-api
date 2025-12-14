@@ -57,6 +57,7 @@ export const useSidebar = () => {
       enabled: true,
       topup: true,
       myplans: true,
+      'my-orders': true,
       personal: true,
     },
     admin: {
@@ -64,6 +65,7 @@ export const useSidebar = () => {
       channel: true,
       models: true,
       plan: true,
+      'plan-orders': true,
       redemption: true,
       user: true,
       setting: true,
