@@ -530,7 +530,18 @@ const MyPlans = () => {
 
   // Render expiration info
   const renderExpiration = (userPlan) => {
+    const isQueued = (userPlan.queue_position || 0) > 0;
+    const validityDays = userPlan.plan_validity_days || userPlan.plan?.validity_days || 0;
+
+    // For queued plans with expires_at = 0, show validity duration instead of "永久有效"
     if (!userPlan.expires_at) {
+      if (isQueued && validityDays > 0) {
+        return (
+          <Tag color='cyan' type='light' shape='circle'>
+            {t('生效后')} {validityDays} {t('天')}
+          </Tag>
+        );
+      }
       return (
         <Tag color='green' type='light' shape='circle'>
           {t('永久有效')}

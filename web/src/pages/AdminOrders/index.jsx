@@ -72,7 +72,7 @@ const AdminOrders = () => {
       if (filters.userId) params.append('user_id', filters.userId);
       if (filters.orderNo) params.append('order_no', filters.orderNo);
 
-      const res = await API.get(`/api/user/admin/plan-orders?${params.toString()}`);
+      const res = await API.get(`/api/user/plan-orders?${params.toString()}`);
       const { success, message, data } = res.data;
       if (success && data) {
         setOrders(data.orders || []);
@@ -116,7 +116,7 @@ const AdminOrders = () => {
       content: t('确认要手动完成该订单并发放套餐吗？此操作不可撤销。'),
       onOk: async () => {
         try {
-          const res = await API.post(`/api/user/admin/plan-orders/${orderId}/complete`);
+          const res = await API.post(`/api/user/plan-orders/${orderId}/complete`);
           const { success, message } = res.data;
           if (success) {
             showSuccess(t('操作成功'));

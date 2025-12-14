@@ -78,6 +78,7 @@ type UserPlan struct {
 	PlanChannelGroups   string `json:"plan_channel_groups" gorm:"type:text"`                  // JSON array: ["group1","group2"]
 	PlanRateLimitRules  string `json:"plan_rate_limit_rules" gorm:"type:text"`                // JSON serialized rate limit rules
 	PlanDailyQuotaLimit int64  `json:"plan_daily_quota_limit" gorm:"default:-1"`              // -1=unlimited, 0=no daily limit, >0=limit
+	PlanValidityDays    int    `json:"plan_validity_days" gorm:"default:0"`                   // Validity in days (0=permanent), used for queued plans display
 
 	// Associations (for preloading - Plan is for admin reference only after migration)
 	Plan *Plan `json:"plan,omitempty" gorm:"foreignKey:PlanId;constraint:OnDelete:SET NULL,OnUpdate:CASCADE"`
@@ -804,6 +805,8 @@ func ExpireUserPlans() (int64, error) {
 }
 
 // AssignPlanToUser assigns a plan to a user with default settings from the plan
+// If user has a current plan, the new plan is added to queue (expires_at calculated when activated)
+// If user has no current plan, the new plan is activated immediately (expires_at calculated now)
 func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPlan, error) {
 	// Get plan details
 	plan, err := GetPlanById(planId)
@@ -814,14 +817,21 @@ func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPl
 		return nil, errors.New("套餐已禁用")
 	}
 
-	// Calculate expiration if not specified
-	if expiresAt == 0 && plan.ValidityDays > 0 {
-		expiresAt = time.Now().Add(time.Duration(plan.ValidityDays) * 24 * time.Hour).UnixMilli()
-	}
-
 	// Use default quota if not specified
 	if quota == 0 {
 		quota = plan.DefaultQuota
+	}
+
+	now := time.Now()
+
+	// Check if user has current plan
+	currentPlan, _ := GetUserCurrentPlan(userId)
+	hasCurrentPlan := currentPlan != nil
+
+	// Get next queue position (needed if going to queue)
+	nextPos, err := GetNextQueuePosition(userId)
+	if err != nil {
+		return nil, err
 	}
 
 	userPlan := &UserPlan{
@@ -829,14 +839,16 @@ func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPl
 		PlanId:          &planId,
 		Quota:           quota,
 		UsedQuota:       0,
-		IsCurrent:       0,
+		OriginalQuota:   quota,
+		IsCurrent:       0, // Will be set to 1 if no current plan
 		AutoSwitch:      1,
 		AllowUserSwitch: plan.DefaultAllowSwitch,
 		AllowUserToggle: plan.DefaultAllowToggle,
 		Locked:          0,
-		StartedAt:       time.Now().UnixMilli(),
-		ExpiresAt:       expiresAt,
 		Status:          UserPlanStatusActive,
+		QueuePosition:   nextPos, // Will be set to 0 if activated immediately
+		Source:          "admin_assign",
+		PurchaseOrder:   now.UnixMilli(),
 		// Display & sorting snapshots
 		PlanName:        plan.Name,
 		PlanDisplayName: plan.DisplayName,
@@ -848,18 +860,32 @@ func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPl
 		PlanChannelGroups:   plan.ChannelGroups,
 		PlanRateLimitRules:  plan.RateLimitRules,
 		PlanDailyQuotaLimit: plan.DailyQuotaLimit,
+		PlanValidityDays:    plan.ValidityDays,
 	}
+
+	// If no current plan, activate immediately and calculate expiration
+	if !hasCurrentPlan {
+		userPlan.IsCurrent = 1
+		userPlan.QueuePosition = 0
+		userPlan.StartedAt = now.UnixMilli()
+
+		// Calculate expiration only when activating
+		if expiresAt == 0 && plan.ValidityDays > 0 {
+			expiresAt = now.Add(time.Duration(plan.ValidityDays) * 24 * time.Hour).UnixMilli()
+		}
+		userPlan.ExpiresAt = expiresAt
+		userPlan.OriginalExpiresAt = expiresAt
+	}
+	// If user has current plan, the new plan goes to queue with expires_at = 0
+	// (expiration will be calculated when ActivateNextQueuedPlan is called)
 
 	if err := userPlan.Insert(); err != nil {
 		return nil, err
 	}
 
-	// If this is the user's first plan, make it current
-	var count int64
-	DB.Model(&UserPlan{}).Where("user_id = ? AND is_current = 1", userId).Count(&count)
-	if count == 0 {
-		userPlan.IsCurrent = 1
-		DB.Model(userPlan).Update("is_current", 1)
+	// Recalculate queue positions if added to queue
+	if hasCurrentPlan {
+		_ = recalculateQueuePositions(userId)
 	}
 
 	return userPlan, nil
@@ -1056,6 +1082,7 @@ func AddPlanToQueue(userId int, planId int, quota int64, source string, sourceOr
 		PlanChannelGroups:   plan.ChannelGroups,
 		PlanRateLimitRules:  plan.RateLimitRules,
 		PlanDailyQuotaLimit: plan.DailyQuotaLimit,
+		PlanValidityDays:    plan.ValidityDays,
 	}
 
 	// If no current plan, activate immediately
@@ -1233,10 +1260,14 @@ func ActivateNextQueuedPlan(userId int) (*UserPlan, error) {
 
 	now := time.Now()
 
-	// Calculate expiry
+	// Calculate expiry using snapshot field first, fallback to Plan association
 	var expiresAt int64
-	if nextPlan.Plan != nil && nextPlan.Plan.ValidityDays > 0 {
-		expiresAt = now.Add(time.Duration(nextPlan.Plan.ValidityDays) * 24 * time.Hour).UnixMilli()
+	validityDays := nextPlan.PlanValidityDays // Use snapshot field
+	if validityDays == 0 && nextPlan.Plan != nil {
+		validityDays = nextPlan.Plan.ValidityDays // Fallback to Plan association
+	}
+	if validityDays > 0 {
+		expiresAt = now.Add(time.Duration(validityDays) * 24 * time.Hour).UnixMilli()
 	}
 
 	// Activate the plan

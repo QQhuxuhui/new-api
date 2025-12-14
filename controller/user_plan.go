@@ -589,12 +589,16 @@ type UserPlanResponse struct {
 	EffectiveDailyLimit     int64        `json:"effective_daily_limit"`      // Computed effective daily limit
 	Plan                    *model.Plan  `json:"plan,omitempty"`
 
+	// Queue management fields
+	QueuePosition int `json:"queue_position"` // Position in queue (0 = current/not in queue)
+
 	// Snapshot fields from UserPlan - for frontend display when Plan is deleted
-	PlanName        string `json:"plan_name"`
-	PlanDisplayName string `json:"plan_display_name"`
-	PlanCategory    string `json:"plan_category"`
-	PlanType        string `json:"plan_type"`
-	PlanPriority    int    `json:"plan_priority"`
+	PlanName         string `json:"plan_name"`
+	PlanDisplayName  string `json:"plan_display_name"`
+	PlanCategory     string `json:"plan_category"`
+	PlanType         string `json:"plan_type"`
+	PlanPriority     int    `json:"plan_priority"`
+	PlanValidityDays int    `json:"plan_validity_days"` // Validity in days (0=permanent), for queued plans display
 }
 
 // convertToUserPlanResponse converts UserPlan to UserPlanResponse with mapped field names
@@ -629,12 +633,16 @@ func convertToUserPlanResponse(up *model.UserPlan) *UserPlanResponse {
 		EffectiveDailyLimit:     effectiveLimit,
 		Plan:                    up.Plan,
 
+		// Queue management fields
+		QueuePosition: up.QueuePosition,
+
 		// Include snapshot fields for frontend display (works even when Plan is deleted)
-		PlanName:        up.PlanName,
-		PlanDisplayName: up.PlanDisplayName,
-		PlanCategory:    up.PlanCategory,
-		PlanType:        up.PlanType,
-		PlanPriority:    up.PlanPriority,
+		PlanName:         up.PlanName,
+		PlanDisplayName:  up.PlanDisplayName,
+		PlanCategory:     up.PlanCategory,
+		PlanType:         up.PlanType,
+		PlanPriority:     up.PlanPriority,
+		PlanValidityDays: up.PlanValidityDays,
 	}
 }
 
