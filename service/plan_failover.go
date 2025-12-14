@@ -87,6 +87,10 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 		return nil, nil, "", nil
 	}
 
+	// Get token group constraint (if any)
+	tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+	hasTokenGroupConstraint := tokenGroup != "" && tokenGroup != "auto"
+
 	// Save original context to restore on failure
 	originalGroups, _ := c.Get("plan_groups")
 	originalGroup, _ := c.Get("plan_group")
@@ -103,6 +107,24 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 			logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) skipped: no channel groups configured",
 				userId, planName, candidate.Id))
 			continue
+		}
+
+		// Check token group constraint: if token specifies a group, only use plans that include it
+		if hasTokenGroupConstraint {
+			tokenGroupInPlan := false
+			for _, pg := range channelGroups {
+				if pg == tokenGroup {
+					tokenGroupInPlan = true
+					break
+				}
+			}
+			if !tokenGroupInPlan {
+				logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) skipped: token group %s not in plan groups %v",
+					userId, planName, candidate.Id, tokenGroup, channelGroups))
+				continue
+			}
+			// Only try the token group, not all plan groups
+			channelGroups = []string{tokenGroup}
 		}
 
 		logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d trying plan=%s(id=%d) groups=%v",
@@ -302,9 +324,19 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 	// Use UserPlan snapshot fields for channel groups
 	channelGroups := failoverPlan.GetChannelGroups()
 	if len(channelGroups) > 0 {
-		common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
-		common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
-		common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
+		// Check if token has a specific group constraint
+		tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+		if tokenGroup != "" && tokenGroup != "auto" {
+			// Token specified a group, only set that group (should match failoverGroup)
+			common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{tokenGroup})
+			common.SetContextKey(c, constant.ContextKeyPlanGroup, tokenGroup)
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, tokenGroup)
+		} else {
+			// No token group constraint, use all plan groups
+			common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
+			common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
+		}
 	}
 
 	return failoverChannel, failoverPlan, failoverGroup, true

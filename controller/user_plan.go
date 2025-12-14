@@ -118,6 +118,27 @@ func AdminRemovePlan(c *gin.Context) {
 	})
 }
 
+// AdminRemovePlanById removes a user plan by its ID (admin)
+// This endpoint is used when the plan template might be deleted and plan_id could be NULL
+func AdminRemovePlanById(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	err = model.RemovePlanByUserPlanId(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "套餐移除成功",
+	})
+}
+
 // AdminUpdateUserPlanPermissions updates permissions for a user plan (admin)
 func AdminUpdateUserPlanPermissions(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))

@@ -338,6 +338,7 @@ func SetApiRouter(router *gin.Engine) {
 			userPlanAdminRoute.PUT("/:id", controller.AdminUpdateUserPlan)                          // Update user plan (quota, expiry, daily limit override, etc.)
 			userPlanAdminRoute.POST("/assign", controller.AdminAssignPlan)
 			userPlanAdminRoute.POST("/remove", controller.AdminRemovePlan)
+			userPlanAdminRoute.DELETE("/:id", controller.AdminRemovePlanById) // Remove user plan by ID (supports deleted plan templates)
 			userPlanAdminRoute.PUT("/:id/permissions", controller.AdminUpdateUserPlanPermissions)
 			userPlanAdminRoute.POST("/force_switch", controller.AdminForceSwitch)
 			userPlanAdminRoute.POST("/:id/lock", controller.AdminLockUserPlan)

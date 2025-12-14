@@ -181,10 +181,8 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
   const handleRemovePlan = async (userPlan) => {
     setLoading(true);
     try {
-      const res = await API.post('/api/user_plan/remove', {
-        user_id: user.id,
-        plan_id: userPlan.plan_id,
-      });
+      // Use DELETE API with user_plan_id to support deleted plan templates
+      const res = await API.delete(`/api/user_plan/${userPlan.id}`);
       const { success, message } = res.data;
       if (success) {
         showSuccess(t('套餐移除成功'));

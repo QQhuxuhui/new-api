@@ -931,6 +931,73 @@ func RemovePlanFromUser(userId, planId int) error {
 	return nil
 }
 
+// RemovePlanByUserPlanId deletes a user plan by its ID (user_plan instance ID)
+// This function is used when the plan template might be deleted and plan_id could be NULL
+func RemovePlanByUserPlanId(userPlanId int) error {
+	// 1. 查找要删除的用户套餐
+	var userPlan UserPlan
+	err := DB.First(&userPlan, userPlanId).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("未找到指定的用户套餐")
+		}
+		return err
+	}
+
+	// 保存删除前的状态，用于后续处理
+	userId := userPlan.UserId
+	wasCurrent := userPlan.IsCurrent == 1
+
+	// 2. 检查是否有关联订单（仅作日志记录，不阻止删除）
+	var orderCount int64
+	DB.Model(&PlanOrder{}).Where("user_plan_id = ?", userPlan.Id).Count(&orderCount)
+
+	planIdStr := "NULL"
+	if userPlan.PlanId != nil {
+		planIdStr = fmt.Sprintf("%d", *userPlan.PlanId)
+	}
+
+	if orderCount > 0 {
+		common.SysLog(
+			fmt.Sprintf("删除用户套餐 ID=%d（用户ID=%d, 套餐ID=%s, 套餐名=%s），关联 %d 个订单（订单的 user_plan_id 将自动设为 NULL，订单快照数据保留完整）",
+				userPlan.Id, userPlan.UserId, planIdStr, userPlan.PlanName, orderCount),
+		)
+	} else {
+		common.SysLog(
+			fmt.Sprintf("删除用户套餐 ID=%d（用户ID=%d, 套餐ID=%s, 套餐名=%s），无关联订单",
+				userPlan.Id, userPlan.UserId, planIdStr, userPlan.PlanName),
+		)
+	}
+
+	// 3. 删除套餐（外键约束会自动将订单的 user_plan_id 设为 NULL）
+	result := DB.Delete(&userPlan)
+	if result.Error != nil {
+		return result.Error
+	}
+
+	// 4. 处理队列逻辑
+	if wasCurrent {
+		// 删除的是当前套餐，激活队列中的下一个套餐
+		nextPlan, activateErr := ActivateNextQueuedPlan(userId)
+		if activateErr != nil {
+			common.SysLog(fmt.Sprintf("激活队列下一个套餐失败: userId=%d, error=%v", userId, activateErr))
+		} else if nextPlan != nil {
+			common.SysLog(fmt.Sprintf("已激活队列下一个套餐: userId=%d, userPlanId=%d, planName=%s",
+				userId, nextPlan.Id, nextPlan.PlanName))
+		}
+	} else {
+		// 删除的是队列套餐，重排队列位置
+		if recalcErr := recalculateQueuePositions(userId); recalcErr != nil {
+			common.SysLog(fmt.Sprintf("重排队列位置失败: userId=%d, error=%v", userId, recalcErr))
+		}
+	}
+
+	// 5. 清理缓存
+	InvalidateUserPlanCache(userId)
+
+	return nil
+}
+
 // GetUserPlansAdmin retrieves user plans with pagination for admin
 func GetUserPlansAdmin(userId int, pageInfo *common.PageInfo) ([]*UserPlan, int64, error) {
 	var userPlans []*UserPlan

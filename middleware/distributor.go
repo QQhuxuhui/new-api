@@ -154,12 +154,36 @@ func Distribute() func(c *gin.Context) {
 							channelGroups = []string{planResult.ChannelGroup}
 						}
 						if len(channelGroups) > 0 {
-							// Set plan groups for channel selection
-							common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
-							// Set first group as primary for compatibility
-							common.SetContextKey(c, constant.ContextKeyPlanGroup, channelGroups[0])
-							usingGroup = channelGroups[0]
-							common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+							// Check if token has a specific group configured
+							tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+							if tokenGroup != "" && tokenGroup != "auto" {
+								// Token specified a group, verify it's within plan's allowed groups
+								tokenGroupInPlan := false
+								for _, pg := range channelGroups {
+									if pg == tokenGroup {
+										tokenGroupInPlan = true
+										break
+									}
+								}
+								if !tokenGroupInPlan {
+									abortWithOpenAiMessage(c, http.StatusForbidden,
+										fmt.Sprintf("令牌分组 %s 不在套餐允许的分组范围内", tokenGroup))
+									return
+								}
+								// Token group is within plan's allowed groups, use token group
+								usingGroup = tokenGroup
+								common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+								// Set only the token group as available (not all plan groups)
+								common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{tokenGroup})
+								common.SetContextKey(c, constant.ContextKeyPlanGroup, tokenGroup)
+							} else {
+								// Token has no specific group or is "auto", use all plan groups
+								common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
+								// Set first group as primary for compatibility
+								common.SetContextKey(c, constant.ContextKeyPlanGroup, channelGroups[0])
+								usingGroup = channelGroups[0]
+								common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+							}
 						}
 					}
 				}
@@ -392,10 +416,20 @@ func Distribute() func(c *gin.Context) {
 								// Use UserPlan snapshot fields for channel groups
 								channelGroups := failoverPlan.GetChannelGroups()
 								if len(channelGroups) > 0 {
-									common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
-									// Use the actual group where the channel was found
-									common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
-									common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
+									// Check if token has a specific group constraint
+									tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+									if tokenGroup != "" && tokenGroup != "auto" {
+										// Token specified a group, only set that group
+										common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{tokenGroup})
+										common.SetContextKey(c, constant.ContextKeyPlanGroup, tokenGroup)
+										common.SetContextKey(c, constant.ContextKeyUsingGroup, tokenGroup)
+									} else {
+										// No token group constraint, use all plan groups
+										common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
+										// Use the actual group where the channel was found
+										common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+										common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
+									}
 								}
 
 								// Use the failover channel
