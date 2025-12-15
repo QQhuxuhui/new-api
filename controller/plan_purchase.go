@@ -369,10 +369,26 @@ func EpayPlanOrderNotify(c *gin.Context) {
 			log.Printf("ALERT: payment received for cancelled order: order_no=%s, amount=%.2f. Processing as valid payment.",
 				orderNo, paymentAmount)
 			// Continue to process - update status to paid and deliver
+		case model.OrderStatusExpired:
+			// Order has expired - check if within grace period (5 minutes after expiration)
+			// This handles race condition: user initiates payment → background task marks order expired → callback arrives
+			gracePeriodMs := int64(5 * 60 * 1000) // 5 minutes grace period
+			now := time.Now().UnixMilli()
+			if now > order.ExpiredAt+gracePeriodMs {
+				// Beyond grace period - reject payment
+				log.Printf("REJECTED: payment for expired order beyond grace period: order_no=%s, expired_at=%d, now=%d",
+					orderNo, order.ExpiredAt, now)
+				return errors.New("订单已过期，无法支付")
+			}
+			// Within grace period - allow payment (race condition scenario)
+			log.Printf("ALERT: payment received for recently expired order within grace period: order_no=%s, amount=%.2f. Processing as valid payment.",
+				orderNo, paymentAmount)
+			// Continue to process - update status to paid and deliver
 		default:
-			// Unknown status - log warning and process as new payment
-			log.Printf("WARNING: unexpected order status during payment callback: order_no=%s, status=%s",
+			// Unknown status - reject payment for safety
+			log.Printf("REJECTED: unexpected order status during payment callback: order_no=%s, status=%s",
 				orderNo, order.Status)
+			return errors.New("订单状态异常，无法支付")
 		}
 
 		// Update order to paid

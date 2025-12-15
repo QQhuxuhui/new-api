@@ -236,42 +236,42 @@ func EpayNotify(c *gin.Context) {
 	client := GetEpayClient()
 	if client == nil {
 		log.Println("易支付回调失败 未找到配置信息")
-		_, err := c.Writer.Write([]byte("fail"))
-		if err != nil {
-			log.Println("易支付回调写入失败")
-		}
+		c.Writer.Write([]byte("fail"))
 		return
 	}
+
+	// Step 1: Verify signature
 	verifyInfo, err := client.Verify(params)
-	if err == nil && verifyInfo.VerifyStatus {
-		_, err := c.Writer.Write([]byte("success"))
-		if err != nil {
-			log.Println("易支付回调写入失败")
-		}
-	} else {
-		_, err := c.Writer.Write([]byte("fail"))
-		if err != nil {
-			log.Println("易支付回调写入失败")
-		}
+	if err != nil || !verifyInfo.VerifyStatus {
 		log.Println("易支付回调签名验证失败")
+		c.Writer.Write([]byte("fail"))
 		return
 	}
 
-	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
-		log.Println(verifyInfo)
-		LockOrder(verifyInfo.ServiceTradeNo)
-		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-
-		// 使用事务保证订单状态和用户余额同时更新
-		err := model.RechargeEpay(verifyInfo.ServiceTradeNo)
-		if err != nil {
-			log.Printf("易支付回调处理失败: %v, 订单号: %s", err, verifyInfo.ServiceTradeNo)
-			return
-		}
-		log.Printf("易支付回调处理成功，订单号: %s", verifyInfo.ServiceTradeNo)
-	} else {
-		log.Printf("易支付异常回调: %v", verifyInfo)
+	// Step 2: Check trade status - if not success, return success to stop retries
+	if verifyInfo.TradeStatus != epay.StatusTradeSuccess {
+		log.Printf("易支付异常回调（非成功状态）: %v", verifyInfo)
+		c.Writer.Write([]byte("success")) // Return success to stop retries for non-success status
+		return
 	}
+
+	// Step 3: Process successful payment
+	log.Println(verifyInfo)
+	LockOrder(verifyInfo.ServiceTradeNo)
+	defer UnlockOrder(verifyInfo.ServiceTradeNo)
+
+	// Step 4: Execute business logic in transaction
+	err = model.RechargeEpay(verifyInfo.ServiceTradeNo)
+	if err != nil {
+		log.Printf("易支付回调处理失败: %v, 订单号: %s", err, verifyInfo.ServiceTradeNo)
+		// Return fail to trigger gateway retry
+		c.Writer.Write([]byte("fail"))
+		return
+	}
+
+	// Step 5: Business logic succeeded - return success
+	log.Printf("易支付回调处理成功，订单号: %s", verifyInfo.ServiceTradeNo)
+	c.Writer.Write([]byte("success"))
 }
 
 func RequestAmount(c *gin.Context) {
