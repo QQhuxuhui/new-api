@@ -62,6 +62,11 @@ func handleGeminiFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 		return err
 	}
 
+	// 处理 thinking_to_content 转换（Gemini 格式也需要支持）
+	if info.ChannelSetting.ThinkingToContent {
+		applyThinkingToContentConversion(&streamResponse, info)
+	}
+
 	geminiResponse := service.StreamResponseOpenAI2Gemini(&streamResponse, info)
 
 	// 如果返回 nil，表示没有实际内容，跳过发送
@@ -79,6 +84,40 @@ func handleGeminiFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 	c.Render(-1, &common.CustomEvent{Data: "data: " + string(geminiResponseStr)})
 	_ = helper.FlushWriter(c)
 	return nil
+}
+
+// applyThinkingToContentConversion 将 reasoning 内容转换为 <think> 标签格式
+func applyThinkingToContentConversion(streamResponse *dto.ChatCompletionsStreamResponse, info *relaycommon.RelayInfo) {
+	if streamResponse == nil || streamResponse.Choices == nil {
+		return
+	}
+
+	for i, choice := range streamResponse.Choices {
+		reasoningContent := choice.Delta.GetReasoningContent()
+		if len(reasoningContent) == 0 {
+			continue
+		}
+
+		currentContent := choice.Delta.GetContentString()
+
+		// 首次出现 reasoning 内容时，添加 <think> 开始标签
+		if info.ThinkingContentInfo.IsFirstThinkingContent {
+			streamResponse.Choices[i].Delta.SetContentString("<think>\n" + reasoningContent)
+			info.ThinkingContentInfo.IsFirstThinkingContent = false
+			info.ThinkingContentInfo.HasSentThinkingContent = true
+		} else if len(currentContent) > 0 && info.ThinkingContentInfo.HasSentThinkingContent && !info.ThinkingContentInfo.SendLastThinkingContent {
+			// 从 thinking 转换到 content 时，添加 </think> 结束标签
+			streamResponse.Choices[i].Delta.SetContentString("\n</think>\n" + currentContent)
+			info.ThinkingContentInfo.SendLastThinkingContent = true
+		} else {
+			// 继续输出 reasoning 内容
+			streamResponse.Choices[i].Delta.SetContentString(reasoningContent)
+		}
+
+		// 清除原始 reasoning 字段
+		streamResponse.Choices[i].Delta.ReasoningContent = nil
+		streamResponse.Choices[i].Delta.Reasoning = nil
+	}
 }
 
 func ProcessStreamResponse(streamResponse dto.ChatCompletionsStreamResponse, responseTextBuilder *strings.Builder, toolCount *int) error {
