@@ -22,6 +22,12 @@ import (
 func HandleStreamFormat(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
 	info.SendResponseCount++
 
+	// 诊断日志：追踪流格式处理
+	if common.DebugEnabled {
+		logger.LogDebug(c, "HandleStreamFormat: RelayFormat=%d, forceFormat=%v, thinkToContent=%v, dataLen=%d",
+			info.RelayFormat, forceFormat, thinkToContent, len(data))
+	}
+
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
 		return sendStreamData(c, info, data, forceFormat, thinkToContent)
