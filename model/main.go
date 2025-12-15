@@ -282,6 +282,7 @@ func migrateDB() error {
 		&UserAssetSnapshot{},
 		&UserNotification{},
 		&PlanOrder{},
+		&TopupOrder{},
 	)
 	if err != nil {
 		return err

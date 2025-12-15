@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import {
   Card,
   Typography,
@@ -54,13 +55,17 @@ import {
   IconArrowDown,
   IconUndo,
   IconList,
+  IconPlus,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess, renderQuota } from '../../helpers';
+import { UserContext } from '../../context/User';
 
 const { Title, Text, Paragraph } = Typography;
 
 const MyPlans = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [userState] = useContext(UserContext);
   const [loading, setLoading] = useState(true);
   const [userPlans, setUserPlans] = useState([]);
   const [quotaStatus, setQuotaStatus] = useState(null);
@@ -70,6 +75,9 @@ const MyPlans = () => {
   const [refundPlan, setRefundPlan] = useState(null);
   const [refundReason, setRefundReason] = useState('');
   const [refundLoading, setRefundLoading] = useState(false);
+
+  // Get wallet balance from user state
+  const walletBalance = userState?.user?.quota || 0;
 
   // Load user's plans
   const loadMyPlans = useCallback(async () => {
@@ -769,6 +777,128 @@ const MyPlans = () => {
     );
   };
 
+  // Render wallet balance as pay-as-you-go virtual card
+  const renderWalletBalanceCard = () => {
+    return (
+      <div
+        className='group relative mb-6 transition-all duration-300 ease-in-out transform hover:-translate-y-1'
+      >
+        <Card
+          className='relative h-full border-none shadow-sm hover:shadow-lg transition-shadow duration-300 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20'
+          style={{
+            borderRadius: '16px',
+            overflow: 'hidden',
+            border: '1px solid rgba(16, 185, 129, 0.2)',
+          }}
+          bodyStyle={{ padding: '24px' }}
+        >
+          {/* Header Section */}
+          <div className='flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4'>
+            <div className='flex items-start gap-4'>
+              <div className='p-3 rounded-2xl bg-green-600 text-white shadow-lg shadow-green-500/30'>
+                <IconCreditCard size="large" />
+              </div>
+              <div>
+                <div className='flex items-center gap-2 mb-1'>
+                  <Title heading={5} className='m-0 text-xl font-bold'>
+                    {t('按量付费')}
+                  </Title>
+                  <Tag
+                    color='green'
+                    size='small'
+                    shape='circle'
+                    className='shadow-sm'
+                  >
+                    {t('钱包余额')}
+                  </Tag>
+                </div>
+                <Space className='flex-wrap gap-y-2 mt-2'>
+                  <Tag color='green' type='ghost' shape='circle'>
+                    <IconCreditCard className='mr-1' />
+                    {t('按量扣费')}
+                  </Tag>
+                  <Tag color='cyan' type='light' shape='circle'>
+                    {t('永不过期')}
+                  </Tag>
+                </Space>
+              </div>
+            </div>
+
+            {/* Topup Button */}
+            <Button
+              theme='solid'
+              type='primary'
+              icon={<IconPlus />}
+              onClick={() => navigate('/plans?category=payg')}
+              className='hidden md:flex'
+              style={{
+                borderRadius: '12px',
+                backgroundColor: '#10b981',
+                borderColor: '#10b981',
+              }}
+            >
+              {t('充值')}
+            </Button>
+          </div>
+
+          <Divider className='mb-6 opacity-50' />
+
+          {/* Balance Display */}
+          <div className='w-full p-4 bg-white/60 dark:bg-gray-800/60 rounded-xl'>
+            <div className='flex justify-between items-center mb-2'>
+              <div className='flex items-center gap-2'>
+                <div className='p-1.5 rounded-lg bg-green-100 dark:bg-green-800 text-green-600 dark:text-green-200'>
+                  <IconCreditCard />
+                </div>
+                <Text strong size='normal'>
+                  {t('账户余额')}
+                </Text>
+              </div>
+              <Text strong className='text-2xl text-green-600 dark:text-green-400'>
+                {renderQuota(walletBalance)}
+              </Text>
+            </div>
+            <Text type='tertiary' size='small' className='block mt-2'>
+              {t('余额按实际使用量扣费，永不过期')}
+            </Text>
+          </div>
+
+          {/* Features */}
+          <div className='mt-4 grid grid-cols-3 gap-3'>
+            <div className='text-center p-3 bg-white/40 dark:bg-gray-800/40 rounded-lg'>
+              <Text type='tertiary' size='small' className='block'>{t('永不过期')}</Text>
+            </div>
+            <div className='text-center p-3 bg-white/40 dark:bg-gray-800/40 rounded-lg'>
+              <Text type='tertiary' size='small' className='block'>{t('按量扣费')}</Text>
+            </div>
+            <div className='text-center p-3 bg-white/40 dark:bg-gray-800/40 rounded-lg'>
+              <Text type='tertiary' size='small' className='block'>{t('即时到账')}</Text>
+            </div>
+          </div>
+
+          {/* Mobile Topup Button */}
+          <div className='mt-6 md:hidden'>
+            <Button
+              theme='solid'
+              type='primary'
+              block
+              icon={<IconPlus />}
+              onClick={() => navigate('/plans?category=payg')}
+              style={{
+                borderRadius: '12px',
+                height: '44px',
+                backgroundColor: '#10b981',
+                borderColor: '#10b981',
+              }}
+            >
+              {t('充值')}
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  };
+
   // Find current plan
   const currentPlan = userPlans.find((p) => p.is_current === 1);
 
@@ -874,13 +1004,18 @@ const MyPlans = () => {
               <Empty
                 image={<IconBox size="extra-large" className="text-gray-300 text-6xl" />}
                 title={t('暂无套餐')}
-                description={t('您当前没有任何可用的套餐订阅，请联系管理员获取。')}
+                description={t('您当前没有任何可用的套餐订阅，可以通过按量付费使用服务。')}
                 className='bg-white dark:bg-gray-800 p-12 rounded-3xl shadow-sm'
               />
             </div>
           )}
         </Spin>
-        
+
+        {/* Wallet Balance as Pay-as-you-go Card - Always visible */}
+        <div className='mt-8'>
+          {renderWalletBalanceCard()}
+        </div>
+
         {/* Footer info */}
         <div className="mt-12 text-center text-gray-400 text-sm pb-8">
            <p>{t('套餐额度仅供参考，具体扣费以实际使用量为准')}</p>
