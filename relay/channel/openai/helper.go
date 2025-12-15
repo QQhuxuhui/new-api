@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -104,6 +105,15 @@ func applyThinkingToContentConversion(streamResponse *dto.ChatCompletionsStreamR
 		}
 
 		currentContent := choice.Delta.GetContentString()
+
+		// 调试日志
+		if common.DebugEnabled {
+			common.SysLog("applyThinkingToContentConversion: IsFirst=" + strconv.FormatBool(info.ThinkingContentInfo.IsFirstThinkingContent) +
+				", HasSent=" + strconv.FormatBool(info.ThinkingContentInfo.HasSentThinkingContent) +
+				", SendLast=" + strconv.FormatBool(info.ThinkingContentInfo.SendLastThinkingContent) +
+				", reasoningLen=" + strconv.Itoa(len(reasoningContent)) +
+				", contentLen=" + strconv.Itoa(len(currentContent)))
+		}
 
 		// 首次出现 reasoning 内容时，添加 <think> 开始标签
 		if info.ThinkingContentInfo.IsFirstThinkingContent {
