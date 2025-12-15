@@ -28,6 +28,12 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 		return nil
 	}
 
+	// 诊断日志：记录转换设置状态
+	if common.DebugEnabled {
+		logger.LogDebug(c, fmt.Sprintf("sendStreamData: forceFormat=%v, thinkToContent=%v, IsFirstThinkingContent=%v",
+			forceFormat, thinkToContent, info.ThinkingContentInfo.IsFirstThinkingContent))
+	}
+
 	if !forceFormat && !thinkToContent {
 		return helper.StringData(c, data)
 	}
@@ -127,6 +133,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
+	var streamItemCount int
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
 		if lastStreamData != "" {
 			err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
@@ -135,6 +142,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 		}
 		if len(data) > 0 {
+			streamItemCount++
 			// 对音频模型，保存倒数第二个stream data
 			if isAudioModel && lastStreamData != "" {
 				secondLastStreamData = lastStreamData
@@ -145,6 +153,15 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		}
 		return true
 	})
+
+	// 诊断日志：记录流处理结果
+	if streamItemCount == 0 {
+		logger.LogWarn(c, fmt.Sprintf("stream processing completed with 0 items, model=%s, lastStreamData=[%s]",
+			model, lastStreamData))
+	} else if common.DebugEnabled {
+		logger.LogDebug(c, fmt.Sprintf("stream processing completed: items=%d, model=%s",
+			streamItemCount, model))
+	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
