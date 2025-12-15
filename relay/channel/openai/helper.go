@@ -45,6 +45,11 @@ func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 		return err
 	}
 
+	// 处理 thinking_to_content 转换（Claude 格式也需要支持）
+	if info.ChannelSetting.ThinkingToContent {
+		applyThinkingToContentConversion(&streamResponse, info)
+	}
+
 	if streamResponse.Usage != nil {
 		info.ClaudeConvertInfo.Usage = streamResponse.Usage
 	}
