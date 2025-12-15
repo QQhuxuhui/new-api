@@ -36,6 +36,7 @@ export default function GroupRatioSettings(props) {
     GroupRatio: '',
     UserUsableGroups: '',
     GroupGroupRatio: '',
+    GroupTree: '',
     'group_ratio_setting.group_special_usable_group': '',
     AutoGroups: '',
     DefaultUseAutoGroup: false,
@@ -183,6 +184,52 @@ export default function GroupRatioSettings(props) {
               onChange={(value) =>
                 setInputs({ ...inputs, GroupGroupRatio: value })
               }
+            />
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col xs={24} sm={16}>
+            <Form.TextArea
+              label={t('分组层级树')}
+              placeholder={t('为一个 JSON 文本，键为父分组，值为子分组数组')}
+              extraText={t(
+                '配置分组的父子层级关系。键为父分组名称，值为该父分组包含的子分组名称数组。例如：{"openai": ["gpt3", "gpt4"], "claude": ["claude-3-5-sonnet"]}。父分组在令牌和套餐中选择时会自动展开为其子分组进行交集计算。渠道配置父分组会自动添加到所有子分组。子分组的倍率会继承父分组的倍率（如果子分组自身未配置）。',
+              )}
+              field={'GroupTree'}
+              autosize={{ minRows: 6, maxRows: 12 }}
+              trigger='blur'
+              stopValidateWithError
+              rules={[
+                {
+                  validator: (rule, value) => {
+                    if (!value || value.trim() === '' || value === '{}') {
+                      return true; // Allow empty values
+                    }
+                    // First check if it's valid JSON
+                    try {
+                      const parsed = JSON.parse(value);
+                      // Check if it's an object (not array)
+                      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+                        return false;
+                      }
+                      // Check each value is an array of strings
+                      for (const children of Object.values(parsed)) {
+                        if (!Array.isArray(children)) {
+                          return false;
+                        }
+                        if (!children.every((item) => typeof item === 'string')) {
+                          return false;
+                        }
+                      }
+                      return true;
+                    } catch (error) {
+                      return false;
+                    }
+                  },
+                  message: t('必须是有效的 JSON 对象，键为父分组名，值为子分组数组'),
+                },
+              ]}
+              onChange={(value) => setInputs({ ...inputs, GroupTree: value })}
             />
           </Col>
         </Row>

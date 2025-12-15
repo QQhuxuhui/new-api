@@ -693,15 +693,25 @@ const EditChannelModal = (props) => {
 
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
+      // Use /api/group/all to get group hierarchy info (parent/child/independent)
+      let res = await API.get(`/api/group/all`);
       if (res === undefined) {
         return;
       }
       setGroupOptions(
-        res.data.data.map((group) => ({
-          label: group,
-          value: group,
-        })),
+        res.data.data.map((groupInfo) => {
+          let label = groupInfo.name;
+          // Add indicator for parent groups
+          if (groupInfo.type === 'parent' && groupInfo.children?.length > 0) {
+            label = `${groupInfo.name} (${t('父分组')}: ${groupInfo.children.join(', ')})`;
+          }
+          return {
+            label: label,
+            value: groupInfo.name,
+            type: groupInfo.type,
+            children: groupInfo.children,
+          };
+        }),
       );
     } catch (error) {
       showError(error.message);

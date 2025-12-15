@@ -82,6 +82,20 @@ func Distribute() func(c *gin.Context) {
 				var selectGroup string
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 
+				// Expand parent group for wallet users (token-based group routing)
+				// This ensures parent groups work for both plan users and wallet users
+				// If token specifies a parent group, expand to child groups for channel selection
+				if ratio_setting.IsParentGroup(usingGroup) {
+					children := ratio_setting.GetChildGroups(usingGroup)
+					if len(children) > 0 {
+						// Set multi-group context similar to plan users
+						// This allows the channel selection logic to iterate through all child groups
+						common.SetContextKey(c, constant.ContextKeyPlanGroups, children)
+						// Keep usingGroup as parent for logging/display, but actual routing uses children
+						// The channel selection will update ContextKeyUsingGroup to the actual child group used
+					}
+				}
+
 				// Try to select a plan for this request (only if plan system is enabled)
 				userId := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 				if common.PlanSystemEnabled && userId > 0 {
@@ -153,31 +167,64 @@ func Distribute() func(c *gin.Context) {
 							// Fallback to old single field
 							channelGroups = []string{planResult.ChannelGroup}
 						}
+
+						// Expand parent groups to child groups (channel cache keys are child groups)
+						if len(channelGroups) > 0 {
+							expandedSet := make(map[string]bool)
+							for _, pg := range channelGroups {
+								expanded := ratio_setting.ExpandGroup(pg)
+								for _, g := range expanded {
+									expandedSet[g] = true
+								}
+							}
+							channelGroups = make([]string, 0, len(expandedSet))
+							for g := range expandedSet {
+								channelGroups = append(channelGroups, g)
+							}
+						}
+
 						if len(channelGroups) > 0 {
 							// Check if token has a specific group configured
 							tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
 							if tokenGroup != "" && tokenGroup != "auto" {
 								// Token specified a group, verify it's within plan's allowed groups
-								tokenGroupInPlan := false
-								for _, pg := range channelGroups {
-									if pg == tokenGroup {
-										tokenGroupInPlan = true
-										break
+								// If token group is a parent group, expand to children and intersect
+								var effectiveGroups []string
+								if ratio_setting.IsParentGroup(tokenGroup) {
+									// Expand parent to children
+									tokenChildren := ratio_setting.GetChildGroups(tokenGroup)
+									// Intersect with plan's channel groups (already expanded)
+									planGroupSet := make(map[string]bool)
+									for _, pg := range channelGroups {
+										planGroupSet[pg] = true
+									}
+									for _, child := range tokenChildren {
+										if planGroupSet[child] {
+											effectiveGroups = append(effectiveGroups, child)
+										}
+									}
+								} else {
+									// Token is child or independent group, direct match
+									for _, pg := range channelGroups {
+										if pg == tokenGroup {
+											effectiveGroups = []string{tokenGroup}
+											break
+										}
 									}
 								}
-								if !tokenGroupInPlan {
+
+								if len(effectiveGroups) == 0 {
 									abortWithOpenAiMessage(c, http.StatusForbidden,
 										fmt.Sprintf("令牌分组 %s 不在套餐允许的分组范围内", tokenGroup))
 									return
 								}
-								// Token group is within plan's allowed groups, use token group
-								usingGroup = tokenGroup
+								// Use the effective groups (intersection result)
+								usingGroup = effectiveGroups[0]
 								common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
-								// Set only the token group as available (not all plan groups)
-								common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{tokenGroup})
-								common.SetContextKey(c, constant.ContextKeyPlanGroup, tokenGroup)
+								common.SetContextKey(c, constant.ContextKeyPlanGroups, effectiveGroups)
+								common.SetContextKey(c, constant.ContextKeyPlanGroup, effectiveGroups[0])
 							} else {
-								// Token has no specific group or is "auto", use all plan groups
+								// Token has no specific group or is "auto", use all plan groups (already expanded)
 								common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
 								// Set first group as primary for compatibility
 								common.SetContextKey(c, constant.ContextKeyPlanGroup, channelGroups[0])

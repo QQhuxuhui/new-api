@@ -210,6 +210,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "GroupTree":
+		err = ratio_setting.CheckGroupTree(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "分组层级树设置失败: " + err.Error(),
+			})
+			return
+		}
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {

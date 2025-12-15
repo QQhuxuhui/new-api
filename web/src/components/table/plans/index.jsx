@@ -85,15 +85,28 @@ const PlansTable = () => {
   const [channelGroups, setChannelGroups] = useState([]);
   const [loadingChannelGroups, setLoadingChannelGroups] = useState(false);
 
-  // Load channel groups
+  // Load channel groups with hierarchy info
   const loadChannelGroups = useCallback(async () => {
     setLoadingChannelGroups(true);
     try {
-      const res = await API.get('/api/channel/groups');
+      const res = await API.get('/api/group/all');
       const { success, message, data } = res.data;
       if (success) {
         const groups = data || [];
-        setChannelGroups(groups.map(g => ({ label: g, value: g })));
+        setChannelGroups(groups.map(groupInfo => {
+          let label = groupInfo.name;
+          // Add indicator for parent groups
+          if (groupInfo.type === 'parent' && groupInfo.children?.length > 0) {
+            label = `${groupInfo.name} (${t('父分组')}: ${groupInfo.children.join(', ')})`;
+          } else if (groupInfo.type === 'child' && groupInfo.parent) {
+            label = `${groupInfo.name} (→ ${groupInfo.parent})`;
+          }
+          return {
+            label: label,
+            value: groupInfo.name,
+            type: groupInfo.type,
+          };
+        }));
       } else {
         showError(message);
       }
@@ -101,7 +114,7 @@ const PlansTable = () => {
       showError(e.message);
     }
     setLoadingChannelGroups(false);
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadChannelGroups();
