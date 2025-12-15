@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/samber/lo"
@@ -210,6 +211,41 @@ func (channel *Channel) GetModels() []string {
 }
 
 func (channel *Channel) GetGroups() []string {
+	if channel.Group == "" {
+		return []string{}
+	}
+	groups := strings.Split(strings.Trim(channel.Group, ","), ",")
+
+	// Use a map to deduplicate expanded groups
+	expanded := make(map[string]bool)
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		// Check if this is a parent group, if so expand to all children
+		if ratio_setting.IsParentGroup(group) {
+			children := ratio_setting.GetChildGroups(group)
+			for _, child := range children {
+				expanded[child] = true
+			}
+		} else {
+			// Not a parent group, include as-is
+			expanded[group] = true
+		}
+	}
+
+	// Convert map to slice
+	result := make([]string, 0, len(expanded))
+	for g := range expanded {
+		result = append(result, g)
+	}
+	return result
+}
+
+// GetRawGroups returns the original groups without expansion
+// This is useful for UI display and editing
+func (channel *Channel) GetRawGroups() []string {
 	if channel.Group == "" {
 		return []string{}
 	}

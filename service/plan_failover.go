@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -102,6 +103,21 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 		// Use UserPlan snapshot fields for channel groups
 		channelGroups := candidate.GetChannelGroups()
 
+		// Expand parent groups to child groups (channel cache keys are child groups)
+		if len(channelGroups) > 0 {
+			expandedSet := make(map[string]bool)
+			for _, pg := range channelGroups {
+				expanded := ratio_setting.ExpandGroup(pg)
+				for _, g := range expanded {
+					expandedSet[g] = true
+				}
+			}
+			channelGroups = make([]string, 0, len(expandedSet))
+			for g := range expandedSet {
+				channelGroups = append(channelGroups, g)
+			}
+		}
+
 		// Skip if plan has no channel groups configured
 		if len(channelGroups) == 0 {
 			logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) skipped: no channel groups configured",
@@ -111,20 +127,38 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 
 		// Check token group constraint: if token specifies a group, only use plans that include it
 		if hasTokenGroupConstraint {
-			tokenGroupInPlan := false
-			for _, pg := range channelGroups {
-				if pg == tokenGroup {
-					tokenGroupInPlan = true
-					break
+			// If token group is a parent group, expand to children and intersect
+			var effectiveGroups []string
+			if ratio_setting.IsParentGroup(tokenGroup) {
+				// Expand parent to children
+				tokenChildren := ratio_setting.GetChildGroups(tokenGroup)
+				// Intersect with plan's channel groups
+				planGroupSet := make(map[string]bool)
+				for _, pg := range channelGroups {
+					planGroupSet[pg] = true
+				}
+				for _, child := range tokenChildren {
+					if planGroupSet[child] {
+						effectiveGroups = append(effectiveGroups, child)
+					}
+				}
+			} else {
+				// Token is child or independent group, direct match
+				for _, pg := range channelGroups {
+					if pg == tokenGroup {
+						effectiveGroups = []string{tokenGroup}
+						break
+					}
 				}
 			}
-			if !tokenGroupInPlan {
+
+			if len(effectiveGroups) == 0 {
 				logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) skipped: token group %s not in plan groups %v",
 					userId, planName, candidate.Id, tokenGroup, channelGroups))
 				continue
 			}
-			// Only try the token group, not all plan groups
-			channelGroups = []string{tokenGroup}
+			// Use the effective groups (intersection result)
+			channelGroups = effectiveGroups
 		}
 
 		logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d trying plan=%s(id=%d) groups=%v",
@@ -323,6 +357,22 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 	// Update channel groups in context
 	// Use UserPlan snapshot fields for channel groups
 	channelGroups := failoverPlan.GetChannelGroups()
+
+	// Expand parent groups to child groups (channel cache keys are child groups)
+	if len(channelGroups) > 0 {
+		expandedSet := make(map[string]bool)
+		for _, pg := range channelGroups {
+			expanded := ratio_setting.ExpandGroup(pg)
+			for _, g := range expanded {
+				expandedSet[g] = true
+			}
+		}
+		channelGroups = make([]string, 0, len(expandedSet))
+		for g := range expandedSet {
+			channelGroups = append(channelGroups, g)
+		}
+	}
+
 	if len(channelGroups) > 0 {
 		// Check if token has a specific group constraint
 		tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)

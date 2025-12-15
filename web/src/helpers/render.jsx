@@ -819,6 +819,10 @@ export const renderGroupOption = (item) => {
     }
   };
 
+  // Check if this is a parent group
+  const isParent = item.is_parent === true;
+  const children = item.children || [];
+
   return (
     <div
       style={baseStyle}
@@ -826,12 +830,24 @@ export const renderGroupOption = (item) => {
       onMouseEnter={handleMouseEnter}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        <Typography.Text strong type={disabled ? 'tertiary' : undefined}>
-          {value}
-        </Typography.Text>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Typography.Text strong type={disabled ? 'tertiary' : undefined}>
+            {value}
+          </Typography.Text>
+          {isParent && (
+            <Tag size='small' color='blue' style={{ borderRadius: '4px' }}>
+              {i18next.t('父分组')}
+            </Tag>
+          )}
+        </div>
         <Typography.Text type='secondary' size='small'>
           {label}
         </Typography.Text>
+        {isParent && children.length > 0 && (
+          <Typography.Text type='tertiary' size='small'>
+            {i18next.t('包含')}: {children.join(', ')}
+          </Typography.Text>
+        )}
       </div>
       {item.ratio && renderRatio(item.ratio)}
     </div>

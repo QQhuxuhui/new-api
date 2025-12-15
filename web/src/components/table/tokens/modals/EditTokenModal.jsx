@@ -133,6 +133,8 @@ const EditTokenModal = (props) => {
         label: info.desc,
         value: group,
         ratio: info.ratio,
+        is_parent: info.is_parent || false,
+        children: info.children || [],
       }));
       if (statusState?.status?.default_use_auto_group) {
         if (localGroupOptions.some((group) => group.value === 'auto')) {

@@ -73,7 +73,8 @@ func InitChannelCache() {
 		if channel.Status != common.ChannelStatusEnabled {
 			continue // skip disabled channels
 		}
-		groups := strings.Split(channel.Group, ",")
+		// Use GetGroups() which expands parent groups to children
+		groups := channel.GetGroups()
 		for _, group := range groups {
 			// Initialize group map if it doesn't exist
 			if _, ok := newGroup2model2channels[group]; !ok {
