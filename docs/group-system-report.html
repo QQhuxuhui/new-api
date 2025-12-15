@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分组系统全面技术报告</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .nav {
+            background: #f8f9fa;
+            padding: 20px 40px;
+            border-bottom: 1px solid #dee2e6;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .nav ul {
+            list-style: none;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .nav a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+
+        .nav a:hover {
+            color: #764ba2;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .section {
+            margin-bottom: 60px;
+        }
+
+        .section h2 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .section h3 {
+            color: #764ba2;
+            font-size: 1.5em;
+            margin: 30px 0 15px 0;
+        }
+
+        .section h4 {
+            color: #555;
+            font-size: 1.2em;
+            margin: 20px 0 10px 0;
+        }
+
+        .card {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .card.warning {
+            border-left-color: #ffc107;
+            background: #fff3cd;
+        }
+
+        .card.info {
+            border-left-color: #17a2b8;
+            background: #d1ecf1;
+        }
+
+        .card.success {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.9em;
+            color: #e83e8c;
+        }
+
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+
+        pre code {
+            background: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+        }
+
+        table th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        table td {
+            padding: 12px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .flow-chart {
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            padding: 30px;
+            margin: 20px 0;
+        }
+
+        .flow-step {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            margin: 10px 0;
+            border-radius: 6px;
+            position: relative;
+        }
+
+        .flow-step::after {
+            content: '↓';
+            display: block;
+            text-align: center;
+            font-size: 1.5em;
+            margin-top: 10px;
+            color: #667eea;
+        }
+
+        .flow-step:last-child::after {
+            content: '✓';
+            color: #28a745;
+        }
+
+        .data-structure {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .data-item {
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .data-item h4 {
+            color: #667eea;
+            margin: 0 0 10px 0;
+        }
+
+        .api-endpoint {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .api-method {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 0.9em;
+        }
+
+        .api-method.get {
+            background: #28a745;
+            color: white;
+        }
+
+        .api-method.post {
+            background: #007bff;
+            color: white;
+        }
+
+        .api-method.put {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin: 0 5px;
+        }
+
+        .badge.parent {
+            background: #667eea;
+            color: white;
+        }
+
+        .badge.child {
+            background: #28a745;
+            color: white;
+        }
+
+        .badge.independent {
+            background: #6c757d;
+            color: white;
+        }
+
+        .tree-view {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 15px 0;
+            white-space: pre;
+            line-height: 1.8;
+        }
+
+        .tree-parent {
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        .tree-child {
+            color: #28a745;
+            margin-left: 30px;
+        }
+
+        .footer {
+            background: #2d2d2d;
+            color: white;
+            padding: 20px 40px;
+            text-align: center;
+        }
+
+        .highlight {
+            background: linear-gradient(120deg, #fef08a 0%, #fef08a 100%);
+            background-repeat: no-repeat;
+            background-size: 100% 40%;
+            background-position: 0 80%;
+        }
+
+        .example-box {
+            background: #fff;
+            border: 2px dashed #667eea;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .comparison > div {
+            padding: 20px;
+            border-radius: 6px;
+        }
+
+        .comparison .before {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+        }
+
+        .comparison .after {
+            background: #d4edda;
+            border: 2px solid #28a745;
+        }
+
+        @media (max-width: 768px) {
+            .comparison {
+                grid-template-columns: 1fr;
+            }
+
+            .data-structure {
+                grid-template-columns: 1fr;
+            }
+
+            .nav ul {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+
+        .toc {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .toc h3 {
+            margin-top: 0;
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 20px;
+        }
+
+        .toc li {
+            margin: 8px 0;
+        }
+
+        .toc a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .toc a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🎯 分组系统全面技术报告</h1>
+            <p class="subtitle">New-API 层级分组系统架构、逻辑与业务流程详解</p>
+            <p style="margin-top: 10px; font-size: 0.9em;">生成时间: 2025-12-15</p>
+        </div>
+
+        <!-- Navigation -->
+        <div class="nav">
+            <ul>
+                <li><a href="#overview">系统概览</a></li>
+                <li><a href="#concepts">核心概念</a></li>
+                <li><a href="#data-structures">数据结构</a></li>
+                <li><a href="#core-functions">核心函数</a></li>
+                <li><a href="#business-flows">业务流程</a></li>
+                <li><a href="#api">API接口</a></li>
+                <li><a href="#configuration">配置说明</a></li>
+                <li><a href="#use-cases">使用场景</a></li>
+            </ul>
+        </div>
+
+        <!-- Content -->
+        <div class="content">
+            <!-- Table of Contents -->
+            <div class="toc">
+                <h3>📋 目录导航</h3>
+                <ul>
+                    <li><a href="#overview">1. 系统概览</a></li>
+                    <li><a href="#concepts">2. 核心概念</a>
+                        <ul>
+                            <li><a href="#concepts-parent">2.1 父级分组</a></li>
+                            <li><a href="#concepts-child">2.2 子级分组</a></li>
+                            <li><a href="#concepts-independent">2.3 独立分组</a></li>
+                        </ul>
+                    </li>
+                    <li><a href="#data-structures">3. 数据结构</a></li>
+                    <li><a href="#core-functions">4. 核心函数</a></li>
+                    <li><a href="#business-flows">5. 业务流程</a>
+                        <ul>
+                            <li><a href="#flow-token">5.1 令牌创建流程</a></li>
+                            <li><a href="#flow-routing">5.2 渠道路由流程</a></li>
+                            <li><a href="#flow-plan">5.3 套餐选择流程</a></li>
+                            <li><a href="#flow-failover">5.4 故障切换流程</a></li>
+                            <li><a href="#flow-ratio">5.5 倍率计算流程</a></li>
+                        </ul>
+                    </li>
+                    <li><a href="#api">6. API接口</a></li>
+                    <li><a href="#configuration">7. 配置说明</a></li>
+                    <li><a href="#use-cases">8. 使用场景</a></li>
+                </ul>
+            </div>
+
+            <!-- Section 1: Overview -->
+            <div class="section" id="overview">
+                <h2>1. 系统概览</h2>
+
+                <div class="card info">
+                    <h4>🎯 设计目标</h4>
+                    <p>分组系统是 New-API 的核心功能模块，用于实现<span class="highlight">资源隔离、权限控制、倍率管理</span>。层级分组系统在原有基础上引入了<strong>父子级关系</strong>，使分组管理更加灵活和高效。</p>
+                </div>
+
+                <h3>架构设计</h3>
+                <div class="example-box">
+                    <p><strong>核心组件：</strong></p>
+                    <ul>
+                        <li><strong>GroupRatio</strong>：分组基础倍率配置</li>
+                        <li><strong>GroupGroupRatio</strong>：用户分组对使用分组的模型倍率</li>
+                        <li><strong>GroupTree</strong>：层级树结构（父级→子级映射）</li>
+                        <li><strong>ChildToParent</strong>：反向索引（子级→父级映射）</li>
+                    </ul>
+                </div>
+
+                <h3>关键特性</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>特性</th>
+                            <th>说明</th>
+                            <th>优势</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>层级管理</strong></td>
+                            <td>支持父级分组自动展开为子级分组</td>
+                            <td>简化配置，减少重复工作</td>
+                        </tr>
+                        <tr>
+                            <td><strong>倍率回退</strong></td>
+                            <td>子级→父级→默认值的倍率查找链</td>
+                            <td>灵活配置，支持继承</td>
+                        </tr>
+                        <tr>
+                            <td><strong>自动过滤</strong></td>
+                            <td>用户界面只显示父级和独立分组</td>
+                            <td>简化用户操作，避免混淆</td>
+                        </tr>
+                        <tr>
+                            <td><strong>自动展开</strong></td>
+                            <td>渠道缓存自动展开父级分组</td>
+                            <td>确保路由正确，无需手动维护</td>
+                        </tr>
+                        <tr>
+                            <td><strong>交集验证</strong></td>
+                            <td>令牌分组与套餐分组的智能交集</td>
+                            <td>支持父级分组，灵活权限控制</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="card success">
+                    <h4>✅ 向后兼容</h4>
+                    <p>未配置 GroupTree 时，系统保持原有行为。所有分组都是独立分组，不会影响现有功能。</p>
+                </div>
+            </div>
+
+            <!-- Section 2: Core Concepts -->
+            <div class="section" id="concepts">
+                <h2>2. 核心概念</h2>
+
+                <div class="data-structure">
+                    <div class="data-item">
+                        <h4 id="concepts-parent"><span class="badge parent">父级分组</span></h4>
+                        <p><strong>定义：</strong>在 GroupTree 中作为 key 存在的分组</p>
+                        <p><strong>特点：</strong></p>
+                        <ul>
+                            <li>可以包含多个子级分组</li>
+                            <li>在令牌创建时显示</li>
+                            <li>选择时自动授予所有子级权限</li>
+                            <li>渠道配置时自动展开为子级</li>
+                        </ul>
+                        <p><strong>示例：</strong><code>claude</code>, <code>openai</code></p>
+                    </div>
+
+                    <div class="data-item">
+                        <h4 id="concepts-child"><span class="badge child">子级分组</span></h4>
+                        <p><strong>定义：</strong>在 GroupTree 中作为 value 存在的分组</p>
+                        <p><strong>特点：</strong></p>
+                        <ul>
+                            <li>属于某个父级分组</li>
+                            <li>在令牌创建时隐藏</li>
+                            <li>用作渠道缓存的 key</li>
+                            <li>可以继承父级的倍率配置</li>
+                        </ul>
+                        <p><strong>示例：</strong><code>claude-包月</code>, <code>claude-按量</code>, <code>openai-包月</code>, <code>openai-按量</code></p>
+                    </div>
+
+                    <div class="data-item">
+                        <h4 id="concepts-independent"><span class="badge independent">独立分组</span></h4>
+                        <p><strong>定义：</strong>既不是父级也不是子级的分组</p>
+                        <p><strong>特点：</strong></p>
+                        <ul>
+                            <li>在 GroupTree 中不存在</li>
+                            <li>在令牌创建时显示</li>
+                            <li>保持原有行为</li>
+                            <li>无继承关系</li>
+                        </ul>
+                        <p><strong>示例：</strong><code>default</code>, <code>gemini</code>, <code>glm</code></p>
+                    </div>
+                </div>
+
+                <h3>GroupTree 配置示例</h3>
+                <div class="tree-view">
+<span class="tree-parent">claude</span> (父级分组)
+  ├── <span class="tree-child">claude-包月</span> (子级分组)
+  └── <span class="tree-child">claude-按量</span> (子级分组)
+
+<span class="tree-parent">openai</span> (父级分组)
+  ├── <span class="tree-child">openai-包月</span> (子级分组)
+  └── <span class="tree-child">openai-按量</span> (子级分组)
+
+<span style="color: #6c757d; font-weight: bold;">default</span> (独立分组)
+<span style="color: #6c757d; font-weight: bold;">gemini</span> (独立分组)
+<span style="color: #6c757d; font-weight: bold;">glm</span> (独立分组)
+                </div>
+
+                <h3>JSON 配置格式</h3>
+                <pre><code>{
+  "claude": ["claude-包月", "claude-按量"],
+  "openai": ["openai-包月", "openai-按量"]
+}</code></pre>
+            </div>
+
+            <!-- Section 3: Data Structures -->
+            <div class="section" id="data-structures">
+                <h2>3. 数据结构</h2>
+
+                <h3>3.1 GroupRatio（分组基础倍率）</h3>
+                <div class="card">
+                    <p><strong>类型：</strong><code>map[string]float64</code></p>
+                    <p><strong>用途：</strong>定义每个分组的基础计费倍率</p>
+                    <p><strong>读写锁：</strong><code>groupRatioMutex sync.RWMutex</code></p>
+                </div>
+                <pre><code>// 示例配置
+{
+  "default": 1.0,
+  "vip": 0.9,
+  "svip": 0.8,
+  "claude": 1.2,
+  "claude-包月": 1.0,
+  "claude-按量": 1.5
+}</code></pre>
+
+                <h3>3.2 GroupGroupRatio（分组间模型倍率）</h3>
+                <div class="card">
+                    <p><strong>类型：</strong><code>map[string]map[string]float64</code></p>
+                    <p><strong>用途：</strong>定义用户分组对使用分组的模型倍率</p>
+                    <p><strong>读写锁：</strong><code>groupGroupRatioMutex sync.RWMutex</code></p>
+                </div>
+                <pre><code>// 示例配置
+{
+  "vip": {
+    "claude-按量": 0.9,
+    "openai-按量": 0.85
+  },
+  "svip": {
+    "claude-按量": 0.8,
+    "openai-按量": 0.75
+  }
+}</code></pre>
+
+                <h3>3.3 GroupTree（层级树结构）</h3>
+                <div class="card">
+                    <p><strong>类型：</strong><code>map[string][]string</code></p>
+                    <p><strong>用途：</strong>定义父级分组到子级分组的映射</p>
+                    <p><strong>读写锁：</strong><code>groupTreeMutex sync.RWMutex</code></p>
+                </div>
+                <pre><code>// 示例配置
+{
+  "claude": ["claude-包月", "claude-按量"],
+  "openai": ["openai-包月", "openai-按量"]
+}</code></pre>
+
+                <h3>3.4 ChildToParent（反向索引）</h3>
+                <div class="card">
+                    <p><strong>类型：</strong><code>map[string]string</code></p>
+                    <p><strong>用途：</strong>快速查找子级分组的父级分组</p>
+                    <p><strong>读写锁：</strong><code>childToParentMutex sync.RWMutex</code></p>
+                </div>
+                <pre><code>// 自动生成的反向索引
+{
+  "claude-包月": "claude",
+  "claude-按量": "claude",
+  "openai-包月": "openai",
+  "openai-按量": "openai"
+}</code></pre>
+
+                <div class="card warning">
+                    <h4>⚠️ 线程安全</h4>
+                    <p>所有数据结构都使用读写锁保护，支持并发读取和独占写入。更新操作会原子性地更新 GroupTree 和 ChildToParent。</p>
+                </div>
+            </div>
+
+            <!-- Section 4: Core Functions -->
+            <div class="section" id="core-functions">
+                <h2>4. 核心函数</h2>
+
+                <h3>4.1 GroupTree 查询函数</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>函数</th>
+                            <th>签名</th>
+                            <th>功能</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>IsParentGroup</code></td>
+                            <td><code>func(group string) bool</code></td>
+                            <td>判断分组是否为父级分组</td>
+                        </tr>
+                        <tr>
+                            <td><code>GetChildGroups</code></td>
+                            <td><code>func(parent string) []string</code></td>
+                            <td>获取父级分组的所有子级分组</td>
+                        </tr>
+                        <tr>
+                            <td><code>GetParentGroup</code></td>
+                            <td><code>func(child string) string</code></td>
+                            <td>获取子级分组的父级分组</td>
+                        </tr>
+                        <tr>
+                            <td><code>ExpandGroup</code></td>
+                            <td><code>func(group string) []string</code></td>
+                            <td>展开分组（父级→子级列表，其他→自身）</td>
+                        </tr>
+                        <tr>
+                            <td><code>GetAllParentGroups</code></td>
+                            <td><code>func() []string</code></td>
+                            <td>获取所有父级分组名称</td>
+                        </tr>
+                        <tr>
+                            <td><code>GetAllChildGroups</code></td>
+                            <td><code>func() []string</code></td>
+                            <td>获取所有子级分组名称</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>4.2 分组过滤函数</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>函数</th>
+                            <th>签名</th>
+                            <th>功能</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>GetIndependentGroups</code></td>
+                            <td><code>func(allGroups []string) []string</code></td>
+                            <td>获取独立分组（非父级非子级）</td>
+                        </tr>
+                        <tr>
+                            <td><code>GetUserSelectableGroups</code></td>
+                            <td><code>func(allGroups []string) []string</code></td>
+                            <td>获取可选分组（父级+独立，排除子级）</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>4.3 倍率查询函数</h3>
+                <div class="card">
+                    <h4><code>GetGroupRatio(name string) float64</code></h4>
+                    <p><strong>倍率回退逻辑：</strong></p>
+                    <ol>
+                        <li>优先查找子级分组的倍率</li>
+                        <li>未找到则查找父级分组的倍率</li>
+                        <li>都未找到则返回默认值 1.0</li>
+                    </ol>
+                </div>
+
+                <pre><code>// 示例：查找 "claude-按量" 的倍率
+func GetGroupRatio(name string) float64 {
+    // 1. 先查 "claude-按量" 的倍率
+    if ratio, ok := groupRatio["claude-按量"]; ok {
+        return ratio // 返回 1.5
+    }
+
+    // 2. 查找父级 "claude" 的倍率
+    parent := GetParentGroup("claude-按量") // 返回 "claude"
+    if parent != "" {
+        if ratio, ok := groupRatio["claude"]; ok {
+            return ratio // 如果配置了，返回 1.2
+        }
+    }
+
+    // 3. 返回默认值
+    return 1.0
+}</code></pre>
+
+                <div class="card">
+                    <h4><code>GetGroupGroupRatio(userGroup, usingGroup string) (float64, bool)</code></h4>
+                    <p><strong>模型倍率回退逻辑：</strong></p>
+                    <ol>
+                        <li>优先查找用户分组对子级分组的模型倍率</li>
+                        <li>未找到则查找用户分组对父级分组的模型倍率</li>
+                        <li>都未找到则返回 (-1, false)</li>
+                    </ol>
+                </div>
+
+                <h3>4.4 配置管理函数</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>函数</th>
+                            <th>功能</th>
+                            <th>说明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>UpdateGroupTreeByJSONString</code></td>
+                            <td>更新 GroupTree 配置</td>
+                            <td>自动构建反向索引，原子性更新</td>
+                        </tr>
+                        <tr>
+                            <td><code>ValidateGroupTree</code></td>
+                            <td>校验 GroupTree 配置</td>
+                            <td>检查重复子级、嵌套层级、自引用</td>
+                        </tr>
+                        <tr>
+                            <td><code>CheckGroupTree</code></td>
+                            <td>校验 JSON 字符串</td>
+                            <td>解析并校验配置格式</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="card warning">
+                    <h4>⚠️ 配置校验规则</h4>
+                    <ul>
+                        <li><strong>禁止重复子级：</strong>同一个子级不能属于多个父级</li>
+                        <li><strong>禁止嵌套层级：</strong>子级不能同时也是父级</li>
+                        <li><strong>禁止自引用：</strong>父级和子级不能同名</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Section 5: Business Flows -->
+            <div class="section" id="business-flows">
+                <h2>5. 业务流程</h2>
+
+                <h3 id="flow-token">5.1 令牌创建流程</h3>
+                <div class="flow-chart">
+                    <div class="flow-step">
+                        <strong>步骤 1：获取所有分组</strong><br>
+                        从 GroupRatio 获取所有分组名称
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 2：过滤子级分组</strong><br>
+                        调用 <code>GetUserSelectableGroups()</code> 过滤出父级和独立分组
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 3：构建响应数据</strong><br>
+                        为父级分组附加 children 信息，方便前端展示
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 4：前端显示</strong><br>
+                        用户只看到父级分组和独立分组，选择父级时自动授予所有子级权限
+                    </div>
+                </div>
+
+                <div class="example-box">
+                    <h4>示例：用户创建令牌时看到的分组选项</h4>
+                    <div class="comparison">
+                        <div class="before">
+                            <h4>❌ 不使用 GroupTree（混乱）</h4>
+                            <ul>
+                                <li>claude-包月</li>
+                                <li>claude-按量</li>
+                                <li>openai-包月</li>
+                                <li>openai-按量</li>
+                                <li>default</li>
+                                <li>gemini</li>
+                            </ul>
+                            <p style="color: #856404; margin-top: 10px;">用户需要理解细分，选择繁琐</p>
+                        </div>
+                        <div class="after">
+                            <h4>✅ 使用 GroupTree（简洁）</h4>
+                            <ul>
+                                <li>claude <span style="color: #6c757d;">(包含: claude-包月, claude-按量)</span></li>
+                                <li>openai <span style="color: #6c757d;">(包含: openai-包月, openai-按量)</span></li>
+                                <li>default</li>
+                                <li>gemini</li>
+                            </ul>
+                            <p style="color: #155724; margin-top: 10px;">用户只需选择大类，自动授权子级</p>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 id="flow-routing">5.2 渠道路由流程</h3>
+                <div class="flow-chart">
+                    <div class="flow-step">
+                        <strong>步骤 1：套餐选择</strong><br>
+                        用户使用令牌调用 API，系统为用户选择套餐（如果启用套餐系统）
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 2：获取套餐分组</strong><br>
+                        从 UserPlan 获取 channel_groups（可能包含父级分组）
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 3：展开父级分组</strong><br>
+                        遍历 channel_groups，调用 <code>ExpandGroup()</code> 展开父级分组为子级分组
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 4：令牌分组交集</strong><br>
+                        如果令牌指定了分组，计算令牌分组与套餐分组的交集（支持父级展开）
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 5：渠道选择</strong><br>
+                        从展开后的分组中，使用 <code>CacheGetRandomSatisfiedChannel()</code> 选择渠道
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 6：路由成功</strong><br>
+                        请求被路由到选中的渠道，记录使用的实际子级分组
+                    </div>
+                </div>
+
+                <div class="card info">
+                    <h4>🔍 关键代码位置</h4>
+                    <ul>
+                        <li><strong>middleware/distributor.go:158-170</strong> - 套餐分组展开</li>
+                        <li><strong>middleware/distributor.go:174-220</strong> - 令牌分组交集验证</li>
+                    </ul>
+                </div>
+
+                <h3 id="flow-plan">5.3 套餐选择流程（交集逻辑）</h3>
+                <div class="example-box">
+                    <h4>场景：令牌分组为 "claude"，套餐分组为 ["claude-按量", "openai-包月"]</h4>
+                    <pre><code>// 伪代码
+tokenGroup := "claude" // 令牌配置的分组
+planGroups := ["claude-按量", "openai-包月"] // 套餐配置的分组
+
+// 1. 检查令牌分组是否为父级
+if IsParentGroup(tokenGroup) {
+    // 2. 展开为子级列表
+    tokenChildren := GetChildGroups(tokenGroup)
+    // tokenChildren = ["claude-包月", "claude-按量"]
+
+    // 3. 与套餐分组求交集
+    planGroupSet := map["claude-按量": true, "openai-包月": true]
+    effectiveGroups := []
+    for _, child := range tokenChildren {
+        if planGroupSet[child] {
+            effectiveGroups = append(effectiveGroups, child)
+        }
+    }
+    // effectiveGroups = ["claude-按量"]
+
+    // 4. 使用交集结果作为实际可用分组
+    channelGroups = effectiveGroups
+} else {
+    // 令牌是子级或独立分组，直接匹配
+    ...
+}
+
+// 5. 从 channelGroups 中选择渠道
+channel := CacheGetRandomSatisfiedChannel(channelGroups[0], modelName)</code></pre>
+                </div>
+
+                <div class="comparison">
+                    <div class="before">
+                        <h4>❌ 旧逻辑（直接匹配）</h4>
+                        <p>令牌分组: <code>claude</code></p>
+                        <p>套餐分组: <code>["claude-按量"]</code></p>
+                        <p style="color: #721c24; margin-top: 10px;"><strong>结果：</strong>匹配失败，拒绝请求</p>
+                    </div>
+                    <div class="after">
+                        <h4>✅ 新逻辑（父级展开）</h4>
+                        <p>令牌分组: <code>claude</code> → 展开为 <code>["claude-包月", "claude-按量"]</code></p>
+                        <p>套餐分组: <code>["claude-按量"]</code></p>
+                        <p style="color: #155724; margin-top: 10px;"><strong>结果：</strong>交集 = <code>["claude-按量"]</code>，匹配成功</p>
+                    </div>
+                </div>
+
+                <h3 id="flow-failover">5.4 故障切换流程</h3>
+                <div class="flow-chart">
+                    <div class="flow-step">
+                        <strong>步骤 1：当前套餐所有渠道不可用</strong><br>
+                        用户请求失败，所有优先级的渠道都尝试过
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 2：检查是否启用 auto_switch</strong><br>
+                        判断当前 UserPlan 的 auto_switch 是否为 1
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 3：获取候选套餐</strong><br>
+                        调用 <code>GetFailoverCandidates()</code> 获取其他可用套餐（按优先级排序）
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 4：遍历候选套餐</strong><br>
+                        对每个候选套餐，展开其 channel_groups（父级→子级）
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 5：令牌分组验证</strong><br>
+                        如果令牌有分组约束，计算交集（支持父级展开）
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 6：尝试选择渠道</strong><br>
+                        在候选套餐的分组中尝试选择渠道
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 7：切换套餐</strong><br>
+                        找到可用渠道后，调用 <code>SwitchToUserPlan()</code> 切换套餐，更新上下文
+                    </div>
+                </div>
+
+                <div class="card info">
+                    <h4>🔍 关键代码位置</h4>
+                    <ul>
+                        <li><strong>service/plan_failover.go:106-119</strong> - 候选套餐分组展开</li>
+                        <li><strong>service/plan_failover.go:128-162</strong> - 令牌分组交集验证</li>
+                        <li><strong>service/plan_failover.go:361-374</strong> - 成功切换后的分组更新</li>
+                    </ul>
+                </div>
+
+                <h3 id="flow-ratio">5.5 倍率计算流程</h3>
+                <div class="flow-chart">
+                    <div class="flow-step">
+                        <strong>步骤 1：获取使用分组</strong><br>
+                        从上下文获取实际使用的分组（如 "claude-按量"）
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 2：查找模型倍率</strong><br>
+                        调用 <code>GetGroupGroupRatio(userGroup, usingGroup)</code>
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 3：模型倍率回退</strong><br>
+                        先查子级，未找到则查父级，都未找到返回 -1
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 4：查找分组倍率</strong><br>
+                        如果模型倍率未找到，调用 <code>GetGroupRatio(usingGroup)</code>
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 5：分组倍率回退</strong><br>
+                        先查子级，未找到则查父级，都未找到返回 1.0
+                    </div>
+                    <div class="flow-step">
+                        <strong>步骤 6：计算最终费用</strong><br>
+                        基础价格 × 模型倍率 × 分组倍率 × 渠道倍率 = 最终费用
+                    </div>
+                </div>
+
+                <div class="example-box">
+                    <h4>示例：计算用户使用 "claude-按量" 的费用</h4>
+                    <pre><code>// 配置
+GroupGroupRatio = {
+  "vip": {
+    "claude": 0.9  // 只配置了父级倍率
+  }
+}
+
+GroupRatio = {
+  "claude": 1.2,
+  "claude-按量": 1.5
+}
+
+// 计算过程
+userGroup := "vip"
+usingGroup := "claude-按量"
+
+// 1. 查找模型倍率
+modelRatio, found := GetGroupGroupRatio("vip", "claude-按量")
+// 先查 GroupGroupRatio["vip"]["claude-按量"] → 未找到
+// 回退查 GroupGroupRatio["vip"]["claude"] → 找到 0.9
+modelRatio = 0.9
+
+// 2. 查找分组倍率
+groupRatio := GetGroupRatio("claude-按量")
+// 先查 GroupRatio["claude-按量"] → 找到 1.5
+groupRatio = 1.5
+
+// 3. 最终倍率 = 0.9 * 1.5 = 1.35</code></pre>
+                </div>
+            </div>
+
+            <!-- Section 6: API -->
+            <div class="section" id="api">
+                <h2>6. API 接口</h2>
+
+                <h3>6.1 分组查询接口</h3>
+
+                <div class="api-endpoint">
+                    <span class="api-method get">GET</span>
+                    <strong>/api/group</strong>
+                    <p style="margin-top: 10px;"><strong>功能：</strong>获取所有分组名称（不过滤）</p>
+                    <p><strong>权限：</strong>管理员</p>
+                    <p><strong>响应：</strong></p>
+                    <pre><code>{
+  "success": true,
+  "message": "",
+  "data": ["default", "vip", "claude", "claude-包月", "claude-按量", ...]
+}</code></pre>
+                </div>
+
+                <div class="api-endpoint">
+                    <span class="api-method get">GET</span>
+                    <strong>/api/user/groups</strong>
+                    <p style="margin-top: 10px;"><strong>功能：</strong>获取用户可用分组（自动过滤子级）</p>
+                    <p><strong>权限：</strong>已登录用户</p>
+                    <p><strong>响应：</strong></p>
+                    <pre><code>{
+  "success": true,
+  "message": "",
+  "data": {
+    "claude": {
+      "ratio": 1.2,
+      "desc": "Claude 分组",
+      "is_parent": true,
+      "children": ["claude-包月", "claude-按量"]
+    },
+    "default": {
+      "ratio": 1.0,
+      "desc": "默认分组"
+    },
+    ...
+  }
+}</code></pre>
+                </div>
+
+                <h3>6.2 GroupTree 管理接口</h3>
+
+                <div class="api-endpoint">
+                    <span class="api-method get">GET</span>
+                    <strong>/api/group/tree</strong>
+                    <p style="margin-top: 10px;"><strong>功能：</strong>获取 GroupTree 配置</p>
+                    <p><strong>权限：</strong>管理员</p>
+                    <p><strong>响应：</strong></p>
+                    <pre><code>{
+  "success": true,
+  "message": "",
+  "data": {
+    "claude": ["claude-包月", "claude-按量"],
+    "openai": ["openai-包月", "openai-按量"]
+  }
+}</code></pre>
+                </div>
+
+                <div class="api-endpoint">
+                    <span class="api-method get">GET</span>
+                    <strong>/api/group/selectable</strong>
+                    <p style="margin-top: 10px;"><strong>功能：</strong>获取可选分组（用于令牌创建）</p>
+                    <p><strong>权限：</strong>已登录用户</p>
+                    <p><strong>响应：</strong></p>
+                    <pre><code>{
+  "success": true,
+  "message": "",
+  "data": [
+    {
+      "name": "claude",
+      "is_parent": true,
+      "children": ["claude-包月", "claude-按量"]
+    },
+    {
+      "name": "default"
+    },
+    ...
+  ]
+}</code></pre>
+                </div>
+
+                <div class="api-endpoint">
+                    <span class="api-method get">GET</span>
+                    <strong>/api/group/all</strong>
+                    <p style="margin-top: 10px;"><strong>功能：</strong>获取所有分组及层级信息</p>
+                    <p><strong>权限：</strong>管理员</p>
+                    <p><strong>响应：</strong></p>
+                    <pre><code>{
+  "success": true,
+  "message": "",
+  "data": [
+    {
+      "name": "claude",
+      "type": "parent",
+      "children": ["claude-包月", "claude-按量"]
+    },
+    {
+      "name": "claude-包月",
+      "type": "child",
+      "parent": "claude"
+    },
+    {
+      "name": "default",
+      "type": "independent"
+    },
+    ...
+  ]
+}</code></pre>
+                </div>
+
+                <h3>6.3 配置更新接口</h3>
+
+                <div class="api-endpoint">
+                    <span class="api-method post">POST</span>
+                    <strong>/api/option/</strong>
+                    <p style="margin-top: 10px;"><strong>功能：</strong>更新系统配置（包括 GroupTree）</p>
+                    <p><strong>权限：</strong>管理员</p>
+                    <p><strong>请求体：</strong></p>
+                    <pre><code>{
+  "key": "GroupTree",
+  "value": {
+    "claude": ["claude-包月", "claude-按量"],
+    "openai": ["openai-包月", "openai-按量"]
+  }
+}</code></pre>
+                    <p><strong>响应：</strong></p>
+                    <pre><code>{
+  "success": true,
+  "message": ""
+}</code></pre>
+                </div>
+
+                <div class="card warning">
+                    <h4>⚠️ 配置更新注意事项</h4>
+                    <ul>
+                        <li>更新 GroupTree 会自动触发渠道缓存刷新</li>
+                        <li>配置会先经过 <code>CheckGroupTree()</code> 校验</li>
+                        <li>校验失败会拒绝更新并返回错误信息</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Section 7: Configuration -->
+            <div class="section" id="configuration">
+                <h2>7. 配置说明</h2>
+
+                <h3>7.1 GroupRatio 配置</h3>
+                <div class="card">
+                    <p><strong>配置位置：</strong>系统设置 → 运营设置 → 分组倍率</p>
+                    <p><strong>配置格式：</strong>JSON 对象</p>
+                    <p><strong>配置示例：</strong></p>
+                    <pre><code>{
+  "default": 1.0,
+  "vip": 0.9,
+  "svip": 0.8,
+  "claude": 1.2,
+  "claude-包月": 1.0,
+  "claude-按量": 1.5,
+  "openai": 1.1,
+  "openai-包月": 0.95,
+  "openai-按量": 1.3
+}</code></pre>
+                </div>
+
+                <div class="card info">
+                    <h4>💡 倍率配置策略</h4>
+                    <ul>
+                        <li><strong>父级倍率：</strong>作为子级的默认倍率（子级未配置时使用）</li>
+                        <li><strong>子级倍率：</strong>覆盖父级倍率（优先使用）</li>
+                        <li><strong>独立分组：</strong>直接配置倍率，无继承关系</li>
+                    </ul>
+                </div>
+
+                <h3>7.2 GroupGroupRatio 配置</h3>
+                <div class="card">
+                    <p><strong>配置位置：</strong>系统设置 → 运营设置 → 分组模型倍率</p>
+                    <p><strong>配置格式：</strong>JSON 嵌套对象</p>
+                    <p><strong>配置示例：</strong></p>
+                    <pre><code>{
+  "vip": {
+    "claude": 0.9,           // 父级配置，作为所有 claude 子级的默认倍率
+    "claude-按量": 0.85,      // 子级配置，覆盖父级
+    "openai-包月": 0.8
+  },
+  "svip": {
+    "claude": 0.8,
+    "openai": 0.75
+  }
+}</code></pre>
+                </div>
+
+                <h3>7.3 GroupTree 配置</h3>
+                <div class="card">
+                    <p><strong>配置位置：</strong>系统设置 → 运营设置 → 分组层级树</p>
+                    <p><strong>配置格式：</strong>JSON 对象（父级→子级数组）</p>
+                    <p><strong>配置示例：</strong></p>
+                    <pre><code>{
+  "claude": ["claude-包月", "claude-按量"],
+  "openai": ["openai-包月", "openai-按量"]
+}</code></pre>
+                </div>
+
+                <div class="card warning">
+                    <h4>⚠️ GroupTree 配置限制</h4>
+                    <ul>
+                        <li>每个子级只能属于一个父级（不能重复）</li>
+                        <li>不支持嵌套层级（子级不能同时是父级）</li>
+                        <li>父级和子级不能同名</li>
+                        <li>配置空对象 <code>{}</code> 会清空 GroupTree</li>
+                    </ul>
+                </div>
+
+                <h3>7.4 配置建议</h3>
+                <div class="example-box">
+                    <h4>推荐配置方案</h4>
+                    <ol>
+                        <li><strong>先规划分组结构：</strong>确定哪些分组应该成为父级，哪些是子级</li>
+                        <li><strong>配置 GroupTree：</strong>定义父子级关系</li>
+                        <li><strong>配置父级倍率：</strong>为父级分组配置基础倍率（作为子级默认值）</li>
+                        <li><strong>配置子级倍率：</strong>为需要差异化的子级单独配置倍率</li>
+                        <li><strong>配置模型倍率：</strong>优先配置父级的模型倍率，减少配置量</li>
+                    </ol>
+                </div>
+
+                <div class="comparison">
+                    <div class="before">
+                        <h4>❌ 低效配置（全部配置子级）</h4>
+                        <pre><code>GroupGroupRatio = {
+  "vip": {
+    "claude-包月": 0.9,
+    "claude-按量": 0.9,
+    "openai-包月": 0.85,
+    "openai-按量": 0.85
+  }
+}</code></pre>
+                        <p style="color: #856404; margin-top: 10px;">配置冗余，维护困难</p>
+                    </div>
+                    <div class="after">
+                        <h4>✅ 高效配置（利用继承）</h4>
+                        <pre><code>GroupGroupRatio = {
+  "vip": {
+    "claude": 0.9,
+    "openai": 0.85
+  }
+}</code></pre>
+                        <p style="color: #155724; margin-top: 10px;">配置简洁，子级自动继承</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 8: Use Cases -->
+            <div class="section" id="use-cases">
+                <h2>8. 使用场景</h2>
+
+                <h3>场景 1：多计费模式管理</h3>
+                <div class="example-box">
+                    <h4>需求</h4>
+                    <p>Claude 和 OpenAI 都有包月和按量两种计费模式，需要分别管理和计费</p>
+
+                    <h4>解决方案</h4>
+                    <pre><code>// 1. 配置 GroupTree
+{
+  "claude": ["claude-包月", "claude-按量"],
+  "openai": ["openai-包月", "openai-按量"]
+}
+
+// 2. 配置渠道
+- 包月渠道：分组设置为 "claude-包月" 或 "openai-包月"
+- 按量渠道：分组设置为 "claude-按量" 或 "openai-按量"
+
+// 3. 创建套餐
+- 按量套餐：channel_groups = ["claude-按量", "openai-按量"]
+- 包月套餐：channel_groups = ["claude-包月", "openai-包月"]
+
+// 4. 创建令牌
+- 用户选择 "claude" 分组
+- 自动授权 "claude-包月" 和 "claude-按量" 两个子级</code></pre>
+
+                    <h4>优势</h4>
+                    <ul>
+                        <li>用户只需选择 "claude"，无需关心计费模式</li>
+                        <li>系统根据套餐自动路由到正确的计费模式</li>
+                        <li>管理员可以为不同计费模式配置不同倍率</li>
+                    </ul>
+                </div>
+
+                <h3>场景 2：差异化定价</h3>
+                <div class="example-box">
+                    <h4>需求</h4>
+                    <p>VIP 用户使用 Claude 享受 9 折，按量使用享受 8.5 折</p>
+
+                    <h4>解决方案</h4>
+                    <pre><code>// 配置 GroupGroupRatio
+{
+  "vip": {
+    "claude": 0.9,          // 父级默认 9 折
+    "claude-按量": 0.85     // 按量特殊优惠 8.5 折
+  }
+}
+
+// 计费逻辑
+- VIP 用户使用 claude-包月：查找 "claude-按量" → 未找到 → 回退 "claude" → 0.9
+- VIP 用户使用 claude-按量：查找 "claude-按量" → 找到 → 0.85</code></pre>
+
+                    <h4>优势</h4>
+                    <ul>
+                        <li>利用倍率回退机制，减少配置量</li>
+                        <li>可以为特定子级设置差异化定价</li>
+                        <li>配置清晰，易于理解和维护</li>
+                    </ul>
+                </div>
+
+                <h3>场景 3：渠道分组简化</h3>
+                <div class="example-box">
+                    <h4>需求</h4>
+                    <p>新增 Claude 渠道，希望同时支持包月和按量用户</p>
+
+                    <h4>解决方案</h4>
+                    <div class="comparison">
+                        <div class="before">
+                            <h4>❌ 不使用 GroupTree</h4>
+                            <p>需要手动填写：</p>
+                            <code>claude-包月,claude-按量</code>
+                            <p style="color: #856404; margin-top: 10px;">容易遗漏或拼写错误</p>
+                        </div>
+                        <div class="after">
+                            <h4>✅ 使用 GroupTree</h4>
+                            <p>只需填写：</p>
+                            <code>claude</code>
+                            <p style="color: #155724; margin-top: 10px;">自动展开为所有子级，不会遗漏</p>
+                        </div>
+                    </div>
+                </div>
+
+                <h3>场景 4：套餐故障切换</h3>
+                <div class="example-box">
+                    <h4>需求</h4>
+                    <p>用户当前套餐的 Claude 渠道全部故障，自动切换到备用套餐</p>
+
+                    <h4>解决方案</h4>
+                    <pre><code>// 用户配置
+- 主套餐：channel_groups = ["claude-按量"]
+- 备用套餐：channel_groups = ["claude"]  // 父级分组
+- 令牌分组：claude
+
+// 故障切换流程
+1. 主套餐 "claude-按量" 渠道全部故障
+2. 检测到 auto_switch = 1，触发故障切换
+3. 获取备用套餐，其 channel_groups = ["claude"]
+4. 展开 "claude" → ["claude-包月", "claude-按量"]
+5. 计算交集：令牌 "claude" 的子级 ∩ 套餐分组 = ["claude-包月", "claude-按量"]
+6. 在 "claude-包月" 中找到可用渠道，切换成功</code></pre>
+
+                    <h4>优势</h4>
+                    <ul>
+                        <li>备用套餐配置父级分组，自动覆盖所有子级</li>
+                        <li>交集逻辑支持父级展开，匹配更灵活</li>
+                        <li>提高故障切换成功率</li>
+                    </ul>
+                </div>
+
+                <h3>场景 5：渐进式迁移</h3>
+                <div class="example-box">
+                    <h4>需求</h4>
+                    <p>现有系统已经使用 "claude-包月" 和 "claude-按量"，希望引入父级分组简化管理</p>
+
+                    <h4>解决方案</h4>
+                    <ol>
+                        <li><strong>第一步：</strong>配置 GroupTree
+                            <pre><code>{
+  "claude": ["claude-包月", "claude-按量"]
+}</code></pre>
+                        </li>
+                        <li><strong>第二步：</strong>系统自动生效
+                            <ul>
+                                <li>现有渠道、套餐、令牌保持不变</li>
+                                <li>渠道缓存自动刷新（父级展开）</li>
+                                <li>新令牌创建时只显示 "claude"</li>
+                            </ul>
+                        </li>
+                        <li><strong>第三步：</strong>逐步迁移
+                            <ul>
+                                <li>新套餐使用 "claude" 父级分组</li>
+                                <li>新渠道使用 "claude" 父级分组</li>
+                                <li>旧配置自然过渡，无需手动修改</li>
+                            </ul>
+                        </li>
+                    </ol>
+
+                    <h4>优势</h4>
+                    <ul>
+                        <li>无需数据迁移，配置即生效</li>
+                        <li>新旧配置并存，平滑过渡</li>
+                        <li>逐步替换，风险可控</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Summary Card -->
+            <div class="card success" style="margin-top: 40px;">
+                <h3>📊 系统总结</h3>
+                <table style="margin: 20px 0;">
+                    <thead>
+                        <tr>
+                            <th>维度</th>
+                            <th>核心价值</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>用户体验</strong></td>
+                            <td>简化选择，父级分组自动授权所有子级</td>
+                        </tr>
+                        <tr>
+                            <td><strong>配置管理</strong></td>
+                            <td>减少重复配置，支持倍率继承</td>
+                        </tr>
+                        <tr>
+                            <td><strong>系统稳定性</strong></td>
+                            <td>自动展开、交集验证，确保路由正确</td>
+                        </tr>
+                        <tr>
+                            <td><strong>扩展性</strong></td>
+                            <td>向后兼容，支持渐进式迁移</td>
+                        </tr>
+                        <tr>
+                            <td><strong>灵活性</strong></td>
+                            <td>父级统一管理，子级差异化定价</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>New-API 分组系统技术报告 | 生成时间: 2025-12-15</p>
+            <p style="margin-top: 10px; font-size: 0.9em;">文档版本: v1.0 | 基于 feature/add-hierarchical-group-system 分支</p>
+        </div>
+    </div>
+
+    <script>
+        // Smooth scroll for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Add copy button to code blocks
+        document.querySelectorAll('pre code').forEach(block => {
+            const button = document.createElement('button');
+            button.innerText = '复制';
+            button.style.cssText = 'position:absolute;top:10px;right:10px;padding:5px 10px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;';
+
+            const wrapper = document.createElement('div');
+            wrapper.style.position = 'relative';
+            block.parentNode.insertBefore(wrapper, block);
+            wrapper.appendChild(block);
+            wrapper.appendChild(button);
+
+            button.addEventListener('click', () => {
+                navigator.clipboard.writeText(block.innerText);
+                button.innerText = '已复制！';
+                setTimeout(() => button.innerText = '复制', 2000);
+            });
+        });
+    </script>
+</body>
+</html>

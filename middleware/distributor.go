@@ -82,6 +82,20 @@ func Distribute() func(c *gin.Context) {
 				var selectGroup string
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 
+				// Expand parent group for wallet users (token-based group routing)
+				// This ensures parent groups work for both plan users and wallet users
+				// If token specifies a parent group, expand to child groups for channel selection
+				if ratio_setting.IsParentGroup(usingGroup) {
+					children := ratio_setting.GetChildGroups(usingGroup)
+					if len(children) > 0 {
+						// Set multi-group context similar to plan users
+						// This allows the channel selection logic to iterate through all child groups
+						common.SetContextKey(c, constant.ContextKeyPlanGroups, children)
+						// Keep usingGroup as parent for logging/display, but actual routing uses children
+						// The channel selection will update ContextKeyUsingGroup to the actual child group used
+					}
+				}
+
 				// Try to select a plan for this request (only if plan system is enabled)
 				userId := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 				if common.PlanSystemEnabled && userId > 0 {
