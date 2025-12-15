@@ -47,6 +47,9 @@ func SetApiRouter(router *gin.Engine) {
 		// Plan purchase payment callback (no auth required - handled by payment gateway)
 		apiRouter.GET("/plan/purchase/epay/notify", controller.EpayPlanOrderNotify)
 
+		// Topup order payment callback (no auth required - handled by payment gateway)
+		apiRouter.GET("/user/topup/order/epay/notify", controller.EpayTopupOrderNotify)
+
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.UniversalVerify)
 		apiRouter.GET("/verify/status", middleware.UserAuth(), controller.GetVerificationStatus)
@@ -62,6 +65,7 @@ func SetApiRouter(router *gin.Engine) {
 			userRoute.GET("/logout", controller.Logout)
 			userRoute.GET("/epay/notify", controller.EpayNotify)
 			userRoute.GET("/groups", controller.GetUserGroups)
+			userRoute.GET("/topup/info", controller.GetTopUpInfo) // Public access for pricing page
 
 			selfRoute := userRoute.Group("/")
 			selfRoute.Use(middleware.UserAuth())
@@ -79,7 +83,6 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/passkey/verify/finish", controller.PasskeyVerifyFinish)
 				selfRoute.DELETE("/passkey", controller.PasskeyDelete)
 				selfRoute.GET("/aff", controller.GetAffCode)
-				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
 				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
 				selfRoute.POST("/pay", middleware.CriticalRateLimit(), controller.RequestEpay)
@@ -108,6 +111,13 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/plan/purchase/pay", middleware.CriticalRateLimit(), controller.PayPlanOrder)
 				selfRoute.GET("/plan/purchase/my-orders", controller.GetMyPlanOrders)
 				selfRoute.POST("/plan/purchase/cancel", controller.CancelPlanOrder)
+
+				// Topup order routes (user) - for pricing page pay-as-you-go
+				selfRoute.POST("/topup/order/create", controller.CreateTopupOrder)
+				selfRoute.GET("/topup/order/:id", controller.GetTopupOrderDetail)
+				selfRoute.POST("/topup/order/pay", middleware.CriticalRateLimit(), controller.PayTopupOrder)
+				selfRoute.GET("/topup/order/my-orders", controller.GetMyTopupOrders)
+				selfRoute.POST("/topup/order/cancel", controller.CancelTopupOrder)
 			}
 
 			adminRoute := userRoute.Group("/")

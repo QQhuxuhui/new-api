@@ -903,6 +903,9 @@ func RemovePlanFromUser(userId, planId int) error {
 		return err
 	}
 
+	// 保存删除前的状态，用于后续处理
+	wasCurrent := userPlan.IsCurrent == 1
+
 	// 2. 检查是否有关联订单（仅作日志记录，不阻止删除）
 	var orderCount int64
 	DB.Model(&PlanOrder{}).Where("user_plan_id = ?", userPlan.Id).Count(&orderCount)
@@ -919,10 +922,36 @@ func RemovePlanFromUser(userId, planId int) error {
 		)
 	}
 
-	// 3. 删除套餐（外键约束会自动将订单的 user_plan_id 设为 NULL）
-	result := DB.Delete(&userPlan)
-	if result.Error != nil {
-		return result.Error
+	// 3. 使用事务确保删除和队列处理的原子性
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		// 删除套餐（外键约束会自动将订单的 user_plan_id 设为 NULL）
+		if err := tx.Delete(&userPlan).Error; err != nil {
+			return err
+		}
+
+		// 处理队列逻辑
+		if wasCurrent {
+			// 删除的是当前套餐，激活队列中的下一个套餐
+			nextPlan, activateErr := activateNextQueuedPlanWithTx(tx, userId)
+			if activateErr != nil {
+				return fmt.Errorf("激活队列下一个套餐失败: %w", activateErr)
+			}
+			if nextPlan != nil {
+				common.SysLog(fmt.Sprintf("已激活队列下一个套餐: userId=%d, userPlanId=%d, planName=%s",
+					userId, nextPlan.Id, nextPlan.PlanName))
+			}
+		} else {
+			// 删除的是队列套餐，重排队列位置
+			if err := recalculateQueuePositionsWithTx(tx, userId); err != nil {
+				return fmt.Errorf("重排队列位置失败: %w", err)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
 	// 4. 清理缓存
@@ -969,30 +998,39 @@ func RemovePlanByUserPlanId(userPlanId int) error {
 		)
 	}
 
-	// 3. 删除套餐（外键约束会自动将订单的 user_plan_id 设为 NULL）
-	result := DB.Delete(&userPlan)
-	if result.Error != nil {
-		return result.Error
+	// 3. 使用事务确保删除和队列处理的原子性
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		// 删除套餐（外键约束会自动将订单的 user_plan_id 设为 NULL）
+		if err := tx.Delete(&userPlan).Error; err != nil {
+			return err
+		}
+
+		// 处理队列逻辑
+		if wasCurrent {
+			// 删除的是当前套餐，激活队列中的下一个套餐
+			nextPlan, activateErr := activateNextQueuedPlanWithTx(tx, userId)
+			if activateErr != nil {
+				return fmt.Errorf("激活队列下一个套餐失败: %w", activateErr)
+			}
+			if nextPlan != nil {
+				common.SysLog(fmt.Sprintf("已激活队列下一个套餐: userId=%d, userPlanId=%d, planName=%s",
+					userId, nextPlan.Id, nextPlan.PlanName))
+			}
+		} else {
+			// 删除的是队列套餐，重排队列位置
+			if err := recalculateQueuePositionsWithTx(tx, userId); err != nil {
+				return fmt.Errorf("重排队列位置失败: %w", err)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
-	// 4. 处理队列逻辑
-	if wasCurrent {
-		// 删除的是当前套餐，激活队列中的下一个套餐
-		nextPlan, activateErr := ActivateNextQueuedPlan(userId)
-		if activateErr != nil {
-			common.SysLog(fmt.Sprintf("激活队列下一个套餐失败: userId=%d, error=%v", userId, activateErr))
-		} else if nextPlan != nil {
-			common.SysLog(fmt.Sprintf("已激活队列下一个套餐: userId=%d, userPlanId=%d, planName=%s",
-				userId, nextPlan.Id, nextPlan.PlanName))
-		}
-	} else {
-		// 删除的是队列套餐，重排队列位置
-		if recalcErr := recalculateQueuePositions(userId); recalcErr != nil {
-			common.SysLog(fmt.Sprintf("重排队列位置失败: userId=%d, error=%v", userId, recalcErr))
-		}
-	}
-
-	// 5. 清理缓存
+	// 4. 清理缓存
 	InvalidateUserPlanCache(userId)
 
 	return nil
@@ -1181,8 +1219,13 @@ func AddPlanToQueue(userId int, planId int, quota int64, source string, sourceOr
 // recalculateQueuePositions reorders queue positions to ensure sequential numbering
 // while preserving relative order (based on existing queue_position)
 func recalculateQueuePositions(userId int) error {
+	return recalculateQueuePositionsWithTx(DB, userId)
+}
+
+// recalculateQueuePositionsWithTx reorders queue positions within a transaction
+func recalculateQueuePositionsWithTx(tx *gorm.DB, userId int) error {
 	var plans []*UserPlan
-	err := DB.Where("user_id = ? AND is_current = 0 AND status = ?", userId, UserPlanStatusActive).
+	err := tx.Where("user_id = ? AND is_current = 0 AND status = ?", userId, UserPlanStatusActive).
 		Order("queue_position ASC, purchase_order ASC").
 		Find(&plans).Error
 	if err != nil {
@@ -1192,7 +1235,9 @@ func recalculateQueuePositions(userId int) error {
 	for i, plan := range plans {
 		newPos := i + 1
 		if plan.QueuePosition != newPos {
-			DB.Model(&UserPlan{}).Where("id = ?", plan.Id).Update("queue_position", newPos)
+			if err := tx.Model(&UserPlan{}).Where("id = ?", plan.Id).Update("queue_position", newPos).Error; err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1312,9 +1357,28 @@ func GetEstimatedActivationTime(userPlanId int) (int64, error) {
 
 // ActivateNextQueuedPlan activates the next plan in queue when current plan completes
 func ActivateNextQueuedPlan(userId int) (*UserPlan, error) {
+	var result *UserPlan
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		plan, activateErr := activateNextQueuedPlanWithTx(tx, userId)
+		if activateErr != nil {
+			return activateErr
+		}
+		result = plan
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Invalidate cache after successful transaction
+	InvalidateUserPlanCache(userId)
+	return result, nil
+}
+
+// activateNextQueuedPlanWithTx activates the next plan in queue within a transaction
+func activateNextQueuedPlanWithTx(tx *gorm.DB, userId int) (*UserPlan, error) {
 	// Get next plan in queue
 	var nextPlan UserPlan
-	err := DB.Preload("Plan").
+	err := tx.Preload("Plan").
 		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0", userId, UserPlanStatusActive).
 		Order("queue_position ASC").
 		First(&nextPlan).Error
@@ -1347,18 +1411,22 @@ func ActivateNextQueuedPlan(userId int) (*UserPlan, error) {
 		"updated_at":          now.UnixMilli(),
 	}
 
-	if err := DB.Model(&UserPlan{}).Where("id = ?", nextPlan.Id).Updates(updates).Error; err != nil {
+	if err := tx.Model(&UserPlan{}).Where("id = ?", nextPlan.Id).Updates(updates).Error; err != nil {
 		return nil, err
 	}
 
-	// Recalculate queue positions
-	_ = recalculateQueuePositions(userId)
+	// Recalculate queue positions within the same transaction
+	if err := recalculateQueuePositionsWithTx(tx, userId); err != nil {
+		return nil, err
+	}
 
-	// Invalidate cache
-	InvalidateUserPlanCache(userId)
+	// Reload the plan from transaction
+	var updatedPlan UserPlan
+	if err := tx.Preload("Plan").First(&updatedPlan, nextPlan.Id).Error; err != nil {
+		return nil, err
+	}
 
-	// Reload the plan
-	return GetUserPlanById(nextPlan.Id)
+	return &updatedPlan, nil
 }
 
 // CompleteCurrentPlan marks the current plan as completed and activates next

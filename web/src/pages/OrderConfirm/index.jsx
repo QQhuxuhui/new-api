@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Card,
   Typography,
@@ -46,6 +46,8 @@ const OrderConfirm = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { orderId } = useParams();
+  const [searchParams] = useSearchParams();
+  const orderType = searchParams.get('type') || 'plan'; // 'plan' or 'topup'
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [order, setOrder] = useState(null);
@@ -116,28 +118,68 @@ const OrderConfirm = () => {
   const loadOrder = async () => {
     setLoading(true);
     try {
-      const res = await API.get('/api/user/plan/purchase/my-orders?page=1&page_size=100');
-      const { success, message, data } = res.data;
-      if (success && data && data.orders) {
-        const targetOrder = data.orders.find(o => o.order_id === parseInt(orderId));
-        if (targetOrder) {
-          setOrder(targetOrder);
-          // Calculate countdown
-          const now = Date.now();
-          const expiredAt = targetOrder.expired_at;
-          const remaining = Math.max(0, Math.floor((expiredAt - now) / 1000));
-          setCountdown(remaining);
+      let targetOrder = null;
+
+      if (orderType === 'topup') {
+        // Load topup order directly by ID
+        const res = await API.get(`/api/user/topup/order/${orderId}`);
+        const { success, message, data } = res.data;
+        if (success && data) {
+          // Transform topup order to common format
+          targetOrder = {
+            order_id: data.order_id,
+            order_no: data.order_no,
+            order_type: 'topup',
+            plan_name: `$${data.amount} ${t('额度')}`, // Display as amount
+            amount: data.amount,
+            quota: data.quota,
+            original_price: data.original_price,
+            final_price: data.final_price,
+            discount_rate: data.discount_rate,
+            status: data.status,
+            created_at: data.created_at,
+            expired_at: data.expired_at,
+            paid_at: data.paid_at,
+          };
         } else {
-          showError(t('订单不存在'));
-          navigate('/plans');
+          showError(message || t('订单不存在'));
+          navigate('/plans?category=payg');
+          return;
         }
       } else {
-        showError(message || t('加载订单失败'));
-        navigate('/plans');
+        // Load plan order from list
+        const res = await API.get('/api/user/plan/purchase/my-orders?page=1&page_size=100');
+        const { success, message, data } = res.data;
+        if (success && data && data.orders) {
+          const foundOrder = data.orders.find(o => o.order_id === parseInt(orderId));
+          if (foundOrder) {
+            targetOrder = {
+              ...foundOrder,
+              order_type: 'plan',
+            };
+          } else {
+            showError(t('订单不存在'));
+            navigate('/plans');
+            return;
+          }
+        } else {
+          showError(message || t('加载订单失败'));
+          navigate('/plans');
+          return;
+        }
+      }
+
+      if (targetOrder) {
+        setOrder(targetOrder);
+        // Calculate countdown
+        const now = Date.now();
+        const expiredAt = targetOrder.expired_at;
+        const remaining = Math.max(0, Math.floor((expiredAt - now) / 1000));
+        setCountdown(remaining);
       }
     } catch (e) {
       showError(e.message || t('网络错误'));
-      navigate('/plans');
+      navigate(orderType === 'topup' ? '/plans?category=payg' : '/plans');
     }
     setLoading(false);
   };
@@ -198,7 +240,12 @@ const OrderConfirm = () => {
     setPaying(true);
     let shouldResetPaying = true; // Control whether to reset paying state in finally
     try {
-      const res = await API.post('/api/user/plan/purchase/pay', {
+      // Use different API based on order type
+      const payApiUrl = order.order_type === 'topup'
+        ? '/api/user/topup/order/pay'
+        : '/api/user/plan/purchase/pay';
+
+      const res = await API.post(payApiUrl, {
         order_id: order.order_id,
         payment_method: paymentMethod,
       });
@@ -289,15 +336,21 @@ const OrderConfirm = () => {
   }
 
   // Show different UI for different order statuses
-  if (order.status === 'delivered') {
+  // For topup orders, 'paid' status means success (no 'delivered' status)
+  if (order.status === 'delivered' || (order.order_type === 'topup' && order.status === 'paid')) {
+    const isTopup = order.order_type === 'topup';
     return (
       <div className='min-h-screen bg-[var(--semi-color-bg-0)] py-12 px-4'>
         <div className='max-w-2xl mx-auto'>
           <Card className='text-center p-12'>
             <IconTickCircle size='extra-large' style={{ fontSize: 80, color: 'var(--semi-color-success)' }} />
-            <Title heading={3} className='mt-6 mb-4'>{t('支付成功')}</Title>
+            <Title heading={3} className='mt-6 mb-4'>
+              {isTopup ? t('充值成功') : t('支付成功')}
+            </Title>
             <Text type='secondary' className='block mb-8'>
-              {t('您的套餐已成功开通，可以开始使用了')}
+              {isTopup
+                ? t('您的账户已成功充值，余额已到账')
+                : t('您的套餐已成功开通，可以开始使用了')}
             </Text>
             <Space spacing='medium'>
               <Button
@@ -308,9 +361,9 @@ const OrderConfirm = () => {
                 {t('查看我的套餐')}
               </Button>
               <Button
-                onClick={() => navigate('/plans')}
+                onClick={() => navigate(isTopup ? '/plans?category=payg' : '/plans')}
               >
-                {t('返回套餐列表')}
+                {isTopup ? t('继续充值') : t('返回套餐列表')}
               </Button>
             </Space>
           </Card>
@@ -320,6 +373,7 @@ const OrderConfirm = () => {
   }
 
   if (order.status === 'expired') {
+    const isTopup = order.order_type === 'topup';
     return (
       <div className='min-h-screen bg-[var(--semi-color-bg-0)] py-12 px-4'>
         <div className='max-w-2xl mx-auto'>
@@ -332,7 +386,7 @@ const OrderConfirm = () => {
             <Button
               theme='solid'
               type='primary'
-              onClick={() => navigate('/plans')}
+              onClick={() => navigate(isTopup ? '/plans?category=payg' : '/plans')}
             >
               {t('重新购买')}
             </Button>
@@ -365,7 +419,7 @@ const OrderConfirm = () => {
         />
 
         {/* Order Details Card */}
-        <Card title={t('订单确认')} className='mb-6'>
+        <Card title={order.order_type === 'topup' ? t('充值订单确认') : t('订单确认')} className='mb-6'>
           <div className='space-y-4'>
             {/* Order Number */}
             <div className='flex justify-between'>
@@ -375,9 +429,11 @@ const OrderConfirm = () => {
 
             <Divider margin='12px' />
 
-            {/* Plan Info */}
+            {/* Plan/Topup Info */}
             <div className='flex justify-between'>
-              <Text type='secondary'>{t('套餐')}</Text>
+              <Text type='secondary'>
+                {order.order_type === 'topup' ? t('充值金额') : t('套餐')}
+              </Text>
               <Text strong>{order.plan_name}</Text>
             </div>
 
@@ -451,7 +507,7 @@ const OrderConfirm = () => {
         <div className='flex gap-4'>
           <Button
             block
-            onClick={() => navigate('/plans')}
+            onClick={() => navigate(order.order_type === 'topup' ? '/plans?category=payg' : '/plans')}
             disabled={paying}
           >
             {t('返回')}
@@ -472,7 +528,9 @@ const OrderConfirm = () => {
         {/* Notice */}
         <div className='mt-6'>
           <Text type='tertiary' size='small' className='block text-center'>
-            {t('支付完成后，套餐将自动开通。如遇问题请联系客服。')}
+            {order.order_type === 'topup'
+              ? t('支付完成后，余额将自动到账。如遇问题请联系客服。')
+              : t('支付完成后，套餐将自动开通。如遇问题请联系客服。')}
           </Text>
         </div>
       </div>

@@ -17,9 +17,16 @@ func StartPlanOrderTasks() {
 		defer ticker.Stop()
 
 		for range ticker.C {
+			// Expire old plan orders
 			err := model.ExpireOldOrders()
 			if err != nil {
-				common.SysLog("order expiration task failed: " + err.Error())
+				common.SysLog("plan order expiration task failed: " + err.Error())
+			}
+
+			// Expire old topup orders
+			err = model.ExpireOldTopupOrders()
+			if err != nil {
+				common.SysLog("topup order expiration task failed: " + err.Error())
 			}
 		}
 	}()

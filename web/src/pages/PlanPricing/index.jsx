@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useState, useEffect, useMemo, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Card,
   Typography,
@@ -78,11 +78,19 @@ const formatQuotaDisplay = (quotaUsd, defaultQuota) => {
 const PlanPricing = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [statusState] = useContext(StatusContext);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [plans, setPlans] = useState([]);
-  const [filter, setFilter] = useState('all');
+  // 从 URL 参数读取初始分类，支持 ?category=payg 预选
+  const [filter, setFilter] = useState(searchParams.get('category') || 'all');
+
+  // 按量付费（充值）相关状态
+  const [topupLoading, setTopupLoading] = useState(false);
+  const [topupInfo, setTopupInfo] = useState(null);
+  const [topupAmounts, setTopupAmounts] = useState([]);
+  const [creatingOrder, setCreatingOrder] = useState(false);
 
   // 从系统配置获取套餐分类配置
   const categoriesConfig = useMemo(() => {
@@ -143,9 +151,73 @@ const PlanPricing = () => {
     setLoading(false);
   };
 
+  // Load topup info (pay-as-you-go amounts)
+  const loadTopupInfo = async () => {
+    if (topupInfo) return; // Already loaded
+    setTopupLoading(true);
+    try {
+      const res = await API.get('/api/user/topup/info');
+      const { success, data } = res.data;
+      if (success) {
+        setTopupInfo(data);
+        // Build topup amounts from amount_options and discount
+        const amounts = (data.amount_options || []).map((amount) => ({
+          value: amount,
+          discount: data.discount?.[amount] || 1.0,
+        }));
+        // If no custom amounts, generate defaults
+        if (amounts.length === 0) {
+          const minTopup = data.min_topup || 1;
+          const multipliers = [1, 5, 10, 30, 50, 100];
+          amounts.push(...multipliers.map((m) => ({
+            value: minTopup * m,
+            discount: 1.0,
+          })));
+        }
+        setTopupAmounts(amounts);
+      }
+    } catch (e) {
+      console.error('Failed to load topup info:', e);
+    }
+    setTopupLoading(false);
+  };
+
+  // Handle topup purchase (create order and redirect)
+  const handleTopupPurchase = async (amount) => {
+    // Check login
+    if (!isLoggedIn()) {
+      navigate(`/login?redirect=/plans?category=payg`);
+      return;
+    }
+
+    setCreatingOrder(true);
+    try {
+      const res = await API.post('/api/user/topup/order/create', {
+        amount: amount,
+      });
+      const { success, message, data } = res.data;
+      if (success) {
+        // Redirect to order confirmation page with topup type
+        navigate(`/console/order-confirm/${data.order_id}?type=topup`);
+      } else {
+        showError(message || t('创建订单失败'));
+      }
+    } catch (e) {
+      showError(e.message || t('网络错误'));
+    }
+    setCreatingOrder(false);
+  };
+
   useEffect(() => {
     loadPlans();
   }, []);
+
+  // Load topup info when filter changes to payg
+  useEffect(() => {
+    if (filter === 'payg' && !topupInfo) {
+      loadTopupInfo();
+    }
+  }, [filter]);
 
   // Filter and sort plans (先拷贝再排序，避免修改原数组)
   const filteredPlans = useMemo(() => {
@@ -306,6 +378,175 @@ const PlanPricing = () => {
 
     return options;
   }, [categoriesConfig, t]);
+
+  // Render single topup amount card (pay-as-you-go)
+  const renderTopupCard = (topupAmount, index) => {
+    const { value, discount } = topupAmount;
+    const hasDiscount = discount < 1;
+    const discountPercent = hasDiscount ? Math.round((1 - discount) * 100) : 0;
+    const priceRatio = statusState?.status?.price || 7; // Default CNY/USD ratio
+    const originalPrice = value * priceRatio;
+    const finalPrice = originalPrice * discount;
+    // Mark the middle card as recommended
+    const isRecommended = index === Math.floor(topupAmounts.length / 2);
+
+    return (
+      <div
+        key={`topup-${value}`}
+        className={`group relative transition-all duration-300 ease-in-out transform hover:-translate-y-2 ${isRecommended ? 'z-10' : 'z-0'}`}
+      >
+        {/* Highlight effect for recommended */}
+        {isRecommended && (
+          <div className='absolute -inset-0.5 bg-gradient-to-r from-green-400 to-emerald-500 rounded-2xl blur opacity-30 group-hover:opacity-50 transition-opacity duration-500'></div>
+        )}
+
+        <Card
+          className={`relative h-full border-none shadow-sm hover:shadow-xl transition-shadow duration-300 ${isRecommended ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-800/50'}`}
+          style={{
+            borderRadius: '20px',
+            overflow: 'hidden',
+          }}
+          bodyStyle={{ padding: '0' }}
+        >
+          {/* Header Section */}
+          <div className={`p-6 ${isRecommended ? 'bg-gradient-to-br from-green-500 to-emerald-600 text-white' : 'bg-gray-100 dark:bg-gray-700'}`}>
+            {/* Popular Badge */}
+            {isRecommended && (
+              <div className='absolute top-4 right-4'>
+                <Tag
+                  style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: 'white', borderColor: 'transparent' }}
+                  shape='circle'
+                >
+                  <IconStar className='mr-1' />
+                  {t('推荐')}
+                </Tag>
+              </div>
+            )}
+
+            {/* Category Badge */}
+            <Tag
+              color='green'
+              size='small'
+              shape='circle'
+              className='mb-3'
+            >
+              {t('按量付费')}
+            </Tag>
+
+            {/* Amount Title */}
+            <Title
+              heading={4}
+              className={`m-0 mb-2 ${isRecommended ? 'text-white' : ''}`}
+            >
+              ${value} {t('额度')}
+            </Title>
+
+            {/* Type */}
+            <div className='flex items-center gap-1'>
+              <IconCreditCard />
+              <Text className={isRecommended ? 'text-green-100' : 'text-gray-500 dark:text-gray-400'}>
+                {t('钱包充值')}
+              </Text>
+            </div>
+          </div>
+
+          {/* Pricing Section */}
+          <div className='px-6 py-6 border-b border-gray-100 dark:border-gray-700'>
+            {/* Quota display */}
+            <div className='mb-4 p-3 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-xl border border-green-200 dark:border-green-800'>
+              <div className='flex items-center justify-between'>
+                <Text size='small' className='text-gray-600 dark:text-gray-400'>
+                  {t('充值额度')}
+                </Text>
+                <div className='flex items-baseline gap-1'>
+                  <Text className='text-2xl font-bold text-green-600 dark:text-green-400'>
+                    ${value}
+                  </Text>
+                  <Text size='small' className='text-gray-500 dark:text-gray-400'>
+                    {t('美金')}
+                  </Text>
+                </div>
+              </div>
+            </div>
+
+            {/* Price display */}
+            <div className='text-center mb-3'>
+              {/* Discount Badge */}
+              {hasDiscount && (
+                <div className='mb-2'>
+                  <Tag color='red' size='large' type='solid' shape='circle' className='shadow-md'>
+                    <span className='font-bold'>-{discountPercent}%</span>
+                  </Tag>
+                </div>
+              )}
+
+              {/* Price */}
+              <div className='flex flex-col items-center'>
+                {hasDiscount && (
+                  <Text delete type='tertiary' className='text-xl mb-1'>
+                    ¥{originalPrice.toFixed(2)}
+                  </Text>
+                )}
+                <div className='flex items-baseline justify-center gap-1'>
+                  <Text className='text-lg font-medium text-gray-600 dark:text-gray-400'>
+                    ¥
+                  </Text>
+                  <Text className='text-5xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent'>
+                    {finalPrice.toFixed(0)}
+                  </Text>
+                </div>
+              </div>
+            </div>
+
+            {/* Description */}
+            <Text type='tertiary' size='small' className='block mt-3 text-center'>
+              {t('充值后永不过期，按实际使用量扣费')}
+            </Text>
+          </div>
+
+          {/* Features Section */}
+          <div className='px-6 py-5'>
+            <div className='space-y-3'>
+              {[
+                { text: t('永不过期'), icon: 'check' },
+                { text: t('按量扣费'), icon: 'check' },
+                { text: t('即时到账'), icon: 'check' },
+              ].map((feature, idx) => (
+                <div key={idx} className='flex items-center gap-2'>
+                  <div className='w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0'>
+                    <span className='text-xs text-green-600 dark:text-green-400'>✓</span>
+                  </div>
+                  <Text size='small' className='text-gray-600 dark:text-gray-300'>
+                    {feature.text}
+                  </Text>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* CTA Section */}
+          <div className='px-6 pb-6'>
+            <Button
+              theme={isRecommended ? 'solid' : 'light'}
+              type='primary'
+              size='large'
+              block
+              loading={creatingOrder}
+              onClick={() => handleTopupPurchase(value)}
+              style={{
+                borderRadius: '12px',
+                height: '48px',
+                fontWeight: 600,
+                backgroundColor: isRecommended ? '#10b981' : undefined,
+              }}
+            >
+              {t('立即充值')}
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  };
 
   // Render single plan card
   const renderPlanCard = (plan) => {
@@ -578,7 +819,7 @@ const PlanPricing = () => {
         </div>
 
         {/* Plans Grid */}
-        {loading ? (
+        {loading || (filter === 'payg' && topupLoading) ? (
           // 加载骨架
           <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
             {[1, 2, 3].map((i) => (
@@ -622,6 +863,20 @@ const PlanPricing = () => {
               {t('重试')}
             </Button>
           </div>
+        ) : filter === 'payg' ? (
+          // 按量付费 - 显示充值金额卡片
+          topupAmounts.length > 0 ? (
+            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
+              {topupAmounts.map((amount, index) => renderTopupCard(amount, index))}
+            </div>
+          ) : (
+            <Empty
+              image={<IconCreditCard size='extra-large' className='text-gray-300 text-6xl' />}
+              title={t('暂无充值选项')}
+              description={t('管理员尚未配置充值金额选项，请联系管理员或访问钱包页面。')}
+              className='bg-white dark:bg-gray-800 p-12 rounded-3xl shadow-sm'
+            />
+          )
         ) : (() => {
           // 先过滤掉禁用分类的卡片，再判断是否为空
           const renderedCards = filteredPlans
