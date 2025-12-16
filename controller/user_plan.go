@@ -383,10 +383,10 @@ func AdminAddQuota(c *gin.Context) {
 
 // AdminUpdateUserPlanRequest is the request body for updating a user plan
 type AdminUpdateUserPlanRequest struct {
-	Quota                   *int64 `json:"quota"`                      // Set absolute quota value (nil = no change)
-	ExpiresAt               *int64 `json:"expires_at"`                 // Set expiration time (nil = no change, 0 = never expires)
-	DailyQuotaLimitOverride *int64 `json:"daily_quota_limit_override"` // Set daily limit override (nil = use plan default, 0 = no limit)
-	AdminNote               string `json:"admin_note"`                 // Admin note
+	Quota                   *int64  `json:"quota"`                      // Set absolute quota value (nil = no change)
+	ExpiresAt               *int64  `json:"expires_at"`                 // Set expiration time (nil = no change, 0 = never expires)
+	DailyQuotaLimitOverride *int64  `json:"daily_quota_limit_override"` // Set daily limit override (nil = use plan default, 0 = no limit)
+	AdminNote               *string `json:"admin_note"`                 // Admin note (nil = no change, empty string = clear)
 }
 
 // AdminUpdateUserPlan updates a user plan's configuration (admin)
@@ -446,9 +446,9 @@ func AdminUpdateUserPlan(c *gin.Context) {
 		updates["daily_quota_limit_override"] = *req.DailyQuotaLimitOverride
 	}
 
-	// Update admin note if provided
-	if req.AdminNote != "" {
-		updates["admin_note"] = req.AdminNote
+	// Update admin note if provided (nil = no change, empty string = clear)
+	if req.AdminNote != nil {
+		updates["admin_note"] = *req.AdminNote
 	}
 
 	if len(updates) == 0 {
