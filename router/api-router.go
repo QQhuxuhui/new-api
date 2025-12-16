@@ -338,6 +338,8 @@ func SetApiRouter(router *gin.Engine) {
 			planRoute.PUT("/", controller.UpdatePlan)
 			planRoute.DELETE("/:id", controller.DeletePlan)
 			planRoute.PUT("/:id/status", controller.UpdatePlanStatus)
+			planRoute.GET("/:id/sync_status", controller.GetPlanSyncStatus)
+			planRoute.POST("/:id/retry_sync", controller.RetryPlanSync)
 		}
 
 		// User plan management routes (admin)
