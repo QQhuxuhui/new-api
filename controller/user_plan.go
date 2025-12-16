@@ -219,17 +219,33 @@ func AdminUpdateUserPlanPermissions(c *gin.Context) {
 }
 
 // AdminForceSwitch forces a user to switch to a specific plan (admin)
+// Supports both user_plan_id (preferred) and plan_id (deprecated) for backwards compatibility
 func AdminForceSwitch(c *gin.Context) {
 	var req struct {
-		UserId int `json:"user_id" binding:"required"`
-		PlanId int `json:"plan_id" binding:"required"`
+		UserId     int `json:"user_id" binding:"required"`
+		UserPlanId int `json:"user_plan_id"` // Preferred: switch by user_plan instance ID
+		PlanId     int `json:"plan_id"`      // Deprecated: switch by plan template ID
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	err := model.SwitchUserCurrentPlan(req.UserId, req.PlanId)
+	var err error
+	if req.UserPlanId > 0 {
+		// Use user_plan_id (works even when plan template is deleted)
+		err = model.SwitchToUserPlan(req.UserId, req.UserPlanId)
+	} else if req.PlanId > 0 {
+		// Fallback to plan_id for backwards compatibility
+		err = model.SwitchUserCurrentPlan(req.UserId, req.PlanId)
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "需要提供 user_plan_id 或 plan_id",
+		})
+		return
+	}
+
 	if err != nil {
 		common.ApiError(c, err)
 		return
