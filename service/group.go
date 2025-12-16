@@ -37,8 +37,19 @@ func GetUserUsableGroups(userGroup string) map[string]string {
 }
 
 func GroupInUserUsableGroups(userGroup, groupName string) bool {
-	_, ok := GetUserUsableGroups(userGroup)[groupName]
-	return ok
+	usableGroups := GetUserUsableGroups(userGroup)
+	// 1. Direct match - groupName is in usable groups
+	if _, ok := usableGroups[groupName]; ok {
+		return true
+	}
+	// 2. Parent inheritance - if groupName is a child group, check if its parent is in usable groups
+	// This implements: "owning parent group permission = owning all child groups permission"
+	if parent := ratio_setting.GetParentGroup(groupName); parent != "" {
+		if _, ok := usableGroups[parent]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // GetUserAutoGroup 根据用户分组获取自动分组设置

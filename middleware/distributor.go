@@ -269,10 +269,27 @@ func Distribute() func(c *gin.Context) {
 												common.SetContextKey(c, constant.ContextKeyPlanName, planName)
 												common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
 
-												// Update channel groups - expand token group if it's a parent group
-												// Channel cache keys are child groups, so we need expanded groups for retry
+												// Update channel groups - intersect failover plan groups with token groups
+												// This ensures we only use groups authorized by the new plan
+												failoverPlanGroups := failoverPlan.GetChannelGroups()
+												expandedPlanGroups := make(map[string]bool)
+												for _, pg := range failoverPlanGroups {
+													for _, g := range ratio_setting.ExpandGroup(pg) {
+														expandedPlanGroups[g] = true
+													}
+												}
 												expandedTokenGroups := ratio_setting.ExpandGroup(tokenGroup)
-												common.SetContextKey(c, constant.ContextKeyPlanGroups, expandedTokenGroups)
+												var effectiveGroups []string
+												for _, g := range expandedTokenGroups {
+													if expandedPlanGroups[g] {
+														effectiveGroups = append(effectiveGroups, g)
+													}
+												}
+												// Fallback to failoverGroup if intersection is empty (shouldn't happen normally)
+												if len(effectiveGroups) == 0 {
+													effectiveGroups = []string{failoverGroup}
+												}
+												common.SetContextKey(c, constant.ContextKeyPlanGroups, effectiveGroups)
 												common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
 												usingGroup = failoverGroup
 												common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
