@@ -122,7 +122,23 @@ func Distribute() func(c *gin.Context) {
 							abortWithOpenAiMessage(c, http.StatusForbidden, "套餐选择失败: "+planErr.Error())
 							return
 						}
-						// ErrNoPlanAvailable - user has no plans, use default group
+						// ErrNoPlanAvailable - user has no plans, will use wallet billing
+						// For wallet consumption, if Token doesn't specify a group, use user's full usable groups
+						tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+						if tokenGroup == "" || tokenGroup == "auto" {
+							// User using wallet billing without Token group restriction
+							// Get user's full usable groups for channel selection
+							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+							usableGroups := service.GetUserUsableGroups(userGroup)
+							if len(usableGroups) > 0 {
+								groups := make([]string, 0, len(usableGroups))
+								for g := range usableGroups {
+									groups = append(groups, g)
+								}
+								common.SetContextKey(c, constant.ContextKeyPlanGroups, groups)
+								logger.LogDebug(c, "Wallet billing: using user's full usable groups:", groups)
+							}
+						}
 					} else if planResult != nil {
 						// Plan selected successfully
 						common.SetContextKey(c, constant.ContextKeyPlanId, planResult.PlanId)
@@ -214,15 +230,100 @@ func Distribute() func(c *gin.Context) {
 								}
 
 								if len(effectiveGroups) == 0 {
-									abortWithOpenAiMessage(c, http.StatusForbidden,
-										fmt.Sprintf("令牌分组 %s 不在套餐允许的分组范围内", tokenGroup))
-									return
+									// Token group not in plan's allowed groups
+									// Try failover to another plan that includes this token group
+									shouldAttemptGroupFailover := false
+									if planResult.UserPlan != nil && planResult.UserPlan.AutoSwitch == 1 {
+										shouldAttemptGroupFailover = true
+									}
+
+									if shouldAttemptGroupFailover {
+										logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d token_group=%s not in plan groups, attempting_failover",
+											userId, tokenGroup))
+
+										failoverChannel, failoverPlan, failoverGroup, failoverErr := service.AttemptPlanFailover(
+											c, userId, planResult.UserPlanId, modelRequest.Model)
+
+										if failoverErr != nil {
+											logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d group_mismatch failover_error=%v", userId, failoverErr))
+										}
+
+										if failoverChannel != nil && failoverPlan != nil {
+											// Successfully found alternative plan with the token group
+											if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id); switchErr != nil {
+												logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
+											} else {
+												planName := failoverPlan.GetDisplayName()
+												failoverPlanId := 0
+												if failoverPlan.PlanId != nil {
+													failoverPlanId = *failoverPlan.PlanId
+												}
+												logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d switched to plan=%s(id=%d,user_plan=%d) reason=token_group_mismatch",
+													userId, planName, failoverPlanId, failoverPlan.Id))
+
+												// Update context with new plan info
+												if failoverPlan.PlanId != nil {
+													common.SetContextKey(c, constant.ContextKeyPlanId, *failoverPlan.PlanId)
+												}
+												common.SetContextKey(c, constant.ContextKeyUserPlanId, failoverPlan.Id)
+												common.SetContextKey(c, constant.ContextKeyPlanName, planName)
+												common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
+
+												// Update channel groups - expand token group if it's a parent group
+												// Channel cache keys are child groups, so we need expanded groups for retry
+												expandedTokenGroups := ratio_setting.ExpandGroup(tokenGroup)
+												common.SetContextKey(c, constant.ContextKeyPlanGroups, expandedTokenGroups)
+												common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+												usingGroup = failoverGroup
+												common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
+
+												// Use the failover channel directly, skip normal channel selection
+												channel = failoverChannel
+												setAutoGroupContext(c, usingGroup, channel)
+												goto channelSelected
+											}
+										}
+									}
+
+									// Failover to other plan failed, try fallback to wallet billing
+									// Check if token group is within user's usable groups
+									userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+									if service.GroupInUserUsableGroups(userGroup, tokenGroup) {
+										// Token group is valid for wallet billing
+										// Clear plan context and fallback to wallet mode
+										logger.LogInfo(c, fmt.Sprintf("[WalletFallback] user=%d token_group=%s fallback to wallet billing",
+											userId, tokenGroup))
+
+										// Clear plan-related context
+										c.Set(string(constant.ContextKeyPlanId), 0)
+										c.Set(string(constant.ContextKeyUserPlanId), 0)
+										c.Set(string(constant.ContextKeyPlanName), "")
+
+										// Expand token group if it's a parent group
+										// Channel cache keys are child groups, so we need expanded groups for channel selection
+										expandedGroups := ratio_setting.ExpandGroup(tokenGroup)
+										common.SetContextKey(c, constant.ContextKeyPlanGroups, expandedGroups)
+										common.SetContextKey(c, constant.ContextKeyPlanGroup, "")
+
+										// Use the first expanded group for wallet billing
+										usingGroup = expandedGroups[0]
+										common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+
+										// Continue with normal channel selection using expanded groups
+										// Don't return here, let the code flow continue to channel selection
+									} else {
+										// Token group not in user's usable groups, return error
+										abortWithOpenAiMessage(c, http.StatusForbidden,
+											fmt.Sprintf("令牌分组 %s 不在套餐允许的分组范围内，且无法降级到钱包消费", tokenGroup))
+										return
+									}
+								} else {
+									// Use the effective groups (intersection result)
+									usingGroup = effectiveGroups[0]
+									common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+									common.SetContextKey(c, constant.ContextKeyPlanGroups, effectiveGroups)
+									common.SetContextKey(c, constant.ContextKeyPlanGroup, effectiveGroups[0])
 								}
-								// Use the effective groups (intersection result)
-								usingGroup = effectiveGroups[0]
-								common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
-								common.SetContextKey(c, constant.ContextKeyPlanGroups, effectiveGroups)
-								common.SetContextKey(c, constant.ContextKeyPlanGroup, effectiveGroups[0])
 							} else {
 								// Token has no specific group or is "auto", use all plan groups (already expanded)
 								common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
@@ -494,6 +595,7 @@ func Distribute() func(c *gin.Context) {
 				}
 			}
 		}
+	channelSelected:
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 
 		// Check if this is a specific channel request (admin diagnostic/testing)
