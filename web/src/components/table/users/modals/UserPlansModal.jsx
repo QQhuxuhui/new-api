@@ -282,12 +282,12 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
   };
 
   // Force switch current plan
-  const handleForceSwitch = async (userPlanId, planId) => {
+  const handleForceSwitch = async (userPlanId) => {
     setLoading(true);
     try {
       const res = await API.post('/api/user_plan/force_switch', {
         user_id: user.id,
-        plan_id: planId,
+        user_plan_id: userPlanId,
       });
       const { success, message } = res.data;
       if (success) {
@@ -576,7 +576,7 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
           {record.is_current !== 1 && (
             <Popconfirm
               title={t('确认切换为当前套餐？')}
-              onConfirm={() => handleForceSwitch(record.id, record.plan_id)}
+              onConfirm={() => handleForceSwitch(record.id)}
             >
               <Button size="small" icon={<IconTick />} type="primary">
                 {t('设为当前')}

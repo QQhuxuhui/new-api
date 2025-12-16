@@ -254,9 +254,76 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
 	return nil
 }
 
+// sendThinkingCloseTag 发送 </think> 闭合标签
+// 用于处理流以 reasoning + tool_calls 结束（无 content）的情况
+func sendThinkingCloseTag(c *gin.Context, info *relaycommon.RelayInfo, responseId string, createAt int64, model string) {
+	closeContent := "\n</think>\n"
+
+	switch info.RelayFormat {
+	case types.RelayFormatOpenAI:
+		// 构造包含 </think> 的流响应
+		response := &dto.ChatCompletionsStreamResponse{
+			Id:      responseId,
+			Object:  "chat.completion.chunk",
+			Created: createAt,
+			Model:   model,
+			Choices: []dto.ChatCompletionsStreamResponseChoice{
+				{
+					Index: 0,
+					Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+						Content: &closeContent,
+					},
+				},
+			},
+		}
+		helper.ObjectData(c, response)
+
+	case types.RelayFormatClaude:
+		// Claude 格式：发送 content_block_delta 事件
+		claudeResponse := &dto.ClaudeResponse{
+			Type: "content_block_delta",
+			Delta: &dto.ClaudeMediaMessage{
+				Type: "text_delta",
+				Text: &closeContent,
+			},
+		}
+		helper.ClaudeData(c, *claudeResponse)
+
+	case types.RelayFormatGemini:
+		// Gemini 格式：发送包含 </think> 的响应
+		geminiResponse := map[string]interface{}{
+			"candidates": []map[string]interface{}{
+				{
+					"content": map[string]interface{}{
+						"parts": []map[string]interface{}{
+							{"text": closeContent},
+						},
+						"role": "model",
+					},
+				},
+			},
+		}
+		geminiResponseStr, err := common.Marshal(geminiResponse)
+		if err != nil {
+			return
+		}
+		c.Render(-1, &common.CustomEvent{Data: "data: " + string(geminiResponseStr)})
+		_ = helper.FlushWriter(c)
+	}
+}
+
 func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStreamData string,
 	responseId string, createAt int64, model string, systemFingerprint string,
 	usage *dto.Usage, containStreamUsage bool) {
+
+	// 兜底处理：如果已发送 <think> 但未发送 </think>，需要补发闭合标签
+	// 这种情况发生在流以 reasoning + tool_calls 结束（无 content）时
+	if info.ChannelSetting.ThinkingToContent &&
+		info.ThinkingContentInfo.HasSentThinkingContent &&
+		!info.ThinkingContentInfo.SendLastThinkingContent {
+		sendThinkingCloseTag(c, info, responseId, createAt, model)
+		info.ThinkingContentInfo.SendLastThinkingContent = true
+	}
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:

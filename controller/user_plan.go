@@ -219,17 +219,33 @@ func AdminUpdateUserPlanPermissions(c *gin.Context) {
 }
 
 // AdminForceSwitch forces a user to switch to a specific plan (admin)
+// Supports both user_plan_id (preferred) and plan_id (deprecated) for backwards compatibility
 func AdminForceSwitch(c *gin.Context) {
 	var req struct {
-		UserId int `json:"user_id" binding:"required"`
-		PlanId int `json:"plan_id" binding:"required"`
+		UserId     int `json:"user_id" binding:"required"`
+		UserPlanId int `json:"user_plan_id"` // Preferred: switch by user_plan instance ID
+		PlanId     int `json:"plan_id"`      // Deprecated: switch by plan template ID
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	err := model.SwitchUserCurrentPlan(req.UserId, req.PlanId)
+	var err error
+	if req.UserPlanId > 0 {
+		// Use user_plan_id (works even when plan template is deleted)
+		err = model.SwitchToUserPlan(req.UserId, req.UserPlanId)
+	} else if req.PlanId > 0 {
+		// Fallback to plan_id for backwards compatibility
+		err = model.SwitchUserCurrentPlan(req.UserId, req.PlanId)
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "需要提供 user_plan_id 或 plan_id",
+		})
+		return
+	}
+
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -367,10 +383,10 @@ func AdminAddQuota(c *gin.Context) {
 
 // AdminUpdateUserPlanRequest is the request body for updating a user plan
 type AdminUpdateUserPlanRequest struct {
-	Quota                   *int64 `json:"quota"`                      // Set absolute quota value (nil = no change)
-	ExpiresAt               *int64 `json:"expires_at"`                 // Set expiration time (nil = no change, 0 = never expires)
-	DailyQuotaLimitOverride *int64 `json:"daily_quota_limit_override"` // Set daily limit override (nil = use plan default, 0 = no limit)
-	AdminNote               string `json:"admin_note"`                 // Admin note
+	Quota                   *int64  `json:"quota"`                      // Set absolute quota value (nil = no change)
+	ExpiresAt               *int64  `json:"expires_at"`                 // Set expiration time (nil = no change, 0 = never expires)
+	DailyQuotaLimitOverride *int64  `json:"daily_quota_limit_override"` // Set daily limit override (nil = use plan default, 0 = no limit)
+	AdminNote               *string `json:"admin_note"`                 // Admin note (nil = no change, empty string = clear)
 }
 
 // AdminUpdateUserPlan updates a user plan's configuration (admin)
@@ -430,9 +446,9 @@ func AdminUpdateUserPlan(c *gin.Context) {
 		updates["daily_quota_limit_override"] = *req.DailyQuotaLimitOverride
 	}
 
-	// Update admin note if provided
-	if req.AdminNote != "" {
-		updates["admin_note"] = req.AdminNote
+	// Update admin note if provided (nil = no change, empty string = clear)
+	if req.AdminNote != nil {
+		updates["admin_note"] = *req.AdminNote
 	}
 
 	if len(updates) == 0 {

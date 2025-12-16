@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -210,8 +211,10 @@ func (p *Plan) Update() error {
 		"purchasable", "show_in_pricing", "updated_at",
 	).Updates(p).Error
 	if err == nil {
-		// Invalidate cache for all users who have this plan (synchronous to ensure consistency)
-		InvalidateUserPlanCacheByPlanId(p.Id)
+		// Async sync snapshot fields to all user_plans with this plan
+		// This ensures existing users get updated configuration (e.g., channel_groups, rate_limit_rules)
+		// Runs in background with retry to avoid blocking the API response
+		SyncUserPlanSnapshotsAsync(p.Id)
 	}
 	return err
 }
@@ -470,3 +473,255 @@ func SeedDefaultPlans() error {
 	}
 	return nil
 }
+
+// SyncUserPlanSnapshots synchronizes plan configuration to all user_plans snapshots
+// This ensures that when admin updates plan settings, existing users get the updated configuration
+// Fields synced: name, display_name, type, category, priority, channel_group(s), rate_limit_rules, daily_quota_limit, validity_days
+// This function handles both snapshot update AND cache invalidation to ensure consistency
+func SyncUserPlanSnapshots(planId int) error {
+	if planId == 0 {
+		return errors.New("套餐ID不能为空")
+	}
+
+	// Step 1: Update snapshots
+	if err := syncUserPlanSnapshotsOnly(planId); err != nil {
+		return err
+	}
+
+	// Step 2: Invalidate cache
+	if err := InvalidateCacheForPlanUsers(planId); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// syncUserPlanSnapshotsOnly updates only the snapshot fields without cache invalidation
+// This is an internal function used by SyncUserPlanSnapshotsAsync for separate retry logic
+func syncUserPlanSnapshotsOnly(planId int) error {
+	if planId == 0 {
+		return errors.New("套餐ID不能为空")
+	}
+
+	// Get current plan configuration
+	plan, err := GetPlanById(planId)
+	if err != nil {
+		return fmt.Errorf("failed to get plan: %w", err)
+	}
+
+	// Update all user_plans with this plan_id
+	// Only sync to active plans (status = 1) to avoid modifying historical data
+	updates := map[string]interface{}{
+		"plan_name":              plan.Name,
+		"plan_display_name":      plan.DisplayName,
+		"plan_type":              plan.Type,
+		"plan_category":          plan.Category,
+		"plan_priority":          plan.Priority,
+		"plan_channel_group":     plan.ChannelGroup,
+		"plan_channel_groups":    plan.ChannelGroups,
+		"plan_rate_limit_rules":  plan.RateLimitRules,
+		"plan_daily_quota_limit": plan.DailyQuotaLimit,
+		"plan_validity_days":     plan.ValidityDays,
+		"updated_at":             time.Now().UnixMilli(),
+	}
+
+	result := DB.Model(&UserPlan{}).
+		Where("plan_id = ? AND status = ?", planId, UserPlanStatusActive).
+		Updates(updates)
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to sync user_plan snapshots: %w", result.Error)
+	}
+
+	if result.RowsAffected > 0 {
+		common.SysLog(fmt.Sprintf("[PlanSync] synced %d user_plans for plan_id=%d", result.RowsAffected, planId))
+	}
+
+	return nil
+}
+
+// InvalidateCacheForPlanUsers invalidates cache for all users with the given plan
+// This is a separate step from snapshot sync to allow independent retry
+func InvalidateCacheForPlanUsers(planId int) error {
+	if planId == 0 {
+		return errors.New("套餐ID不能为空")
+	}
+
+	var userIds []int
+	if err := DB.Model(&UserPlan{}).
+		Where("plan_id = ? AND status = ?", planId, UserPlanStatusActive).
+		Distinct().
+		Pluck("user_id", &userIds).Error; err != nil {
+		return fmt.Errorf("failed to query affected users: %w", err)
+	}
+
+	if len(userIds) == 0 {
+		return nil
+	}
+
+	var failedUsers []int
+	for _, userId := range userIds {
+		if err := InvalidateUserPlanCache(userId); err != nil {
+			failedUsers = append(failedUsers, userId)
+			common.SysLog(fmt.Sprintf("[PlanSync] failed to invalidate cache for user=%d: %v", userId, err))
+		}
+	}
+
+	if len(failedUsers) > 0 {
+		return fmt.Errorf("failed to invalidate cache for %d users: %v", len(failedUsers), failedUsers)
+	}
+
+	common.SysLog(fmt.Sprintf("[PlanSync] invalidated cache for %d users of plan_id=%d", len(userIds), planId))
+	return nil
+}
+
+// PlanSyncResult represents the result of an async plan sync operation
+type PlanSyncResult struct {
+	PlanId        int    `json:"plan_id"`
+	Status        string `json:"status"` // "pending", "success", "failed"
+	SnapshotOk    bool   `json:"snapshot_ok"`
+	CacheOk       bool   `json:"cache_ok"`
+	ErrorMsg      string `json:"error_msg,omitempty"`
+	LastAttemptAt int64  `json:"last_attempt_at"`
+}
+
+const (
+	planSyncStatusPending = "pending"
+	planSyncStatusSuccess = "success"
+	planSyncStatusFailed  = "failed"
+	planSyncKeyPrefix     = "plan_sync_status:"
+	planSyncTTL           = 24 * time.Hour
+)
+
+// SetPlanSyncStatus records the sync status in Redis
+func SetPlanSyncStatus(result *PlanSyncResult) {
+	if !common.RedisEnabled {
+		return
+	}
+	key := fmt.Sprintf("%s%d", planSyncKeyPrefix, result.PlanId)
+	data, err := json.Marshal(result)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("[PlanSync] failed to marshal sync status: %v", err))
+		return
+	}
+	if err := common.RedisSet(key, string(data), planSyncTTL); err != nil {
+		common.SysLog(fmt.Sprintf("[PlanSync] failed to set sync status in Redis: %v", err))
+	}
+}
+
+// GetPlanSyncStatus retrieves the sync status from Redis
+func GetPlanSyncStatus(planId int) *PlanSyncResult {
+	if !common.RedisEnabled {
+		return nil
+	}
+	key := fmt.Sprintf("%s%d", planSyncKeyPrefix, planId)
+	data, err := common.RedisGet(key)
+	if err != nil || data == "" {
+		return nil
+	}
+	var result PlanSyncResult
+	if err := json.Unmarshal([]byte(data), &result); err != nil {
+		return nil
+	}
+	return &result
+}
+
+// ClearPlanSyncStatus removes the sync status from Redis
+func ClearPlanSyncStatus(planId int) {
+	if !common.RedisEnabled {
+		return
+	}
+	key := fmt.Sprintf("%s%d", planSyncKeyPrefix, planId)
+	common.RedisDel(key)
+}
+
+// SyncUserPlanSnapshotsAsync asynchronously syncs plan snapshots with retry
+// This is the recommended way to call sync after plan updates
+func SyncUserPlanSnapshotsAsync(planId int) {
+	// Record pending status immediately
+	SetPlanSyncStatus(&PlanSyncResult{
+		PlanId:        planId,
+		Status:        planSyncStatusPending,
+		LastAttemptAt: time.Now().UnixMilli(),
+	})
+
+	go func() {
+		// Panic protection - prevent process crash
+		defer func() {
+			if r := recover(); r != nil {
+				errMsg := fmt.Sprintf("panic recovered: %v", r)
+				common.SysError(fmt.Sprintf("[PlanSyncAsync] plan_id=%d PANIC: %s", planId, errMsg))
+				SetPlanSyncStatus(&PlanSyncResult{
+					PlanId:        planId,
+					Status:        planSyncStatusFailed,
+					ErrorMsg:      errMsg,
+					LastAttemptAt: time.Now().UnixMilli(),
+				})
+			}
+		}()
+
+		const maxRetries = 3
+		const retryDelay = 2 * time.Second
+
+		var snapshotOk, cacheOk bool
+		var lastErr error
+
+		// Step 1: Sync snapshots only (with retry)
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if err := syncUserPlanSnapshotsOnly(planId); err != nil {
+				lastErr = err
+				common.SysLog(fmt.Sprintf("[PlanSyncAsync] plan_id=%d snapshot sync attempt %d/%d failed: %v",
+					planId, attempt, maxRetries, err))
+				if attempt < maxRetries {
+					time.Sleep(retryDelay)
+				}
+				continue
+			}
+			snapshotOk = true
+			break
+		}
+
+		// Step 2: Invalidate cache (with retry, independent of step 1)
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if err := InvalidateCacheForPlanUsers(planId); err != nil {
+				lastErr = err
+				common.SysLog(fmt.Sprintf("[PlanSyncAsync] plan_id=%d cache invalidation attempt %d/%d failed: %v",
+					planId, attempt, maxRetries, err))
+				if attempt < maxRetries {
+					time.Sleep(retryDelay)
+				}
+				continue
+			}
+			cacheOk = true
+			break
+		}
+
+		// Record final status
+		if snapshotOk && cacheOk {
+			SetPlanSyncStatus(&PlanSyncResult{
+				PlanId:        planId,
+				Status:        planSyncStatusSuccess,
+				SnapshotOk:    true,
+				CacheOk:       true,
+				LastAttemptAt: time.Now().UnixMilli(),
+			})
+			common.SysLog(fmt.Sprintf("[PlanSyncAsync] plan_id=%d completed successfully", planId))
+		} else {
+			errMsg := ""
+			if lastErr != nil {
+				errMsg = lastErr.Error()
+			}
+			SetPlanSyncStatus(&PlanSyncResult{
+				PlanId:        planId,
+				Status:        planSyncStatusFailed,
+				SnapshotOk:    snapshotOk,
+				CacheOk:       cacheOk,
+				ErrorMsg:      errMsg,
+				LastAttemptAt: time.Now().UnixMilli(),
+			})
+			common.SysError(fmt.Sprintf("[PlanSyncAsync] plan_id=%d FAILED: snapshot_ok=%v cache_ok=%v error=%v",
+				planId, snapshotOk, cacheOk, lastErr))
+		}
+	}()
+}
+

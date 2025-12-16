@@ -275,9 +275,10 @@ func UpdatePlan(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    existingPlan,
+		"success":     true,
+		"message":     "",
+		"data":        existingPlan,
+		"sync_status": "pending", // Snapshot sync runs async in background
 	})
 }
 
@@ -299,6 +300,56 @@ func DeletePlan(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+	})
+}
+
+// GetPlanSyncStatus returns the async sync status for a plan (admin)
+func GetPlanSyncStatus(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	status := model.GetPlanSyncStatus(id)
+	if status == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    nil, // No sync record found (never synced or already cleared)
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    status,
+	})
+}
+
+// RetryPlanSync manually triggers a sync retry for a plan (admin)
+func RetryPlanSync(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Verify plan exists
+	_, err = model.GetPlanById(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Trigger async sync
+	model.SyncUserPlanSnapshotsAsync(id)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"message":     "同步任务已启动",
+		"sync_status": "pending",
 	})
 }
 
