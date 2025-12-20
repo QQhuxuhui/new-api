@@ -136,6 +136,7 @@ var defaultModelRatio = map[string]float64{
 	"claude-2.1":                                4,     // $8 / 1M tokens
 	"claude-3-haiku-20240307":                   0.125, // $0.25 / 1M tokens
 	"claude-3-5-haiku-20241022":                 0.5,   // $1 / 1M tokens
+	"claude-haiku-4-5-20251001":                 0.5,   // $1 / 1M tokens
 	"claude-3-sonnet-20240229":                  1.5,   // $3 / 1M tokens
 	"claude-3-5-sonnet-20240620":                1.5,
 	"claude-3-5-sonnet-20241022":                1.5,
@@ -143,6 +144,7 @@ var defaultModelRatio = map[string]float64{
 	"claude-3-7-sonnet-20250219-thinking":       1.5,
 	"claude-sonnet-4-20250514":                  1.5,
 	"claude-sonnet-4-5-20250929":                1.5,
+	"claude-opus-4-5-20251101":                  2.5,
 	"claude-3-opus-20240229":                    7.5, // $15 / 1M tokens
 	"claude-opus-4-20250514":                    7.5,
 	"claude-opus-4-1-20250805":                  7.5,
