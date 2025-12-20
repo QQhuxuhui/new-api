@@ -30,6 +30,7 @@ import { IconPlay, IconFile, IconGithubLogo } from '@douyinfe/semi-icons';
 import { Link, useNavigate } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
 import OnboardingWizard from '../../components/onboarding/OnboardingWizard';
+import BackgroundIcons from './BackgroundIcons';
 import './Home.css';
 
 const Home = () => {
@@ -145,6 +146,9 @@ const Home = () => {
       />
       {homePageContentLoaded && homePageContent === '' ? (
         <div className='home-wrapper'>
+          {/* 3D Background Icons */}
+          <BackgroundIcons />
+
           {/* Dynamic Background Blobs */}
           <div className='home-blob home-blob-indigo' />
           <div className='home-blob home-blob-teal' />

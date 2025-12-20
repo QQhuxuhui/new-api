@@ -450,56 +450,38 @@ const PlanPricing = () => {
             </div>
           </div>
 
-          {/* Pricing Section */}
-          <div className='px-6 py-6 border-b border-gray-100 dark:border-gray-700'>
-            {/* Quota display */}
-            <div className='mb-4 p-3 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-xl border border-green-200 dark:border-green-800'>
-              <div className='flex items-center justify-between'>
-                <Text size='small' className='text-gray-600 dark:text-gray-400'>
-                  {t('充值额度')}
-                </Text>
-                <div className='flex items-baseline gap-1'>
-                  <Text className='text-2xl font-bold text-green-600 dark:text-green-400'>
-                    ${value}
-                  </Text>
-                  <Text size='small' className='text-gray-500 dark:text-gray-400'>
-                    {t('美金')}
-                  </Text>
-                </div>
-              </div>
-            </div>
-
-            {/* Price display */}
-            <div className='text-center mb-3'>
-              {/* Discount Badge */}
+          {/* Pricing Section - Split Layout */}
+          <div className='flex items-center justify-between px-6 py-8 border-b border-gray-100 dark:border-gray-700'>
+            {/* Price Side */}
+            <div className='flex-1 text-center border-r border-gray-100 dark:border-gray-700 pr-2'>
               {hasDiscount && (
-                <div className='mb-2'>
-                  <Tag color='red' size='large' type='solid' shape='circle' className='shadow-md'>
-                    <span className='font-bold'>-{discountPercent}%</span>
+                  <Tag color='red' size='small' type='solid' shape='circle' className='mb-1'>
+                    -{discountPercent}%
                   </Tag>
-                </div>
               )}
-
-              {/* Price */}
-              <div className='flex flex-col items-center'>
-                {hasDiscount && (
-                  <Text delete type='tertiary' className='text-xl mb-1'>
-                    ¥{originalPrice.toFixed(2)}
-                  </Text>
-                )}
-                <div className='flex items-baseline justify-center gap-1'>
-                  <Text className='text-lg font-medium text-gray-600 dark:text-gray-400'>
-                    ¥
-                  </Text>
-                  <Text className='text-5xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent'>
-                    {finalPrice.toFixed(0)}
-                  </Text>
-                </div>
+              <div className='text-gray-500 text-xs mb-1'>{t('支付金额')}</div>
+              <div className='text-3xl font-bold text-blue-600 dark:text-blue-400'>
+                <span className='text-lg mr-0.5'>¥</span>
+                {finalPrice.toFixed(0)}
               </div>
+              {hasDiscount && (
+                  <div className='text-xs text-gray-400 line-through'>¥{originalPrice.toFixed(0)}</div>
+              )}
             </div>
 
-            {/* Description */}
-            <Text type='tertiary' size='small' className='block mt-3 text-center'>
+            {/* Quota Side */}
+            <div className='flex-1 text-center pl-2'>
+               <div className='text-gray-500 text-xs mb-1'>{t('获得额度')}</div>
+               <div className='text-3xl font-bold text-green-600 dark:text-green-400'>
+                 <span className='text-lg mr-0.5'>$</span>
+                 {value}
+               </div>
+               <div className='text-xs text-gray-400'>{t('美金')}</div>
+            </div>
+          </div>
+
+          <div className='px-6 pt-2 pb-0'>
+             <Text type='tertiary' size='small' className='block text-center'>
               {t('充值后永不过期，按实际使用量扣费')}
             </Text>
           </div>
@@ -626,84 +608,48 @@ const PlanPricing = () => {
             </div>
           </div>
 
-          {/* Pricing Section - 重新设计以突出价格信息 */}
-          <div className='px-6 py-6 border-b border-gray-100 dark:border-gray-700'>
-            {/* 消费美金金额 - 突出显示 */}
-            {plan.quota_usd && plan.quota_usd > 0 && (
-              <div className='mb-4 p-3 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-xl border border-green-200 dark:border-green-800'>
-                <div className='flex items-center justify-between'>
-                  <Text size='small' className='text-gray-600 dark:text-gray-400'>
-                    {t('套餐额度')}
-                  </Text>
-                  <div className='flex items-baseline gap-1'>
-                    <Text className='text-2xl font-bold text-green-600 dark:text-green-400'>
-                      ${plan.quota_usd}
-                    </Text>
-                    <Text size='small' className='text-gray-500 dark:text-gray-400'>
-                      {t('美金')}
-                    </Text>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 人民币价格 - 突出显示 */}
-            <div className='text-center mb-3'>
-              {/* Discount Badge */}
+          {/* Pricing Section - Split Layout */}
+          <div className='flex items-center justify-between px-6 py-8 border-b border-gray-100 dark:border-gray-700'>
+            {/* Price Side */}
+            <div className='flex-1 text-center border-r border-gray-100 dark:border-gray-700 pr-2'>
               {discountPercent > 0 && (
-                <div className='mb-2'>
-                  <Tag color='red' size='large' type='solid' shape='circle' className='shadow-md'>
-                    <span className='font-bold'>-{discountPercent}%</span>
+                  <Tag color='red' size='small' type='solid' shape='circle' className='mb-1'>
+                    -{discountPercent}%
                   </Tag>
-                </div>
               )}
-
-              {/* 价格展示 */}
-              <div className='flex flex-col items-center'>
-                {/* Original Price */}
-                {discountPercent > 0 && (
-                  <Text delete type='tertiary' className='text-xl mb-1'>
-                    ¥{plan.original_price}
-                  </Text>
-                )}
-
-                {/* 当前价格 - 超大显示 */}
-                <div className='flex items-baseline justify-center gap-1'>
-                  <Text className='text-lg font-medium text-gray-600 dark:text-gray-400'>
-                    ¥
-                  </Text>
-                  <Text className='text-5xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent'>
-                    {plan.price}
-                  </Text>
-                  <Text type='tertiary' className='ml-1 text-base'>
-                    {priceUnit}
-                  </Text>
-                </div>
+              <div className='text-gray-500 text-xs mb-1'>{t('价格')}</div>
+              <div className='text-3xl font-bold text-blue-600 dark:text-blue-400'>
+                <span className='text-lg mr-0.5'>¥</span>
+                {plan.price}
               </div>
+              {priceUnit && <div className='text-xs text-gray-400'>{priceUnit}</div>}
             </div>
 
-            {/* Consumption Quota */}
-            {(() => {
-              const quotaDisplay = formatQuotaDisplay(plan.quota_usd, plan.default_quota);
-              if (quotaDisplay) {
-                return (
-                  <div className='mt-2'>
-                    <Text type='secondary' size='small'>
-                      {t('消费额度')}: <span className='font-medium'>{quotaDisplay}</span>
-                    </Text>
-                  </div>
-                );
-              }
-              return null;
-            })()}
-
-            {/* Description */}
-            {plan.description && (
-              <Text type='tertiary' size='small' className='block mt-3 text-center line-clamp-2'>
-                {plan.description}
-              </Text>
-            )}
+            {/* Quota Side */}
+            <div className='flex-1 text-center pl-2'>
+               <div className='text-gray-500 text-xs mb-1'>{t('额度')}</div>
+               <div className='text-3xl font-bold text-green-600 dark:text-green-400'>
+                 {(() => {
+                   if (plan.quota_usd > 0) {
+                     return `$${plan.quota_usd}`;
+                   }
+                   return formatQuotaDisplay(plan.quota_usd, plan.default_quota) || '—';
+                 })()}
+               </div>
+               <div className='text-xs text-gray-400'>
+                 {plan.quota_usd > 0 ? t('美金') : ''}
+               </div>
+            </div>
           </div>
+
+          {/* Description */}
+          {plan.description && (
+            <div className='px-6 pt-2 pb-0 text-center'>
+               <Text type='tertiary' size='small' className='line-clamp-2'>
+                  {plan.description}
+               </Text>
+            </div>
+          )}
 
           {/* Features Section */}
           <div className='px-6 py-5'>
