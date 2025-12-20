@@ -206,6 +206,7 @@ type GeminiPart struct {
 	Thought             bool                           `json:"thought,omitempty"`
 	InlineData          *GeminiInlineData              `json:"inlineData,omitempty"`
 	FunctionCall        *FunctionCall                  `json:"functionCall,omitempty"`
+	ThoughtSignature    json.RawMessage                `json:"thoughtSignature,omitempty"`
 	FunctionResponse    *GeminiFunctionResponse        `json:"functionResponse,omitempty"`
 	FileData            *GeminiFileData                `json:"fileData,omitempty"`
 	ExecutableCode      *GeminiPartExecutableCode      `json:"executableCode,omitempty"`

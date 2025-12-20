@@ -44,6 +44,8 @@ var geminiSupportedMimeTypes = map[string]bool{
 	"video/flv":       true,
 }
 
+const thoughtSignatureBypassValue = "context_engineering_is_the_way_to_go"
+
 // Gemini 允许的思考预算范围
 const (
 	pro25MinBudget       = 128
@@ -192,6 +194,10 @@ func CovertGemini2OpenAI(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 			Seed:            int64(textRequest.Seed),
 		},
 	}
+
+	attachThoughtSignature := (info.ChannelType == constant.ChannelTypeGemini ||
+		info.ChannelType == constant.ChannelTypeVertexAi) &&
+		model_setting.GetGeminiSettings().FunctionCallThoughtSignatureEnabled
 
 	if model_setting.IsGeminiModelSupportImagine(info.UpstreamModelName) {
 		geminiRequest.GenerationConfig.ResponseModalities = []string{
@@ -387,6 +393,8 @@ func CovertGemini2OpenAI(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 		content := dto.GeminiChatContent{
 			Role: message.Role,
 		}
+		shouldAttachThoughtSignature := attachThoughtSignature && (message.Role == "assistant" || message.Role == "model")
+		signatureAttached := false
 		// isToolCall := false
 		if message.ToolCalls != nil {
 			// message.Role = "model"
@@ -403,6 +411,10 @@ func CovertGemini2OpenAI(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 						FunctionName: call.Function.Name,
 						Arguments:    args,
 					},
+				}
+				if shouldAttachThoughtSignature && !signatureAttached && hasFunctionCallContent(toolCall.FunctionCall) && len(toolCall.ThoughtSignature) == 0 {
+					toolCall.ThoughtSignature = json.RawMessage(strconv.Quote(thoughtSignatureBypassValue))
+					signatureAttached = true
 				}
 				parts = append(parts, toolCall)
 				tool_call_ids[call.ID] = call.Function.Name
@@ -488,6 +500,17 @@ func CovertGemini2OpenAI(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 			}
 		}
 
+		// 如果需要附加签名但还没有附加（没有 tool_calls 或 tool_calls 为空），
+		// 则在第一个文本 part 上附加 thoughtSignature
+		if shouldAttachThoughtSignature && !signatureAttached && len(parts) > 0 {
+			for i := range parts {
+				if parts[i].Text != "" {
+					parts[i].ThoughtSignature = json.RawMessage(strconv.Quote(thoughtSignatureBypassValue))
+					break
+				}
+			}
+		}
+
 		content.Parts = parts
 
 		// there's no assistant role in gemini and API shall vomit if Role is not user or model
@@ -510,6 +533,29 @@ func CovertGemini2OpenAI(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 	}
 
 	return &geminiRequest, nil
+}
+
+// hasFunctionCallContent checks if a FunctionCall has meaningful content
+func hasFunctionCallContent(call *dto.FunctionCall) bool {
+	if call == nil {
+		return false
+	}
+	if strings.TrimSpace(call.FunctionName) != "" {
+		return true
+	}
+
+	switch v := call.Arguments.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(v) != ""
+	case map[string]interface{}:
+		return len(v) > 0
+	case []interface{}:
+		return len(v) > 0
+	default:
+		return true
+	}
 }
 
 // Helper function to get a list of supported MIME types for error messages
