@@ -605,6 +605,91 @@ func Distribute() func(c *gin.Context) {
 					}
 
 					// If still no channel after failover attempt (or failover disabled)
+					// Try other child groups of token's parent group with wallet billing
+					if channel == nil {
+						tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+
+						// Check if token group is a parent group with children
+						if ratio_setting.IsParentGroup(tokenGroup) {
+							allChildGroups := ratio_setting.GetChildGroups(tokenGroup)
+
+							// Get the groups we already tried (from plan intersection)
+							triedGroups := make(map[string]bool)
+							if planGroups, exists := c.Get(string(constant.ContextKeyPlanGroups)); exists {
+								if groups, ok := planGroups.([]string); ok {
+									for _, g := range groups {
+										triedGroups[g] = true
+									}
+								}
+							}
+							triedGroups[usingGroup] = true
+
+							// Find untried child groups
+							var untriedGroups []string
+							for _, child := range allChildGroups {
+								if !triedGroups[child] {
+									untriedGroups = append(untriedGroups, child)
+								}
+							}
+
+							// If there are untried groups and user has wallet balance
+							if len(untriedGroups) > 0 {
+								userQuota := common.GetContextKeyInt(c, constant.ContextKeyUserQuota)
+								userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+
+								// Check if token group is within user's usable groups (for wallet billing)
+								if userQuota > 0 && service.GroupInUserUsableGroups(userGroup, tokenGroup) {
+									logger.LogInfo(c, fmt.Sprintf("[ChildGroupFallback] user=%d trying untried child groups %v", userId, untriedGroups))
+
+									// Try each untried child group
+									for _, childGroup := range untriedGroups {
+										// CRITICAL: Override ContextKeyPlanGroups before calling CacheGetRandomSatisfiedChannel
+										// The function prioritizes plan_groups over the passed group parameter (see service/channel_select.go:20-67)
+										// Without this, it would keep trying the failed plan groups instead of the new child group
+										c.Set(string(constant.ContextKeyPlanGroups), []string{childGroup})
+
+										for retry := 0; retry < 1000; retry++ {
+											channel, _, err = service.CacheGetRandomSatisfiedChannel(c, childGroup, modelRequest.Model, retry)
+
+											if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
+												err = nil // Clear expected error
+												break     // Try next child group
+											}
+
+											if err != nil {
+												break // System error, try next child group
+											}
+
+											if channel != nil {
+												// Found channel! Switch to wallet billing mode
+												logger.LogInfo(c, fmt.Sprintf("[ChildGroupFallback] user=%d found channel=%d in group=%s, switching to wallet billing",
+													userId, channel.Id, childGroup))
+
+												// Clear plan context - switch to wallet billing
+												c.Set(string(constant.ContextKeyPlanId), 0)
+												c.Set(string(constant.ContextKeyUserPlanId), 0)
+												c.Set(string(constant.ContextKeyPlanName), "")
+
+												// Update group context
+												common.SetContextKey(c, constant.ContextKeyUsingGroup, childGroup)
+												common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{childGroup})
+												usingGroup = childGroup
+
+												setAutoGroupContext(c, usingGroup, channel)
+												break
+											}
+										}
+
+										if channel != nil {
+											break // Found channel, exit outer loop
+										}
+									}
+								}
+							}
+						}
+					}
+
+					// If still no channel after all attempts
 					if channel == nil {
 						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", usingGroup, modelRequest.Model), string(types.ErrorCodeModelNotFound))
 						return
