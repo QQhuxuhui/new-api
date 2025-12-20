@@ -146,13 +146,13 @@ const Home = () => {
       />
       {homePageContentLoaded && homePageContent === '' ? (
         <div className='home-wrapper'>
-          {/* 3D Background Icons */}
-          <BackgroundIcons />
-
           {/* Dynamic Background Blobs */}
           <div className='home-blob home-blob-indigo' />
           <div className='home-blob home-blob-teal' />
           <div className='home-blob home-blob-purple' />
+
+          {/* 3D Background Icons */}
+          <BackgroundIcons />
 
           {/* Hero Section */}
           <main className='home-hero'>
