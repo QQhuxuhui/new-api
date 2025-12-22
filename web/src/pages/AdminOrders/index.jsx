@@ -32,11 +32,17 @@ import {
   Toast,
   Spin,
   Empty,
+  Descriptions,
+  Popconfirm,
 } from '@douyinfe/semi-ui';
 import {
   IconRefresh,
   IconSearch,
   IconShoppingBag,
+  IconEyeOpened,
+  IconClose,
+  IconDelete,
+  IconTickCircle,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess, timestamp2string } from '../../helpers';
 
@@ -58,6 +64,11 @@ const AdminOrders = () => {
     userId: '',
     orderNo: '',
   });
+
+  // Detail modal
+  const [detailVisible, setDetailVisible] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [orderDetail, setOrderDetail] = useState(null);
 
   // Load orders
   const loadOrders = async (page = 1) => {
@@ -129,6 +140,58 @@ const AdminOrders = () => {
         }
       },
     });
+  };
+
+  // Handle view detail
+  const handleViewDetail = async (orderId) => {
+    setDetailLoading(true);
+    setDetailVisible(true);
+    try {
+      const res = await API.get(`/api/user/plan-orders/${orderId}`);
+      const { success, message, data } = res.data;
+      if (success && data) {
+        setOrderDetail(data);
+      } else {
+        showError(message || t('获取详情失败'));
+        setDetailVisible(false);
+      }
+    } catch (e) {
+      showError(e.message || t('网络错误'));
+      setDetailVisible(false);
+    }
+    setDetailLoading(false);
+  };
+
+  // Handle cancel order
+  const handleCancelOrder = async (orderId) => {
+    try {
+      const res = await API.post(`/api/user/plan-orders/${orderId}/cancel`);
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('订单已取消'));
+        loadOrders(pagination.currentPage);
+      } else {
+        showError(message || t('操作失败'));
+      }
+    } catch (e) {
+      showError(e.message || t('网络错误'));
+    }
+  };
+
+  // Handle delete order
+  const handleDeleteOrder = async (orderId) => {
+    try {
+      const res = await API.delete(`/api/user/plan-orders/${orderId}`);
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('订单已删除'));
+        loadOrders(pagination.currentPage);
+      } else {
+        showError(message || t('操作失败'));
+      }
+    } catch (e) {
+      showError(e.message || t('网络错误'));
+    }
   };
 
   // Get status tag
@@ -228,21 +291,71 @@ const AdminOrders = () => {
     {
       title: t('操作'),
       key: 'action',
-      width: 120,
+      width: 200,
       fixed: 'right',
       render: (_, record) => {
-        if (record.status === 'paid' && record.user_plan_id === 0) {
-          return (
+        const actions = [];
+
+        // View detail button - always show
+        actions.push(
+          <Button
+            key='view'
+            size='small'
+            icon={<IconEyeOpened />}
+            onClick={() => handleViewDetail(record.order_id)}
+          />
+        );
+
+        // Manual complete button - for paid orders without user_plan
+        if (record.status === 'paid' && !record.user_plan_id) {
+          actions.push(
             <Button
+              key='complete'
               size='small'
               type='warning'
+              icon={<IconTickCircle />}
               onClick={() => handleManualComplete(record.order_id)}
-            >
-              {t('手动完成')}
-            </Button>
+            />
           );
         }
-        return '-';
+
+        // Cancel button - for pending orders
+        if (record.status === 'pending') {
+          actions.push(
+            <Popconfirm
+              key='cancel'
+              title={t('确认取消订单')}
+              content={t('确认要取消该订单吗？')}
+              onConfirm={() => handleCancelOrder(record.order_id)}
+            >
+              <Button
+                size='small'
+                type='tertiary'
+                icon={<IconClose />}
+              />
+            </Popconfirm>
+          );
+        }
+
+        // Delete button - for expired or cancelled orders
+        if (record.status === 'expired' || record.status === 'cancelled') {
+          actions.push(
+            <Popconfirm
+              key='delete'
+              title={t('确认删除订单')}
+              content={t('确认要删除该订单吗？此操作不可撤销。')}
+              onConfirm={() => handleDeleteOrder(record.order_id)}
+            >
+              <Button
+                size='small'
+                type='danger'
+                icon={<IconDelete />}
+              />
+            </Popconfirm>
+          );
+        }
+
+        return <Space>{actions}</Space>;
       },
     },
   ];
@@ -345,6 +458,84 @@ const AdminOrders = () => {
           />
         )}
       </Card>
+
+      {/* Order Detail Modal */}
+      <Modal
+        title={t('订单详情')}
+        visible={detailVisible}
+        onCancel={() => setDetailVisible(false)}
+        footer={null}
+        width={700}
+      >
+        {detailLoading ? (
+          <div className='flex items-center justify-center py-10'>
+            <Spin size='large' />
+          </div>
+        ) : orderDetail ? (
+          <Descriptions>
+            <Descriptions.Item itemKey={t('订单号')}>
+              <span style={{ fontFamily: 'monospace' }}>{orderDetail.order_no}</span>
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('状态')}>
+              {getStatusTag(orderDetail.status)}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('用户')}>
+              {orderDetail.username || `ID: ${orderDetail.user_id}`}
+              {orderDetail.user_email && ` (${orderDetail.user_email})`}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('套餐名称')}>
+              {orderDetail.plan_display_name || orderDetail.plan_name || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('套餐类型')}>
+              {orderDetail.plan_type || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('套餐分类')}>
+              {orderDetail.plan_category || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('套餐额度')}>
+              {orderDetail.plan_quota ? `$${(orderDetail.plan_quota / 500000).toFixed(2)}` : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('有效期')}>
+              {orderDetail.plan_validity_days ? `${orderDetail.plan_validity_days} 天` : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('原价')}>
+              ¥{orderDetail.plan_original_price?.toFixed(2) || '0.00'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('实付金额')}>
+              <span style={{ fontWeight: 600, color: '#f5222d' }}>
+                ¥{orderDetail.final_price?.toFixed(2) || '0.00'}
+              </span>
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('支付方式')}>
+              {orderDetail.payment_method || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('支付流水号')}>
+              {orderDetail.payment_trade_no || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('创建时间')}>
+              {orderDetail.created_at ? timestamp2string(orderDetail.created_at / 1000) : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('过期时间')}>
+              {orderDetail.expired_at ? timestamp2string(orderDetail.expired_at / 1000) : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('支付时间')}>
+              {orderDetail.paid_at ? timestamp2string(orderDetail.paid_at / 1000) : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('发放时间')}>
+              {orderDetail.delivered_at ? timestamp2string(orderDetail.delivered_at / 1000) : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('取消时间')}>
+              {orderDetail.cancelled_at ? timestamp2string(orderDetail.cancelled_at / 1000) : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('用户套餐ID')}>
+              {orderDetail.user_plan_id || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item itemKey={t('发放重试次数')}>
+              {orderDetail.delivery_retry_count || 0}
+            </Descriptions.Item>
+          </Descriptions>
+        ) : null}
+      </Modal>
     </div>
   );
 };

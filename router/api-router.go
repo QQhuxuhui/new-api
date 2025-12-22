@@ -129,7 +129,10 @@ func SetApiRouter(router *gin.Engine) {
 
 				// Plan order management (admin)
 				adminRoute.GET("/plan-orders", controller.GetAllPlanOrders)
+				adminRoute.GET("/plan-orders/:id", controller.GetPlanOrderDetail)
 				adminRoute.POST("/plan-orders/:id/complete", controller.ManualCompletePlanOrder)
+				adminRoute.POST("/plan-orders/:id/cancel", controller.AdminCancelPlanOrder)
+				adminRoute.DELETE("/plan-orders/:id", controller.DeletePlanOrder)
 
 				adminRoute.GET("/search", controller.SearchUsers)
 				adminRoute.GET("/:id", controller.GetUser)
