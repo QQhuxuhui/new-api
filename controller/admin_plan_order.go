@@ -140,6 +140,145 @@ func ManualCompletePlanOrder(c *gin.Context) {
 	})
 }
 
+// AdminCancelPlanOrder cancels a pending plan order (admin only)
+func AdminCancelPlanOrder(c *gin.Context) {
+	orderId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, errors.New("无效的订单ID"))
+		return
+	}
+
+	// Get admin user info
+	adminId := c.GetInt("id")
+	username := c.GetString("username")
+
+	// Load order
+	order, err := model.GetOrderById(orderId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Validate order status (only pending orders can be cancelled)
+	if order.Status != model.OrderStatusPending {
+		common.ApiError(c, fmt.Errorf("只有待支付状态的订单才能取消，当前状态: %s", order.Status))
+		return
+	}
+
+	// Update order status to cancelled
+	err = model.DB.Model(order).Updates(map[string]interface{}{
+		"status":       model.OrderStatusCancelled,
+		"cancelled_at": common.GetTimestamp(),
+	}).Error
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("取消订单失败: %w", err))
+		return
+	}
+
+	// Log admin operation
+	logAdminPlanOrderOperation("cancel", orderId, adminId, username)
+
+	common.ApiSuccess(c, gin.H{
+		"message": "订单已取消",
+	})
+}
+
+// DeletePlanOrder deletes an expired or cancelled plan order (admin only)
+func DeletePlanOrder(c *gin.Context) {
+	orderId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, errors.New("无效的订单ID"))
+		return
+	}
+
+	// Get admin user info
+	adminId := c.GetInt("id")
+	username := c.GetString("username")
+
+	// Load order
+	order, err := model.GetOrderById(orderId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Validate order status (only expired or cancelled orders can be deleted)
+	if order.Status != model.OrderStatusExpired && order.Status != model.OrderStatusCancelled {
+		common.ApiError(c, fmt.Errorf("只有已过期或已取消的订单才能删除，当前状态: %s", order.Status))
+		return
+	}
+
+	// Delete order
+	err = model.DB.Delete(order).Error
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("删除订单失败: %w", err))
+		return
+	}
+
+	// Log admin operation
+	logAdminPlanOrderOperation("delete", orderId, adminId, username)
+
+	common.ApiSuccess(c, gin.H{
+		"message": "订单已删除",
+	})
+}
+
+// GetPlanOrderDetail returns detailed information of a plan order (admin only)
+func GetPlanOrderDetail(c *gin.Context) {
+	orderId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, errors.New("无效的订单ID"))
+		return
+	}
+
+	// Load order with all relations
+	order, err := model.GetOrderById(orderId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Build detailed response
+	orderDetail := gin.H{
+		"order_id":             order.Id,
+		"order_no":             order.OrderNo,
+		"user_id":              order.UserId,
+		"plan_id":              order.PlanId,
+		"plan_price":           order.PlanPrice,
+		"plan_original_price":  order.PlanOriginalPrice,
+		"final_price":          order.FinalPrice,
+		"status":               order.Status,
+		"payment_method":       order.PaymentMethod,
+		"payment_trade_no":     order.PaymentTradeNo,
+		"created_at":           order.CreatedAt,
+		"expired_at":           order.ExpiredAt,
+		"paid_at":              order.PaidAt,
+		"delivered_at":         order.DeliveredAt,
+		"cancelled_at":         order.CancelledAt,
+		"user_plan_id":         order.UserPlanId,
+		"delivery_retry_count": order.DeliveryRetryCount,
+		"plan_name":            order.PlanName,
+		"plan_display_name":    order.PlanDisplayName,
+		"plan_quota":           order.PlanQuota,
+		"plan_validity_days":   order.PlanValidityDays,
+		"plan_category":        order.PlanCategory,
+		"plan_type":            order.PlanType,
+	}
+
+	// Add user info if available
+	if order.User != nil {
+		orderDetail["username"] = order.User.Username
+		orderDetail["user_email"] = order.User.Email
+	}
+
+	// Add plan info if available
+	if order.Plan != nil {
+		orderDetail["plan_current_name"] = order.Plan.DisplayName
+	}
+
+	common.ApiSuccess(c, orderDetail)
+}
+
 // logAdminPlanOrderOperation logs admin operations on plan orders
 func logAdminPlanOrderOperation(action string, orderId int, adminId int, adminUsername string) {
 	// Log the admin operation
