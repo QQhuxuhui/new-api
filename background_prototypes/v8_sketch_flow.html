@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Version 8: Sketch Flow Field</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        .content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+            text-align: center;
+            color: #333;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px 40px;
+            border-radius: 50px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas-container"></canvas>
+    
+    <div class="content">
+        <h1>New API</h1>
+        <p>Organic Flow</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas-container');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        // Particle System
+        const particles = [];
+        const numParticles = 1000;
+        const scale = 0.005; // Scale of the noise field
+
+        class Particle {
+            constructor() {
+                this.x = Math.random() * width;
+                this.y = Math.random() * height;
+                this.vx = 0;
+                this.vy = 0;
+                this.speed = Math.random() * 2 + 1;
+                // Random gray color
+                const shade = Math.floor(Math.random() * 100 + 150); // 150-250
+                this.color = `rgba(0, 0, 0, ${Math.random() * 0.1 + 0.05})`;
+            }
+
+            update() {
+                // Simple pseudo-noise based on position (trig field)
+                const angle = (Math.cos(this.x * scale) + Math.sin(this.y * scale)) * Math.PI;
+                
+                this.vx = Math.cos(angle) * this.speed;
+                this.vy = Math.sin(angle) * this.speed;
+
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Wrap around edges
+                if (this.x > width) this.x = 0;
+                if (this.x < 0) this.x = width;
+                if (this.y > height) this.y = 0;
+                if (this.y < 0) this.y = height;
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                // Draw a small rectangle instead of circle for performance/style
+                ctx.fillRect(this.x, this.y, 1.5, 1.5);
+            }
+        }
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            
+            // Re-init particles
+            particles.length = 0;
+            for(let i=0; i<numParticles; i++) {
+                particles.push(new Particle());
+            }
+        }
+
+        function animate() {
+            // Fading trail effect: Draw semi-transparent white rect instead of clearRect
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)'; 
+            ctx.fillRect(0, 0, width, height);
+
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+        animate();
+    </script>
+</body>
+</html>

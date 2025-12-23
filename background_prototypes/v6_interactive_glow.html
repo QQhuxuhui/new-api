@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Version 6: Interactive Glow</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            cursor: default;
+        }
+
+        /* Subtle noise texture for grain */
+        .noise-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.05;
+            z-index: 5;
+            pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='1'/%3E%3C/svg%3E");
+        }
+
+        /* The glowing cursor follower */
+        #glow {
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, rgba(168, 85, 247, 0.05) 40%, rgba(255, 255, 255, 0) 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            z-index: 1;
+            mix-blend-mode: multiply; /* Helps blend with white */
+            transition: width 0.3s, height 0.3s; /* Smooth expansion if needed */
+        }
+
+        /* Static ambient spots */
+        .ambient-glow {
+            position: absolute;
+            width: 800px;
+            height: 800px;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.4;
+            z-index: 0;
+            animation: pulse 10s infinite alternate;
+        }
+
+        .ambient-1 {
+            top: -20%;
+            left: -10%;
+            background: #f0f9ff;
+        }
+
+        .ambient-2 {
+            bottom: -20%;
+            right: -10%;
+            background: #fdf4ff;
+            animation-delay: -5s;
+        }
+
+        .content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+            text-align: center;
+            color: #111;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.4; }
+            100% { transform: scale(1.1); opacity: 0.6; }
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient-glow ambient-1"></div>
+    <div class="ambient-glow ambient-2"></div>
+    <div id="glow"></div>
+    <div class="noise-overlay"></div>
+
+    <div class="content">
+        <h1>New API</h1>
+        <p>Interactive Discovery</p>
+    </div>
+
+    <script>
+        const glow = document.getElementById('glow');
+        
+        document.addEventListener('mousemove', (e) => {
+            // Using requestAnimationFrame for smoother performance
+            requestAnimationFrame(() => {
+                glow.style.left = e.clientX + 'px';
+                glow.style.top = e.clientY + 'px';
+            });
+        });
+
+        // Touch support
+        document.addEventListener('touchmove', (e) => {
+            requestAnimationFrame(() => {
+                glow.style.left = e.touches[0].clientX + 'px';
+                glow.style.top = e.touches[0].clientY + 'px';
+            });
+        });
+    </script>
+</body>
+</html>

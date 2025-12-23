@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Version 7: Breathing Dot Matrix</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        .content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+            text-align: center;
+            color: #111;
+            background: rgba(255,255,255,0.8);
+            padding: 20px 40px;
+            backdrop-filter: blur(5px);
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas-container"></canvas>
+    
+    <div class="content">
+        <h1>New API</h1>
+        <p>Data-Driven Precision</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas-container');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        // Settings
+        const spacing = 30; // Space between dots
+        const baseRadius = 1.5;
+        const waveRadius = 4; // Max extra size
+        const speed = 0.002;
+        const color = 'rgba(20, 30, 40, 0.25)'; // Dark gray, transparent
+
+        let time = 0;
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, width, height);
+            time += speed;
+
+            // Loop through grid
+            for (let x = 0; x < width + spacing; x += spacing) {
+                for (let y = 0; y < height + spacing; y += spacing) {
+                    
+                    // Calculate wave effect based on position and time
+                    // Mixing two sine waves for more interesting pattern
+                    const wave1 = Math.sin(x * 0.005 + time * 1000);
+                    const wave2 = Math.cos(y * 0.005 + time * 1000);
+                    const wave3 = Math.sin((x + y) * 0.002 + time * 500);
+                    
+                    // Combine waves to get a value between 0 and 1 (roughly)
+                    const factor = (wave1 + wave2 + wave3) / 3; 
+                    
+                    // Map factor to radius
+                    // We only want positive influence for the "swell"
+                    const sizeOffset = Math.max(0, factor) * waveRadius;
+                    const r = baseRadius + sizeOffset;
+
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.arc(x, y, r, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            requestAnimationFrame(animate);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+        animate();
+    </script>
+</body>
+</html>
