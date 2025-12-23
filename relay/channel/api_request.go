@@ -1,11 +1,13 @@
 package channel
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +25,102 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+// debugPrintHeaders 打印请求头（调试用）
+func debugPrintHeaders(prefix string, headers http.Header) {
+	if !common2.DebugEnabled {
+		return
+	}
+	println(fmt.Sprintf("\n========== %s ==========", prefix))
+	// 按字母顺序排序 header keys
+	keys := make([]string, 0, len(headers))
+	for k := range headers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		for _, v := range headers[k] {
+			// 对敏感信息脱敏
+			displayValue := v
+			lowerKey := strings.ToLower(k)
+			if strings.Contains(lowerKey, "key") || strings.Contains(lowerKey, "authorization") || strings.Contains(lowerKey, "secret") || strings.Contains(lowerKey, "token") {
+				if len(v) > 12 {
+					displayValue = v[:6] + "****" + v[len(v)-4:]
+				} else if len(v) > 4 {
+					displayValue = v[:2] + "****"
+				} else {
+					displayValue = "****"
+				}
+			}
+			println(fmt.Sprintf("  %s: %s", k, displayValue))
+		}
+	}
+	println("==========================================\n")
+}
+
+// debugPrintBody 打印请求体（调试用，限制长度）
+func debugPrintBody(prefix string, body []byte) {
+	if !common2.DebugEnabled {
+		return
+	}
+	println(fmt.Sprintf("\n========== %s ==========", prefix))
+	bodyStr := string(body)
+	// 限制输出长度，避免打印过长的内容
+	maxLen := 2000
+	if len(bodyStr) > maxLen {
+		println(bodyStr[:maxLen])
+		println(fmt.Sprintf("... [truncated, total %d bytes]", len(bodyStr)))
+	} else {
+		println(bodyStr)
+	}
+	println("==========================================\n")
+}
+
+// debugPrintClientRequest 打印客户端请求信息
+func debugPrintClientRequest(c *gin.Context) {
+	if !common2.DebugEnabled {
+		return
+	}
+	println("\n##################################################")
+	println("########## [DEBUG] CLIENT REQUEST INFO ##########")
+	println("##################################################")
+	println(fmt.Sprintf("Method: %s", c.Request.Method))
+	println(fmt.Sprintf("URL: %s", c.Request.URL.String()))
+	println(fmt.Sprintf("RemoteAddr: %s", c.ClientIP()))
+	debugPrintHeaders("CLIENT REQUEST HEADERS", c.Request.Header)
+}
+
+// debugPrintUpstreamRequest 打印上游请求信息
+func debugPrintUpstreamRequest(req *http.Request, body []byte) {
+	if !common2.DebugEnabled {
+		return
+	}
+	println("\n##################################################")
+	println("########## [DEBUG] UPSTREAM REQUEST INFO ##########")
+	println("##################################################")
+	println(fmt.Sprintf("Method: %s", req.Method))
+	println(fmt.Sprintf("URL: %s", req.URL.String()))
+	debugPrintHeaders("UPSTREAM REQUEST HEADERS", req.Header)
+	if body != nil {
+		debugPrintBody("UPSTREAM REQUEST BODY", body)
+	}
+}
+
+// debugPrintUpstreamResponse 打印上游响应信息
+func debugPrintUpstreamResponse(resp *http.Response, body []byte) {
+	if !common2.DebugEnabled {
+		return
+	}
+	println("\n##################################################")
+	println("########## [DEBUG] UPSTREAM RESPONSE INFO ##########")
+	println("##################################################")
+	println(fmt.Sprintf("Status: %s", resp.Status))
+	println(fmt.Sprintf("StatusCode: %d", resp.StatusCode))
+	debugPrintHeaders("UPSTREAM RESPONSE HEADERS", resp.Header)
+	if body != nil {
+		debugPrintBody("UPSTREAM RESPONSE BODY", body)
+	}
+}
 
 func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Header) {
 	if info.RelayMode == constant.RelayModeAudioTranscription || info.RelayMode == constant.RelayModeAudioTranslation {
@@ -68,13 +166,27 @@ func processHeaderOverride(info *common.RelayInfo) (map[string]string, error) {
 }
 
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
+	// [DEBUG] 打印客户端请求信息
+	debugPrintClientRequest(c)
+
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	if common2.DebugEnabled {
-		println("fullRequestURL:", fullRequestURL)
+		println("[DEBUG] Upstream URL:", fullRequestURL)
 	}
+
+	// 读取请求体用于调试（需要重新包装）
+	var bodyBytes []byte
+	if requestBody != nil {
+		bodyBytes, err = io.ReadAll(requestBody)
+		if err != nil {
+			return nil, fmt.Errorf("read request body failed: %w", err)
+		}
+		requestBody = bytes.NewReader(bodyBytes)
+	}
+
 	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
@@ -91,20 +203,33 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+
+	// [DEBUG] 打印上游请求信息（在设置完所有 header 之后）
+	debugPrintUpstreamRequest(req, bodyBytes)
+
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
+
+	// [DEBUG] 打印上游响应头信息（响应体在流式处理中打印）
+	if common2.DebugEnabled && resp != nil {
+		debugPrintUpstreamResponse(resp, nil)
+	}
+
 	return resp, nil
 }
 
 func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
+	// [DEBUG] 打印客户端请求信息
+	debugPrintClientRequest(c)
+
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	if common2.DebugEnabled {
-		println("fullRequestURL:", fullRequestURL)
+		println("[DEBUG] Upstream URL:", fullRequestURL)
 	}
 	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
@@ -124,10 +249,20 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+
+	// [DEBUG] 打印上游请求信息
+	debugPrintUpstreamRequest(req, nil)
+
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
+
+	// [DEBUG] 打印上游响应头信息
+	if common2.DebugEnabled && resp != nil {
+		debugPrintUpstreamResponse(resp, nil)
+	}
+
 	return resp, nil
 }
 

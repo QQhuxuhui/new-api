@@ -29,6 +29,25 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	logger.LogInfo(c, fmt.Sprintf("[TokenDebug] ClaudeHelper: InitChannelMeta 后, 渠道 #%d, RelayInfo令牌: %s",
 		info.ChannelId, maskedKey))
 
+	// [DEBUG] 打印客户端原始请求体
+	if common.DebugEnabled {
+		clientBody, err := common.GetRequestBody(c)
+		if err == nil {
+			println("\n##################################################")
+			println("########## [DEBUG] CLIENT REQUEST BODY ##########")
+			println("##################################################")
+			bodyStr := string(clientBody)
+			maxLen := 2000
+			if len(bodyStr) > maxLen {
+				println(bodyStr[:maxLen])
+				println(fmt.Sprintf("... [truncated, total %d bytes]", len(bodyStr)))
+			} else {
+				println(bodyStr)
+			}
+			println("##################################################\n")
+		}
+	}
+
 	claudeReq, ok := info.Request.(*dto.ClaudeRequest)
 
 	if !ok {
