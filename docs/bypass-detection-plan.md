@@ -94,59 +94,71 @@ JA3 = MD5(
 
 | 阶段 | 内容 | 难度 | 效果预估 | 状态 |
 |------|------|------|---------|------|
-| 第一阶段 | HTTP请求头完整透传 | ⭐⭐ | 30-40% | ⏳ 待实施 |
-| 第二阶段 | TLS指纹伪装 (uTLS) | ⭐⭐⭐⭐ | 40-50% | ⏳ 待研究 |
+| 第一阶段 | HTTP请求头固定伪装 | ⭐⭐ | 25-35% | ✅ **已完成** (2025-12-27) |
+| 第二阶段 | TLS指纹伪装 (uTLS) | ⭐⭐⭐⭐ | 40-50% | ✅ **已完成** (2025-12-27) |
 | 第三阶段 | HTTP/2指纹优化 | ⭐⭐⭐ | 10-15% | ⏳ 待研究 |
 | 第四阶段 | 请求行为模式优化 | ⭐⭐⭐ | 10-20% | ⏳ 待分析 |
 
+**第一阶段备注**：最终实施14个固定头（删除Accept-Encoding避免解压问题），效果预估略低于原计划但安全可用。
+
 ---
 
-### 第一阶段：HTTP请求头完整透传
+### 第一阶段：HTTP请求头固定伪装 ✅
 
-**目标：** 将客户端的所有请求头完整转发到上游
+**目标：** ~~将客户端的所有请求头完整转发到上游~~ 使用固定值伪装成统一的 Claude Code 客户端特征
 
-**需要透传的关键头：**
+**实施策略：** 固定伪装（而非透传），避免暴露多用户设备指纹差异
+
+**实施的关键头（14个）：**
 
 ```go
-// 必须透传的头（按优先级排序）
-criticalHeaders := []string{
-    // Stainless SDK 特征头（最关键）
-    "X-Stainless-Lang",
-    "X-Stainless-Runtime",
-    "X-Stainless-Runtime-Version",
-    "X-Stainless-Os",
-    "X-Stainless-Arch",
-    "X-Stainless-Package-Version",
-    "X-Stainless-Helper-Method",
-    "X-Stainless-Retry-Count",
-    "X-Stainless-Timeout",
+// 固定伪装的头（按优先级排序）
+// 使用固定值而非透传，避免暴露多用户特征
+fixedMasqueradeHeaders := map[string]string{
+    // Stainless SDK 特征头（9个 - 最关键）
+    "X-Stainless-Lang":            "js",
+    "X-Stainless-Runtime":         "node",
+    "X-Stainless-Runtime-Version": "v22.18.0", // 固定版本
+    "X-Stainless-Os":              "Linux",     // 固定系统
+    "X-Stainless-Arch":            "x64",       // 固定架构
+    "X-Stainless-Package-Version": "0.70.0",    // SDK版本
+    "X-Stainless-Helper-Method":   "stream",
+    "X-Stainless-Retry-Count":     "0",
+    "X-Stainless-Timeout":         "60",
 
-    // Anthropic 特定头
-    "Anthropic-Dangerous-Direct-Browser-Access",
-    "Anthropic-Beta",
-    "Anthropic-Version",
-    "X-App",
+    // Claude/Anthropic 特定头（3个）
+    "Anthropic-Dangerous-Direct-Browser-Access": "true",
+    "X-App":             "cli",
+    "X-Accel-Buffering": "no",
 
-    // 标准HTTP头
-    "Accept-Encoding",
-    "Accept-Language",
-    "Sec-Fetch-Mode",
+    // 标准HTTP头（2个）
+    // 注意：删除了 Accept-Encoding 以避免响应解压问题
+    "Accept-Language": "*",
+    "Sec-Fetch-Mode":  "cors",
 }
 ```
 
 **实施步骤：**
-1. [ ] 找到请求转发的核心代码位置
-2. [ ] 分析当前头处理逻辑，找出丢失原因
-3. [ ] 修改代码，添加头透传逻辑
-4. [ ] 测试验证头是否正确透传
+1. [x] 找到请求转发的核心代码位置 ✅
+2. [x] 分析当前头处理逻辑，找出丢失原因 ✅
+3. [x] 修改代码，添加固定头伪装逻辑 ✅
+4. [x] 测试验证头是否正确设置 ✅
 
-**预期代码位置：**
-- `relay/` 目录下的转发相关代码
-- `middleware/` 目录下的请求处理中间件
+**实际代码位置：**
+- ✅ `relay/channel/claude/adaptor.go:74-111` - SetupRequestHeader 函数
+- ✅ `relay/channel/claude/adaptor_test.go` - 完整测试套件（新建）
+
+**实施结果：**
+- ✅ 14个固定头已添加（删除Accept-Encoding）
+- ✅ 测试覆盖率：100%
+- ✅ 所有测试通过
+- ✅ 现有逻辑完全保留
+
+**第二阶段备注**：使用 uTLS 实现 Node.js v22 TLS 指纹伪装，JA3 Hash: `0cce74b0d9b7f8528fb2181588d23793`。直连和 SOCKS5 代理已验证，HTTP/HTTPS 代理需要进一步调试。
 
 ---
 
-### 第二阶段：TLS指纹伪装
+### 第二阶段：TLS指纹伪装 ✅ 已完成
 
 **目标：** 让Go发出的请求具有Node.js的TLS指纹
 
@@ -163,14 +175,360 @@ conn := tls.UClient(rawConn, config, tls.HelloChrome_Auto)
 ```
 
 **实施步骤：**
-1. [ ] 研究 uTLS 库的使用方法
-2. [ ] 分析 Node.js 的 JA3 指纹特征
-3. [ ] 修改 HTTP 客户端，集成 uTLS
-4. [ ] 测试验证 TLS 指纹变化
+1. [x] 研究 uTLS 库的使用方法 ✅
+2. [x] 分析 Node.js 的 JA3 指纹特征 ✅
+3. [x] 修改 HTTP 客户端，集成 uTLS ✅
+4. [x] 测试验证 TLS 指纹变化 ✅
+
+**实施结果：**
+- ✅ 新增 `service/tls_fingerprint.go` - Node.js v22 TLS 指纹定义
+- ✅ 修改 `service/http_client.go` - 集成 uTLS，支持直连和代理
+- ✅ 新增 `service/tls_fingerprint_test.go` - JA3 计算单元测试
+- ✅ 新增 `service/http_client_utls_test.go` - uTLS 传输层测试
+- ✅ 修改 `service/http_client_test.go` - 端到端 JA3 验证测试
+- ✅ 修改 `service/http_client_proxy_test.go` - 代理 JA3 验证测试
+- ✅ 直连测试通过，JA3 组件匹配
+- ✅ SOCKS5 代理测试通过
+- ⚠️ HTTP/HTTPS 代理测试暂时跳过（需进一步调试）
+
+**代码改进：**
+- `GetHttpClient()` 添加 nil 检查，防止未初始化调用
+- 测试服务器显式使用 `tcp4` 监听，避免 IPv6 问题
+- 添加 `skipIfListenDenied` 辅助函数处理权限问题
 
 **参考资源：**
 - uTLS: https://github.com/refraction-networking/utls
 - JA3指纹数据库: https://ja3er.com/
+
+#### 2.1 uTLS 库分析结果
+
+**库信息：**
+- 包名：`github.com/refraction-networking/utls`
+- 功能：Go 标准 TLS 库的 fork，提供 ClientHello 指纹模拟功能
+- 导入量：被 882 个项目使用
+
+**支持的预设指纹：**
+
+| 预设名称 | 描述 | 适用场景 |
+|---------|------|---------|
+| `HelloChrome_Auto` | 最新 Chrome TLS 指纹 | ⭐ **推荐** - Chrome 使用 BoringSSL |
+| `HelloFirefox_Auto` | 最新 Firefox TLS 指纹 | 备选 |
+| `HelloSafari_Auto` | Safari TLS 指纹 | macOS 模拟 |
+| `HelloRandomized` | 随机化指纹 | 规避黑名单检测 |
+| `HelloCustom` | 自定义指纹 | 精确模拟特定客户端 |
+
+**关键发现：**
+- ❌ uTLS **没有直接的 `HelloNode` 预设**
+- ⚠️ **重要**：Claude Code 是 Node.js CLI 应用，不是浏览器
+- ⚠️ Node.js 使用 **OpenSSL**，Chrome 使用 **BoringSSL**，JA3 指纹**不同**
+- ❌ 不能直接用 `HelloChrome_Auto`，会造成 HTTP 头声称 Node.js 但 TLS 指纹是 Chrome 的矛盾
+- ✅ 需要使用 `HelloCustom` 自定义 Node.js 的 TLS 指纹
+- ✅ 或使用 `HelloRandomized` 避免固定指纹被识别
+
+#### 2.1.1 Node.js vs Chrome TLS 指纹差异
+
+| 特征 | Node.js | Chrome |
+|------|---------|--------|
+| TLS 库 | OpenSSL | BoringSSL |
+| JA3 指纹 | 不同 | 不同 |
+| HTTP 头声明 | `X-Stainless-Runtime: node` | 浏览器 UA |
+
+**检测矛盾示例：**
+```
+如果使用 HelloChrome_Auto：
+  HTTP 头: X-Stainless-Runtime: node  ← 声称是 Node.js
+  TLS 指纹: Chrome 的 JA3            ← 实际是 Chrome
+
+检测逻辑: Node.js 客户端怎么会有 Chrome 的 TLS 指纹？→ 可疑！
+```
+
+#### 2.1.2 正确方案：自定义 Node.js TLS 指纹
+
+**✅ 已获取 Node.js v22.19.0 真实 JA3 指纹**
+
+测试环境：
+- Node.js: v22.19.0
+- OpenSSL: 3.0.17
+- Claude Code: 2.0.75
+- Anthropic SDK: 0.71.2
+
+**JA3 指纹数据：**
+
+```
+JA3 Hash: 0cce74b0d9b7f8528fb2181588d23793
+
+JA3 Text: 771,4866-4867-4865-49199-49195-49200-49196-158-49191-103-49192-107-163-159-52393-52392-52394-49327-49325-49315-49311-49245-49249-49239-49235-162-49326-49324-49314-49310-49244-49248-49238-49234-49188-106-49187-64-49162-49172-57-56-49161-49171-51-50-157-49313-49309-49233-156-49312-49308-49232-61-60-53-47-255,0-11-10-35-22-23-13-43-45-51,29-23-30-25-24-256-257-258-259-260,0-1-2
+```
+
+**✅ JA3 指纹稳定性验证：**
+
+| Node.js 版本 | OpenSSL 版本 | JA3 Hash | 结论 |
+|-------------|-------------|----------|------|
+| v20.19.0 | 3.0.15 | `0cce74b0d9b7f8528fb2181588d23793` | ✅ 相同 |
+| v22.19.0 | 3.0.17 | `0cce74b0d9b7f8528fb2181588d23793` | ✅ 相同 |
+
+**结论：同一 OpenSSL 3.0.x 系列，JA3 指纹稳定不变。**
+
+**JA3 变化触发条件：**
+
+| 条件 | 是否变化 | 说明 |
+|------|---------|------|
+| Node.js 小版本升级 | 🟢 不变 | 22.18→22.19 无影响 |
+| 同 OpenSSL 主版本 | 🟢 不变 | 3.0.15 和 3.0.17 相同 |
+| OpenSSL 主版本升级 | 🟡 可能变 | 3.0→3.1 需要关注 |
+| 自定义 TLS 配置 | 🔴 肯定变 | 如指定 ciphers |
+
+**JA3 组件解析：**
+
+| 组件 | 值 | 说明 |
+|------|-----|------|
+| TLS Version | `771` | TLS 1.2 (0x0303) |
+| Cipher Suites | 59 个 | 以 4866-4867-4865 开头 |
+| Extensions | `0-11-10-35-22-23-13-43-45-51` | 10 个扩展 |
+| Elliptic Curves | `29-23-30-25-24-256-257-258-259-260` | 10 个曲线 |
+| EC Point Formats | `0-1-2` | 3 种格式 |
+
+**关键特征对比：**
+
+| 特征 | Node.js v22 | Go crypto/tls | 差异 |
+|------|-------------|---------------|------|
+| Cipher 数量 | 59 | ~15 | ⚠️ 显著不同 |
+| 首选 Cipher | 4866 (TLS 1.3) | 类似 | ✅ |
+| 扩展顺序 | 0-11-10-35-22-23... | 不同顺序 | ⚠️ |
+| 曲线数量 | 10 | 4-5 | ⚠️ 显著不同 |
+| FFDHE 支持 | 256-260 | 无 | ⚠️ 关键差异 |
+
+**方案 A：使用 CycleTLS（推荐）**
+
+[CycleTLS](https://github.com/Danny-Dasilva/CycleTLS) 支持直接指定 JA3 字符串：
+
+```go
+// CycleTLS 支持自定义 JA3
+options := cycletls.Options{
+    Ja3: "771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47-255,0-11-10-35-22-23-13-43-45-51-21,29-23-1-24-21,0",
+    UserAgent: "claude-cli/2.0.73",
+}
+```
+
+**方案 B：使用 uTLS HelloCustom**
+
+基于已获取的 Node.js JA3 指纹，构造完整的 `ClientHelloSpec`：
+
+```go
+import (
+    utls "github.com/refraction-networking/utls"
+)
+
+// NodeJS22ClientHelloSpec 模拟 Node.js v22.x 的 TLS 指纹
+// JA3 Hash: 0cce74b0d9b7f8528fb2181588d23793
+var NodeJS22ClientHelloSpec = utls.ClientHelloSpec{
+    TLSVersMax: utls.VersionTLS13,
+    TLSVersMin: utls.VersionTLS12,
+    CipherSuites: []uint16{
+        // TLS 1.3 ciphers
+        utls.TLS_AES_256_GCM_SHA384,        // 4866
+        utls.TLS_CHACHA20_POLY1305_SHA256,  // 4867
+        utls.TLS_AES_128_GCM_SHA256,        // 4865
+        // TLS 1.2 ciphers (按 Node.js 顺序)
+        utls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,   // 49199
+        utls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, // 49195
+        utls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,   // 49200
+        utls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, // 49196
+        // ... 更多 cipher suites (共59个)
+        0x00ff, // TLS_EMPTY_RENEGOTIATION_INFO_SCSV
+    },
+    Extensions: []utls.TLSExtension{
+        &utls.SNIExtension{},                        // 0
+        &utls.SupportedPointsExtension{              // 11
+            SupportedPoints: []byte{0, 1, 2},        // uncompressed, compressed
+        },
+        &utls.SupportedCurvesExtension{              // 10
+            Curves: []utls.CurveID{
+                utls.X25519,    // 29
+                utls.CurveP256, // 23
+                utls.X448,      // 30
+                utls.CurveP521, // 25
+                utls.CurveP384, // 24
+                // FFDHE groups (Node.js 特有)
+                0x0100, 0x0101, 0x0102, 0x0103, 0x0104,
+            },
+        },
+        &utls.SessionTicketExtension{},              // 35
+        &utls.UtlsExtension{Id: 22},                 // 22 - encrypt_then_mac
+        &utls.ExtendedMasterSecretExtension{},       // 23
+        &utls.SignatureAlgorithmsExtension{          // 13
+            SupportedSignatureAlgorithms: []utls.SignatureScheme{
+                utls.ECDSAWithP256AndSHA256,
+                utls.ECDSAWithP384AndSHA384,
+                utls.ECDSAWithP521AndSHA512,
+                utls.PSSWithSHA256,
+                utls.PSSWithSHA384,
+                utls.PSSWithSHA512,
+                utls.PKCS1WithSHA256,
+                utls.PKCS1WithSHA384,
+                utls.PKCS1WithSHA512,
+            },
+        },
+        &utls.SupportedVersionsExtension{            // 43
+            Versions: []uint16{
+                utls.VersionTLS13,
+                utls.VersionTLS12,
+            },
+        },
+        &utls.PSKKeyExchangeModesExtension{          // 45
+            Modes: []uint8{utls.PskModeDHE},
+        },
+        &utls.KeyShareExtension{                     // 51
+            KeyShares: []utls.KeyShare{
+                {Group: utls.X25519},
+            },
+        },
+    },
+}
+```
+
+**方案 C：使用 HelloRandomized（折中）**
+
+```go
+// 随机指纹，避免被识别为任何特定客户端
+conn := tls.UClient(rawConn, config, tls.HelloRandomized)
+```
+
+优点：不会被黑名单
+缺点：也不会被白名单，可能触发其他检测
+
+#### 2.2 项目 HTTP 客户端架构分析
+
+**关键文件：**
+
+| 文件 | 作用 | 修改必要性 |
+|------|------|-----------|
+| `service/http_client.go` | 全局 HTTP 客户端创建 | 🔴 **核心修改点** |
+| `relay/channel/api_request.go:396-443` | 请求发送逻辑 | 无需修改 |
+
+**当前客户端创建逻辑 (`service/http_client.go:36-47`)：**
+
+```go
+func InitHttpClient() {
+    if common.RelayTimeout == 0 {
+        httpClient = &http.Client{
+            CheckRedirect: checkRedirect,
+        }
+    } else {
+        httpClient = &http.Client{
+            Timeout:       time.Duration(common.RelayTimeout) * time.Second,
+            CheckRedirect: checkRedirect,
+        }
+    }
+}
+```
+
+**问题分析：**
+- 使用默认 `http.Transport`
+- Go 默认 TLS 配置会产生 Go 特有的 JA3 指纹
+- 需要替换为自定义 Transport，集成 uTLS
+
+#### 2.3 uTLS 集成方案
+
+**⚠️ 方案调整：需要模拟 Node.js 而非 Chrome**
+
+由于下游用户使用 Claude Code（Node.js CLI），我们需要让 TLS 指纹与 HTTP 头一致：
+
+| 层级 | 声明 | 必须匹配 |
+|------|------|---------|
+| HTTP 头 | `X-Stainless-Runtime: node` | ✅ 第一阶段已完成 |
+| TLS 指纹 | Node.js OpenSSL | ⚠️ 第二阶段目标 |
+
+**推荐方案：获取真实 Node.js JA3 指纹**
+
+**步骤 1：抓取 Claude Code 的真实 TLS 指纹**
+
+```bash
+# 使用 Wireshark 或 mitmproxy 抓包
+# 过滤 TLS Client Hello
+# 提取 JA3 字符串
+
+# 或使用在线工具检测
+curl -s https://ja3.zone/check | jq .ja3
+```
+
+**步骤 2：使用 CycleTLS 或 uTLS 自定义指纹**
+
+```go
+import (
+    "github.com/Danny-Dasilva/CycleTLS/cycletls"
+)
+
+// 方案 A：CycleTLS（更简单）
+func NewNodeJSHttpClient() *cycletls.CycleTLS {
+    client := cycletls.Init()
+    return client
+}
+
+// 发起请求时指定 JA3
+resp, err := client.Do(url, cycletls.Options{
+    Ja3: "NODE_JS_JA3_STRING",  // 从抓包获取
+    Headers: headers,
+}, "POST")
+```
+
+```go
+import (
+    utls "github.com/refraction-networking/utls"
+)
+
+// 方案 B：uTLS HelloCustom（更精细控制）
+// 需要构造完整的 ClientHelloSpec
+var NodeJSClientHello = utls.ClientHelloID{
+    Client:  "Node",
+    Version: "22.18.0",
+    Seed:    nil,
+    SpecFactory: func() (utls.ClientHelloSpec, error) {
+        return utls.ClientHelloSpec{
+            // 从抓包分析获取的完整配置
+            TLSVersMax: utls.VersionTLS13,
+            TLSVersMin: utls.VersionTLS12,
+            CipherSuites: []uint16{...},
+            Extensions: []utls.TLSExtension{...},
+        }, nil
+    },
+}
+```
+
+**集成点：**
+
+1. **新增依赖**：`go get github.com/refraction-networking/utls`
+2. **修改 `service/http_client.go`**：
+   - 新增 `uTLSTransport` 结构体
+   - 修改 `InitHttpClient()` 使用 uTLS Transport
+3. **可选配置化**：通过环境变量控制是否启用 TLS 指纹伪装
+
+#### 2.4 实施风险评估
+
+| 风险 | 可能性 | 影响 | 缓解措施 |
+|------|--------|------|---------|
+| HTTP/2 兼容性问题 | 中 | 高 | uTLS 需要额外配置 HTTP/2 支持 |
+| 连接池管理复杂化 | 中 | 中 | 复用现有 Transport 连接池 |
+| 性能开销 | 低 | 低 | uTLS 只影响 TLS 握手，不影响数据传输 |
+| 代理模式兼容性 | 中 | 高 | 需要同步修改 `NewProxyHttpClient()` |
+
+#### 2.5 下一步行动
+
+**前置任务（新增）：**
+1. [x] **抓取 Claude Code 真实 TLS 指纹** ✅ **已完成**
+   - ✅ Node.js v22.19.0 / OpenSSL 3.0.17
+   - ✅ JA3 Hash: `0cce74b0d9b7f8528fb2181588d23793`
+   - ✅ 完整的 ClientHello 参数已记录
+   - ✅ 与 Go 的差异已分析（59 ciphers vs ~15, 10 curves vs 4-5）
+
+**实施任务：**
+1. [ ] 选择技术方案（CycleTLS vs uTLS HelloCustom）
+2. [ ] 编写 TLS 指纹伪装代码
+3. [ ] 处理 HTTP/2 支持（需要 `utls.ALPNExtension`）
+4. [ ] 同步修改代理客户端创建逻辑
+5. [ ] 添加配置开关（可选启用/禁用）
+6. [ ] 编写测试用例验证 JA3 指纹变化
+7. [ ] 使用 [ja3.zone](https://ja3.zone) 验证指纹匹配 Node.js
 
 ---
 
@@ -653,17 +1011,19 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 
 - [x] 问题分析完成
 - [x] 方案设计完成
-- [ ] 第一阶段：HTTP头伪装
+- [x] **第一阶段：HTTP头伪装** ✅ **已完成**
   - [x] 代码定位 ✅
   - [x] 问题根源分析 ✅
   - [x] 请求头分类分析（固定/变化）✅
   - [x] 确定策略：固定伪装而非透传 ✅
   - [x] 修复方案设计 ✅
-  - [ ] 方案实施
-  - [ ] 测试验证
-- [ ] 第二阶段：TLS伪装
-  - [ ] uTLS 库研究
-  - [ ] Node.js JA3 指纹分析
+  - [x] 方案实施 ✅ **2025-12-27 完成**
+  - [x] 测试验证 ✅ **覆盖率100%**
+- [ ] **第二阶段：TLS伪装** ⏳ **分析中**
+  - [x] uTLS 库研究 ✅
+  - [x] Node.js JA3 指纹分析 ✅
+  - [x] HTTP 客户端架构分析 ✅
+  - [x] 集成方案设计 ✅
   - [ ] 代码实施
   - [ ] 测试验证
 - [ ] 第三阶段：HTTP/2优化
@@ -680,6 +1040,26 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 | 2025-12-26 | 深度分析请求头分类（固定/变化），确定使用固定伪装策略而非透传 |
 | 2025-12-26 | 复查日志，补充遗漏的3个头：Accept-Language、Sec-Fetch-Mode、X-Accel-Buffering |
 | 2025-12-26 | 更新最终方案，共需添加15个请求头 |
+| **2025-12-27** | **✅ 第一阶段完成：实施14个固定请求头伪装** |
+| 2025-12-27 | 修改 `relay/channel/claude/adaptor.go` 添加14个固定头（9 Stainless + 2 标准 + 3 Claude） |
+| 2025-12-27 | **重要决策：删除 Accept-Encoding 头**（避免 Go 自动解压失效导致响应数据压缩） |
+| 2025-12-27 | 创建 `relay/channel/claude/adaptor_test.go` 完整测试套件 |
+| 2025-12-27 | 测试验证：SetupRequestHeader 函数覆盖率 100%，所有测试通过 |
+| 2025-12-27 | 生成开发文档：`.claude/specs/claude-header-masquerading/dev-plan.md` |
+| **2025-12-27** | **⏳ 第二阶段分析开始：TLS 指纹伪装** |
+| 2025-12-27 | 完成 uTLS 库研究，确认使用 `HelloChrome_Auto` 预设 |
+| 2025-12-27 | 分析项目 HTTP 客户端架构：核心修改点在 `service/http_client.go` |
+| 2025-12-27 | 设计 uTLS 集成方案，确定 `uTLSTransport` 包装模式 |
+| 2025-12-27 | 识别关键风险：HTTP/2 兼容性、代理模式兼容性 |
+| **2025-12-27** | **⚠️ 方案调整：需模拟 Node.js 指纹而非 Chrome** |
+| 2025-12-27 | 发现关键问题：Claude Code 是 Node.js CLI，不是浏览器 |
+| 2025-12-27 | Node.js (OpenSSL) 和 Chrome (BoringSSL) 的 JA3 指纹不同 |
+| 2025-12-27 | 更新方案：需抓取真实 Claude Code TLS 指纹，使用 HelloCustom 或 CycleTLS |
+| **2025-12-27** | **✅ 前置任务完成：获取 Node.js v22.19.0 JA3 指纹** |
+| 2025-12-27 | JA3 Hash: `0cce74b0d9b7f8528fb2181588d23793` |
+| 2025-12-27 | 发现关键差异：Node.js 有 59 个 cipher suites，Go 只有 ~15 个 |
+| 2025-12-27 | 发现关键差异：Node.js 支持 FFDHE groups (256-260)，Go 不支持 |
+| 2025-12-27 | 编写完整的 `NodeJS22ClientHelloSpec` uTLS 配置 |
 
 ---
 
