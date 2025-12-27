@@ -32,10 +32,10 @@ func masqueradeMetadata(raw json.RawMessage) (json.RawMessage, string) {
 	return masked, originalUserID
 }
 
-// masqueradeMetadataInBody updates the top-level metadata field in a Claude
+// MasqueradeMetadataInBody updates the top-level metadata field in a Claude
 // request body, preserving other top-level fields. It returns the updated body
 // and the original user_id (if any) from metadata.
-func masqueradeMetadataInBody(body []byte) ([]byte, string) {
+func MasqueradeMetadataInBody(body []byte) ([]byte, string) {
 	payload := make(map[string]json.RawMessage)
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return body, "<empty>"
