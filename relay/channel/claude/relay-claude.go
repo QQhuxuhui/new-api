@@ -412,6 +412,17 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 
 	claudeRequest.Prompt = ""
 	claudeRequest.Messages = claudeMessages
+
+	// ========================================
+	// 伪装固定的 metadata.user_id（保留其他字段）
+	// 避免上游检测多用户转售
+	// ========================================
+	masked, originalUserID := masqueradeMetadata(claudeRequest.Metadata)
+	claudeRequest.Metadata = masked
+
+	// 打印日志（OpenAI 格式请求通常不携带 metadata，原始为空）
+	logger.LogInfo(c, fmt.Sprintf("[OpenAI->Claude] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, MasqueradeUserID))
+
 	return &claudeRequest, nil
 }
 

@@ -161,6 +161,7 @@ const EditChannelModal = (props) => {
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
+    pass_through_metadata_masquerade: false,
     system_prompt: '',
     system_prompt_override: false,
     settings: '',
@@ -327,6 +328,7 @@ const EditChannelModal = (props) => {
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
+    pass_through_metadata_masquerade: false,
     system_prompt: '',
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
@@ -513,6 +515,8 @@ const EditChannelModal = (props) => {
           data.proxy = parsedSettings.proxy || '';
           data.pass_through_body_enabled =
             parsedSettings.pass_through_body_enabled || false;
+          data.pass_through_metadata_masquerade =
+            parsedSettings.pass_through_metadata_masquerade || false;
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
@@ -522,6 +526,7 @@ const EditChannelModal = (props) => {
           data.thinking_to_content = false;
           data.proxy = '';
           data.pass_through_body_enabled = false;
+          data.pass_through_metadata_masquerade = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
         }
@@ -530,6 +535,7 @@ const EditChannelModal = (props) => {
         data.thinking_to_content = false;
         data.proxy = '';
         data.pass_through_body_enabled = false;
+        data.pass_through_metadata_masquerade = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
       }
@@ -879,6 +885,7 @@ const EditChannelModal = (props) => {
       thinking_to_content: false,
       proxy: '',
       pass_through_body_enabled: false,
+      pass_through_metadata_masquerade: false,
       system_prompt: '',
       system_prompt_override: false,
     });
@@ -1055,6 +1062,8 @@ const EditChannelModal = (props) => {
       thinking_to_content: localInputs.thinking_to_content || false,
       proxy: localInputs.proxy || '',
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
+      pass_through_metadata_masquerade:
+        localInputs.pass_through_metadata_masquerade || false,
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
     };
@@ -1099,6 +1108,7 @@ const EditChannelModal = (props) => {
     delete localInputs.thinking_to_content;
     delete localInputs.proxy;
     delete localInputs.pass_through_body_enabled;
+    delete localInputs.pass_through_metadata_masquerade;
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
     delete localInputs.is_enterprise_account;
@@ -3071,6 +3081,20 @@ const EditChannelModal = (props) => {
                         )
                       }
                       extraText={t('启用请求体透传功能')}
+                    />
+
+                    <Form.Switch
+                      field='pass_through_metadata_masquerade'
+                      label={t('透传仍伪装 metadata.user_id')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange(
+                          'pass_through_metadata_masquerade',
+                          value,
+                        )
+                      }
+                      extraText={t('透传模式下也覆写 metadata.user_id 以防泄露真实用户标识')}
                     />
 
                     <Form.Input

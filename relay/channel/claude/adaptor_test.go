@@ -1,12 +1,14 @@
 package claude
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 )
 
 func TestSetupRequestHeader(t *testing.T) {
@@ -41,8 +43,8 @@ func TestSetupRequestHeader(t *testing.T) {
 				"Accept-Language": "*",
 				"Sec-Fetch-Mode":  "cors",
 				// Claude/Anthropic specific headers (3)
-				"X-App":                                    "cli",
-				"X-Accel-Buffering":                        "no",
+				"X-App":             "cli",
+				"X-Accel-Buffering": "no",
 				"Anthropic-Dangerous-Direct-Browser-Access": "true",
 			},
 		},
@@ -177,5 +179,154 @@ func TestSetupRequestHeader_ExistingLogicPreserved(t *testing.T) {
 	// Verify fixed headers are present
 	if req.Get("X-Stainless-Lang") != "js" {
 		t.Errorf("Fixed header X-Stainless-Lang not set")
+	}
+}
+
+// TestConvertClaudeRequest_MetadataMasquerade 验证 metadata.user_id 固定伪装
+func TestConvertClaudeRequest_MetadataMasquerade(t *testing.T) {
+	// 使用常量中定义的伪装 user_id
+	expectedUserID := MasqueradeUserID
+
+	tests := []struct {
+		name            string
+		initialMetadata json.RawMessage
+	}{
+		{
+			name:            "Empty metadata should be set",
+			initialMetadata: nil,
+		},
+		{
+			name:            "Existing metadata should be overwritten",
+			initialMetadata: json.RawMessage(`{"user_id":"old_user_id"}`),
+		},
+		{
+			name:            "Existing different metadata should be replaced but preserved",
+			initialMetadata: json.RawMessage(`{"other_field":"value","user_id":"different_id","another":"keep"}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup gin context
+			gin.SetMode(gin.TestMode)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+
+			// Setup relay info
+			info := &relaycommon.RelayInfo{
+				OriginModelName: "claude-3-5-sonnet-20241022",
+			}
+
+			// Create request with initial metadata
+			request := &dto.ClaudeRequest{
+				Model:     "claude-3-5-sonnet-20241022",
+				MaxTokens: 1024,
+				Messages: []dto.ClaudeMessage{
+					{Role: "user", Content: "Hello"},
+				},
+				Metadata: tt.initialMetadata,
+			}
+
+			// Convert request
+			adaptor := &Adaptor{}
+			result, err := adaptor.ConvertClaudeRequest(c, info, request)
+
+			if err != nil {
+				t.Fatalf("ConvertClaudeRequest returned error: %v", err)
+			}
+
+			// Verify result is a ClaudeRequest
+			claudeReq, ok := result.(*dto.ClaudeRequest)
+			if !ok {
+				t.Fatalf("Result is not *dto.ClaudeRequest")
+			}
+
+			// Verify metadata is set
+			if claudeReq.Metadata == nil {
+				t.Fatalf("Metadata is nil")
+			}
+
+			// Parse metadata as map to ensure other keys are preserved
+			var metadata map[string]any
+			if err := json.Unmarshal(claudeReq.Metadata, &metadata); err != nil {
+				t.Fatalf("Failed to parse metadata: %v", err)
+			}
+
+			// Verify user_id is the fixed value
+			if uid, _ := metadata["user_id"].(string); uid != expectedUserID {
+				t.Errorf("user_id = %v; want %s", metadata["user_id"], expectedUserID)
+			}
+
+			// Other fields should be preserved when present
+			if tt.name == "Existing different metadata should be replaced but preserved" {
+				if val, ok := metadata["other_field"]; !ok || val != "value" {
+					t.Errorf("other_field not preserved; got %v", val)
+				}
+				if val, ok := metadata["another"]; !ok || val != "keep" {
+					t.Errorf("another not preserved; got %v", val)
+				}
+			}
+		})
+	}
+}
+
+// TestConvertClaudeRequest_PreservesOtherFields 验证伪装 metadata 不影响其他字段
+func TestConvertClaudeRequest_PreservesOtherFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "claude-3-5-sonnet-20241022",
+	}
+
+	// Create request with various fields
+	request := &dto.ClaudeRequest{
+		Model:     "claude-3-5-sonnet-20241022",
+		MaxTokens: 2048,
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "Test message"},
+		},
+		Stream: true,
+	}
+
+	adaptor := &Adaptor{}
+	result, err := adaptor.ConvertClaudeRequest(c, info, request)
+
+	if err != nil {
+		t.Fatalf("ConvertClaudeRequest returned error: %v", err)
+	}
+
+	claudeReq := result.(*dto.ClaudeRequest)
+
+	// Verify other fields are preserved
+	if claudeReq.Model != "claude-3-5-sonnet-20241022" {
+		t.Errorf("Model not preserved")
+	}
+	if claudeReq.MaxTokens != 2048 {
+		t.Errorf("MaxTokens not preserved")
+	}
+	if !claudeReq.Stream {
+		t.Errorf("Stream not preserved")
+	}
+	if len(claudeReq.Messages) != 1 {
+		t.Errorf("Messages not preserved")
+	}
+
+	// And metadata should be set
+	if claudeReq.Metadata == nil {
+		t.Errorf("Metadata not set")
+	}
+
+	// user_id should be masked
+	var metadata map[string]any
+	if err := json.Unmarshal(claudeReq.Metadata, &metadata); err != nil {
+		t.Fatalf("Failed to parse metadata: %v", err)
+	}
+
+	if uid, _ := metadata["user_id"].(string); uid != MasqueradeUserID {
+		t.Errorf("user_id not masked, got %v", metadata["user_id"])
 	}
 }

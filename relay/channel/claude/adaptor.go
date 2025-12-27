@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -21,6 +22,9 @@ const (
 	RequestModeMessage    = 2
 )
 
+// MasqueradeUserID 固定伪装的 user_id
+const MasqueradeUserID = "user_41b40fa179f64f4ab28ea67a70a478f93d4dbb5d9ed166ed8f9dd2e9ebb4975d_account__session_b37fb515-b9ad-49f8-a5c1-945aa8f888ee"
+
 type Adaptor struct {
 	RequestMode int
 }
@@ -30,6 +34,16 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
+	// ========================================
+	// 伪装固定的 metadata.user_id
+	// 避免上游检测多用户转售，同时保留其他 metadata 字段
+	// ========================================
+
+	masked, originalUserID := masqueradeMetadata(request.Metadata)
+	request.Metadata = masked
+
+	logger.LogInfo(c, fmt.Sprintf("[Claude Native] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, MasqueradeUserID))
+
 	return request, nil
 }
 
@@ -89,9 +103,9 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	req.Set("X-Stainless-Lang", "js")
 	req.Set("X-Stainless-Runtime", "node")
 	req.Set("X-Stainless-Runtime-Version", "v22.18.0") // 固定 Node 版本
-	req.Set("X-Stainless-Os", "Linux")                  // 固定操作系统
-	req.Set("X-Stainless-Arch", "x64")                  // 固定 CPU 架构
-	req.Set("X-Stainless-Package-Version", "0.70.0")    // SDK 版本
+	req.Set("X-Stainless-Os", "Linux")                 // 固定操作系统
+	req.Set("X-Stainless-Arch", "x64")                 // 固定 CPU 架构
+	req.Set("X-Stainless-Package-Version", "0.70.0")   // SDK 版本
 	req.Set("X-Stainless-Helper-Method", "stream")
 	req.Set("X-Stainless-Retry-Count", "0")
 	req.Set("X-Stainless-Timeout", "60")

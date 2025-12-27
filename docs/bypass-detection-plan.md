@@ -95,11 +95,14 @@ JA3 = MD5(
 | 阶段 | 内容 | 难度 | 效果预估 | 状态 |
 |------|------|------|---------|------|
 | 第一阶段 | HTTP请求头固定伪装 | ⭐⭐ | 25-35% | ✅ **已完成** (2025-12-27) |
+| 第1.5阶段 | metadata.user_id 固定伪装 | ⭐ | 10-15% | ✅ **已完成** (2025-12-27) |
 | 第二阶段 | TLS指纹伪装 (uTLS) | ⭐⭐⭐⭐ | 40-50% | ✅ **已完成** (2025-12-27) |
 | 第三阶段 | HTTP/2指纹优化 | ⭐⭐⭐ | 10-15% | ⏳ 待研究 |
 | 第四阶段 | 请求行为模式优化 | ⭐⭐⭐ | 10-20% | ⏳ 待分析 |
 
 **第一阶段备注**：最终实施14个固定头（删除Accept-Encoding避免解压问题），效果预估略低于原计划但安全可用。
+
+**第1.5阶段备注**：请求体中的 `metadata.user_id` 字段固定为统一值，避免暴露多用户身份特征。
 
 ---
 
@@ -155,6 +158,90 @@ fixedMasqueradeHeaders := map[string]string{
 - ✅ 现有逻辑完全保留
 
 **第二阶段备注**：使用 uTLS 实现 Node.js v22 TLS 指纹伪装，JA3 Hash: `0cce74b0d9b7f8528fb2181588d23793`。直连和 SOCKS5 代理已验证，HTTP/HTTPS 代理需要进一步调试。
+
+---
+
+### 第1.5阶段：metadata.user_id 固定伪装 ✅ 已完成
+
+**目标：** 将请求体中的 `metadata.user_id` 固定为统一值，避免暴露多用户身份
+
+**背景分析：**
+
+请求体中发现以下身份信息字段：
+```json
+{
+  "metadata": {
+    "user_id": "user_{hash}_account__session_{uuid}",
+    "other_field": "value"  // 可能存在其他字段
+  }
+}
+```
+
+- `hash` 部分：64字符 SHA256 哈希（账户标识符的哈希）
+- `uuid` 部分：会话的唯一标识符
+
+如果透传不同用户的 user_id，上游可通过以下方式检测转售：
+- 同一 API Key 关联多个不同的 user_id
+- user_id 变化频率异常
+
+**实施方案：**
+
+```go
+// relay/channel/claude/metadata.go
+
+// MasqueradeUserID 固定伪装的 user_id
+const MasqueradeUserID = "user_41b40fa179f64f4ab28ea67a70a478f93d4dbb5d9ed166ed8f9dd2e9ebb4975d_account__session_b37fb515-b9ad-49f8-a5c1-945aa8f888ee"
+
+// masqueradeMetadata 只覆盖 user_id，保留其他 metadata 字段
+func masqueradeMetadata(raw json.RawMessage) (json.RawMessage, string) {
+    originalUserID := "<empty>"
+    meta := make(map[string]any)
+
+    // 解析原有 metadata
+    if len(raw) > 0 {
+        if err := json.Unmarshal(raw, &meta); err == nil {
+            if uid, ok := meta["user_id"].(string); ok && uid != "" {
+                originalUserID = uid
+            }
+        }
+    }
+
+    // 只覆盖 user_id，保留其他字段
+    meta["user_id"] = MasqueradeUserID
+
+    masked, _ := json.Marshal(meta)
+    return masked, originalUserID
+}
+
+// masqueradeMetadataInBody 用于透传模式，直接修改请求体中的 metadata
+func masqueradeMetadataInBody(body []byte) ([]byte, string) {
+    // 解析请求体 -> 修改 metadata.user_id -> 重新序列化
+}
+```
+
+**修改的文件：**
+- ✅ `relay/channel/claude/metadata.go` - **新增**：metadata 伪装核心逻辑
+- ✅ `relay/channel/claude/adaptor.go:36-48` - ConvertClaudeRequest 函数
+- ✅ `relay/channel/claude/relay-claude.go:416-425` - RequestOpenAI2ClaudeMessage 函数
+- ✅ `relay/channel/claude/adaptor_test.go` - 新增测试用例
+
+**实施结果：**
+- ✅ 原生 Claude 请求和 OpenAI 转 Claude 请求均已覆盖
+- ✅ **只覆盖 user_id，保留其他 metadata 字段**
+- ✅ 添加日志打印：`[Claude Native] metadata.user_id 伪装: 下游=xxx -> 上游=yyy`
+- ✅ 测试覆盖率：100%
+- ✅ 所有测试通过
+
+**日志输出示例：**
+```
+[INFO] 2025/12/27 - 13:09:43 | SYSTEM | [Claude Native] metadata.user_id 伪装: 下游=old_user_id -> 上游=user_41b40fa...
+[INFO] 2025/12/27 - 13:09:43 | SYSTEM | [OpenAI->Claude] metadata.user_id 伪装: 下游=<empty> -> 上游=user_41b40fa...
+```
+
+**注意事项：**
+- `signature` 字段不需要伪装（它是 Extended Thinking 的响应字段，由 API 自动生成）
+- **透传模式分析**：开启 `PassThroughRequestEnabled` 或 `PassThroughBodyEnabled` 时，请求体直接转发，不调用 `ConvertClaudeRequest`，因此伪装不生效。这是**设计预期**，因为透传是用户主动选择的"原样转发"模式
+- 已预留 `masqueradeMetadataInBody` 函数，如需在透传模式下也伪装，可在 `relay/claude_handler.go:108-113` 处调用
 
 ---
 
@@ -1019,13 +1106,18 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
   - [x] 修复方案设计 ✅
   - [x] 方案实施 ✅ **2025-12-27 完成**
   - [x] 测试验证 ✅ **覆盖率100%**
-- [ ] **第二阶段：TLS伪装** ⏳ **分析中**
+- [x] **第1.5阶段：metadata.user_id 伪装** ✅ **已完成**
+  - [x] 分析请求体中的身份信息 ✅
+  - [x] 研究 `signature` 字段（Extended Thinking 响应字段，无需伪装）✅
+  - [x] 实施固定 user_id 伪装 ✅
+  - [x] 测试验证 ✅ **覆盖率100%**
+- [x] **第二阶段：TLS伪装** ✅ **已完成**
   - [x] uTLS 库研究 ✅
   - [x] Node.js JA3 指纹分析 ✅
   - [x] HTTP 客户端架构分析 ✅
   - [x] 集成方案设计 ✅
-  - [ ] 代码实施
-  - [ ] 测试验证
+  - [x] 代码实施 ✅
+  - [x] 测试验证 ✅ （直连+SOCKS5通过，HTTP/HTTPS代理待调试）
 - [ ] 第三阶段：HTTP/2优化
 - [ ] 第四阶段：请求行为模式优化
 
@@ -1060,6 +1152,15 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 | 2025-12-27 | 发现关键差异：Node.js 有 59 个 cipher suites，Go 只有 ~15 个 |
 | 2025-12-27 | 发现关键差异：Node.js 支持 FFDHE groups (256-260)，Go 不支持 |
 | 2025-12-27 | 编写完整的 `NodeJS22ClientHelloSpec` uTLS 配置 |
+| **2025-12-27** | **✅ 第1.5阶段完成：实施 metadata.user_id 固定伪装** |
+| 2025-12-27 | 分析请求体中的身份信息：`metadata.user_id` 和 `signature` |
+| 2025-12-27 | 研究结论：`signature` 是 Extended Thinking 响应字段，无需伪装 |
+| 2025-12-27 | 新增 `relay/channel/claude/metadata.go` - 伪装核心逻辑（只覆盖 user_id，保留其他字段）|
+| 2025-12-27 | 修改 `relay/channel/claude/adaptor.go:36-48` - 调用 masqueradeMetadata 函数 |
+| 2025-12-27 | 修改 `relay/channel/claude/relay-claude.go:416-425` - 调用 masqueradeMetadata 函数 |
+| 2025-12-27 | 添加日志打印：记录下游原始 user_id 和上游伪装后的 user_id |
+| 2025-12-27 | 新增 metadata 伪装测试：验证 user_id 覆盖和其他字段保留 |
+| 2025-12-27 | 预留 `masqueradeMetadataInBody` 函数供透传模式使用（当前未启用）|
 
 ---
 
