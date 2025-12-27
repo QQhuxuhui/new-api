@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 令牌分发示意图</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+            background: #0d1117;
+            min-height: 100vh;
+            padding: 40px 20px;
+            color: #c9d1d9;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 50px;
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: #58a6ff;
+        }
+
+        .diagram {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .tier {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .tier-label {
+            width: 80px;
+            font-size: 0.75rem;
+            color: #6e7681;
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        .tier-content {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        /* 服务器盒子 */
+        .server {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 140px;
+            text-align: center;
+        }
+
+        .server-icon {
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+        }
+
+        .server-name {
+            font-size: 0.85rem;
+            color: #8b949e;
+        }
+
+        /* 中游网关 - 突出显示 */
+        .gateway {
+            background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+            border: 2px solid #3b82f6;
+            border-radius: 12px;
+            padding: 30px 50px;
+            text-align: center;
+            position: relative;
+        }
+
+        .gateway-icon {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .gateway-name {
+            font-size: 1rem;
+            color: #60a5fa;
+            font-weight: 600;
+        }
+
+        .gateway-badge {
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #3b82f6;
+            color: #fff;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+        }
+
+        /* 客户端 */
+        .client {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 15px 20px;
+            min-width: 120px;
+            text-align: center;
+        }
+
+        .client-icon {
+            font-size: 1.5rem;
+            margin-bottom: 6px;
+        }
+
+        .client-name {
+            font-size: 0.8rem;
+            color: #8b949e;
+        }
+
+        .client-token {
+            font-size: 0.65rem;
+            color: #f0883e;
+            margin-top: 6px;
+            background: rgba(240, 136, 62, 0.1);
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+
+        /* 请求流 */
+        .flow-section {
+            margin: 30px 0;
+            padding-left: 100px;
+        }
+
+        .flow-arrow {
+            display: flex;
+            align-items: center;
+            margin: 15px 0;
+        }
+
+        .arrow-line {
+            flex: 1;
+            height: 2px;
+            background: linear-gradient(to right, #238636, #3b82f6);
+            position: relative;
+        }
+
+        .arrow-line.reverse {
+            background: linear-gradient(to left, #238636, #3b82f6);
+        }
+
+        .arrow-line::after {
+            content: '';
+            position: absolute;
+            right: -8px;
+            top: -4px;
+            border: 5px solid transparent;
+            border-left: 8px solid #3b82f6;
+        }
+
+        .arrow-line.reverse::after {
+            right: auto;
+            left: -8px;
+            border-left: none;
+            border-right: 8px solid #238636;
+        }
+
+        .arrow-label {
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.7rem;
+            color: #6e7681;
+            white-space: nowrap;
+        }
+
+        /* HTTP 请求块 */
+        .http-block {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            margin: 20px 0;
+            overflow: hidden;
+            font-size: 0.75rem;
+        }
+
+        .http-header {
+            background: #161b22;
+            padding: 8px 12px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .http-method {
+            background: #238636;
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .http-url {
+            color: #58a6ff;
+        }
+
+        .http-body {
+            padding: 12px;
+        }
+
+        .http-line {
+            margin: 4px 0;
+        }
+
+        .http-key {
+            color: #7ee787;
+        }
+
+        .http-value {
+            color: #a5d6ff;
+        }
+
+        .http-comment {
+            color: #6e7681;
+            font-style: italic;
+        }
+
+        /* 分隔线 */
+        .separator {
+            display: flex;
+            align-items: center;
+            margin: 40px 0;
+            padding-left: 100px;
+        }
+
+        .separator-line {
+            flex: 1;
+            height: 1px;
+            background: #30363d;
+        }
+
+        .separator-text {
+            padding: 0 20px;
+            color: #6e7681;
+            font-size: 0.8rem;
+        }
+
+        /* 流程说明 */
+        .flow-explain {
+            display: flex;
+            gap: 40px;
+            margin-top: 40px;
+            padding: 20px;
+            background: #161b22;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+        }
+
+        .flow-step {
+            flex: 1;
+        }
+
+        .step-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            background: #3b82f6;
+            color: #fff;
+            border-radius: 50%;
+            font-size: 0.75rem;
+            margin-bottom: 10px;
+        }
+
+        .step-title {
+            font-size: 0.85rem;
+            color: #c9d1d9;
+            margin-bottom: 6px;
+        }
+
+        .step-desc {
+            font-size: 0.75rem;
+            color: #6e7681;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>HTTPS 请求转发与令牌分发示意图</h1>
+
+        <div class="diagram">
+            <!-- 上游服务器 -->
+            <div class="tier">
+                <div class="tier-label">Upstream</div>
+                <div class="tier-content">
+                    <div class="server">
+                        <div class="server-icon">🖥️</div>
+                        <div class="server-name">上游服务器 A</div>
+                    </div>
+                    <div class="server">
+                        <div class="server-icon">🖥️</div>
+                        <div class="server-name">上游服务器 B</div>
+                    </div>
+                    <div class="server">
+                        <div class="server-icon">🖥️</div>
+                        <div class="server-name">上游服务器 N</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 上游请求示例 -->
+            <div class="flow-section">
+                <div class="http-block">
+                    <div class="http-header">
+                        <span class="http-method">POST</span>
+                        <span class="http-url">https://upstream-api.example.com/v1/chat/completions</span>
+                    </div>
+                    <div class="http-body">
+                        <div class="http-line"><span class="http-key">Authorization:</span> <span class="http-value">Bearer sk-upstream-key-xxxxx</span></div>
+                        <div class="http-line"><span class="http-key">Content-Type:</span> <span class="http-value">application/json</span></div>
+                        <div class="http-line http-comment">// 使用上游服务商的原始 API Key</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="separator">
+                <div class="separator-line"></div>
+                <div class="separator-text">↑ 代理转发 ↓</div>
+                <div class="separator-line"></div>
+            </div>
+
+            <!-- 中游网关 -->
+            <div class="tier">
+                <div class="tier-label">Midstream</div>
+                <div class="tier-content">
+                    <div class="gateway">
+                        <span class="gateway-badge">API Gateway</span>
+                        <div class="gateway-icon">⚡</div>
+                        <div class="gateway-name">API 代理服务</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="separator">
+                <div class="separator-line"></div>
+                <div class="separator-text">↑ 令牌验证 & 路由 ↓</div>
+                <div class="separator-line"></div>
+            </div>
+
+            <!-- 下游请求示例 -->
+            <div class="flow-section">
+                <div class="http-block">
+                    <div class="http-header">
+                        <span class="http-method">POST</span>
+                        <span class="http-url">https://your-api.example.com/v1/chat/completions</span>
+                    </div>
+                    <div class="http-body">
+                        <div class="http-line"><span class="http-key">Authorization:</span> <span class="http-value">Bearer sk-user-token-abc123</span></div>
+                        <div class="http-line"><span class="http-key">Content-Type:</span> <span class="http-value">application/json</span></div>
+                        <div class="http-line http-comment">// 使用分发给用户的令牌</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 下游客户端 -->
+            <div class="tier">
+                <div class="tier-label">Downstream</div>
+                <div class="tier-content">
+                    <div class="client">
+                        <div class="client-icon">💻</div>
+                        <div class="client-name">客户端 1</div>
+                        <div class="client-token">Token: sk-***a1</div>
+                    </div>
+                    <div class="client">
+                        <div class="client-icon">💻</div>
+                        <div class="client-name">客户端 2</div>
+                        <div class="client-token">Token: sk-***b2</div>
+                    </div>
+                    <div class="client">
+                        <div class="client-icon">💻</div>
+                        <div class="client-name">客户端 3</div>
+                        <div class="client-token">Token: sk-***c3</div>
+                    </div>
+                    <div class="client">
+                        <div class="client-icon">💻</div>
+                        <div class="client-name">客户端 N</div>
+                        <div class="client-token">Token: sk-***nX</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 流程说明 -->
+            <div class="flow-explain">
+                <div class="flow-step">
+                    <div class="step-num">1</div>
+                    <div class="step-title">客户端请求</div>
+                    <div class="step-desc">下游客户端使用分发的令牌向 API 代理服务发起 HTTPS 请求</div>
+                </div>
+                <div class="flow-step">
+                    <div class="step-num">2</div>
+                    <div class="step-title">令牌验证</div>
+                    <div class="step-desc">代理服务验证令牌有效性，检查配额和权限</div>
+                </div>
+                <div class="flow-step">
+                    <div class="step-num">3</div>
+                    <div class="step-title">请求转发</div>
+                    <div class="step-desc">替换为上游 API Key，将请求转发至上游服务器</div>
+                </div>
+                <div class="flow-step">
+                    <div class="step-num">4</div>
+                    <div class="step-title">响应返回</div>
+                    <div class="step-desc">上游响应经代理返回给客户端，记录用量</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

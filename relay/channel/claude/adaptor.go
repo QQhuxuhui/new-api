@@ -79,6 +79,33 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 		anthropicVersion = "2023-06-01"
 	}
 	req.Set("anthropic-version", anthropicVersion)
+
+	// ========================================
+	// 伪装成固定的 Claude Code 客户端
+	// 使用固定值而非透传，避免暴露多用户特征
+	// ========================================
+
+	// Stainless SDK 特征头（9个）- 关键伪装特征
+	req.Set("X-Stainless-Lang", "js")
+	req.Set("X-Stainless-Runtime", "node")
+	req.Set("X-Stainless-Runtime-Version", "v22.18.0") // 固定 Node 版本
+	req.Set("X-Stainless-Os", "Linux")                  // 固定操作系统
+	req.Set("X-Stainless-Arch", "x64")                  // 固定 CPU 架构
+	req.Set("X-Stainless-Package-Version", "0.70.0")    // SDK 版本
+	req.Set("X-Stainless-Helper-Method", "stream")
+	req.Set("X-Stainless-Retry-Count", "0")
+	req.Set("X-Stainless-Timeout", "60")
+
+	// 标准 HTTP 头（2个）
+	// 注意：不设置 Accept-Encoding，让 Go 自动处理 gzip 以避免解压问题
+	req.Set("Accept-Language", "*")
+	req.Set("Sec-Fetch-Mode", "cors")
+
+	// Claude/Anthropic 特定头（3个）
+	req.Set("X-App", "cli")
+	req.Set("X-Accel-Buffering", "no")
+	req.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
+
 	CommonClaudeHeadersOperation(c, req, info)
 	return nil
 }
