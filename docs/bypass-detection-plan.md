@@ -99,10 +99,14 @@ JA3 = MD5(
 | 第二阶段 | TLS指纹伪装 (uTLS) | ⭐⭐⭐⭐ | 40-50% | ✅ **已完成** (2025-12-27) |
 | 第三阶段 | HTTP/2指纹优化 | ⭐⭐⭐ | 10-15% | ⏳ 待研究 |
 | 第四阶段 | 请求行为模式优化 | ⭐⭐⭐ | 10-20% | ⏳ 待分析 |
+| **OpenAI-1** | **Codex CLI 请求头伪装** | ⭐ | 15-20% | ✅ **已完成** (2025-12-27) |
+| **OpenAI-1.5** | **prompt_cache_key 伪装** | ⭐ | 10-15% | ⏳ 待实施 |
 
 **第一阶段备注**：最终实施14个固定头（删除Accept-Encoding避免解压问题），效果预估略低于原计划但安全可用。
 
 **第1.5阶段备注**：请求体中的 `metadata.user_id` 字段固定为统一值，避免暴露多用户身份特征。
+
+**OpenAI-1备注**：Codex CLI 使用 Rust 编写，特征头与 Claude Code (Node.js) 不同，只需伪装 2 个头。
 
 ---
 
@@ -669,6 +673,150 @@ WINDOW_UPDATE行为:
 
 ---
 
+## 二（附）、OpenAI/Codex 渠道优化
+
+> 本节记录 OpenAI 渠道（主要针对 Codex CLI）的检测突破方案。
+
+### OpenAI-1 阶段：Codex CLI 请求头伪装 ✅ 已完成
+
+**目标：** 伪装成 Codex CLI (Rust) 客户端的请求特征
+
+**背景分析：**
+
+Codex CLI 与 Claude Code 的技术栈不同：
+
+| 对比项 | Claude Code | Codex CLI |
+|--------|-------------|-----------|
+| 语言 | Node.js | Rust |
+| SDK | Anthropic SDK (Stainless) | 原生 HTTP |
+| 特征头数量 | 14 个 | 2 个 |
+| 复杂度 | 高 | 低 |
+
+**客户端请求头分析：**
+
+```
+========== CLIENT REQUEST HEADERS ==========
+  Accept: text/event-stream
+  Authorization: Bearer****HR9M
+  Connection: upgrade
+  Content-Length: 40187
+  Content-Type: application/json
+  Originator: codex_cli_rs          ← 关键特征头
+  User-Agent: codex_cli_rs/0.77.0 (Ubuntu 22.4.0; x86_64) WindowsTerminal
+  X-Accel-Buffering: no             ← 流式控制头
+  X-Forwarded-For: ...              ← 代理头，不转发
+  X-Forwarded-Proto: https          ← 代理头，不转发
+  X-Real-Ip: ...                    ← 代理头，不转发
+==========================================
+```
+
+**丢失的头：**
+
+| 头 | 值 | 重要性 |
+|---|-----|--------|
+| `Originator` | `codex_cli_rs` | 🔴 **关键** - Codex CLI 身份标识 |
+| `X-Accel-Buffering` | `no` | 🟡 中等 - 流式传输控制 |
+
+**实施方案：**
+
+```go
+// relay/channel/openai/adaptor.go
+
+func (a *Adaptor) SetupRequestHeader(...) error {
+    // ... 现有代码 ...
+
+    // ========================================
+    // Codex CLI 特征头伪装
+    // 使用固定值，模拟 Codex CLI (Rust) 客户端
+    // ========================================
+    header.Set("Originator", "codex_cli_rs")
+    header.Set("X-Accel-Buffering", "no")
+
+    return nil
+}
+```
+
+**实际代码位置：**
+- ✅ `relay/channel/openai/adaptor.go:214-219` - SetupRequestHeader 函数
+
+**实施结果：**
+- ✅ 2 个固定头已添加
+- ✅ 编译通过
+- ✅ 已提交：`6ac5d240 feat(openai): 实现 Codex CLI 特征头伪装`
+
+---
+
+### OpenAI-1.5 阶段：prompt_cache_key 伪装 ⏳ 待实施
+
+**目标：** 将请求体中的 `prompt_cache_key` 固定为统一值，避免暴露多用户身份
+
+**背景分析：**
+
+Codex CLI 请求体中发现以下身份信息字段：
+
+```json
+{
+  "prompt_cache_key": "019b5f16-234c-7e12-a247-ffe620dff524",
+  "model": "gpt-5.1-codex-max",
+  "store": false,
+  "stream": true,
+  ...
+}
+```
+
+**检测风险：**
+
+```
+同一 API Key，出现多个不同的 prompt_cache_key
+→ 多用户共享 → 标记为转售
+```
+
+**与 Claude 渠道对比：**
+
+| 对比项 | Claude Code | Codex CLI |
+|--------|-------------|-----------|
+| 身份字段 | `metadata.user_id` | `prompt_cache_key` |
+| 格式 | `user_{hash}_account__session_{uuid}` | UUID |
+| 复杂度 | 高 | 低 |
+
+**待实施方案：**
+
+```go
+// 参考 Claude 渠道的 masqueradeMetadata 函数实现
+// 在请求体中固定 prompt_cache_key 为统一值
+
+const MasqueradePromptCacheKey = "019b5f16-234c-7e12-a247-ffe620dff524"
+
+func masqueradePromptCacheKey(body []byte) ([]byte, string) {
+    // 解析 JSON -> 替换 prompt_cache_key -> 重新序列化
+}
+```
+
+**实施步骤：**
+1. [ ] 确认 `prompt_cache_key` 是否需要伪装（需要更多请求样本）
+2. [ ] 实现 `masqueradePromptCacheKey` 函数
+3. [ ] 在 OpenAI 适配器中调用
+4. [ ] 测试验证
+
+---
+
+### OpenAI TLS 指纹说明
+
+**当前状态：** 使用 Node.js v22 TLS 指纹（与 Claude 渠道共享）
+
+**潜在矛盾：**
+
+```
+HTTP 头声称：Originator: codex_cli_rs (Rust 客户端)
+TLS 指纹实际：Node.js v22 的 JA3
+
+检测逻辑：Rust 客户端怎么会有 Node.js 的 TLS 指纹？→ 可疑
+```
+
+**决策：** 暂时保持现状，如果上游确实做 HTTP + TLS 交叉验证，再抓取 Rust TLS 指纹。
+
+---
+
 ## 三、代码定位与分析 ✅ 已完成
 
 ### 3.1 关键代码文件
@@ -1120,6 +1268,18 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
   - [x] 测试验证 ✅ （直连+SOCKS5通过，HTTP/HTTPS代理待调试）
 - [ ] 第三阶段：HTTP/2优化
 - [ ] 第四阶段：请求行为模式优化
+- [x] **OpenAI-1 阶段：Codex CLI 请求头伪装** ✅ **已完成**
+  - [x] 分析 Codex CLI 请求头（通过 DEBUG 日志）✅
+  - [x] 对比 Claude Code 与 Codex CLI 差异 ✅
+  - [x] 确定需要伪装的头：`Originator` + `X-Accel-Buffering` ✅
+  - [x] 修改 `relay/channel/openai/adaptor.go` ✅
+  - [x] 编译验证 ✅
+  - [x] 提交代码 ✅ **2025-12-27 完成**
+- [ ] **OpenAI-1.5 阶段：prompt_cache_key 伪装** ⏳ 待实施
+  - [x] 分析 Codex CLI 请求体 ✅
+  - [x] 发现 `prompt_cache_key` 字段 ✅
+  - [ ] 确认是否需要伪装（需要更多样本）
+  - [ ] 实施伪装逻辑
 
 ### 更新日志
 
@@ -1161,6 +1321,16 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 | 2025-12-27 | 添加日志打印：记录下游原始 user_id 和上游伪装后的 user_id |
 | 2025-12-27 | 新增 metadata 伪装测试：验证 user_id 覆盖和其他字段保留 |
 | 2025-12-27 | 预留 `masqueradeMetadataInBody` 函数供透传模式使用（当前未启用）|
+| **2025-12-27** | **⏳ OpenAI 渠道分析开始：Codex CLI 检测突破** |
+| 2025-12-27 | 启用 DEBUG 日志，抓取 Codex CLI 真实请求头 |
+| 2025-12-27 | 发现 Codex CLI 是 Rust 编写，与 Claude Code (Node.js) 技术栈不同 |
+| 2025-12-27 | 分析结果：Codex CLI 只需伪装 2 个头（`Originator` + `X-Accel-Buffering`）|
+| **2025-12-27** | **✅ OpenAI-1 阶段完成：实施 Codex CLI 请求头伪装** |
+| 2025-12-27 | 修改 `relay/channel/openai/adaptor.go:214-219` 添加 2 个固定头 |
+| 2025-12-27 | 提交代码：`6ac5d240 feat(openai): 实现 Codex CLI 特征头伪装` |
+| 2025-12-27 | 分析 Codex CLI 请求体，发现 `prompt_cache_key` 字段（潜在身份标识）|
+| 2025-12-27 | 记录 OpenAI-1.5 阶段待实施：`prompt_cache_key` 固定伪装 |
+| 2025-12-27 | TLS 指纹决策：暂时保持 Node.js 指纹，待验证是否需要 Rust 指纹 |
 
 ---
 
