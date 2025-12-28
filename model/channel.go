@@ -1,7 +1,10 @@
 package model
 
 import (
+	crand "crypto/rand"
+	"crypto/sha256"
 	"database/sql/driver"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -51,6 +55,7 @@ type Channel struct {
 	ParamOverride     *string `json:"param_override" gorm:"type:text"`
 	HeaderOverride    *string `json:"header_override" gorm:"type:text"`
 	Remark            *string `json:"remark" gorm:"type:varchar(255)" validate:"max=255"`
+	MasqueradeHash    *string `json:"masquerade_hash,omitempty" gorm:"type:varchar(64);column:masquerade_hash"`
 	// add after v0.8.5
 	ChannelInfo ChannelInfo `json:"channel_info" gorm:"type:json"`
 
@@ -74,6 +79,41 @@ type ChannelInfo struct {
 	MultiKeyDisabledTime   map[int]int64         `json:"multi_key_disabled_time,omitempty"`   // key禁用时间列表，key index -> time
 	MultiKeyPollingIndex   int                   `json:"multi_key_polling_index"`             // 多Key模式下轮询的key索引
 	MultiKeyMode           constant.MultiKeyMode `json:"multi_key_mode"`
+}
+
+func (channel *Channel) GetOrCreateMasqueradeHash() string {
+	if channel == nil || channel.Id == 0 {
+		return ""
+	}
+	if channel.MasqueradeHash != nil && *channel.MasqueradeHash != "" {
+		return *channel.MasqueradeHash
+	}
+
+	randomBytes := make([]byte, 32)
+	if _, err := crand.Read(randomBytes); err != nil {
+		// Extremely unlikely; fall back to current time only.
+		randomBytes = []byte(fmt.Sprintf("%d", time.Now().UnixNano()))
+	}
+
+	sum := sha256.Sum256([]byte(fmt.Sprintf("channel:%d|ts:%d|rand:%x", channel.Id, time.Now().UnixNano(), randomBytes)))
+	hash := hex.EncodeToString(sum[:])
+
+	// Best-effort persist with an atomic "set-if-empty" update to avoid races.
+	if DB != nil {
+		_ = DB.Model(&Channel{}).
+			Where("id = ? AND (masquerade_hash IS NULL OR masquerade_hash = ?)", channel.Id, "").
+			Update("masquerade_hash", hash).Error
+
+		var persisted string
+		_ = DB.Model(&Channel{}).Select("masquerade_hash").Where("id = ?", channel.Id).Scan(&persisted).Error
+		if persisted != "" {
+			channel.MasqueradeHash = &persisted
+			return persisted
+		}
+	}
+
+	channel.MasqueradeHash = &hash
+	return hash
 }
 
 // Value implements driver.Valuer interface

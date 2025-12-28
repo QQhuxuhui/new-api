@@ -39,10 +39,17 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 	// 避免上游检测多用户转售，同时保留其他 metadata 字段
 	// ========================================
 
-	masked, originalUserID := masqueradeMetadata(request.Metadata)
+	channelID := 0
+	channelHash := ""
+	if info != nil && info.Channel != nil {
+		channelID = info.Channel.Id
+		channelHash = info.Channel.GetOrCreateMasqueradeHash()
+	}
+
+	masked, originalUserID, maskedUserID := masqueradeMetadata(request.Metadata, channelID, channelHash)
 	request.Metadata = masked
 
-	logger.LogInfo(c, fmt.Sprintf("[Claude Native] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, MasqueradeUserID))
+	logger.LogInfo(c, fmt.Sprintf("[Claude Native] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, maskedUserID))
 
 	return request, nil
 }
@@ -131,7 +138,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if a.RequestMode == RequestModeCompletion {
 		return RequestOpenAI2ClaudeComplete(*request), nil
 	} else {
-		return RequestOpenAI2ClaudeMessage(c, *request)
+		return RequestOpenAI2ClaudeMessage(c, info, *request)
 	}
 }
 

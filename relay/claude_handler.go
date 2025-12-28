@@ -114,9 +114,16 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 		// 如果开启了 PassThroughMetadataMasquerade，则在透传路径也覆写 metadata.user_id
 		if info.ChannelSetting.PassThroughMetadataMasquerade {
-			maskedBody, originalUserID := claude.MasqueradeMetadataInBody(body)
+			channelID := 0
+			channelHash := ""
+			if info != nil && info.Channel != nil {
+				channelID = info.Channel.Id
+				channelHash = info.Channel.GetOrCreateMasqueradeHash()
+			}
+
+			maskedBody, originalUserID, maskedUserID := claude.MasqueradeMetadataInBody(body, channelID, channelHash)
 			body = maskedBody
-			logger.LogInfo(c, fmt.Sprintf("[Claude Native/PT] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, claude.MasqueradeUserID))
+			logger.LogInfo(c, fmt.Sprintf("[Claude Native/PT] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, maskedUserID))
 		}
 
 		requestBody = bytes.NewBuffer(body)

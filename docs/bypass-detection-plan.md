@@ -95,7 +95,7 @@ JA3 = MD5(
 | 阶段 | 内容 | 难度 | 效果预估 | 状态 |
 |------|------|------|---------|------|
 | 第一阶段 | HTTP请求头固定伪装 | ⭐⭐ | 25-35% | ✅ **已完成** (2025-12-27) |
-| 第1.5阶段 | metadata.user_id 固定伪装 | ⭐ | 10-15% | ✅ **已完成** (2025-12-27) |
+| 第1.5阶段 | metadata.user_id 渠道级会话池伪装 | ⭐⭐ | 15-25% | ✅ **已完成** (2025-12-28) |
 | 第二阶段 | TLS指纹伪装 (uTLS) | ⭐⭐⭐⭐ | 40-50% | ✅ **已完成** (2025-12-27) |
 | 第三阶段 | HTTP/2指纹优化 | ⭐⭐⭐ | 10-15% | ⏳ 待研究 |
 | 第四阶段 | 请求行为模式优化 | ⭐⭐⭐ | 10-20% | ⏳ 待分析 |
@@ -104,7 +104,7 @@ JA3 = MD5(
 
 **第一阶段备注**：最终实施14个固定头（删除Accept-Encoding避免解压问题），效果预估略低于原计划但安全可用。
 
-**第1.5阶段备注**：请求体中的 `metadata.user_id` 字段固定为统一值，避免暴露多用户身份特征。
+**第1.5阶段备注**：请求体中的 `metadata.user_id` 按渠道隔离，并从下游请求中收集真实 session UUID 组成会话池随机轮换，更贴近真实 Claude Code 行为。
 
 **OpenAI-1备注**：Codex CLI 使用 Rust 编写，特征头与 Claude Code (Node.js) 不同，只需伪装 2 个头。
 
@@ -165,9 +165,9 @@ fixedMasqueradeHeaders := map[string]string{
 
 ---
 
-### 第1.5阶段：metadata.user_id 固定伪装 ✅ 已完成
+### 第1.5阶段：metadata.user_id 渠道级会话池伪装 ✅ 已完成
 
-**目标：** 将请求体中的 `metadata.user_id` 固定为统一值，避免暴露多用户身份
+**目标：** 为每个渠道提供独立、可持久化的 `metadata.user_id` 伪装身份，并轮换真实 session UUID，降低跨渠道 hash 碰撞与静态会话特征。
 
 **背景分析：**
 
@@ -188,64 +188,44 @@ fixedMasqueradeHeaders := map[string]string{
 - 同一 API Key 关联多个不同的 user_id
 - user_id 变化频率异常
 
-**实施方案：**
+**实施方案（v2）：**
+- **渠道级 hash 隔离**：新增 `channels.masquerade_hash`（64 字符 SHA256），首次使用自动生成并持久化。
+- **会话池轮换**：从下游请求 `metadata.user_id` 中提取 `session_{uuid}` 并按渠道缓存（TTL=2h，最多 50 个，定期清理），伪装时随机选择会话。
+- **空池兜底**：会话池为空时使用默认 session UUID `b37fb515-b9ad-49f8-a5c1-945aa8f888ee`。
 
 ```go
-// relay/channel/claude/metadata.go
-
-// MasqueradeUserID 固定伪装的 user_id
-const MasqueradeUserID = "user_41b40fa179f64f4ab28ea67a70a478f93d4dbb5d9ed166ed8f9dd2e9ebb4975d_account__session_b37fb515-b9ad-49f8-a5c1-945aa8f888ee"
-
-// masqueradeMetadata 只覆盖 user_id，保留其他 metadata 字段
-func masqueradeMetadata(raw json.RawMessage) (json.RawMessage, string) {
-    originalUserID := "<empty>"
-    meta := make(map[string]any)
-
-    // 解析原有 metadata
-    if len(raw) > 0 {
-        if err := json.Unmarshal(raw, &meta); err == nil {
-            if uid, ok := meta["user_id"].(string); ok && uid != "" {
-                originalUserID = uid
-            }
-        }
-    }
-
-    // 只覆盖 user_id，保留其他字段
-    meta["user_id"] = MasqueradeUserID
-
-    masked, _ := json.Marshal(meta)
-    return masked, originalUserID
-}
-
-// masqueradeMetadataInBody 用于透传模式，直接修改请求体中的 metadata
-func masqueradeMetadataInBody(body []byte) ([]byte, string) {
-    // 解析请求体 -> 修改 metadata.user_id -> 重新序列化
+// 关键实现位置：
+// - model/channel.go: channels.masquerade_hash + GetOrCreateMasqueradeHash()
+// - relay/channel/claude/session_pool.go: 渠道会话池（收集 / TTL / 上限 / 随机选择）
+// - relay/channel/claude/metadata.go: 覆写 metadata.user_id（保留其他字段）
+func masqueradeMetadata(raw json.RawMessage, channelID int, channelHash string) (json.RawMessage, string, string) {
+    // masked, originalUserID, maskedUserID := ...
 }
 ```
 
 **修改的文件：**
-- ✅ `relay/channel/claude/metadata.go` - **新增**：metadata 伪装核心逻辑
-- ✅ `relay/channel/claude/adaptor.go:36-48` - ConvertClaudeRequest 函数
-- ✅ `relay/channel/claude/relay-claude.go:416-425` - RequestOpenAI2ClaudeMessage 函数
-- ✅ `relay/channel/claude/adaptor_test.go` - 新增测试用例
+- ✅ `model/channel.go` - 新增 `masquerade_hash` 字段 + 自动生成/持久化
+- ✅ `relay/channel/claude/session_pool.go` - 新增：渠道会话池
+- ✅ `relay/channel/claude/metadata.go` - 更新：metadata.user_id 伪装入口（含透传模式）
+- ✅ `relay/channel/claude/adaptor.go` / `relay/channel/claude/relay-claude.go` - 接入会话池
+- ✅ `relay/channel/claude/*_test.go` - 新增/更新测试
 
 **实施结果：**
-- ✅ 原生 Claude 请求和 OpenAI 转 Claude 请求均已覆盖
-- ✅ **只覆盖 user_id，保留其他 metadata 字段**
-- ✅ 添加日志打印：`[Claude Native] metadata.user_id 伪装: 下游=xxx -> 上游=yyy`
-- ✅ 测试覆盖率：100%
-- ✅ 所有测试通过
+- ✅ 按渠道隔离的 user_id hash，重启稳定
+- ✅ 会话 UUID 来自真实下游请求并随机轮换
+- ✅ 只覆盖 `user_id`，保留其他 metadata 字段
+- ✅ 所有测试通过 `-race` 标志检测，无竞态条件
+- ✅ 测试覆盖：session_pool_test.go + channel_masquerade_hash_test.go
 
 **日志输出示例：**
 ```
-[INFO] 2025/12/27 - 13:09:43 | SYSTEM | [Claude Native] metadata.user_id 伪装: 下游=old_user_id -> 上游=user_41b40fa...
-[INFO] 2025/12/27 - 13:09:43 | SYSTEM | [OpenAI->Claude] metadata.user_id 伪装: 下游=<empty> -> 上游=user_41b40fa...
+[INFO] 2025/12/28 - ... | SYSTEM | [Claude Native] metadata.user_id 伪装: 下游=... -> 上游=user_<channel_hash>_account__session_<uuid>
+[INFO] 2025/12/28 - ... | SYSTEM | [OpenAI->Claude] metadata.user_id 伪装: 下游=<empty> -> 上游=user_<channel_hash>_account__session_<uuid>
 ```
 
 **注意事项：**
 - `signature` 字段不需要伪装（它是 Extended Thinking 的响应字段，由 API 自动生成）
-- **透传模式分析**：开启 `PassThroughRequestEnabled` 或 `PassThroughBodyEnabled` 时，请求体直接转发，不调用 `ConvertClaudeRequest`，因此伪装不生效。这是**设计预期**，因为透传是用户主动选择的"原样转发"模式
-- 已预留 `masqueradeMetadataInBody` 函数，如需在透传模式下也伪装，可在 `relay/claude_handler.go:108-113` 处调用
+- **透传模式**：开启 `PassThroughRequestEnabled` 或 `PassThroughBodyEnabled` 时默认不走 request 转换；如开启 `PassThroughMetadataMasquerade`，会在透传路径中覆写 `metadata.user_id`。
 
 ---
 
@@ -1254,11 +1234,13 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
   - [x] 修复方案设计 ✅
   - [x] 方案实施 ✅ **2025-12-27 完成**
   - [x] 测试验证 ✅ **覆盖率100%**
-- [x] **第1.5阶段：metadata.user_id 伪装** ✅ **已完成**
+- [x] **第1.5阶段：metadata.user_id 渠道级会话池伪装** ✅ **已完成**
   - [x] 分析请求体中的身份信息 ✅
   - [x] 研究 `signature` 字段（Extended Thinking 响应字段，无需伪装）✅
-  - [x] 实施固定 user_id 伪装 ✅
+  - [x] 实施渠道级 hash + 会话池轮换 ✅
   - [x] 测试验证 ✅ **覆盖率100%**
+  - [x] 代码审查 ✅ **2025-12-28 完成**
+  - [x] 竞态条件测试 ✅ **通过 -race 检测**
 - [x] **第二阶段：TLS伪装** ✅ **已完成**
   - [x] uTLS 库研究 ✅
   - [x] Node.js JA3 指纹分析 ✅
@@ -1312,7 +1294,8 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 | 2025-12-27 | 发现关键差异：Node.js 有 59 个 cipher suites，Go 只有 ~15 个 |
 | 2025-12-27 | 发现关键差异：Node.js 支持 FFDHE groups (256-260)，Go 不支持 |
 | 2025-12-27 | 编写完整的 `NodeJS22ClientHelloSpec` uTLS 配置 |
-| **2025-12-27** | **✅ 第1.5阶段完成：实施 metadata.user_id 固定伪装** |
+| **2025-12-27** | **✅ 第1.5阶段（v1）：实施 metadata.user_id 固定伪装** |
+| **2025-12-28** | **✅ 第1.5阶段（v2）：升级为渠道级 hash + 会话池轮换伪装** |
 | 2025-12-27 | 分析请求体中的身份信息：`metadata.user_id` 和 `signature` |
 | 2025-12-27 | 研究结论：`signature` 是 Extended Thinking 响应字段，无需伪装 |
 | 2025-12-27 | 新增 `relay/channel/claude/metadata.go` - 伪装核心逻辑（只覆盖 user_id，保留其他字段）|
@@ -1331,6 +1314,11 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 | 2025-12-27 | 分析 Codex CLI 请求体，发现 `prompt_cache_key` 字段（潜在身份标识）|
 | 2025-12-27 | 记录 OpenAI-1.5 阶段待实施：`prompt_cache_key` 固定伪装 |
 | 2025-12-27 | TLS 指纹决策：暂时保持 Node.js 指纹，待验证是否需要 Rust 指纹 |
+| **2025-12-28** | **✅ 第1.5阶段代码审查完成** |
+| 2025-12-28 | 代码审查验证：session_pool.go、metadata.go、model/channel.go 实现正确 |
+| 2025-12-28 | 测试验证：所有测试通过 `-race` 标志检测，无竞态条件 |
+| 2025-12-28 | 功能验证：渠道级 hash 持久化、会话 UUID 收集与随机轮换、TTL 清理均正常 |
+| 2025-12-28 | OpenSpec 归档就绪：`openspec/changes/add-channel-session-pool-masquerade/` |
 
 ---
 

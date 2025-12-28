@@ -72,7 +72,7 @@ func RequestOpenAI2ClaudeComplete(textRequest dto.GeneralOpenAIRequest) *dto.Cla
 	return &claudeRequest
 }
 
-func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
+func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
 	claudeTools := make([]any, 0, len(textRequest.Tools))
 
 	for _, tool := range textRequest.Tools {
@@ -417,11 +417,18 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 	// 伪装固定的 metadata.user_id（保留其他字段）
 	// 避免上游检测多用户转售
 	// ========================================
-	masked, originalUserID := masqueradeMetadata(claudeRequest.Metadata)
+	channelID := 0
+	channelHash := ""
+	if info != nil && info.Channel != nil {
+		channelID = info.Channel.Id
+		channelHash = info.Channel.GetOrCreateMasqueradeHash()
+	}
+
+	masked, originalUserID, maskedUserID := masqueradeMetadata(claudeRequest.Metadata, channelID, channelHash)
 	claudeRequest.Metadata = masked
 
 	// 打印日志（OpenAI 格式请求通常不携带 metadata，原始为空）
-	logger.LogInfo(c, fmt.Sprintf("[OpenAI->Claude] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, MasqueradeUserID))
+	logger.LogInfo(c, fmt.Sprintf("[OpenAI->Claude] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, maskedUserID))
 
 	return &claudeRequest, nil
 }

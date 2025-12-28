@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 
@@ -125,6 +126,7 @@ type RelayInfo struct {
 	*RerankerInfo
 	*ResponsesUsageInfo
 	*ChannelMeta
+	Channel *model.Channel
 	*TaskRelayInfo
 }
 
@@ -434,6 +436,13 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
 	if ok {
 		info.UserSetting = userSetting
+	}
+
+	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	if channelID > 0 {
+		if ch, err := model.CacheGetChannel(channelID); err == nil {
+			info.Channel = ch
+		}
 	}
 
 	return info

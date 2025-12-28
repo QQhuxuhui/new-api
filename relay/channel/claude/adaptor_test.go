@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 )
@@ -184,24 +185,33 @@ func TestSetupRequestHeader_ExistingLogicPreserved(t *testing.T) {
 
 // TestConvertClaudeRequest_MetadataMasquerade 验证 metadata.user_id 固定伪装
 func TestConvertClaudeRequest_MetadataMasquerade(t *testing.T) {
-	// 使用常量中定义的伪装 user_id
-	expectedUserID := MasqueradeUserID
+	masqueradeHash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	channel := &model.Channel{Id: 1001001, MasqueradeHash: &masqueradeHash}
 
 	tests := []struct {
 		name            string
 		initialMetadata json.RawMessage
+		wantSessionUUID string
 	}{
 		{
 			name:            "Empty metadata should be set",
 			initialMetadata: nil,
+			wantSessionUUID: defaultMasqueradeSessionUUID,
 		},
 		{
 			name:            "Existing metadata should be overwritten",
 			initialMetadata: json.RawMessage(`{"user_id":"old_user_id"}`),
+			wantSessionUUID: defaultMasqueradeSessionUUID,
 		},
 		{
 			name:            "Existing different metadata should be replaced but preserved",
 			initialMetadata: json.RawMessage(`{"other_field":"value","user_id":"different_id","another":"keep"}`),
+			wantSessionUUID: defaultMasqueradeSessionUUID,
+		},
+		{
+			name:            "Valid session UUID is collected and reused",
+			initialMetadata: json.RawMessage(`{"user_id":"user_x_account__session_d2719c3d-61fb-4c61-8c86-4b735ed0f9be"}`),
+			wantSessionUUID: "d2719c3d-61fb-4c61-8c86-4b735ed0f9be",
 		},
 	}
 
@@ -216,6 +226,7 @@ func TestConvertClaudeRequest_MetadataMasquerade(t *testing.T) {
 			// Setup relay info
 			info := &relaycommon.RelayInfo{
 				OriginModelName: "claude-3-5-sonnet-20241022",
+				Channel:         channel,
 			}
 
 			// Create request with initial metadata
@@ -254,8 +265,8 @@ func TestConvertClaudeRequest_MetadataMasquerade(t *testing.T) {
 			}
 
 			// Verify user_id is the fixed value
-			if uid, _ := metadata["user_id"].(string); uid != expectedUserID {
-				t.Errorf("user_id = %v; want %s", metadata["user_id"], expectedUserID)
+			if uid, _ := metadata["user_id"].(string); uid != composeMasqueradeUserID(masqueradeHash, tt.wantSessionUUID) {
+				t.Errorf("user_id = %v; want %s", metadata["user_id"], composeMasqueradeUserID(masqueradeHash, tt.wantSessionUUID))
 			}
 
 			// Other fields should be preserved when present
@@ -278,8 +289,10 @@ func TestConvertClaudeRequest_PreservesOtherFields(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
 
+	masqueradeHash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	info := &relaycommon.RelayInfo{
 		OriginModelName: "claude-3-5-sonnet-20241022",
+		Channel:         &model.Channel{Id: 1001002, MasqueradeHash: &masqueradeHash},
 	}
 
 	// Create request with various fields
@@ -326,7 +339,7 @@ func TestConvertClaudeRequest_PreservesOtherFields(t *testing.T) {
 		t.Fatalf("Failed to parse metadata: %v", err)
 	}
 
-	if uid, _ := metadata["user_id"].(string); uid != MasqueradeUserID {
+	if uid, _ := metadata["user_id"].(string); uid != composeMasqueradeUserID(masqueradeHash, defaultMasqueradeSessionUUID) {
 		t.Errorf("user_id not masked, got %v", metadata["user_id"])
 	}
 }

@@ -7,7 +7,6 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
-	commonRelay "github.com/QuantumNous/new-api/relay/common"
 )
 
 type TaskStatus string
@@ -78,6 +77,16 @@ type Properties struct {
 	OriginModelName   string `json:"origin_model_name,omitempty"`
 }
 
+type TaskInitContext struct {
+	UserId            int
+	UsingGroup        string
+	ChannelId         int
+	ChannelType       int
+	ChannelApiKey     string
+	UpstreamModelName string
+	OriginModelName   string
+}
+
 func (m *Properties) Scan(val interface{}) error {
 	bytesValue, _ := val.([]byte)
 	if len(bytesValue) == 0 {
@@ -126,28 +135,31 @@ type SyncTaskQueryParams struct {
 	UserIDs        []int
 }
 
-func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) *Task {
+func InitTask(platform constant.TaskPlatform, ctx *TaskInitContext) *Task {
 	properties := Properties{}
 	privateData := TaskPrivateData{}
-	if relayInfo != nil && relayInfo.ChannelMeta != nil {
-		if relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini {
-			privateData.Key = relayInfo.ChannelMeta.ApiKey
+	if ctx == nil {
+		ctx = &TaskInitContext{}
+	}
+	{
+		if ctx.ChannelType == constant.ChannelTypeGemini {
+			privateData.Key = ctx.ChannelApiKey
 		}
-		if relayInfo.UpstreamModelName != "" {
-			properties.UpstreamModelName = relayInfo.UpstreamModelName
+		if ctx.UpstreamModelName != "" {
+			properties.UpstreamModelName = ctx.UpstreamModelName
 		}
-		if relayInfo.OriginModelName != "" {
-			properties.OriginModelName = relayInfo.OriginModelName
+		if ctx.OriginModelName != "" {
+			properties.OriginModelName = ctx.OriginModelName
 		}
 	}
 
 	t := &Task{
-		UserId:      relayInfo.UserId,
-		Group:       relayInfo.UsingGroup,
+		UserId:      ctx.UserId,
+		Group:       ctx.UsingGroup,
 		SubmitTime:  time.Now().Unix(),
 		Status:      TaskStatusNotStart,
 		Progress:    "0%",
-		ChannelId:   relayInfo.ChannelId,
+		ChannelId:   ctx.ChannelId,
 		Platform:    platform,
 		Properties:  properties,
 		PrivateData: privateData,
