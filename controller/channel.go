@@ -523,6 +523,23 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		return fmt.Errorf("每个Key的最大并发请求数不能为负数")
 	}
 
+	// Anthropic/Claude: 校验渠道级伪装身份 Hash（允许为空，非空必须是 64 字符 hex SHA256）
+	if channel.Type == constant.ChannelTypeAnthropic && channel.MasqueradeHash != nil {
+		v := strings.ToLower(strings.TrimSpace(*channel.MasqueradeHash))
+		if v != "" {
+			if len(v) != 64 {
+				return fmt.Errorf("伪装身份 Hash 必须是 64 字符 SHA256（十六进制）")
+			}
+			for _, ch := range v {
+				if (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') {
+					continue
+				}
+				return fmt.Errorf("伪装身份 Hash 必须是 64 字符 SHA256（十六进制）")
+			}
+		}
+		*channel.MasqueradeHash = v
+	}
+
 	// 校验渠道倍率配置
 	if channel.Ratio != nil {
 		ratio := *channel.Ratio

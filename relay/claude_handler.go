@@ -26,9 +26,11 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	info.InitChannelMeta(c)
 
 	// 调试日志：确认 InitChannelMeta 后的令牌信息
-	maskedKey := maskClaudeApiKey(info.ApiKey)
-	logger.LogInfo(c, fmt.Sprintf("[TokenDebug] ClaudeHelper: InitChannelMeta 后, 渠道 #%d, RelayInfo令牌: %s",
-		info.ChannelId, maskedKey))
+	if common.DebugEnabled {
+		maskedKey := maskClaudeApiKey(info.ApiKey)
+		logger.LogInfo(c, fmt.Sprintf("[TokenDebug] ClaudeHelper: InitChannelMeta 后, 渠道 #%d, RelayInfo令牌: %s",
+			info.ChannelId, maskedKey))
+	}
 
 	claudeReq, ok := info.Request.(*dto.ClaudeRequest)
 

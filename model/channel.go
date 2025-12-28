@@ -81,12 +81,59 @@ type ChannelInfo struct {
 	MultiKeyMode           constant.MultiKeyMode `json:"multi_key_mode"`
 }
 
+var masqueradeHashCache = struct {
+	mu sync.RWMutex
+	db *gorm.DB
+	m  map[int]string
+}{
+	m: make(map[int]string),
+}
+
+func resetMasqueradeHashCacheIfDBChanged() {
+	masqueradeHashCache.mu.Lock()
+	defer masqueradeHashCache.mu.Unlock()
+	if masqueradeHashCache.db != DB {
+		masqueradeHashCache.db = DB
+		masqueradeHashCache.m = make(map[int]string)
+	}
+}
+
 func (channel *Channel) GetOrCreateMasqueradeHash() string {
 	if channel == nil || channel.Id == 0 {
 		return ""
 	}
-	if channel.MasqueradeHash != nil && *channel.MasqueradeHash != "" {
-		return *channel.MasqueradeHash
+
+	resetMasqueradeHashCacheIfDBChanged()
+
+	if channel.MasqueradeHash != nil {
+		if v := strings.ToLower(strings.TrimSpace(*channel.MasqueradeHash)); v != "" {
+			masqueradeHashCache.mu.Lock()
+			masqueradeHashCache.m[channel.Id] = v
+			masqueradeHashCache.mu.Unlock()
+			return v
+		}
+		// Explicitly cleared: drop any cached value so it can be regenerated.
+		masqueradeHashCache.mu.Lock()
+		delete(masqueradeHashCache.m, channel.Id)
+		masqueradeHashCache.mu.Unlock()
+	}
+
+	masqueradeHashCache.mu.RLock()
+	if v, ok := masqueradeHashCache.m[channel.Id]; ok && v != "" {
+		masqueradeHashCache.mu.RUnlock()
+		return v
+	}
+	masqueradeHashCache.mu.RUnlock()
+
+	if DB != nil {
+		var persisted string
+		_ = DB.Model(&Channel{}).Select("masquerade_hash").Where("id = ?", channel.Id).Scan(&persisted).Error
+		if persisted = strings.ToLower(strings.TrimSpace(persisted)); persisted != "" {
+			masqueradeHashCache.mu.Lock()
+			masqueradeHashCache.m[channel.Id] = persisted
+			masqueradeHashCache.mu.Unlock()
+			return persisted
+		}
 	}
 
 	randomBytes := make([]byte, 32)
@@ -107,12 +154,17 @@ func (channel *Channel) GetOrCreateMasqueradeHash() string {
 		var persisted string
 		_ = DB.Model(&Channel{}).Select("masquerade_hash").Where("id = ?", channel.Id).Scan(&persisted).Error
 		if persisted != "" {
-			channel.MasqueradeHash = &persisted
+			persisted = strings.ToLower(strings.TrimSpace(persisted))
+			masqueradeHashCache.mu.Lock()
+			masqueradeHashCache.m[channel.Id] = persisted
+			masqueradeHashCache.mu.Unlock()
 			return persisted
 		}
 	}
 
-	channel.MasqueradeHash = &hash
+	masqueradeHashCache.mu.Lock()
+	masqueradeHashCache.m[channel.Id] = hash
+	masqueradeHashCache.mu.Unlock()
 	return hash
 }
 

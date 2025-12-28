@@ -160,6 +160,11 @@ func (p *ChannelSessionPool) SetHash(hash string) {
 		return
 	}
 	p.mu.Lock()
+	// If the channel hash changes (e.g. admin override), reset the session pool to
+	// avoid mixing sessions across different masquerade identities.
+	if p.hashPart != "" && p.hashPart != hash {
+		p.sessions = make(map[string]time.Time)
+	}
 	p.hashPart = hash
 	p.mu.Unlock()
 }

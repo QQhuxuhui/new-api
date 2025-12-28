@@ -175,6 +175,8 @@ const EditChannelModal = (props) => {
     allow_service_tier: false,
     disable_store: false, // false = 允许透传（默认开启）
     allow_safety_identifier: false,
+    // Claude 渠道伪装标识
+    masquerade_hash: '',
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -3096,6 +3098,17 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t('透传模式下也覆写 metadata.user_id 以防泄露真实用户标识')}
                     />
+
+                    {inputs.type === 14 && isEdit && (
+                      <Form.Input
+                        field='masquerade_hash'
+                        label={t('伪装身份 Hash')}
+                        placeholder={t('留空则使用默认值，首次请求时自动学习')}
+                        showClear
+                        onChange={(value) => handleInputChange('masquerade_hash', value)}
+                        extraText={t('用于 metadata.user_id 伪装的渠道专属标识（64 字符 SHA256），修改后会话池将重置')}
+                      />
+                    )}
 
                     <Form.Input
                       field='proxy'
