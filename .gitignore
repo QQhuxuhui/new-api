@@ -29,4 +29,4 @@ electron/dist
 concurrency_translations.txt
 
 .cache*
-.gomod*
+.gomod**.out
