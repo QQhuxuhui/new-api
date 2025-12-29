@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 func TestSetupRequestHeader(t *testing.T) {
@@ -192,22 +194,18 @@ func TestConvertClaudeRequest_MetadataMasquerade(t *testing.T) {
 	tests := []struct {
 		name            string
 		initialMetadata json.RawMessage
-		wantSessionUUID string
 	}{
 		{
 			name:            "Empty metadata should be set",
 			initialMetadata: nil,
-			wantSessionUUID: defaultMasqueradeSessionUUID,
 		},
 		{
 			name:            "Existing metadata should be overwritten",
 			initialMetadata: json.RawMessage(`{"user_id":"old_user_id"}`),
-			wantSessionUUID: defaultMasqueradeSessionUUID,
 		},
 		{
 			name:            "Existing different metadata should be replaced but preserved",
 			initialMetadata: json.RawMessage(`{"other_field":"value","user_id":"different_id","another":"keep"}`),
-			wantSessionUUID: defaultMasqueradeSessionUUID,
 		},
 	}
 
@@ -260,9 +258,33 @@ func TestConvertClaudeRequest_MetadataMasquerade(t *testing.T) {
 				t.Fatalf("Failed to parse metadata: %v", err)
 			}
 
-			// Verify user_id is the fixed value
-			if uid, _ := metadata["user_id"].(string); uid != composeMasqueradeUserID(masqueradeHash, tt.wantSessionUUID) {
-				t.Errorf("user_id = %v; want %s", metadata["user_id"], composeMasqueradeUserID(masqueradeHash, tt.wantSessionUUID))
+			// Verify user_id is masked with channel hash and one of the pool sessions.
+			uid, _ := metadata["user_id"].(string)
+			if uid == "" {
+				t.Fatalf("user_id is empty")
+			}
+			if !strings.HasPrefix(uid, "user_"+masqueradeHash+"_account__session_") {
+				t.Fatalf("user_id not masked with channel hash, got %q", uid)
+			}
+			sessionUUID, ok := extractSessionUUID(uid)
+			if !ok {
+				t.Fatalf("user_id missing session UUID, got %q", uid)
+			}
+			if _, err := uuid.Parse(sessionUUID); err != nil {
+				t.Fatalf("user_id session UUID invalid: %v", err)
+			}
+			pool := GetSessionPoolManager().GetPool(channel.Id, masqueradeHash, concurrency)
+			found := false
+			pool.mu.RLock()
+			for _, s := range pool.sessions {
+				if s.UUID == sessionUUID {
+					found = true
+					break
+				}
+			}
+			pool.mu.RUnlock()
+			if !found {
+				t.Fatalf("user_id session UUID %q not found in pool", sessionUUID)
 			}
 
 			// Other fields should be preserved when present
@@ -335,7 +357,31 @@ func TestConvertClaudeRequest_PreservesOtherFields(t *testing.T) {
 		t.Fatalf("Failed to parse metadata: %v", err)
 	}
 
-	if uid, _ := metadata["user_id"].(string); uid != composeMasqueradeUserID(masqueradeHash, defaultMasqueradeSessionUUID) {
-		t.Errorf("user_id not masked, got %v", metadata["user_id"])
+	uid, _ := metadata["user_id"].(string)
+	if uid == "" {
+		t.Fatalf("user_id is empty")
+	}
+	if !strings.HasPrefix(uid, "user_"+masqueradeHash+"_account__session_") {
+		t.Fatalf("user_id not masked with channel hash, got %q", uid)
+	}
+	sessionUUID, ok := extractSessionUUID(uid)
+	if !ok {
+		t.Fatalf("user_id missing session UUID, got %q", uid)
+	}
+	if _, err := uuid.Parse(sessionUUID); err != nil {
+		t.Fatalf("user_id session UUID invalid: %v", err)
+	}
+	pool := GetSessionPoolManager().GetPool(info.Channel.Id, masqueradeHash, 0)
+	found := false
+	pool.mu.RLock()
+	for _, s := range pool.sessions {
+		if s.UUID == sessionUUID {
+			found = true
+			break
+		}
+	}
+	pool.mu.RUnlock()
+	if !found {
+		t.Fatalf("user_id session UUID %q not found in pool", sessionUUID)
 	}
 }

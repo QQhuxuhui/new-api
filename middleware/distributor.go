@@ -639,10 +639,30 @@ func Distribute() func(c *gin.Context) {
 
 								// Check if token group is within user's usable groups (for wallet billing)
 								if userQuota > 0 && service.GroupInUserUsableGroups(userGroup, tokenGroup) {
-									logger.LogInfo(c, fmt.Sprintf("[ChildGroupFallback] user=%d trying untried child groups %v", userId, untriedGroups))
+									// CRITICAL: Check if current plan allows auto-switch before wallet fallback
+									// If auto_switch is disabled, user explicitly wants to stay on their plan
+									// and should NOT be automatically switched to wallet billing
+									shouldAllowWalletFallback := true
+									if userPlanIdVal, exists := common.GetContextKey(c, constant.ContextKeyUserPlanId); exists {
+										if upId, ok := userPlanIdVal.(int); ok && upId > 0 {
+											if userPlan, upErr := model.GetUserPlanById(upId); upErr == nil && userPlan != nil {
+												if userPlan.AutoSwitch != 1 {
+													shouldAllowWalletFallback = false
+													logger.LogInfo(c, fmt.Sprintf("[ChildGroupFallback] user=%d plan=%d auto_switch disabled, blocking wallet fallback",
+														userId, upId))
+												}
+											}
+										}
+									}
 
-									// Try each untried child group
-									for _, childGroup := range untriedGroups {
+									if !shouldAllowWalletFallback {
+										// auto_switch disabled, do not fallback to wallet
+										// Let the code continue to the final "no channel" error
+									} else {
+										logger.LogInfo(c, fmt.Sprintf("[ChildGroupFallback] user=%d trying untried child groups %v", userId, untriedGroups))
+
+										// Try each untried child group
+										for _, childGroup := range untriedGroups {
 										// CRITICAL: Override ContextKeyPlanGroups before calling CacheGetRandomSatisfiedChannel
 										// The function prioritizes plan_groups over the passed group parameter (see service/channel_select.go:20-67)
 										// Without this, it would keep trying the failed plan groups instead of the new child group
@@ -683,6 +703,7 @@ func Distribute() func(c *gin.Context) {
 										if channel != nil {
 											break // Found channel, exit outer loop
 										}
+									}
 									}
 								}
 							}
