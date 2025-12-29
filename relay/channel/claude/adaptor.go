@@ -41,12 +41,16 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 
 	channelID := 0
 	channelHash := ""
+	maxSessions := 0
 	if info != nil && info.Channel != nil {
 		channelID = info.Channel.Id
 		channelHash = info.Channel.GetOrCreateMasqueradeHash()
+		if info.Channel.MaxConcurrentRequestsPerKey != nil {
+			maxSessions = *info.Channel.MaxConcurrentRequestsPerKey
+		}
 	}
 
-	masked, originalUserID, maskedUserID := masqueradeMetadata(request.Metadata, channelID, channelHash)
+	masked, originalUserID, maskedUserID := masqueradeMetadata(request.Metadata, channelID, channelHash, maxSessions)
 	request.Metadata = masked
 
 	logger.LogInfo(c, fmt.Sprintf("[Claude Native] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, maskedUserID))

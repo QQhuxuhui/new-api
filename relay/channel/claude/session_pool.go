@@ -13,9 +13,11 @@ import (
 )
 
 const (
-	defaultMasqueradeSessionTTL      = 2 * time.Hour
-	defaultMasqueradeCleanupInterval = 10 * time.Minute
-	defaultMasqueradeMaxSessions     = 50
+	// Default pool size when channel concurrency is not configured
+	defaultMasqueradeMaxSessions = 5
+
+	// Rotate one session per interval to gradually refresh the pool
+	defaultMasqueradeRotationInterval = 2 * time.Hour
 
 	defaultMasqueradeSessionUUID = "b37fb515-b9ad-49f8-a5c1-945aa8f888ee"
 	defaultMasqueradeHash        = "41b40fa179f64f4ab28ea67a70a478f93d4dbb5d9ed166ed8f9dd2e9ebb4975d"
@@ -57,11 +59,10 @@ func cryptoRandIntn(n int) int {
 }
 
 type SessionPoolManager struct {
-	mu              sync.RWMutex
-	pools           map[int]*ChannelSessionPool
-	ttl             time.Duration
-	maxSessions     int
-	cleanupInterval time.Duration
+	mu               sync.RWMutex
+	pools            map[int]*ChannelSessionPool
+	defaultMax       int
+	rotationInterval time.Duration
 }
 
 var (
@@ -69,90 +70,92 @@ var (
 	globalSessionPoolManagerOnce sync.Once
 )
 
-func newSessionPoolManager(ttl time.Duration, maxSessions int, cleanupInterval time.Duration) *SessionPoolManager {
-	if ttl <= 0 {
-		ttl = defaultMasqueradeSessionTTL
-	}
+func newSessionPoolManager(maxSessions int, rotationInterval time.Duration) *SessionPoolManager {
 	if maxSessions <= 0 {
 		maxSessions = defaultMasqueradeMaxSessions
 	}
-	if cleanupInterval <= 0 {
-		cleanupInterval = defaultMasqueradeCleanupInterval
+	if rotationInterval <= 0 {
+		rotationInterval = defaultMasqueradeRotationInterval
 	}
 
 	m := &SessionPoolManager{
-		pools:           make(map[int]*ChannelSessionPool),
-		ttl:             ttl,
-		maxSessions:     maxSessions,
-		cleanupInterval: cleanupInterval,
+		pools:            make(map[int]*ChannelSessionPool),
+		defaultMax:       maxSessions,
+		rotationInterval: rotationInterval,
 	}
-	m.startCleanupLoop()
+	m.startRotationLoop()
 	return m
 }
 
 func GetSessionPoolManager() *SessionPoolManager {
 	globalSessionPoolManagerOnce.Do(func() {
-		globalSessionPoolManager = newSessionPoolManager(defaultMasqueradeSessionTTL, defaultMasqueradeMaxSessions, defaultMasqueradeCleanupInterval)
+		globalSessionPoolManager = newSessionPoolManager(defaultMasqueradeMaxSessions, defaultMasqueradeRotationInterval)
 	})
 	return globalSessionPoolManager
 }
 
-func (m *SessionPoolManager) GetPool(channelID int, channelHash string) *ChannelSessionPool {
-	m.mu.RLock()
-	pool, ok := m.pools[channelID]
-	m.mu.RUnlock()
-	if ok {
-		if channelHash != "" {
-			pool.SetHash(channelHash)
-		}
-		return pool
+func (m *SessionPoolManager) GetPool(channelID int, channelHash string, maxSessions int) *ChannelSessionPool {
+	if maxSessions <= 0 {
+		maxSessions = m.defaultMax
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if pool, ok = m.pools[channelID]; ok {
-		if channelHash != "" {
-			pool.SetHash(channelHash)
-		}
+
+	if pool, ok := m.pools[channelID]; ok {
+		pool.SetHash(channelHash)
+		pool.UpdateMaxSessions(maxSessions)
 		return pool
 	}
 
-	pool = &ChannelSessionPool{
-		channelID:   channelID,
-		hashPart:    channelHash,
-		sessions:    make(map[string]time.Time),
-		ttl:         m.ttl,
-		maxSessions: m.maxSessions,
-	}
+	pool := newChannelSessionPool(channelID, channelHash, maxSessions, m.rotationInterval)
 	m.pools[channelID] = pool
 	return pool
 }
 
-func (m *SessionPoolManager) startCleanupLoop() {
-	ticker := time.NewTicker(m.cleanupInterval)
+func (m *SessionPoolManager) startRotationLoop() {
+	ticker := time.NewTicker(m.rotationInterval)
 	go func() {
 		for range ticker.C {
-			m.cleanupAllPools(time.Now())
+			m.rotateAllPools(time.Now())
 		}
 	}()
 }
 
-func (m *SessionPoolManager) cleanupAllPools(now time.Time) {
+func (m *SessionPoolManager) rotateAllPools(now time.Time) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, pool := range m.pools {
-		pool.cleanup(now)
+		pool.rotateOldestSession(now)
 	}
 }
 
 type ChannelSessionPool struct {
 	channelID int
 
-	mu          sync.RWMutex
-	hashPart    string
-	sessions    map[string]time.Time // uuid -> last seen time
-	ttl         time.Duration
-	maxSessions int
+	mu               sync.RWMutex
+	hashPart         string
+	sessions         []SessionEntry
+	maxSessions      int
+	rotationInterval time.Duration
+	lastRotation     time.Time
+}
+
+type SessionEntry struct {
+	UUID      string
+	CreatedAt time.Time
+}
+
+func newChannelSessionPool(channelID int, channelHash string, maxSessions int, rotationInterval time.Duration) *ChannelSessionPool {
+	p := &ChannelSessionPool{
+		channelID:        channelID,
+		hashPart:         channelHash,
+		maxSessions:      maxSessions,
+		rotationInterval: rotationInterval,
+	}
+	// Initialize with a fixed set of sessions bound to maxSessions
+	_ = p.initializeSessions(maxSessions)
+	return p
 }
 
 func (p *ChannelSessionPool) SetHash(hash string) {
@@ -163,25 +166,10 @@ func (p *ChannelSessionPool) SetHash(hash string) {
 	// If the channel hash changes (e.g. admin override), reset the session pool to
 	// avoid mixing sessions across different masquerade identities.
 	if p.hashPart != "" && p.hashPart != hash {
-		p.sessions = make(map[string]time.Time)
+		_ = p.initializeSessionsLocked(p.maxSessions)
 	}
 	p.hashPart = hash
 	p.mu.Unlock()
-}
-
-func (p *ChannelSessionPool) AddSession(sessionUUID string, now time.Time) {
-	if sessionUUID == "" {
-		return
-	}
-	if now.IsZero() {
-		now = time.Now()
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.sessions[sessionUUID] = now
-	p.evictToMaxLocked()
 }
 
 func (p *ChannelSessionPool) SelectRandomSession(now time.Time) string {
@@ -191,11 +179,8 @@ func (p *ChannelSessionPool) SelectRandomSession(now time.Time) string {
 
 	p.mu.RLock()
 	active := make([]string, 0, len(p.sessions))
-	for s, ts := range p.sessions {
-		if p.ttl > 0 && now.Sub(ts) > p.ttl {
-			continue
-		}
-		active = append(active, s)
+	for _, s := range p.sessions {
+		active = append(active, s.UUID)
 	}
 	p.mu.RUnlock()
 
@@ -213,9 +198,6 @@ func (p *ChannelSessionPool) MasqueradeMetadata(raw json.RawMessage) (json.RawMe
 		if err := json.Unmarshal(raw, &meta); err == nil {
 			if uid, ok := meta["user_id"].(string); ok && uid != "" {
 				originalUserID = uid
-				if sessionUUID, ok := extractSessionUUID(uid); ok {
-					p.AddSession(sessionUUID, time.Now())
-				}
 			}
 		} else {
 			meta = make(map[string]any)
@@ -238,46 +220,96 @@ func (p *ChannelSessionPool) MasqueradeMetadata(raw json.RawMessage) (json.RawMe
 	return masked, originalUserID, maskedUserID
 }
 
-func (p *ChannelSessionPool) cleanup(now time.Time) {
+// initializeSessionsLocked regenerates the session list while holding the lock.
+func (p *ChannelSessionPool) initializeSessionsLocked(n int) error {
+	if n <= 0 {
+		n = defaultMasqueradeMaxSessions
+	}
+
+	seen := make(map[string]struct{}, n)
+	sessions := make([]SessionEntry, 0, n)
+
+	for len(sessions) < n {
+		uuidStr, err := generateRandomUUID()
+		if err != nil {
+			return err
+		}
+		if _, ok := seen[uuidStr]; ok {
+			continue
+		}
+		seen[uuidStr] = struct{}{}
+		sessions = append(sessions, SessionEntry{UUID: uuidStr, CreatedAt: time.Now()})
+	}
+
+	p.sessions = sessions
+	p.lastRotation = time.Now()
+	return nil
+}
+
+func (p *ChannelSessionPool) initializeSessions(n int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.initializeSessionsLocked(n)
+}
+
+// UpdateMaxSessions rebuilds the pool if the size changes.
+func (p *ChannelSessionPool) UpdateMaxSessions(maxSessions int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if maxSessions <= 0 {
+		maxSessions = defaultMasqueradeMaxSessions
+	}
+
+	if p.maxSessions == maxSessions && len(p.sessions) == maxSessions {
+		return
+	}
+
+	p.maxSessions = maxSessions
+	_ = p.initializeSessionsLocked(maxSessions)
+}
+
+// rotateOldestSession replaces exactly one oldest session when rotation interval has elapsed.
+func (p *ChannelSessionPool) rotateOldestSession(now time.Time) {
 	if now.IsZero() {
 		now = time.Now()
 	}
 
-	if p.ttl > 0 {
-		for s, ts := range p.sessions {
-			if now.Sub(ts) > p.ttl {
-				delete(p.sessions, s)
-			}
-		}
-	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	p.evictToMaxLocked()
-}
-
-func (p *ChannelSessionPool) evictToMaxLocked() {
-	if p.maxSessions <= 0 || len(p.sessions) <= p.maxSessions {
+	if p.rotationInterval <= 0 || len(p.sessions) == 0 {
 		return
 	}
 
-	// Remove oldest (least recently seen) sessions until within limit.
-	for len(p.sessions) > p.maxSessions {
-		var oldestSession string
-		var oldestTime time.Time
-		first := true
-
-		for s, ts := range p.sessions {
-			if first || ts.Before(oldestTime) {
-				first = false
-				oldestSession = s
-				oldestTime = ts
-			}
-		}
-		if oldestSession == "" {
-			return
-		}
-		delete(p.sessions, oldestSession)
+	if !p.lastRotation.IsZero() && now.Sub(p.lastRotation) < p.rotationInterval {
+		return
 	}
+
+	// Find oldest session
+	oldestIdx := 0
+	oldestTime := p.sessions[0].CreatedAt
+	for i := 1; i < len(p.sessions); i++ {
+		if p.sessions[i].CreatedAt.Before(oldestTime) {
+			oldestIdx = i
+			oldestTime = p.sessions[i].CreatedAt
+		}
+	}
+
+	uuidStr, err := generateRandomUUID()
+	if err != nil {
+		return
+	}
+
+	p.sessions[oldestIdx] = SessionEntry{UUID: uuidStr, CreatedAt: now}
+	p.lastRotation = now
+}
+
+// generateRandomUUID returns a lower-case UUIDv4 using crypto/rand.
+func generateRandomUUID() (string, error) {
+	u, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	return strings.ToLower(u.String()), nil
 }
