@@ -7,7 +7,7 @@ import (
 // masqueradeMetadata sets metadata.user_id using a channel-level session pool while
 // preserving other metadata fields when possible. It returns the masked
 // metadata payload, the original user_id (if present), and the masked user_id.
-func masqueradeMetadata(raw json.RawMessage, channelID int, channelHash string) (json.RawMessage, string, string) {
+func masqueradeMetadata(raw json.RawMessage, channelID int, channelHash string, maxSessions int) (json.RawMessage, string, string) {
 	// Back-compat fallback: if no channel context is available, keep the historical fixed user_id.
 	if channelID == 0 && channelHash == "" {
 		originalUserID := "<empty>"
@@ -30,20 +30,20 @@ func masqueradeMetadata(raw json.RawMessage, channelID int, channelHash string) 
 		return masked, originalUserID, MasqueradeUserID
 	}
 
-	pool := GetSessionPoolManager().GetPool(channelID, channelHash)
+	pool := GetSessionPoolManager().GetPool(channelID, channelHash, maxSessions)
 	return pool.MasqueradeMetadata(raw)
 }
 
 // MasqueradeMetadataInBody updates the top-level metadata field in a Claude
 // request body, preserving other top-level fields. It returns the updated body
 // and the original user_id (if any) from metadata.
-func MasqueradeMetadataInBody(body []byte, channelID int, channelHash string) ([]byte, string, string) {
+func MasqueradeMetadataInBody(body []byte, channelID int, channelHash string, maxSessions int) ([]byte, string, string) {
 	payload := make(map[string]json.RawMessage)
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return body, "<empty>", ""
 	}
 
-	maskedMetadata, originalUserID, maskedUserID := masqueradeMetadata(payload["metadata"], channelID, channelHash)
+	maskedMetadata, originalUserID, maskedUserID := masqueradeMetadata(payload["metadata"], channelID, channelHash, maxSessions)
 	payload["metadata"] = maskedMetadata
 
 	maskedBody, err := json.Marshal(payload)

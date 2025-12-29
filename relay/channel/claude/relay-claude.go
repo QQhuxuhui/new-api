@@ -419,12 +419,16 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, te
 	// ========================================
 	channelID := 0
 	channelHash := ""
+	maxSessions := 0
 	if info != nil && info.Channel != nil {
 		channelID = info.Channel.Id
 		channelHash = info.Channel.GetOrCreateMasqueradeHash()
+		if info.Channel.MaxConcurrentRequestsPerKey != nil {
+			maxSessions = *info.Channel.MaxConcurrentRequestsPerKey
+		}
 	}
 
-	masked, originalUserID, maskedUserID := masqueradeMetadata(claudeRequest.Metadata, channelID, channelHash)
+	masked, originalUserID, maskedUserID := masqueradeMetadata(claudeRequest.Metadata, channelID, channelHash, maxSessions)
 	claudeRequest.Metadata = masked
 
 	// 打印日志（OpenAI 格式请求通常不携带 metadata，原始为空）

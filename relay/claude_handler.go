@@ -118,12 +118,16 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		if info.ChannelSetting.PassThroughMetadataMasquerade {
 			channelID := 0
 			channelHash := ""
+			maxSessions := 0
 			if info != nil && info.Channel != nil {
 				channelID = info.Channel.Id
 				channelHash = info.Channel.GetOrCreateMasqueradeHash()
+				if info.Channel.MaxConcurrentRequestsPerKey != nil {
+					maxSessions = *info.Channel.MaxConcurrentRequestsPerKey
+				}
 			}
 
-			maskedBody, originalUserID, maskedUserID := claude.MasqueradeMetadataInBody(body, channelID, channelHash)
+			maskedBody, originalUserID, maskedUserID := claude.MasqueradeMetadataInBody(body, channelID, channelHash, maxSessions)
 			body = maskedBody
 			logger.LogInfo(c, fmt.Sprintf("[Claude Native/PT] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, maskedUserID))
 		}

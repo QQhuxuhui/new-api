@@ -155,6 +155,13 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 
 	if len(channels) == 1 {
 		if channel, ok := channelsIDM[channels[0]]; ok {
+			// Check health status for single channel (fix: previously skipped health check)
+			if !IsChannelHealthy(channels[0]) {
+				common.SysLog(fmt.Sprintf("single channel %d is suspended for group: %s, model: %s", channels[0], group, model))
+				// For single channel, return ErrPriorityExhausted directly to trigger failover
+				// (no other priorities to try)
+				return nil, ErrPriorityExhausted
+			}
 			return channel, nil
 		}
 		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
@@ -268,12 +275,19 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 		return nil, ErrPriorityExhausted
 	}
 
-	// For single channel, check if it's excluded
+	// For single channel, check if it's excluded or suspended
 	if len(channels) == 1 {
 		if excludeIds != nil && excludeIds[channels[0]] {
 			return nil, nil // Channel already tried
 		}
 		if channel, ok := channelsIDM[channels[0]]; ok {
+			// Check health status for single channel (fix: previously skipped health check)
+			if !IsChannelHealthy(channels[0]) {
+				common.SysLog(fmt.Sprintf("single channel %d is suspended for group: %s, model: %s (excluding)", channels[0], group, model))
+				// For single channel, return ErrPriorityExhausted directly to trigger failover
+				// (no other priorities to try)
+				return nil, ErrPriorityExhausted
+			}
 			return channel, nil
 		}
 		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])

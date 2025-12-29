@@ -339,6 +339,18 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		}
 	}
 
+	// ========================================
+	// prompt_cache_key 伪装与日志
+	// ========================================
+	if request.PromptCacheKey != "" {
+		masked, original := MasqueradePromptCacheKey(request.PromptCacheKey, info.ChannelId)
+		if masked != "" {
+			request.PromptCacheKey = masked
+		}
+		logger.LogInfo(c, fmt.Sprintf("[OpenAI] prompt_cache_key masquerade: %s -> %s (model=%s, channel=%d)",
+			original, request.PromptCacheKey, request.Model, info.ChannelId))
+	}
+
 	return request, nil
 }
 
@@ -565,6 +577,28 @@ func detectImageMimeType(filename string) string {
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
+	// ========================================
+	// prompt_cache_key 伪装与日志
+	// ========================================
+	if len(request.PromptCacheKey) > 0 {
+		var key string
+		if err := json.Unmarshal(request.PromptCacheKey, &key); err == nil && key != "" {
+			masked, original := MasqueradePromptCacheKey(key, info.ChannelId)
+			maskedLog := key
+			if masked != "" {
+				if marshalled, err := json.Marshal(masked); err == nil {
+					request.PromptCacheKey = marshalled
+				}
+				maskedLog = masked
+			}
+			logger.LogInfo(c, fmt.Sprintf("[OpenAI Responses] prompt_cache_key masquerade: %s -> %s (model=%s, channel=%d)",
+				original, maskedLog, request.Model, info.ChannelId))
+		} else {
+			logger.LogInfo(c, fmt.Sprintf("[OpenAI Responses] prompt_cache_key (unparsed): %s (model=%s, channel=%d)",
+				string(request.PromptCacheKey), request.Model, info.ChannelId))
+		}
+	}
+
 	//  转换模型推理力度后缀
 	effort, originModel := parseReasoningEffortFromModelSuffix(request.Model)
 	if effort != "" {

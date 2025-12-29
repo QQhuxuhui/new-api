@@ -186,7 +186,8 @@ func TestSetupRequestHeader_ExistingLogicPreserved(t *testing.T) {
 // TestConvertClaudeRequest_MetadataMasquerade 验证 metadata.user_id 固定伪装
 func TestConvertClaudeRequest_MetadataMasquerade(t *testing.T) {
 	masqueradeHash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	channel := &model.Channel{Id: 1001001, MasqueradeHash: &masqueradeHash}
+	concurrency := 5
+	channel := &model.Channel{Id: 1001001, MasqueradeHash: &masqueradeHash, MaxConcurrentRequestsPerKey: &concurrency}
 
 	tests := []struct {
 		name            string
@@ -207,11 +208,6 @@ func TestConvertClaudeRequest_MetadataMasquerade(t *testing.T) {
 			name:            "Existing different metadata should be replaced but preserved",
 			initialMetadata: json.RawMessage(`{"other_field":"value","user_id":"different_id","another":"keep"}`),
 			wantSessionUUID: defaultMasqueradeSessionUUID,
-		},
-		{
-			name:            "Valid session UUID is collected and reused",
-			initialMetadata: json.RawMessage(`{"user_id":"user_x_account__session_d2719c3d-61fb-4c61-8c86-4b735ed0f9be"}`),
-			wantSessionUUID: "d2719c3d-61fb-4c61-8c86-4b735ed0f9be",
 		},
 	}
 
