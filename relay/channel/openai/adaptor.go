@@ -340,11 +340,15 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	}
 
 	// ========================================
-	// 日志：打印 prompt_cache_key 用于调研分析
+	// prompt_cache_key 伪装与日志
 	// ========================================
 	if request.PromptCacheKey != "" {
-		logger.LogInfo(c, fmt.Sprintf("[OpenAI] prompt_cache_key: %s (model=%s, channel=%d)",
-			request.PromptCacheKey, request.Model, info.ChannelId))
+		masked, original := MasqueradePromptCacheKey(request.PromptCacheKey, info.ChannelId)
+		if masked != "" {
+			request.PromptCacheKey = masked
+		}
+		logger.LogInfo(c, fmt.Sprintf("[OpenAI] prompt_cache_key masquerade: %s -> %s (model=%s, channel=%d)",
+			original, request.PromptCacheKey, request.Model, info.ChannelId))
 	}
 
 	return request, nil
@@ -574,11 +578,25 @@ func detectImageMimeType(filename string) string {
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
 	// ========================================
-	// 日志：打印 prompt_cache_key 用于调研分析
+	// prompt_cache_key 伪装与日志
 	// ========================================
 	if len(request.PromptCacheKey) > 0 {
-		logger.LogInfo(c, fmt.Sprintf("[OpenAI Responses] prompt_cache_key: %s (model=%s, channel=%d)",
-			string(request.PromptCacheKey), request.Model, info.ChannelId))
+		var key string
+		if err := json.Unmarshal(request.PromptCacheKey, &key); err == nil && key != "" {
+			masked, original := MasqueradePromptCacheKey(key, info.ChannelId)
+			maskedLog := key
+			if masked != "" {
+				if marshalled, err := json.Marshal(masked); err == nil {
+					request.PromptCacheKey = marshalled
+				}
+				maskedLog = masked
+			}
+			logger.LogInfo(c, fmt.Sprintf("[OpenAI Responses] prompt_cache_key masquerade: %s -> %s (model=%s, channel=%d)",
+				original, maskedLog, request.Model, info.ChannelId))
+		} else {
+			logger.LogInfo(c, fmt.Sprintf("[OpenAI Responses] prompt_cache_key (unparsed): %s (model=%s, channel=%d)",
+				string(request.PromptCacheKey), request.Model, info.ChannelId))
+		}
 	}
 
 	//  转换模型推理力度后缀

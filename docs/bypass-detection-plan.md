@@ -100,7 +100,7 @@ JA3 = MD5(
 | 第三阶段 | HTTP/2指纹优化 | ⭐⭐⭐ | 10-15% | ⏳ 待研究 |
 | 第四阶段 | 请求行为模式优化 | ⭐⭐⭐ | 10-20% | ⏳ 待分析 |
 | **OpenAI-1** | **Codex CLI 请求头伪装** | ⭐ | 15-20% | ✅ **已完成** (2025-12-27) |
-| **OpenAI-1.5** | **prompt_cache_key 伪装** | ⭐ | 10-15% | ⏳ 待实施 |
+| **OpenAI-1.5** | **prompt_cache_key 伪装** | ⭐ | 10-15% | ✅ **已完成** (2025-12-29) |
 
 **第一阶段备注**：最终实施14个固定头（删除Accept-Encoding避免解压问题），效果预估略低于原计划但安全可用。
 
@@ -726,57 +726,24 @@ func (a *Adaptor) SetupRequestHeader(...) error {
 
 ---
 
-### OpenAI-1.5 阶段：prompt_cache_key 伪装 ⏳ 待实施
+### OpenAI-1.5 阶段：prompt_cache_key 伪装 ✅ 已完成 (2025-12-29)
 
-**目标：** 将请求体中的 `prompt_cache_key` 固定为统一值，避免暴露多用户身份
+**目标：** 在不自生成 UUID 的前提下，按渠道收集并轮换下游的 `prompt_cache_key`，降低多用户共享同一上游 Key 的暴露度。
 
-**背景分析：**
+**实施方案（与 Claude 会话池模式对齐，简化版）：**
+- 渠道级 prompt_cache_key 池：TTL **2 小时**，最大 **4** 条目，清理周期 **10 分钟**，仅收集下游提供的 UUID v7。
+- 空池或无效 UUID 时直接透传原值，不自生成默认 key。
+- 每次请求将原始 key 写入池，随后随机选择池中有效 key 进行伪装。
+- 日志输出原始与伪装值：`[OpenAI] prompt_cache_key masquerade: <origin> -> <masked> (channel=N)`.
 
-Codex CLI 请求体中发现以下身份信息字段：
+**核心代码位置：**
+- `relay/channel/openai/prompt_cache_pool.go`：池管理、TTL/淘汰、后台清理。
+- `relay/channel/openai/masquerade.go`：收集与随机选择伪装 key。
+- `relay/channel/openai/adaptor.go`：`ConvertOpenAIRequest` 与 `ConvertOpenAIResponsesRequest` 调用伪装并记录日志。
 
-```json
-{
-  "prompt_cache_key": "019b5f16-234c-7e12-a247-ffe620dff524",
-  "model": "gpt-5.1-codex-max",
-  "store": false,
-  "stream": true,
-  ...
-}
-```
-
-**检测风险：**
-
-```
-同一 API Key，出现多个不同的 prompt_cache_key
-→ 多用户共享 → 标记为转售
-```
-
-**与 Claude 渠道对比：**
-
-| 对比项 | Claude Code | Codex CLI |
-|--------|-------------|-----------|
-| 身份字段 | `metadata.user_id` | `prompt_cache_key` |
-| 格式 | `user_{hash}_account__session_{uuid}` | UUID |
-| 复杂度 | 高 | 低 |
-
-**待实施方案：**
-
-```go
-// 参考 Claude 渠道的 masqueradeMetadata 函数实现
-// 在请求体中固定 prompt_cache_key 为统一值
-
-const MasqueradePromptCacheKey = "019b5f16-234c-7e12-a247-ffe620dff524"
-
-func masqueradePromptCacheKey(body []byte) ([]byte, string) {
-    // 解析 JSON -> 替换 prompt_cache_key -> 重新序列化
-}
-```
-
-**实施步骤：**
-1. [ ] 确认 `prompt_cache_key` 是否需要伪装（需要更多请求样本）
-2. [ ] 实现 `masqueradePromptCacheKey` 函数
-3. [ ] 在 OpenAI 适配器中调用
-4. [ ] 测试验证
+**验证：**
+- `go test -race ./relay/channel/openai/...`
+- 覆盖点：池创建与单例、随机选择、TTL 过期清理、最老淘汰、通道隔离、空池透传、无效 UUID 透传、并发安全。
 
 ---
 
@@ -1257,11 +1224,12 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
   - [x] 修改 `relay/channel/openai/adaptor.go` ✅
   - [x] 编译验证 ✅
   - [x] 提交代码 ✅ **2025-12-27 完成**
-- [ ] **OpenAI-1.5 阶段：prompt_cache_key 伪装** ⏳ 待实施
+- [x] **OpenAI-1.5 阶段：prompt_cache_key 伪装** ✅ **已完成（2025-12-29）**
   - [x] 分析 Codex CLI 请求体 ✅
   - [x] 发现 `prompt_cache_key` 字段 ✅
-  - [ ] 确认是否需要伪装（需要更多样本）
-  - [ ] 实施伪装逻辑
+  - [x] 确认需要伪装（UUID v7，多用户暴露风险）✅
+  - [x] 实施伪装逻辑（渠道级池化 + TTL/最大数限制）✅
+  - [x] 日志与测试验证（`go test -race ./relay/channel/openai/...`）✅
 
 ### 更新日志
 
@@ -1314,6 +1282,9 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 | 2025-12-27 | 分析 Codex CLI 请求体，发现 `prompt_cache_key` 字段（潜在身份标识）|
 | 2025-12-27 | 记录 OpenAI-1.5 阶段待实施：`prompt_cache_key` 固定伪装 |
 | 2025-12-27 | TLS 指纹决策：暂时保持 Node.js 指纹，待验证是否需要 Rust 指纹 |
+| **2025-12-29** | **✅ 完成 OpenAI-1.5：prompt_cache_key 渠道池化伪装（最大4条、TTL 2h、10m 清理、随机轮换、空池透传）** |
+| 2025-12-29 | 新增 `relay/channel/openai/prompt_cache_pool.go`、`masquerade.go`，改造适配器日志原始→伪装值 |
+| 2025-12-29 | 测试通过：`go test -race ./relay/channel/openai/...` 覆盖池单例/TTL/淘汰/隔离/并发安全 |
 | **2025-12-28** | **✅ 第1.5阶段代码审查完成** |
 | 2025-12-28 | 代码审查验证：session_pool.go、metadata.go、model/channel.go 实现正确 |
 | 2025-12-28 | 测试验证：所有测试通过 `-race` 标志检测，无竞态条件 |
