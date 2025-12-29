@@ -339,6 +339,14 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		}
 	}
 
+	// ========================================
+	// 日志：打印 prompt_cache_key 用于调研分析
+	// ========================================
+	if request.PromptCacheKey != "" {
+		logger.LogInfo(c, fmt.Sprintf("[OpenAI] prompt_cache_key: %s (model=%s, channel=%d)",
+			request.PromptCacheKey, request.Model, info.ChannelId))
+	}
+
 	return request, nil
 }
 
@@ -565,6 +573,14 @@ func detectImageMimeType(filename string) string {
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
+	// ========================================
+	// 日志：打印 prompt_cache_key 用于调研分析
+	// ========================================
+	if len(request.PromptCacheKey) > 0 {
+		logger.LogInfo(c, fmt.Sprintf("[OpenAI Responses] prompt_cache_key: %s (model=%s, channel=%d)",
+			string(request.PromptCacheKey), request.Model, info.ChannelId))
+	}
+
 	//  转换模型推理力度后缀
 	effort, originModel := parseReasoningEffortFromModelSuffix(request.Model)
 	if effort != "" {
