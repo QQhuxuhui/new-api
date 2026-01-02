@@ -811,6 +811,29 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 
+		// If all channels in current plan hit concurrency limit, try plan failover
+		if !isSpecificChannel && newAPIError != nil && newAPIError.GetErrorCode() == types.ErrorCodeChannelKeyConcurrencyLimit {
+			failoverUserId := common.GetContextKeyInt(c, constant.ContextKeyUserId)
+			shouldFailover, currentUserPlanId := shouldAttemptPlanFailover(c, failoverUserId)
+			if shouldFailover {
+				failoverChannel, failoverPlan, success := executePlanFailover(c, failoverUserId, currentUserPlanId, modelRequest.Model, "concurrency_limit")
+				if success && failoverChannel != nil && failoverPlan != nil {
+					// 重新检查新套餐的速率限制，避免并发限流路径绕过套餐限流
+					if failoverPlan.Plan != nil && failoverPlan.Plan.HasRateLimits() {
+						if canProceed, _, message := service.CheckRateLimits(failoverPlan.Plan, failoverPlan.Id, 0); !canProceed {
+							abortWithOpenAiMessage(c, http.StatusTooManyRequests, message)
+							return
+						}
+					}
+
+					// Try to setup the failover channel
+					channel = failoverChannel
+					newAPIError = SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+					// If failover channel also fails, newAPIError will be set and we'll abort below
+				}
+			}
+		}
+
 		if newAPIError != nil {
 			// Channel setup failed (e.g., concurrency limit, no available key)
 			// Abort here to prevent half-initialized context from reaching controller
@@ -1164,4 +1187,91 @@ func extractModelNameFromGeminiPath(path string) string {
 
 	// 返回模型名部分
 	return path[startIndex : startIndex+colonIndex]
+}
+
+// shouldAttemptPlanFailover checks if plan failover should be attempted
+// Returns: (shouldAttempt bool, currentUserPlanId int)
+func shouldAttemptPlanFailover(c *gin.Context, userId int) (bool, int) {
+	if !common.PlanSystemEnabled || userId <= 0 {
+		return false, 0
+	}
+
+	planId, exists := common.GetContextKey(c, constant.ContextKeyUserPlanId)
+	if !exists {
+		return false, 0
+	}
+
+	userPlanId, ok := planId.(int)
+	if !ok || userPlanId <= 0 {
+		return false, 0
+	}
+
+	userPlan, err := model.GetUserPlanById(userPlanId)
+	if err != nil {
+		return false, 0
+	}
+
+	if userPlan.AutoSwitch != 1 {
+		return false, 0
+	}
+
+	return true, userPlanId
+}
+
+// executePlanFailover attempts to failover to an alternative plan
+// Returns: (channel *model.Channel, plan *model.UserPlan, success bool)
+// If successful, it updates context with new plan info
+func executePlanFailover(c *gin.Context, userId int, currentUserPlanId int, modelName string, failoverReason string) (*model.Channel, *model.UserPlan, bool) {
+	logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d %s attempting_failover", userId, failoverReason))
+
+	failoverChannel, failoverPlan, failoverGroup, failoverErr := service.AttemptPlanFailover(c, userId, currentUserPlanId, modelName)
+
+	if failoverErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failover_error=%v", userId, failoverErr))
+	}
+
+	if failoverChannel == nil || failoverPlan == nil {
+		return nil, nil, false
+	}
+
+	// Switch user to the new plan
+	if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id); switchErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
+		return nil, nil, false
+	}
+
+	planName := failoverPlan.GetDisplayName()
+	planId := 0
+	if failoverPlan.PlanId != nil {
+		planId = *failoverPlan.PlanId
+	}
+	logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d switched to plan=%s(id=%d,user_plan=%d) reason=%s",
+		userId, planName, planId, failoverPlan.Id, failoverReason))
+
+	// Update context with new plan info
+	if failoverPlan.PlanId != nil {
+		common.SetContextKey(c, constant.ContextKeyPlanId, *failoverPlan.PlanId)
+	}
+	common.SetContextKey(c, constant.ContextKeyUserPlanId, failoverPlan.Id)
+	common.SetContextKey(c, constant.ContextKeyPlanName, planName)
+	common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
+
+	// Update channel groups in context
+	channelGroups := failoverPlan.GetChannelGroups()
+	if len(channelGroups) > 0 {
+		tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+		if tokenGroup != "" && tokenGroup != "auto" {
+			common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{tokenGroup})
+			common.SetContextKey(c, constant.ContextKeyPlanGroup, tokenGroup)
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, tokenGroup)
+		} else {
+			common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
+			common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
+		}
+	}
+
+	setAutoGroupContext(c, common.GetContextKeyString(c, constant.ContextKeyUsingGroup), failoverChannel)
+
+	return failoverChannel, failoverPlan, true
 }
