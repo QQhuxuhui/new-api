@@ -135,16 +135,17 @@ func GetEnabledDisableRules() []*ChannelDisableRule {
 	}
 	disableRulesCacheLock.RUnlock()
 
-	return RefreshDisableRulesCache()
+	rules, _ := RefreshDisableRulesCache()
+	return rules
 }
 
 // RefreshDisableRulesCache refreshes the cache from database and returns latest enabled rules.
-func RefreshDisableRulesCache() []*ChannelDisableRule {
+func RefreshDisableRulesCache() ([]*ChannelDisableRule, error) {
 	disableRulesCacheLock.Lock()
 	defer disableRulesCacheLock.Unlock()
 
 	if !disableRulesCacheTime.IsZero() && time.Since(disableRulesCacheTime) < disableRulesCacheTTL && disableRulesCache != nil {
-		return disableRulesCache
+		return disableRulesCache, nil
 	}
 
 	var rules []*ChannelDisableRule
@@ -153,12 +154,12 @@ func RefreshDisableRulesCache() []*ChannelDisableRule {
 		Order("priority DESC, id ASC").
 		Find(&rules).Error; err != nil {
 		common.SysLog("加载渠道故障转移规则失败: " + err.Error())
-		return disableRulesCache
+		return disableRulesCache, err
 	}
 
 	disableRulesCache = rules
 	disableRulesCacheTime = time.Now()
-	return disableRulesCache
+	return disableRulesCache, nil
 }
 
 // InvalidateDisableRulesCache clears the cached rules to force refresh on next read.

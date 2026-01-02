@@ -206,6 +206,7 @@ func SetApiRouter(router *gin.Engine) {
 			disableRuleRoute.PUT("/:id", controller.UpdateDisableRule)
 			disableRuleRoute.DELETE("/:id", controller.DeleteDisableRule)
 			disableRuleRoute.POST("/test", controller.TestDisableRule)
+			disableRuleRoute.POST("/refresh-cache", controller.RefreshDisableRulesCache)
 		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())

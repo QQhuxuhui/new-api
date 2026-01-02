@@ -2368,5 +2368,8 @@
   "测试": "Test",
   "优先级": "Priority",
   "保存成功": "Saved successfully",
-  "删除成功": "Deleted successfully"
+  "删除成功": "Deleted successfully",
+  "刷新缓存": "Refresh cache",
+  "缓存刷新成功": "Cache refreshed",
+  "匹配成功会记录到健康检查并触发临时暂停（自动恢复），不会永久禁用渠道。编辑规则后会自动刷新缓存。": "Matches record to health check and trigger temporary suspension (auto recovery), not permanent disable. Editing rules will automatically refresh the cache."
 }

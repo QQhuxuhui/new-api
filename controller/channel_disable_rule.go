@@ -133,6 +133,21 @@ func TestDisableRule(c *gin.Context) {
 	common.ApiSuccess(c, result)
 }
 
+// RefreshDisableRulesCache manually refreshes the disable rules cache.
+func RefreshDisableRulesCache(c *gin.Context) {
+	model.InvalidateDisableRulesCache()
+	// Force refresh by calling GetEnabledDisableRules
+	rules, err := model.RefreshDisableRulesCache()
+	if err != nil {
+		common.ApiErrorMsg(c, "缓存刷新失败: "+err.Error())
+		return
+	}
+	common.ApiSuccess(c, map[string]interface{}{
+		"message":     "缓存已刷新",
+		"rules_count": len(rules),
+	})
+}
+
 // validateDisableRule enforces rule constraints.
 func validateDisableRule(req disableRuleRequest) error {
 	if strings.TrimSpace(req.Name) == "" {

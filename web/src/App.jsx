@@ -53,6 +53,7 @@ import MyPlans from './pages/MyPlans';
 import OrderConfirm from './pages/OrderConfirm';
 import MyOrders from './pages/MyOrders';
 import AdminOrders from './pages/AdminOrders';
+import FailoverRules from './pages/FailoverRules';
 
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -161,6 +162,14 @@ function App() {
           element={
             <AdminRoute>
               <AdminOrders />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/failover-rules'
+          element={
+            <AdminRoute>
+              <FailoverRules />
             </AdminRoute>
           }
         />

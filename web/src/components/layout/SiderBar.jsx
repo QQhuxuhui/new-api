@@ -168,6 +168,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
+        text: t('渠道故障转移规则'),
+        itemKey: 'failover-rules',
+        to: '/console/failover-rules',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
         text: t('模型管理'),
         itemKey: 'models',
         to: '/console/models',

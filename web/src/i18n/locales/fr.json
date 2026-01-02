@@ -2092,5 +2092,12 @@
     "默认补全倍率": "Taux de complétion par défaut",
     "统一的": "La Passerelle",
     "大模型接口网关": "API LLM Unifiée"
-  }
+  },
+  "测试": "Test",
+  "优先级": "Priorité",
+  "保存成功": "Enregistré avec succès",
+  "删除成功": "Supprimé avec succès",
+  "刷新缓存": "Actualiser le cache",
+  "缓存刷新成功": "Cache actualisé",
+  "匹配成功会记录到健康检查并触发临时暂停（自动恢复），不会永久禁用渠道。编辑规则后会自动刷新缓存。": "Les correspondances sont consignées dans la surveillance et provoquent une suspension temporaire (rétablissement automatique), sans désactiver définitivement le canal. La modification des règles actualise automatiquement le cache."
 }

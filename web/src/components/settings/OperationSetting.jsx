@@ -27,7 +27,6 @@ import SettingsSensitiveWords from '../../pages/Setting/Operation/SettingsSensit
 import SettingsLog from '../../pages/Setting/Operation/SettingsLog';
 import SettingsMonitoring from '../../pages/Setting/Operation/SettingsMonitoring';
 import SettingsCreditLimit from '../../pages/Setting/Operation/SettingsCreditLimit';
-import ChannelDisableRules from '../../pages/Setting/Operation/ChannelDisableRules';
 import { API, showError, toBoolean } from '../../helpers';
 
 const OperationSetting = () => {
@@ -145,8 +144,6 @@ const OperationSetting = () => {
         <Card style={{ marginTop: '10px' }}>
           <SettingsMonitoring options={inputs} refresh={onRefresh} />
         </Card>
-        {/* 渠道故障转移规则 */}
-        <ChannelDisableRules />
         {/* 额度设置 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsCreditLimit options={inputs} refresh={onRefresh} />

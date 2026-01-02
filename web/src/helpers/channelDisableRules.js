@@ -19,3 +19,7 @@ export async function deleteDisableRule(id) {
 export async function testDisableRules(payload) {
   return API.post('/api/channel/disable-rules/test', payload);
 }
+
+export async function refreshDisableRulesCache() {
+  return API.post('/api/channel/disable-rules/refresh-cache');
+}
