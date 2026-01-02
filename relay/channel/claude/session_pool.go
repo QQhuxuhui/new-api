@@ -17,7 +17,12 @@ const (
 	defaultMasqueradeMaxSessions = 5
 
 	// Rotate one session per interval to gradually refresh the pool
-	defaultMasqueradeRotationInterval = 2 * time.Hour
+	defaultMasqueradeRotationInterval = 6 * time.Hour
+
+	// Grace period for soft rotation: old session remains selectable until grace period ends,
+	// new session becomes selectable only after grace period. This prevents exposing more
+	// sessions than configured during rotation transitions.
+	defaultMasqueradeGracePeriod = 5 * time.Minute
 
 	defaultMasqueradeSessionUUID = "b37fb515-b9ad-49f8-a5c1-945aa8f888ee"
 	defaultMasqueradeHash        = "41b40fa179f64f4ab28ea67a70a478f93d4dbb5d9ed166ed8f9dd2e9ebb4975d"
@@ -127,6 +132,7 @@ func (m *SessionPoolManager) rotateAllPools(now time.Time) {
 	defer m.mu.RUnlock()
 	for _, pool := range m.pools {
 		pool.rotateOldestSession(now)
+		pool.cleanupExpiredSessions(now)
 	}
 }
 
@@ -144,6 +150,8 @@ type ChannelSessionPool struct {
 type SessionEntry struct {
 	UUID      string
 	CreatedAt time.Time
+	ActiveAt  time.Time // When this session becomes selectable (zero = immediately)
+	RetireAt  time.Time // When this session stops being selectable (zero = never)
 }
 
 func newChannelSessionPool(channelID int, channelHash string, maxSessions int, rotationInterval time.Duration) *ChannelSessionPool {
@@ -180,6 +188,14 @@ func (p *ChannelSessionPool) SelectRandomSession(now time.Time) string {
 	p.mu.RLock()
 	active := make([]string, 0, len(p.sessions))
 	for _, s := range p.sessions {
+		// Skip sessions not yet activated (soft rotation: new session waiting)
+		if !s.ActiveAt.IsZero() && now.Before(s.ActiveAt) {
+			continue
+		}
+		// Skip sessions already retired (soft rotation: old session expired)
+		if !s.RetireAt.IsZero() && now.After(s.RetireAt) {
+			continue
+		}
 		active = append(active, s.UUID)
 	}
 	p.mu.RUnlock()
@@ -269,7 +285,9 @@ func (p *ChannelSessionPool) UpdateMaxSessions(maxSessions int) {
 	_ = p.initializeSessionsLocked(maxSessions)
 }
 
-// rotateOldestSession replaces exactly one oldest session when rotation interval has elapsed.
+// rotateOldestSession performs soft rotation: marks the oldest active session for retirement
+// and adds a new session that will activate after the grace period. This ensures that at any
+// point in time, the number of selectable sessions never exceeds maxSessions.
 func (p *ChannelSessionPool) rotateOldestSession(now time.Time) {
 	if now.IsZero() {
 		now = time.Now()
@@ -277,6 +295,15 @@ func (p *ChannelSessionPool) rotateOldestSession(now time.Time) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	// Drop expired sessions up front to avoid unbounded growth when cleanup loop is delayed.
+	active := make([]SessionEntry, 0, len(p.sessions))
+	for _, s := range p.sessions {
+		if s.RetireAt.IsZero() || now.Before(s.RetireAt) {
+			active = append(active, s)
+		}
+	}
+	p.sessions = active
 
 	if p.rotationInterval <= 0 || len(p.sessions) == 0 {
 		return
@@ -286,14 +313,31 @@ func (p *ChannelSessionPool) rotateOldestSession(now time.Time) {
 		return
 	}
 
-	// Find oldest session
-	oldestIdx := 0
-	oldestTime := p.sessions[0].CreatedAt
-	for i := 1; i < len(p.sessions); i++ {
-		if p.sessions[i].CreatedAt.Before(oldestTime) {
-			oldestIdx = i
-			oldestTime = p.sessions[i].CreatedAt
+	// Avoid overlapping soft-rotation windows: if a session is already retiring,
+	// wait until it expires before starting another rotation to keep pool size bounded.
+	for _, s := range p.sessions {
+		if !s.RetireAt.IsZero() && now.Before(s.RetireAt) {
+			return
 		}
+	}
+
+	// Find oldest active session (not already retiring)
+	oldestIdx := -1
+	var oldestTime time.Time
+	for i, s := range p.sessions {
+		// Skip sessions already marked for retirement
+		if !s.RetireAt.IsZero() {
+			continue
+		}
+		if oldestIdx == -1 || s.CreatedAt.Before(oldestTime) {
+			oldestIdx = i
+			oldestTime = s.CreatedAt
+		}
+	}
+
+	// No active session found to rotate
+	if oldestIdx == -1 {
+		return
 	}
 
 	uuidStr, err := generateRandomUUID()
@@ -301,8 +345,39 @@ func (p *ChannelSessionPool) rotateOldestSession(now time.Time) {
 		return
 	}
 
-	p.sessions[oldestIdx] = SessionEntry{UUID: uuidStr, CreatedAt: now}
+	// Soft rotation: mark old session to retire after grace period
+	retireAt := now.Add(defaultMasqueradeGracePeriod)
+	p.sessions[oldestIdx].RetireAt = retireAt
+
+	// Add new session that activates when old session retires
+	newSession := SessionEntry{
+		UUID:      uuidStr,
+		CreatedAt: now,
+		ActiveAt:  retireAt, // Becomes selectable only after old session retires
+	}
+	p.sessions = append(p.sessions, newSession)
+
 	p.lastRotation = now
+}
+
+// cleanupExpiredSessions removes sessions that have passed their RetireAt time.
+// This prevents unbounded growth of the sessions slice during soft rotation.
+func (p *ChannelSessionPool) cleanupExpiredSessions(now time.Time) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	active := make([]SessionEntry, 0, len(p.sessions))
+	for _, s := range p.sessions {
+		// Keep sessions that are not yet retired
+		if s.RetireAt.IsZero() || now.Before(s.RetireAt) {
+			active = append(active, s)
+		}
+	}
+	p.sessions = active
 }
 
 // generateRandomUUID returns a lower-case UUIDv4 using crypto/rand.
