@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/types"
 )
 
@@ -133,6 +134,14 @@ func ShouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
 		strings.Contains(errorMessageLower, "ssl") ||
 		strings.Contains(errorMessageLower, "network") {
 		return true
+	}
+
+	// 用户自定义规则（新增）：在所有硬编码规则之后执行，保持 OR 关系
+	for _, rule := range model.GetEnabledDisableRules() {
+		if rule.Match(statusCode, errorMessage) {
+			common.SysLog(fmt.Sprintf("故障转移规则「%s」匹配成功 (状态码=%d)", rule.Name, statusCode))
+			return true
+		}
 	}
 
 	return false

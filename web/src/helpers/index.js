@@ -29,3 +29,4 @@ export * from './token';
 export * from './boolean';
 export * from './passkey';
 export * from './dashboard';
+export * from './channelDisableRules';

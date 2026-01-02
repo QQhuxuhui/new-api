@@ -196,6 +196,17 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/copy/:id", controller.CopyChannel)
 			channelRoute.POST("/multi_key/manage", controller.ManageMultiKeys)
 		}
+
+		// Channel failover rule management (admin)
+		disableRuleRoute := apiRouter.Group("/channel/disable-rules")
+		disableRuleRoute.Use(middleware.AdminAuth())
+		{
+			disableRuleRoute.GET("/", controller.GetDisableRules)
+			disableRuleRoute.POST("/", controller.CreateDisableRule)
+			disableRuleRoute.PUT("/:id", controller.UpdateDisableRule)
+			disableRuleRoute.DELETE("/:id", controller.DeleteDisableRule)
+			disableRuleRoute.POST("/test", controller.TestDisableRule)
+		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{

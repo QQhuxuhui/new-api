@@ -283,6 +283,7 @@ func migrateDB() error {
 		&UserNotification{},
 		&PlanOrder{},
 		&TopupOrder{},
+		&ChannelDisableRule{},
 	)
 	if err != nil {
 		return err
@@ -406,6 +407,7 @@ func migrateDBFast() error {
 		{&UserAssetSnapshot{}, "UserAssetSnapshot"},
 		{&UserNotification{}, "UserNotification"},
 		{&PlanOrder{}, "PlanOrder"},
+		{&ChannelDisableRule{}, "ChannelDisableRule"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
