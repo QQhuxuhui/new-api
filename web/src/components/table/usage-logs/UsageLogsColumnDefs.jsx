@@ -363,6 +363,18 @@ export const getLogsColumns = ({
       },
     },
     {
+      key: COLUMN_KEYS.PLAN,
+      title: t('套餐'),
+      dataIndex: 'plan_name',
+      render: (text, record, index) => {
+        return record.type === 0 || record.type === 2 || record.type === 5 ? (
+          <>{renderPlan(record, t)}</>
+        ) : (
+          <></>
+        );
+      },
+    },
+    {
       key: COLUMN_KEYS.GROUP,
       title: t('分组'),
       dataIndex: 'group',
@@ -477,18 +489,6 @@ export const getLogsColumns = ({
       render: (text, record, index) => {
         return record.type === 0 || record.type === 2 || record.type === 5 ? (
           <>{renderQuota(text, 6)}</>
-        ) : (
-          <></>
-        );
-      },
-    },
-    {
-      key: COLUMN_KEYS.PLAN,
-      title: t('套餐'),
-      dataIndex: 'plan_name',
-      render: (text, record, index) => {
-        return record.type === 0 || record.type === 2 || record.type === 5 ? (
-          <>{renderPlan(record, t)}</>
         ) : (
           <></>
         );
