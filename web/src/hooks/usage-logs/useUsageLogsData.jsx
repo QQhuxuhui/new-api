@@ -59,6 +59,7 @@ export const useLogsData = () => {
     PLAN: 'plan',
     RETRY: 'retry',
     IP: 'ip',
+    GROUP_RATIO: 'group_ratio',
     DETAILS: 'details',
   };
 
@@ -173,8 +174,9 @@ export const useLogsData = () => {
       [COLUMN_KEYS.COST]: true,
       [COLUMN_KEYS.PLAN]: true,
       [COLUMN_KEYS.RETRY]: isAdminUser,
-      [COLUMN_KEYS.IP]: true,
-      [COLUMN_KEYS.DETAILS]: true,
+      [COLUMN_KEYS.IP]: isAdminUser, // 普通用户默认隐藏IP
+      [COLUMN_KEYS.GROUP_RATIO]: !isAdminUser, // 普通用户默认显示分组倍率
+      [COLUMN_KEYS.DETAILS]: isAdminUser, // 普通用户默认隐藏详情
     };
   };
 
