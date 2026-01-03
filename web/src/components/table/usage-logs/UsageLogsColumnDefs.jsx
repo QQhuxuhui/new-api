@@ -566,28 +566,31 @@ export const getLogsColumns = ({
         if (!(record.type === 0 || record.type === 2 || record.type === 5)) {
           return <></>;
         }
-        let other = getLogOther(record.other);
+        const other = getLogOther(record.other);
         if (!other) {
           return <></>;
         }
-        const groupRatio = other.group_ratio || 1.0;
+        const groupRatio = other.group_ratio ?? 1.0;
         const userGroupRatio = other.user_group_ratio;
+        const ratiosDiffer =
+          userGroupRatio !== undefined &&
+          userGroupRatio !== null &&
+          userGroupRatio !== groupRatio;
 
-        // 如果有用户分组倍率且与分组倍率不同，显示两者
-        if (userGroupRatio !== undefined && userGroupRatio !== groupRatio) {
-          return (
-            <Tooltip content={`${t('分组倍率')}: ${groupRatio}, ${t('用户分组倍率')}: ${userGroupRatio}`}>
-              <Tag color='blue' shape='circle'>
-                {userGroupRatio}x
-              </Tag>
-            </Tooltip>
-          );
-        }
-
-        return (
+        const ratioTag = (
           <Tag color='grey' shape='circle'>
             {groupRatio}x
           </Tag>
+        );
+
+        return ratiosDiffer ? (
+          <Tooltip
+            content={`${t('分组倍率')}: ${groupRatio}, ${t('用户分组倍率')}: ${userGroupRatio}`}
+          >
+            {ratioTag}
+          </Tooltip>
+        ) : (
+          ratioTag
         );
       },
     },
