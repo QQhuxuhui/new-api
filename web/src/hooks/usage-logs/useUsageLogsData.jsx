@@ -132,6 +132,7 @@ export const useLogsData = () => {
           merged[COLUMN_KEYS.CHANNEL] = false;
           merged[COLUMN_KEYS.USERNAME] = false;
           merged[COLUMN_KEYS.RETRY] = false;
+          merged[COLUMN_KEYS.GROUP] = false;
         }
         setVisibleColumns(merged);
       } catch (e) {
@@ -163,7 +164,7 @@ export const useLogsData = () => {
       [COLUMN_KEYS.CHANNEL]: isAdminUser,
       [COLUMN_KEYS.USERNAME]: isAdminUser,
       [COLUMN_KEYS.TOKEN]: true,
-      [COLUMN_KEYS.GROUP]: true,
+      [COLUMN_KEYS.GROUP]: isAdminUser,
       [COLUMN_KEYS.TYPE]: true,
       [COLUMN_KEYS.MODEL]: true,
       [COLUMN_KEYS.USE_TIME]: true,
@@ -199,7 +200,8 @@ export const useLogsData = () => {
       if (
         (key === COLUMN_KEYS.CHANNEL ||
           key === COLUMN_KEYS.USERNAME ||
-          key === COLUMN_KEYS.RETRY) &&
+          key === COLUMN_KEYS.RETRY ||
+          key === COLUMN_KEYS.GROUP) &&
         !isAdminUser
       ) {
         updatedColumns[key] = false;
