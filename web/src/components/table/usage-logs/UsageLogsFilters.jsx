@@ -32,6 +32,9 @@ const LogsFilters = ({
   setLogType,
   loading,
   isAdminUser,
+  planOptions,
+  loadingPlans,
+  loadPlanOptions,
   t,
 }) => {
   return (
@@ -92,6 +95,33 @@ const LogsFilters = ({
             pure
             size='small'
           />
+
+          <Form.Select
+            field='user_plan_id'
+            placeholder={t('套餐')}
+            showClear
+            loading={loadingPlans}
+            filter
+            className='w-full'
+            pure
+            onDropdownVisibleChange={(visible) => {
+              if (visible) {
+                loadPlanOptions();
+              }
+            }}
+            onChange={() => {
+              setTimeout(() => {
+                refresh();
+              }, 0);
+            }}
+            size='small'
+          >
+            {planOptions.map((plan) => (
+              <Form.Select.Option key={plan.value} value={plan.value}>
+                {plan.label}
+              </Form.Select.Option>
+            ))}
+          </Form.Select>
 
           {isAdminUser && (
             <>

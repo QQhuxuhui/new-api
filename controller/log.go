@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -20,7 +22,17 @@ func GetAllLogs(c *gin.Context) {
 	modelName := c.Query("model_name")
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
-	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group)
+	userPlanIdParam := c.Query("user_plan_id")
+	var userPlanId *int
+	if userPlanIdParam != "" {
+		value, err := strconv.Atoi(userPlanIdParam)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		userPlanId = &value
+	}
+	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, userPlanId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -40,7 +52,17 @@ func GetUserLogs(c *gin.Context) {
 	tokenName := c.Query("token_name")
 	modelName := c.Query("model_name")
 	group := c.Query("group")
-	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group)
+	userPlanIdParam := c.Query("user_plan_id")
+	var userPlanId *int
+	if userPlanIdParam != "" {
+		value, err := strconv.Atoi(userPlanIdParam)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		userPlanId = &value
+	}
+	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, userPlanId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -108,7 +130,17 @@ func GetLogsStat(c *gin.Context) {
 	modelName := c.Query("model_name")
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
-	stat := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+	userPlanIdParam := c.Query("user_plan_id")
+	var userPlanId *int
+	if userPlanIdParam != "" {
+		value, err := strconv.Atoi(userPlanIdParam)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		userPlanId = &value
+	}
+	stat := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, userPlanId)
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, "")
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -131,7 +163,17 @@ func GetLogsSelfStat(c *gin.Context) {
 	modelName := c.Query("model_name")
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
-	quotaNum := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+	userPlanIdParam := c.Query("user_plan_id")
+	var userPlanId *int
+	if userPlanIdParam != "" {
+		value, err := strconv.Atoi(userPlanIdParam)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		userPlanId = &value
+	}
+	quotaNum := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, userPlanId)
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, tokenName)
 	c.JSON(200, gin.H{
 		"success": true,
@@ -144,6 +186,36 @@ func GetLogsSelfStat(c *gin.Context) {
 		},
 	})
 	return
+}
+
+func GetUserLogPlans(c *gin.Context) {
+	userId := c.GetInt("id")
+	role := c.GetInt("role")
+
+	targetUsername := strings.TrimSpace(c.Query("username"))
+	if targetUsername != "" {
+		if role < common.RoleAdminUser {
+			common.ApiError(c, fmt.Errorf("仅管理员可按用户名查询套餐列表"))
+			return
+		}
+		var user model.User
+		if err := model.DB.Where("username = ?", targetUsername).First(&user).Error; err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		userId = user.Id
+	}
+
+	plans, err := model.GetUserLogPlanOptions(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    plans,
+	})
 }
 
 func DeleteHistoryLogs(c *gin.Context) {

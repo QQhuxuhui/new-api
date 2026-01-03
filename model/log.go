@@ -35,6 +35,7 @@ type Log struct {
 	ChannelName      string `json:"channel_name" gorm:"->"`
 	TokenId          int    `json:"token_id" gorm:"default:0;index"`
 	UserPlanId       int    `json:"user_plan_id" gorm:"default:0;index"` // 关联的用户套餐ID，用于套餐消耗统计
+	PlanName         string `json:"plan_name" gorm:"->;column:plan_name"` // 套餐显示名称（LEFT JOIN user_plans.plan_display_name）
 	Group            string `json:"group" gorm:"index"`
 	Ip               string `json:"ip" gorm:"index;default:''"`
 	Other            string `json:"other"`
@@ -205,41 +206,45 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string) (logs []*Log, total int64, err error) {
-	var tx *gorm.DB
-	if logType == LogTypeUnknown {
-		tx = LOG_DB
-	} else {
-		tx = LOG_DB.Where("logs.type = ?", logType)
-	}
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, userPlanId *int) (logs []*Log, total int64, err error) {
+	baseQuery := LOG_DB.Model(&Log{}).
+		Joins("LEFT JOIN user_plans ON user_plans.id = logs.user_plan_id")
 
+	if logType != LogTypeUnknown {
+		baseQuery = baseQuery.Where("logs.type = ?", logType)
+	}
 	if modelName != "" {
-		tx = tx.Where("logs.model_name like ?", modelName)
+		baseQuery = baseQuery.Where("logs.model_name like ?", modelName)
 	}
 	if username != "" {
-		tx = tx.Where("logs.username = ?", username)
+		baseQuery = baseQuery.Where("logs.username = ?", username)
 	}
 	if tokenName != "" {
-		tx = tx.Where("logs.token_name = ?", tokenName)
+		baseQuery = baseQuery.Where("logs.token_name = ?", tokenName)
 	}
 	if startTimestamp != 0 {
-		tx = tx.Where("logs.created_at >= ?", startTimestamp)
+		baseQuery = baseQuery.Where("logs.created_at >= ?", startTimestamp)
 	}
 	if endTimestamp != 0 {
-		tx = tx.Where("logs.created_at <= ?", endTimestamp)
+		baseQuery = baseQuery.Where("logs.created_at <= ?", endTimestamp)
 	}
 	if channel != 0 {
-		tx = tx.Where("logs.channel_id = ?", channel)
+		baseQuery = baseQuery.Where("logs.channel_id = ?", channel)
 	}
 	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+		baseQuery = baseQuery.Where("logs."+logGroupCol+" = ?", group)
 	}
-	err = tx.Model(&Log{}).Count(&total).Error
-	if err != nil {
+	if userPlanId != nil {
+		baseQuery = baseQuery.Where("logs.user_plan_id = ?", *userPlanId)
+	}
+
+	countQuery := baseQuery.Session(&gorm.Session{})
+	if err = countQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	err = tx.Order("logs.id desc").Limit(num).Offset(startIdx).Find(&logs).Error
-	if err != nil {
+
+	listQuery := baseQuery.Select("logs.*, COALESCE(user_plans.plan_display_name, '') AS plan_name")
+	if err = listQuery.Order("logs.id desc").Limit(num).Offset(startIdx).Find(&logs).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -270,36 +275,44 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	return logs, total, err
 }
 
-func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string) (logs []*Log, total int64, err error) {
-	var tx *gorm.DB
+func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, userPlanId *int) (logs []*Log, total int64, err error) {
+	baseQuery := LOG_DB.Model(&Log{}).
+		Where("logs.user_id = ?", userId).
+		Joins("LEFT JOIN user_plans ON user_plans.id = logs.user_plan_id")
+
 	if logType == LogTypeUnknown {
 		// For normal users viewing all logs, exclude error logs (type=5)
-		tx = LOG_DB.Where("logs.user_id = ? AND logs.type != ?", userId, LogTypeError)
+		baseQuery = baseQuery.Where("logs.type != ?", LogTypeError)
 	} else {
-		tx = LOG_DB.Where("logs.user_id = ? and logs.type = ?", userId, logType)
+		baseQuery = baseQuery.Where("logs.type = ?", logType)
 	}
 
 	if modelName != "" {
-		tx = tx.Where("logs.model_name like ?", modelName)
+		baseQuery = baseQuery.Where("logs.model_name like ?", modelName)
 	}
 	if tokenName != "" {
-		tx = tx.Where("logs.token_name = ?", tokenName)
+		baseQuery = baseQuery.Where("logs.token_name = ?", tokenName)
 	}
 	if startTimestamp != 0 {
-		tx = tx.Where("logs.created_at >= ?", startTimestamp)
+		baseQuery = baseQuery.Where("logs.created_at >= ?", startTimestamp)
 	}
 	if endTimestamp != 0 {
-		tx = tx.Where("logs.created_at <= ?", endTimestamp)
+		baseQuery = baseQuery.Where("logs.created_at <= ?", endTimestamp)
 	}
 	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+		baseQuery = baseQuery.Where("logs."+logGroupCol+" = ?", group)
 	}
-	err = tx.Model(&Log{}).Count(&total).Error
-	if err != nil {
+	if userPlanId != nil {
+		baseQuery = baseQuery.Where("logs.user_plan_id = ?", *userPlanId)
+	}
+
+	countQuery := baseQuery.Session(&gorm.Session{})
+	if err = countQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	err = tx.Order("logs.id desc").Limit(num).Offset(startIdx).Find(&logs).Error
-	if err != nil {
+
+	listQuery := baseQuery.Select("logs.*, COALESCE(user_plans.plan_display_name, '') AS plan_name")
+	if err = listQuery.Order("logs.id desc").Limit(num).Offset(startIdx).Find(&logs).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -324,7 +337,13 @@ type Stat struct {
 	Tpm   int `json:"tpm"`
 }
 
-func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat) {
+// LogPlanOption is a lightweight view for populating usage log plan filter dropdowns.
+type LogPlanOption struct {
+	UserPlanId int    `json:"user_plan_id" gorm:"column:user_plan_id"`
+	PlanName   string `json:"plan_display_name" gorm:"column:plan_display_name"`
+}
+
+func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, userPlanId *int) (stat Stat) {
 	tx := LOG_DB.Table("logs").Select("sum(quota) quota")
 
 	// 为rpm和tpm创建单独的查询
@@ -355,6 +374,10 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if group != "" {
 		tx = tx.Where(logGroupCol+" = ?", group)
 		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
+	}
+	if userPlanId != nil {
+		tx = tx.Where("user_plan_id = ?", *userPlanId)
+		rpmTpmQuery = rpmTpmQuery.Where("user_plan_id = ?", *userPlanId)
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)
@@ -412,4 +435,14 @@ func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64,
 	}
 
 	return total, nil
+}
+
+// GetUserLogPlanOptions returns all plan instances (active and historical) for a user.
+func GetUserLogPlanOptions(userId int) (plans []LogPlanOption, err error) {
+	err = DB.Table("user_plans").
+		Select("id AS user_plan_id, COALESCE(NULLIF(plan_display_name, ''), plan_name, '') AS plan_display_name").
+		Where("user_id = ?", userId).
+		Order("is_current DESC, purchase_order DESC, id DESC").
+		Find(&plans).Error
+	return
 }

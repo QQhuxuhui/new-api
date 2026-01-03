@@ -56,6 +56,7 @@ export const useLogsData = () => {
     PROMPT: 'prompt',
     COMPLETION: 'completion',
     COST: 'cost',
+    PLAN: 'plan',
     RETRY: 'retry',
     IP: 'ip',
     DETAILS: 'details',
@@ -85,6 +86,10 @@ export const useLogsData = () => {
     token: 0,
   });
 
+  // Plan filter options
+  const [planOptions, setPlanOptions] = useState([]);
+  const [loadingPlans, setLoadingPlans] = useState(false);
+
   // Form state
   const [formApi, setFormApi] = useState(null);
   let now = new Date();
@@ -94,6 +99,7 @@ export const useLogsData = () => {
     model_name: '',
     channel: '',
     group: '',
+    user_plan_id: '',
     dateRange: [
       timestamp2string(getTodayStartTimestamp()),
       timestamp2string(now.getTime() / 1000 + 3600),
@@ -137,6 +143,19 @@ export const useLogsData = () => {
     }
   }, []);
 
+  useEffect(() => {
+    loadPlanOptions();
+  }, []);
+
+  useEffect(() => {
+    setPlanOptions((prev) => {
+      const extras = prev.filter(
+        (item) => item.value !== '' && item.value !== '0',
+      );
+      return [...getBasePlanOptions(), ...extras];
+    });
+  }, [t]);
+
   // Get default column visibility based on user role
   const getDefaultColumnVisibility = () => {
     return {
@@ -151,6 +170,7 @@ export const useLogsData = () => {
       [COLUMN_KEYS.PROMPT]: true,
       [COLUMN_KEYS.COMPLETION]: true,
       [COLUMN_KEYS.COST]: true,
+      [COLUMN_KEYS.PLAN]: true,
       [COLUMN_KEYS.RETRY]: isAdminUser,
       [COLUMN_KEYS.IP]: true,
       [COLUMN_KEYS.DETAILS]: true,
@@ -222,8 +242,70 @@ export const useLogsData = () => {
       end_timestamp,
       channel: formValues.channel || '',
       group: formValues.group || '',
+      user_plan_id:
+        formValues.user_plan_id === undefined ? '' : formValues.user_plan_id,
       logType: formValues.logType ? parseInt(formValues.logType) : 0,
     };
+  };
+
+  const getBasePlanOptions = () => [
+    { label: t('全部'), value: '' },
+    { label: t('钱包'), value: '0' },
+  ];
+
+  const loadPlanOptions = async () => {
+    setLoadingPlans(true);
+    try {
+      const { username } = getFormValues();
+      const query =
+        isAdminUser && username
+          ? `/api/log/plans?username=${encodeURIComponent(username)}`
+          : '/api/log/plans';
+      const res = await API.get(query);
+      const { success, message, data } = res.data;
+      if (success) {
+        const seen = new Set(['', '0']);
+        const planOpts =
+          data?.map((plan) => {
+            const value = String(plan.user_plan_id);
+            const label =
+              plan.plan_display_name && plan.plan_display_name.trim() !== ''
+                ? plan.plan_display_name
+                : t('已删除套餐');
+            return { value, label };
+          }) || [];
+
+        const deduped = [];
+        planOpts.forEach((item) => {
+          if (!seen.has(item.value)) {
+            seen.add(item.value);
+            deduped.push(item);
+          }
+        });
+
+        const nextOptions = [...getBasePlanOptions(), ...deduped];
+        setPlanOptions(nextOptions);
+
+        // 如果当前选择的套餐不在列表中，自动重置
+        if (formApi) {
+          const currentPlan = formApi.getValue('user_plan_id');
+          if (
+            currentPlan &&
+            !nextOptions.some((option) => option.value === currentPlan)
+          ) {
+            formApi.setValue('user_plan_id', '');
+          }
+        }
+      } else {
+        showError(message);
+        setPlanOptions(getBasePlanOptions());
+      }
+    } catch (error) {
+      showError(error?.message || error);
+      setPlanOptions(getBasePlanOptions());
+    } finally {
+      setLoadingPlans(false);
+    }
   };
 
   // Statistics functions
@@ -234,12 +316,16 @@ export const useLogsData = () => {
       start_timestamp,
       end_timestamp,
       group,
+      user_plan_id,
       logType: formLogType,
     } = getFormValues();
     const currentLogType = formLogType !== undefined ? formLogType : logType;
     let localStartTimestamp = Date.parse(start_timestamp) / 1000;
     let localEndTimestamp = Date.parse(end_timestamp) / 1000;
     let url = `/api/log/self/stat?type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}`;
+    if (user_plan_id !== '') {
+      url += `&user_plan_id=${user_plan_id}`;
+    }
     url = encodeURI(url);
     let res = await API.get(url);
     const { success, message, data } = res.data;
@@ -259,12 +345,16 @@ export const useLogsData = () => {
       end_timestamp,
       channel,
       group,
+      user_plan_id,
       logType: formLogType,
     } = getFormValues();
     const currentLogType = formLogType !== undefined ? formLogType : logType;
     let localStartTimestamp = Date.parse(start_timestamp) / 1000;
     let localEndTimestamp = Date.parse(end_timestamp) / 1000;
     let url = `/api/log/stat?type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}`;
+    if (user_plan_id !== '') {
+      url += `&user_plan_id=${user_plan_id}`;
+    }
     url = encodeURI(url);
     let res = await API.get(url);
     const { success, message, data } = res.data;
@@ -506,6 +596,7 @@ export const useLogsData = () => {
       end_timestamp,
       channel,
       group,
+      user_plan_id,
       logType: formLogType,
     } = getFormValues();
 
@@ -522,6 +613,9 @@ export const useLogsData = () => {
       url = `/api/log/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}`;
     } else {
       url = `/api/log/self/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}`;
+    }
+    if (user_plan_id !== '') {
+      url += `&user_plan_id=${user_plan_id}`;
     }
     url = encodeURI(url);
     const res = await API.get(url);
@@ -619,6 +713,9 @@ export const useLogsData = () => {
     setFormApi,
     formInitValues,
     getFormValues,
+    planOptions,
+    loadingPlans,
+    loadPlanOptions,
 
     // Column visibility
     visibleColumns,

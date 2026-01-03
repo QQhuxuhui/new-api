@@ -235,6 +235,34 @@ function renderModelName(record, copyText, t) {
   }
 }
 
+function renderPlan(record, t) {
+  if (record.user_plan_id === 0) {
+    return (
+      <Tag color='amber' shape='circle'>
+        {t('钱包')}
+      </Tag>
+    );
+  }
+
+  if (!record.user_plan_id) {
+    return <></>;
+  }
+
+  const label =
+    record.plan_name && record.plan_name.trim() !== ''
+      ? record.plan_name
+      : t('已删除套餐');
+
+  const color =
+    record.plan_name && record.plan_name.trim() !== '' ? 'blue' : 'grey';
+
+  return (
+    <Tag color={color} shape='circle'>
+      {label}
+    </Tag>
+  );
+}
+
 export const getLogsColumns = ({
   t,
   COLUMN_KEYS,
@@ -449,6 +477,18 @@ export const getLogsColumns = ({
       render: (text, record, index) => {
         return record.type === 0 || record.type === 2 || record.type === 5 ? (
           <>{renderQuota(text, 6)}</>
+        ) : (
+          <></>
+        );
+      },
+    },
+    {
+      key: COLUMN_KEYS.PLAN,
+      title: t('套餐'),
+      dataIndex: 'plan_name',
+      render: (text, record, index) => {
+        return record.type === 0 || record.type === 2 || record.type === 5 ? (
+          <>{renderPlan(record, t)}</>
         ) : (
           <></>
         );
