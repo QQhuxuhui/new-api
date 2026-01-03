@@ -203,7 +203,47 @@ func (p *ChannelSessionPool) SelectRandomSession(now time.Time) string {
 	if len(active) == 0 {
 		return defaultMasqueradeSessionUUID
 	}
-	return active[cryptoRandIntn(len(active))]
+
+	// Linear weighted random selection: first session has highest weight
+	// Weights: [N, N-1, N-2, ..., 1] where N = len(active)
+	// This makes earlier sessions more likely to be selected,
+	// simulating natural user behavior where a few users are most active.
+	return selectWeightedSession(active)
+}
+
+// selectWeightedSession selects a session using linear decreasing weights.
+// The first session has weight N, the second N-1, etc.
+// This creates a natural distribution where earlier sessions are preferred.
+func selectWeightedSession(sessions []string) string {
+	n := len(sessions)
+	if n == 0 {
+		return defaultMasqueradeSessionUUID
+	}
+	if n == 1 {
+		return sessions[0]
+	}
+
+	// Total weight = N + (N-1) + ... + 1 = N*(N+1)/2
+	totalWeight := n * (n + 1) / 2
+
+	// Pick a random number in [0, totalWeight)
+	pick := cryptoRandIntn(totalWeight)
+
+	// Find which session this falls into
+	// Session 0: weight N, range [0, N)
+	// Session 1: weight N-1, range [N, N+(N-1))
+	// Session i: weight N-i, range [sum(0..i-1), sum(0..i))
+	cumulative := 0
+	for i := 0; i < n; i++ {
+		weight := n - i // Linear decreasing: N, N-1, N-2, ..., 1
+		cumulative += weight
+		if pick < cumulative {
+			return sessions[i]
+		}
+	}
+
+	// Fallback (should not reach here)
+	return sessions[n-1]
 }
 
 func (p *ChannelSessionPool) MasqueradeMetadata(raw json.RawMessage) (json.RawMessage, string, string) {

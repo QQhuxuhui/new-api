@@ -300,3 +300,108 @@ func TestSessionPoolManager_DefaultMaxWhenZero(t *testing.T) {
 type failingReader struct{}
 
 func (failingReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
+
+func TestSelectWeightedSession_EmptyReturnsDefault(t *testing.T) {
+	result := selectWeightedSession(nil)
+	if result != defaultMasqueradeSessionUUID {
+		t.Fatalf("expected default UUID for empty input, got %s", result)
+	}
+
+	result = selectWeightedSession([]string{})
+	if result != defaultMasqueradeSessionUUID {
+		t.Fatalf("expected default UUID for empty slice, got %s", result)
+	}
+}
+
+func TestSelectWeightedSession_SingleSession(t *testing.T) {
+	sessions := []string{"only-one"}
+	for i := 0; i < 10; i++ {
+		result := selectWeightedSession(sessions)
+		if result != "only-one" {
+			t.Fatalf("expected 'only-one', got %s", result)
+		}
+	}
+}
+
+func TestSelectWeightedSession_WeightedDistribution(t *testing.T) {
+	// Test with 5 sessions, run 10000 iterations
+	// Expected distribution with linear weights [5,4,3,2,1] (total=15):
+	//   Session 0: 5/15 = 33.3%
+	//   Session 1: 4/15 = 26.7%
+	//   Session 2: 3/15 = 20.0%
+	//   Session 3: 2/15 = 13.3%
+	//   Session 4: 1/15 = 6.7%
+
+	sessions := []string{"A", "B", "C", "D", "E"}
+	counts := make(map[string]int)
+	iterations := 10000
+
+	for i := 0; i < iterations; i++ {
+		result := selectWeightedSession(sessions)
+		counts[result]++
+	}
+
+	// Verify all sessions were selected at least once
+	for _, s := range sessions {
+		if counts[s] == 0 {
+			t.Fatalf("session %s was never selected", s)
+		}
+	}
+
+	// Verify ordering: earlier sessions should be selected more often
+	// Allow some variance due to randomness, but the trend should be clear
+	if counts["A"] < counts["E"] {
+		t.Fatalf("expected session A to be selected more than E, got A=%d, E=%d", counts["A"], counts["E"])
+	}
+	if counts["B"] < counts["E"] {
+		t.Fatalf("expected session B to be selected more than E, got B=%d, E=%d", counts["B"], counts["E"])
+	}
+
+	// Verify approximate distribution (within 50% tolerance for statistical variance)
+	expectedA := float64(iterations) * 5.0 / 15.0 // ~3333
+	expectedE := float64(iterations) * 1.0 / 15.0 // ~667
+
+	if float64(counts["A"]) < expectedA*0.7 || float64(counts["A"]) > expectedA*1.3 {
+		t.Logf("WARNING: Session A distribution outside expected range: got %d, expected ~%.0f", counts["A"], expectedA)
+	}
+	if float64(counts["E"]) < expectedE*0.5 || float64(counts["E"]) > expectedE*1.5 {
+		t.Logf("WARNING: Session E distribution outside expected range: got %d, expected ~%.0f", counts["E"], expectedE)
+	}
+
+	t.Logf("Distribution over %d iterations: A=%d(%.1f%%), B=%d(%.1f%%), C=%d(%.1f%%), D=%d(%.1f%%), E=%d(%.1f%%)",
+		iterations,
+		counts["A"], float64(counts["A"])/float64(iterations)*100,
+		counts["B"], float64(counts["B"])/float64(iterations)*100,
+		counts["C"], float64(counts["C"])/float64(iterations)*100,
+		counts["D"], float64(counts["D"])/float64(iterations)*100,
+		counts["E"], float64(counts["E"])/float64(iterations)*100,
+	)
+}
+
+func TestSelectWeightedSession_TwoSessions(t *testing.T) {
+	// With 2 sessions, weights are [2, 1] (total=3)
+	// Session 0: 2/3 = 66.7%
+	// Session 1: 1/3 = 33.3%
+
+	sessions := []string{"first", "second"}
+	counts := make(map[string]int)
+	iterations := 3000
+
+	for i := 0; i < iterations; i++ {
+		result := selectWeightedSession(sessions)
+		counts[result]++
+	}
+
+	// First should be selected roughly twice as often as second
+	ratio := float64(counts["first"]) / float64(counts["second"])
+	if ratio < 1.5 || ratio > 2.5 {
+		t.Fatalf("expected first/second ratio ~2.0, got %.2f (first=%d, second=%d)",
+			ratio, counts["first"], counts["second"])
+	}
+
+	t.Logf("Two session distribution: first=%d(%.1f%%), second=%d(%.1f%%), ratio=%.2f",
+		counts["first"], float64(counts["first"])/float64(iterations)*100,
+		counts["second"], float64(counts["second"])/float64(iterations)*100,
+		ratio,
+	)
+}
