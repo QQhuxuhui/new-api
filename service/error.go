@@ -103,6 +103,15 @@ func ShouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
 		return false
 	}
 
+	// 用户自定义规则优先：在硬编码规则之前执行，允许用户覆盖默认行为
+	// 例如：400状态码默认不触发故障转移，但用户可以通过关键词匹配规则强制触发
+	for _, rule := range model.GetEnabledDisableRules() {
+		if rule.Match(statusCode, errorMessage) {
+			common.SysLog(fmt.Sprintf("故障转移规则「%s」匹配成功 (状态码=%d)", rule.Name, statusCode))
+			return true
+		}
+	}
+
 	// 4xx 客户端错误
 	if statusCode >= 400 && statusCode < 500 {
 		// 400 Bad Request - 通常是客户端请求格式问题，不是渠道问题
@@ -135,14 +144,6 @@ func ShouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
 		strings.Contains(errorMessageLower, "ssl") ||
 		strings.Contains(errorMessageLower, "network") {
 		return true
-	}
-
-	// 用户自定义规则（新增）：在所有硬编码规则之后执行，保持 OR 关系
-	for _, rule := range model.GetEnabledDisableRules() {
-		if rule.Match(statusCode, errorMessage) {
-			common.SysLog(fmt.Sprintf("故障转移规则「%s」匹配成功 (状态码=%d)", rule.Name, statusCode))
-			return true
-		}
 	}
 
 	return false
