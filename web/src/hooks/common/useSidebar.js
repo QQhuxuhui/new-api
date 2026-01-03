@@ -63,6 +63,7 @@ export const useSidebar = () => {
     admin: {
       enabled: true,
       channel: true,
+      'failover-rules': true,
       models: true,
       plan: true,
       'plan-orders': true,
