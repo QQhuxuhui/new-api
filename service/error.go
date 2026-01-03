@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -180,6 +181,18 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		return
 	}
 	CloseResponseBodyGracefully(resp)
+
+	// 打印上游非200响应日志
+	channelId, _ := ctx.Value(string(constant.ContextKeyChannelId)).(int)
+	channelName, _ := ctx.Value(string(constant.ContextKeyChannelName)).(string)
+	if channelName != "" {
+		logger.LogInfo(ctx, fmt.Sprintf("渠道 %s (ID:%d) 请求异常，状态码：%d，内容：%s",
+			channelName, channelId, resp.StatusCode, string(responseBody)))
+	} else {
+		logger.LogInfo(ctx, fmt.Sprintf("渠道 (ID:%d) 请求异常，状态码：%d，内容：%s",
+			channelId, resp.StatusCode, string(responseBody)))
+	}
+
 	var errResponse dto.GeneralErrorResponse
 
 	err = common.Unmarshal(responseBody, &errResponse)
