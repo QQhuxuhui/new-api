@@ -119,6 +119,10 @@ export const useLogsData = () => {
   const [showUserInfo, setShowUserInfoModal] = useState(false);
   const [userInfoData, setUserInfoData] = useState(null);
 
+  // User detail modal state (for UserDetailModal component)
+  const [showUserDetail, setShowUserDetail] = useState(false);
+  const [selectedUserForDetail, setSelectedUserForDetail] = useState(null);
+
   // Load saved column preferences from localStorage
   useEffect(() => {
     const savedColumns = localStorage.getItem(STORAGE_KEY);
@@ -383,19 +387,20 @@ export const useLogsData = () => {
     setLoadingStat(false);
   };
 
-  // User info function
-  const showUserInfoFunc = async (userId) => {
+  // User info function - now opens UserDetailModal
+  const showUserInfoFunc = async (userId, username) => {
     if (!isAdminUser) {
       return;
     }
-    const res = await API.get(`/api/user/${userId}`);
-    const { success, message, data } = res.data;
-    if (success) {
-      setUserInfoData(data);
-      setShowUserInfoModal(true);
-    } else {
-      showError(message);
-    }
+    // Set user data for UserDetailModal
+    setSelectedUserForDetail({ id: userId, username: username || `User#${userId}` });
+    setShowUserDetail(true);
+  };
+
+  // Close user detail modal
+  const closeUserDetailModal = () => {
+    setShowUserDetail(false);
+    setSelectedUserForDetail(null);
   };
 
   // Format logs data
@@ -648,11 +653,11 @@ export const useLogsData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadLogs(activePage, size)
-      .then()
-      .catch((reason) => {
-        showError(reason);
-      });
+    try {
+      await loadLogs(1, size);
+    } catch (reason) {
+      showError(reason);
+    }
   };
 
   // Refresh function
@@ -739,6 +744,11 @@ export const useLogsData = () => {
     setShowUserInfoModal,
     userInfoData,
     showUserInfoFunc,
+
+    // User detail modal (for UserDetailModal component)
+    showUserDetail,
+    selectedUserForDetail,
+    closeUserDetailModal,
 
     // Functions
     loadLogs,

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -56,8 +57,15 @@ func CreateTopupOrder(c *gin.Context) {
 		return
 	}
 
-	// Get minimum topup amount
+	// 统一处理不同额度展示类型下的最小充值校验与金额换算
 	minTopup := float64(operation_setting.MinTopUp)
+	amountUSD := req.Amount // 默认前端传入的就是 USD 金额
+	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
+		// 前端传入的是代币数量，需要换算成 USD；最小值同样按代币数校验
+		minTopup = float64(operation_setting.MinTopUp) * common.QuotaPerUnit
+		amountUSD = req.Amount / common.QuotaPerUnit
+	}
+
 	if req.Amount < minTopup {
 		common.ApiError(c, fmt.Errorf("充值金额不能小于 %.2f", minTopup))
 		return
@@ -87,7 +95,7 @@ func CreateTopupOrder(c *gin.Context) {
 	}
 
 	// Create order
-	order, err := model.CreateTopupOrder(userId, req.Amount, priceRatio, discountRate)
+	order, err := model.CreateTopupOrder(userId, amountUSD, priceRatio, discountRate)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -302,6 +310,12 @@ func EpayTopupOrderNotify(c *gin.Context) {
 	LockOrder(orderNo)
 	defer UnlockOrder(orderNo)
 
+	// Variables to capture order info for logging after transaction
+	var logUserId int
+	var logQuota int64
+	var logMoney float64
+	var shouldRecordLog bool
+
 	// Process payment in transaction
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		// Load order with row lock
@@ -400,6 +414,13 @@ func EpayTopupOrderNotify(c *gin.Context) {
 
 		log.Printf("topup order payment processed successfully: order_no=%s, user_id=%d, quota=%d",
 			orderNo, order.UserId, order.Quota)
+
+		// Capture order info for logging after transaction commits
+		logUserId = order.UserId
+		logQuota = order.Quota
+		logMoney = order.FinalPrice
+		shouldRecordLog = true
+
 		return nil
 	})
 
@@ -407,6 +428,12 @@ func EpayTopupOrderNotify(c *gin.Context) {
 		log.Printf("topup order epay callback processing failed: %v, order_no=%s", err, orderNo)
 		c.Writer.Write([]byte("fail"))
 		return
+	}
+
+	// Record topup log after transaction commits successfully
+	if shouldRecordLog {
+		model.RecordLog(logUserId, model.LogTypeTopup,
+			fmt.Sprintf("使用在线支付充值成功，充值额度: %v，支付金额：%.2f", logger.FormatQuota(int(logQuota)), logMoney))
 	}
 
 	c.Writer.Write([]byte("success"))

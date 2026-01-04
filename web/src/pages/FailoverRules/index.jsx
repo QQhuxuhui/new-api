@@ -35,8 +35,18 @@ import {
   Switch,
   Spin,
   Layout,
+  Empty,
 } from '@douyinfe/semi-ui';
-import { Plus, Trash, Edit, TestTube, RefreshCw } from 'lucide-react';
+import {
+  IconPlus,
+  IconDelete,
+  IconEdit,
+  IconRefresh,
+  IconSetting,
+  IconTickCircle,
+  IconMinusCircle,
+  IconInfoCircle,
+} from '@douyinfe/semi-icons';
 import {
   createDisableRule,
   deleteDisableRule,
@@ -47,7 +57,8 @@ import {
 } from '../../helpers';
 import { useTranslation } from 'react-i18next';
 
-const { Header, Content } = Layout;
+const { Content } = Layout;
+const { Title, Text } = Typography;
 
 const matchTypeOptions = [
   { label: 'AND', value: 'AND' },
@@ -171,85 +182,160 @@ const TestPanel = ({ loading, onTest, result }) => {
     });
   };
 
+  const resultColumns = [
+    { title: t('名称'), dataIndex: 'rule_name', width: 160 },
+    { title: t('匹配方式'), dataIndex: 'match_type', width: 100 },
+    {
+      title: t('状态码匹配'),
+      dataIndex: 'status_match',
+      width: 100,
+      render: (v) => (
+        <Tag color={v ? 'green' : 'grey'} size='small'>
+          {v ? t('是') : t('否')}
+        </Tag>
+      ),
+    },
+    {
+      title: t('关键词匹配'),
+      dataIndex: 'keyword_match',
+      width: 100,
+      render: (v) => (
+        <Tag color={v ? 'green' : 'grey'} size='small'>
+          {v ? t('是') : t('否')}
+        </Tag>
+      ),
+    },
+    {
+      title: t('结果'),
+      dataIndex: 'matched',
+      width: 100,
+      render: (v, row) => {
+        if (!row.enabled) {
+          return <Tag color='grey' size='small'>{t('已禁用')}</Tag>;
+        }
+        return v ? (
+          <Tag color='red' size='small'>{t('匹配')}</Tag>
+        ) : (
+          <Tag color='blue' size='small'>{t('未匹配')}</Tag>
+        );
+      },
+    },
+  ];
+
   return (
     <Card
-      title={
-        <Space>
-          <TestTube size={16} />
-          {t('规则测试')}
-        </Space>
-      }
-      headerExtraContent={
-        <Button loading={loading} onClick={handleTest}>
-          {t('测试')}
-        </Button>
-      }
+      style={{
+        borderRadius: 8,
+        border: '1px solid var(--semi-color-border)',
+      }}
+      bodyStyle={{ padding: 20 }}
     >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <Space>
+          <IconSetting size='large' style={{ color: 'var(--semi-color-primary)' }} />
+          <Title heading={5} style={{ margin: 0 }}>{t('规则测试')}</Title>
+        </Space>
+        <Button
+          theme='solid'
+          type='primary'
+          loading={loading}
+          onClick={handleTest}
+          icon={<IconSetting />}
+        >
+          {t('执行测试')}
+        </Button>
+      </div>
+
       <Form
         getFormApi={(api) => (formApi.current = api)}
         labelPosition='top'
         initValues={{ status_code: '', error_message: '' }}
       >
         <Row gutter={16}>
-          <Col span={8}>
+          <Col span={6}>
             <Form.InputNumber
               field='status_code'
               label={t('状态码')}
-              placeholder='429'
+              placeholder='例如: 429'
+              style={{ width: '100%' }}
             />
           </Col>
-          <Col span={16}>
+          <Col span={18}>
             <Form.TextArea
               field='error_message'
               label={t('错误消息')}
-              placeholder='rate limit exceeded'
-              autosize={{ minRows: 2, maxRows: 4 }}
+              placeholder={t('例如: rate limit exceeded, quota exceeded')}
+              autosize={{ minRows: 1, maxRows: 3 }}
             />
           </Col>
         </Row>
       </Form>
+
       {result && (
-        <>
-          <Divider />
-          <Space vertical align='start'>
-            <Typography.Text>
-              {t('硬编码规则匹配')}：{result.hardcoded_match ? t('是') : t('否')}
-            </Typography.Text>
-            <Typography.Text>
-              {t('最终是否触发故障转移')}：
-              {result.would_trigger_failover ? t('是') : t('否')}
-            </Typography.Text>
-          </Space>
-          <Divider />
-          <Table
-            size='small'
-            pagination={false}
-            dataSource={result.user_rule_matches || []}
-            columns={[
-              { title: t('名称'), dataIndex: 'rule_name', width: 160 },
-              { title: t('匹配方式'), dataIndex: 'match_type', width: 120 },
-              {
-                title: t('状态码匹配'),
-                dataIndex: 'status_match',
-                render: (v) => (v ? t('是') : t('否')),
-                width: 120,
-              },
-              {
-                title: t('关键词匹配'),
-                dataIndex: 'keyword_match',
-                render: (v) => (v ? t('是') : t('否')),
-                width: 120,
-              },
-              {
-                title: t('结果'),
-                dataIndex: 'matched',
-                render: (v, row) =>
-                  row.enabled ? (v ? t('匹配') : t('未匹配')) : t('已禁用'),
-                width: 120,
-              },
-            ]}
-          />
-        </>
+        <div style={{ marginTop: 20 }}>
+          <Divider margin={16} />
+
+          <Row gutter={24} style={{ marginBottom: 16 }}>
+            <Col span={12}>
+              <div
+                style={{
+                  padding: '12px 16px',
+                  borderRadius: 6,
+                  background: result.hardcoded_match
+                    ? 'var(--semi-color-warning-light-default)'
+                    : 'var(--semi-color-fill-0)',
+                  border: `1px solid ${result.hardcoded_match ? 'var(--semi-color-warning)' : 'var(--semi-color-border)'}`,
+                }}
+              >
+                <Space>
+                  <IconInfoCircle style={{ color: result.hardcoded_match ? 'var(--semi-color-warning)' : 'var(--semi-color-text-2)' }} />
+                  <Text type='secondary'>{t('硬编码规则匹配')}</Text>
+                  <Text strong>{result.hardcoded_match ? t('是') : t('否')}</Text>
+                </Space>
+              </div>
+            </Col>
+            <Col span={12}>
+              <div
+                style={{
+                  padding: '12px 16px',
+                  borderRadius: 6,
+                  background: result.would_trigger_failover
+                    ? 'var(--semi-color-danger-light-default)'
+                    : 'var(--semi-color-success-light-default)',
+                  border: `1px solid ${result.would_trigger_failover ? 'var(--semi-color-danger)' : 'var(--semi-color-success)'}`,
+                }}
+              >
+                <Space>
+                  {result.would_trigger_failover ? (
+                    <IconMinusCircle style={{ color: 'var(--semi-color-danger)' }} />
+                  ) : (
+                    <IconTickCircle style={{ color: 'var(--semi-color-success)' }} />
+                  )}
+                  <Text type='secondary'>{t('触发故障转移')}</Text>
+                  <Text strong style={{ color: result.would_trigger_failover ? 'var(--semi-color-danger)' : 'var(--semi-color-success)' }}>
+                    {result.would_trigger_failover ? t('是') : t('否')}
+                  </Text>
+                </Space>
+              </div>
+            </Col>
+          </Row>
+
+          {(result.user_rule_matches || []).length > 0 && (
+            <>
+              <Text type='secondary' size='small' style={{ marginBottom: 8, display: 'block' }}>
+                {t('用户规则匹配详情')}
+              </Text>
+              <Table
+                size='small'
+                pagination={false}
+                dataSource={result.user_rule_matches || []}
+                columns={resultColumns}
+                rowKey='rule_name'
+                style={{ borderRadius: 6, overflow: 'hidden' }}
+              />
+            </>
+          )}
+        </div>
       )}
     </Card>
   );
@@ -308,7 +394,6 @@ const FailoverRules = () => {
       setModalVisible(false);
       setEditing(null);
       loadRules();
-      // 编辑后主动刷新缓存
       handleRefreshCache();
     } catch {
       // error toast handled globally
@@ -326,7 +411,6 @@ const FailoverRules = () => {
           await deleteDisableRule(rule.id);
           Toast.success(t('删除成功'));
           loadRules();
-          // 删除后主动刷新缓存
           handleRefreshCache();
         } catch {
           // global error
@@ -339,7 +423,6 @@ const FailoverRules = () => {
     try {
       await updateDisableRule(rule.id, { ...rule, enabled });
       loadRules();
-      // 切换状态后主动刷新缓存
       handleRefreshCache();
     } catch {
       // global error
@@ -348,47 +431,68 @@ const FailoverRules = () => {
 
   const columns = useMemo(
     () => [
-      { title: t('名称'), dataIndex: 'name', width: 180 },
+      {
+        title: t('名称'),
+        dataIndex: 'name',
+        width: 180,
+        render: (text) => <Text strong>{text}</Text>,
+      },
       {
         title: t('状态码'),
         dataIndex: 'status_codes',
         render: (arr) =>
           (arr || []).length ? (
-            <Space wrap>
+            <Space wrap size={4}>
               {arr.map((c) => (
-                <Tag key={c}>{c}</Tag>
+                <Tag key={c} color='amber' size='small' style={{ borderRadius: 4 }}>
+                  {c}
+                </Tag>
               ))}
             </Space>
           ) : (
-            '-'
+            <Text type='tertiary'>-</Text>
           ),
-        width: 200,
+        width: 180,
       },
       {
         title: t('关键词'),
         dataIndex: 'keywords',
         render: (arr) =>
           (arr || []).length ? (
-            <Space wrap>
+            <Space wrap size={4}>
               {arr.map((k) => (
-                <Tag key={k}>{k}</Tag>
+                <Tag key={k} color='violet' size='small' style={{ borderRadius: 4 }}>
+                  {k}
+                </Tag>
               ))}
             </Space>
           ) : (
-            '-'
+            <Text type='tertiary'>-</Text>
           ),
-        width: 220,
+        width: 200,
       },
-      { title: t('匹配方式'), dataIndex: 'match_type', width: 130 },
+      {
+        title: t('匹配方式'),
+        dataIndex: 'match_type',
+        width: 120,
+        render: (type) => (
+          <Tag color='blue' size='small' style={{ borderRadius: 4 }}>
+            {type}
+          </Tag>
+        ),
+      },
       {
         title: t('优先级'),
         dataIndex: 'priority',
-        width: 90,
+        width: 80,
+        align: 'center',
+        render: (v) => <Text type='secondary'>{v}</Text>,
       },
       {
-        title: t('启用'),
+        title: t('状态'),
         dataIndex: 'enabled',
-        width: 100,
+        width: 80,
+        align: 'center',
         render: (v, record) => (
           <Switch
             size='small'
@@ -399,12 +503,14 @@ const FailoverRules = () => {
       },
       {
         title: t('操作'),
-        width: 140,
+        width: 160,
+        fixed: 'right',
         render: (_, record) => (
-          <Space>
+          <Space size={4}>
             <Button
               size='small'
-              icon={<Edit size={14} />}
+              type='tertiary'
+              icon={<IconEdit />}
               onClick={() => {
                 setEditing(record);
                 setModalVisible(true);
@@ -415,7 +521,7 @@ const FailoverRules = () => {
             <Button
               size='small'
               type='danger'
-              icon={<Trash size={14} />}
+              icon={<IconDelete />}
               onClick={() => handleDelete(record)}
             >
               {t('删除')}
@@ -443,52 +549,94 @@ const FailoverRules = () => {
   };
 
   return (
-    <Layout>
-      <Content style={{ padding: '24px' }}>
-        <Card
-          title={t('渠道故障转移规则')}
-          headerExtraContent={
-            <Space>
-              <Button
-                icon={<RefreshCw size={16} />}
-                loading={refreshLoading}
-                onClick={handleRefreshCache}
-              >
-                {t('刷新缓存')}
-              </Button>
-              <Button
-                icon={<Plus size={16} />}
-                onClick={() => {
-                  setEditing(null);
-                  setModalVisible(true);
-                }}
-              >
-                {t('新建规则')}
-              </Button>
-            </Space>
-          }
-        >
-          <Banner
-            type='info'
-            description={t(
-              '匹配成功会记录到健康检查并触发临时暂停（自动恢复），不会永久禁用渠道。编辑规则后会自动刷新缓存。',
-            )}
-          />
-          <Spin spinning={loading}>
-            <Table
-              dataSource={rules}
-              columns={columns}
-              pagination={false}
-              bordered
-              rowKey='id'
-              style={{ marginTop: 12 }}
-              scroll={{ x: 980 }}
-            />
-          </Spin>
+    <Layout style={{ minHeight: '100%', background: 'transparent' }}>
+      <Content style={{ padding: '74px 24px 24px 24px' }}>
+        <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+          {/* Page Header */}
+          <div style={{ marginBottom: 24 }}>
+            <Title heading={3} style={{ marginBottom: 8 }}>
+              {t('渠道故障转移规则')}
+            </Title>
+            <Text type='tertiary'>
+              {t('配置渠道错误匹配规则，当请求失败时自动触发故障转移')}
+            </Text>
+          </div>
 
-          <Divider />
+          {/* Rules Card */}
+          <Card
+            style={{
+              marginBottom: 24,
+              borderRadius: 8,
+              border: '1px solid var(--semi-color-border)',
+            }}
+            bodyStyle={{ padding: 0 }}
+          >
+            <div
+              style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid var(--semi-color-border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <Title heading={5} style={{ margin: 0 }}>{t('规则列表')}</Title>
+              <Space>
+                <Button
+                  type='tertiary'
+                  icon={<IconRefresh spin={refreshLoading} />}
+                  loading={refreshLoading}
+                  onClick={handleRefreshCache}
+                >
+                  {t('刷新缓存')}
+                </Button>
+                <Button
+                  theme='solid'
+                  type='primary'
+                  icon={<IconPlus />}
+                  onClick={() => {
+                    setEditing(null);
+                    setModalVisible(true);
+                  }}
+                >
+                  {t('新建规则')}
+                </Button>
+              </Space>
+            </div>
+
+            <div style={{ padding: '0 20px' }}>
+              <Banner
+                type='info'
+                icon={<IconInfoCircle />}
+                description={t(
+                  '匹配成功会记录到健康检查并触发临时暂停（自动恢复），不会永久禁用渠道。编辑规则后会自动刷新缓存。',
+                )}
+                style={{ margin: '16px 0', borderRadius: 6 }}
+              />
+            </div>
+
+            <Spin spinning={loading}>
+              <Table
+                dataSource={rules}
+                columns={columns}
+                pagination={false}
+                rowKey='id'
+                scroll={{ x: 1000 }}
+                empty={
+                  <Empty
+                    description={t('暂无规则，点击上方按钮创建')}
+                    style={{ padding: '40px 0' }}
+                  />
+                }
+                style={{ borderRadius: 0 }}
+              />
+            </Spin>
+          </Card>
+
+          {/* Test Panel */}
           <TestPanel loading={testLoading} onTest={handleTest} result={testResult} />
 
+          {/* Rule Modal */}
           {modalVisible && (
             <RuleModal
               visible={modalVisible}
@@ -500,7 +648,7 @@ const FailoverRules = () => {
               initial={editing}
             />
           )}
-        </Card>
+        </div>
       </Content>
     </Layout>
   );

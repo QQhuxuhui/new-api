@@ -65,6 +65,11 @@ func GetUserConsumptionDetail(userId int, days int) (*dto.UserConsumptionDetail,
 		return nil, fmt.Errorf("failed to get model summary: %w", err)
 	}
 
+	userPlanBalances, err := getUserPlanBalances(userId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user plan balances: %w", err)
+	}
+
 	// Calculate statistics (using actual totalDays for average calculation)
 	stats := calculateConsumptionStats(dailyConsumption, days)
 
@@ -79,10 +84,117 @@ func GetUserConsumptionDetail(userId int, days int) (*dto.UserConsumptionDetail,
 		DailyConsumption:     dailyConsumption,
 		PlanDailyConsumption: planConsumption,
 		ModelSummary:         modelSummary,
+		UserPlanBalances:     userPlanBalances,
 		Stats:                stats,
 	}
 
 	return result, nil
+}
+
+// getUserPlanBalances builds balance details for all user plans
+func getUserPlanBalances(userId int) ([]dto.UserPlanBalance, error) {
+	userPlans, err := model.GetAllUserPlans(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	// Prepare time range for today's usage (Beijing timezone)
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	if loc == nil {
+		loc = time.FixedZone("CST", 8*3600)
+	}
+	now := time.Now().In(loc)
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).Unix()
+	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, loc).Unix()
+
+	var balances []dto.UserPlanBalance
+
+	for _, up := range userPlans {
+		planName := up.PlanName
+		planDisplayName := up.PlanDisplayName
+		planType := up.PlanType
+		planCategory := up.PlanCategory
+
+		// Fallback to plan template if snapshot missing
+		if up.Plan != nil {
+			if planName == "" {
+				planName = up.Plan.Name
+			}
+			if planDisplayName == "" {
+				planDisplayName = up.Plan.DisplayName
+			}
+			if planType == "" {
+				planType = up.Plan.Type
+			}
+			if planCategory == "" {
+				planCategory = up.Plan.Category
+			}
+		}
+
+		// Compute quotas
+		totalQuota := up.OriginalQuota
+		if totalQuota == 0 {
+			totalQuota = up.Quota + up.UsedQuota
+		}
+		if totalQuota < 0 {
+			totalQuota = 0
+		}
+
+		totalQuotaUSD := common.QuotaToUSD(int(totalQuota))
+		remainingUSD := common.QuotaToUSD(int(up.Quota))
+		usedUSD := common.QuotaToUSD(int(up.UsedQuota))
+
+		usagePercent := float64(0)
+		if totalQuotaUSD > 0 {
+			usagePercent = (usedUSD / totalQuotaUSD) * 100
+		}
+
+		// Daily limit data (for subscription plans)
+		dailyLimit := up.GetPlanDailyQuotaLimit()
+		dailyLimitUSD := common.QuotaToUSD(int(dailyLimit))
+
+		var todayUsedUSD float64
+		var todayRemainingUSD float64
+		if dailyLimit > 0 {
+			// Query today's usage from logs by user_plan_id
+			type result struct {
+				TotalQuota int64
+			}
+			var r result
+			query := `
+				SELECT COALESCE(SUM(quota), 0) AS total_quota
+				FROM logs
+				WHERE user_id = ? AND user_plan_id = ? AND type = ? AND created_at >= ? AND created_at <= ?`
+			if err := model.LOG_DB.Raw(query, up.UserId, up.Id, model.LogTypeConsume, startOfDay, endOfDay).Scan(&r).Error; err == nil {
+				todayUsedUSD = common.QuotaToUSD(int(r.TotalQuota))
+			}
+			todayRemainingUSD = dailyLimitUSD - todayUsedUSD
+			if todayRemainingUSD < 0 {
+				todayRemainingUSD = 0
+			}
+		}
+
+		balances = append(balances, dto.UserPlanBalance{
+			UserPlanID:         up.Id,
+			PlanName:           planName,
+			PlanDisplayName:    planDisplayName,
+			PlanType:           planType,
+			PlanCategory:       planCategory,
+			IsCurrent:          up.IsCurrent,
+			QuotaUSD:           remainingUSD,
+			UsedQuotaUSD:       usedUSD,
+			TotalQuotaUSD:      totalQuotaUSD,
+			UsagePercent:       usagePercent,
+			ExpiresAt:          up.ExpiresAt,
+			Status:             up.Status,
+			DailyQuotaLimit:    dailyLimit,
+			DailyQuotaLimitUSD: dailyLimitUSD,
+			TodayUsedUSD:       todayUsedUSD,
+			TodayRemainingUSD:  todayRemainingUSD,
+		})
+	}
+
+	return balances, nil
 }
 
 // getUserDailyConsumption retrieves daily consumption with model breakdown
@@ -219,6 +331,18 @@ func getUserPlanConsumption(userId int, startTime, endTime int64, days int) ([]d
 		})
 	}
 
+	// Append wallet consumption (user_plan_id = 0) if present
+	walletDailyData, _ := getWalletDailyConsumption(userId, startTime, endTime, days)
+	if len(walletDailyData) > 0 {
+		planDetails = append(planDetails, dto.PlanConsumptionDetail{
+			UserPlanID: 0,
+			PlanName:   "钱包",
+			PlanType:   "wallet",
+			IsCurrent:  0,
+			DailyData:  walletDailyData,
+		})
+	}
+
 	return planDetails, nil
 }
 
@@ -300,6 +424,85 @@ func getPlanDailyConsumption(userPlanId int, userId int, startTime, endTime int6
 	}
 
 	// Sort by date descending
+	sort.Slice(dailyData, func(i, j int) bool {
+		return dailyData[i].Date > dailyData[j].Date
+	})
+
+	return dailyData, nil
+}
+
+// getWalletDailyConsumption retrieves daily consumption for wallet (user_plan_id = 0)
+func getWalletDailyConsumption(userId int, startTime, endTime int64, days int) ([]dto.PlanDailyData, error) {
+	type DailyModelData struct {
+		Date         string
+		ModelName    string
+		TotalQuota   int
+		RequestCount int
+	}
+
+	// Use log database dialect for date formatting
+	dateFormat := getLogDBDateFormat()
+
+	var results []DailyModelData
+	query := fmt.Sprintf(`
+		SELECT
+			%s as date,
+			model_name,
+			SUM(quota) as total_quota,
+			COUNT(*) as request_count
+		FROM logs
+		WHERE user_id = ?
+			AND user_plan_id = 0
+			AND type = 2
+			AND created_at >= ?
+			AND created_at <= ?
+		GROUP BY %s, model_name
+		ORDER BY date DESC, total_quota DESC
+	`, dateFormat, dateFormat)
+
+	err := model.LOG_DB.Raw(query, userId, startTime, endTime).Scan(&results).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Group by date
+	dailyMap := make(map[string]*dto.PlanDailyData)
+	for _, row := range results {
+		if _, exists := dailyMap[row.Date]; !exists {
+			dailyMap[row.Date] = &dto.PlanDailyData{
+				Date:          row.Date,
+				UsedUSD:       0,
+				DailyLimitUSD: 0, // Wallet has no daily limit
+				UsagePercent:  0,
+				Models:        []dto.ModelDailyConsumption{},
+			}
+		}
+
+		usd := common.QuotaToUSD(row.TotalQuota)
+		dailyMap[row.Date].UsedUSD += usd
+		dailyMap[row.Date].Models = append(dailyMap[row.Date].Models, dto.ModelDailyConsumption{
+			ModelName:    row.ModelName,
+			USD:          usd,
+			Quota:        row.TotalQuota,
+			RequestCount: row.RequestCount,
+		})
+	}
+
+	// Calculate model percentages (usage percent remains 0 because limit is unlimited)
+	for _, item := range dailyMap {
+		for i := range item.Models {
+			if item.UsedUSD > 0 {
+				item.Models[i].Percentage = (item.Models[i].USD / item.UsedUSD) * 100
+			}
+		}
+	}
+
+	// Convert to array and sort by date descending
+	var dailyData []dto.PlanDailyData
+	for _, item := range dailyMap {
+		dailyData = append(dailyData, *item)
+	}
+
 	sort.Slice(dailyData, func(i, j int) bool {
 		return dailyData[i].Date > dailyData[j].Date
 	})

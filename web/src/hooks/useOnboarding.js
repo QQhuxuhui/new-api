@@ -39,6 +39,7 @@ export const useOnboarding = () => {
     skippedSteps: [],
     createdToken: null,
     topupData: null,
+    usageModeData: null,
     startTime: null,
   });
 
@@ -114,6 +115,7 @@ export const useOnboarding = () => {
       skippedSteps: [],
       createdToken: null,
       topupData: null,
+      usageModeData: null,
       startTime: new Date().toISOString(),
     });
     localStorage.removeItem(STORAGE_KEYS.COMPLETED);

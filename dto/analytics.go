@@ -147,14 +147,14 @@ type UserBalanceAnalysisResponse struct {
 
 // ChannelCostMetrics represents cost analysis for a specific channel
 type ChannelCostMetrics struct {
-	ChannelId          int     `json:"channel_id"`
-	ChannelName        string  `json:"channel_name"`
-	TotalRequests      int     `json:"total_requests"`
-	TotalTokens        int64   `json:"total_tokens"`
-	RevenueUSD         float64 `json:"revenue_usd"`          // Total quota charged to users
-	CostUSD            float64 `json:"cost_usd"`             // Upstream API costs
-	ProfitUSD          float64 `json:"profit_usd"`           // Revenue - Cost
-	ProfitMargin       float64 `json:"profit_margin"`        // (Profit / Revenue) * 100
+	ChannelId           int     `json:"channel_id"`
+	ChannelName         string  `json:"channel_name"`
+	TotalRequests       int     `json:"total_requests"`
+	TotalTokens         int64   `json:"total_tokens"`
+	RevenueUSD          float64 `json:"revenue_usd"`           // Total quota charged to users
+	CostUSD             float64 `json:"cost_usd"`              // Upstream API costs
+	ProfitUSD           float64 `json:"profit_usd"`            // Revenue - Cost
+	ProfitMargin        float64 `json:"profit_margin"`         // (Profit / Revenue) * 100
 	AverageChannelRatio float64 `json:"average_channel_ratio"` // Average channel ratio used
 }
 
@@ -178,11 +178,11 @@ type ModelCostMetrics struct {
 
 // DataQuality represents data quality metrics for cost analysis
 type DataQuality struct {
-	TotalLogs         int     `json:"total_logs"`
-	LogsWithPricing   int     `json:"logs_with_pricing"`
-	CoveragePercent   float64 `json:"coverage_percent"`
-	HasWarning        bool    `json:"has_warning"`
-	WarningMessage    string  `json:"warning_message,omitempty"`
+	TotalLogs       int     `json:"total_logs"`
+	LogsWithPricing int     `json:"logs_with_pricing"`
+	CoveragePercent float64 `json:"coverage_percent"`
+	HasWarning      bool    `json:"has_warning"`
+	WarningMessage  string  `json:"warning_message,omitempty"`
 }
 
 // ChannelCostAnalysisResponse represents the complete channel cost analysis response
@@ -194,16 +194,16 @@ type ChannelCostAnalysisResponse struct {
 
 // ChannelCostSummary represents overall cost summary across all channels
 type ChannelCostSummary struct {
-	TotalRevenueUSD  float64 `json:"total_revenue_usd"`
-	TotalCostUSD     float64 `json:"total_cost_usd"`
-	TotalProfitUSD   float64 `json:"total_profit_usd"`
-	OverallMargin    float64 `json:"overall_margin"`
+	TotalRevenueUSD float64 `json:"total_revenue_usd"`
+	TotalCostUSD    float64 `json:"total_cost_usd"`
+	TotalProfitUSD  float64 `json:"total_profit_usd"`
+	OverallMargin   float64 `json:"overall_margin"`
 }
 
 // CostWarning represents cost-related warnings and alerts
 type CostWarning struct {
-	Type        string  `json:"type"`        // "negative_margin", "low_margin", "suspicious_ratio", "cost_spike"
-	Severity    string  `json:"severity"`    // "low", "medium", "high"
+	Type        string  `json:"type"`     // "negative_margin", "low_margin", "suspicious_ratio", "cost_spike"
+	Severity    string  `json:"severity"` // "low", "medium", "high"
 	ChannelId   int     `json:"channel_id"`
 	ChannelName string  `json:"channel_name"`
 	Description string  `json:"description"`
@@ -213,13 +213,13 @@ type CostWarning struct {
 
 // PlanUsageOverview represents aggregate plan usage statistics
 type PlanUsageOverview struct {
-	TotalPlans          int     `json:"total_plans"`           // Total number of user plans
-	ActivePlans         int     `json:"active_plans"`          // Active plans count
-	ExpiringPlans       int     `json:"expiring_plans"`        // Plans expiring within 3 days
-	LockedPlans         int     `json:"locked_plans"`          // Locked plans count
-	TotalAllocatedUSD   float64 `json:"total_allocated_usd"`   // Total allocated quota in USD
-	TotalUsedUSD        float64 `json:"total_used_usd"`        // Total used quota in USD
-	AverageUsageRate    float64 `json:"average_usage_rate"`    // Average usage rate percentage
+	TotalPlans        int     `json:"total_plans"`         // Total number of user plans
+	ActivePlans       int     `json:"active_plans"`        // Active plans count
+	ExpiringPlans     int     `json:"expiring_plans"`      // Plans expiring within 3 days
+	LockedPlans       int     `json:"locked_plans"`        // Locked plans count
+	TotalAllocatedUSD float64 `json:"total_allocated_usd"` // Total allocated quota in USD
+	TotalUsedUSD      float64 `json:"total_used_usd"`      // Total used quota in USD
+	AverageUsageRate  float64 `json:"average_usage_rate"`  // Average usage rate percentage
 }
 
 // PlanUsageListItem represents a single plan in the usage list
@@ -230,26 +230,26 @@ type PlanUsageListItem struct {
 	PlanId          int     `json:"plan_id"`
 	PlanName        string  `json:"plan_name"`
 	PlanDisplayName string  `json:"plan_display_name"`
-	PlanType        string  `json:"plan_type"`           // subscription, consumption, trial, enterprise
-	QuotaUSD        float64 `json:"quota_usd"`           // Remaining quota in USD
-	UsedUSD         float64 `json:"used_usd"`            // Used quota in USD
-	TotalUSD        float64 `json:"total_usd"`           // Total quota (used + remaining) in USD
-	UsageRate       float64 `json:"usage_rate"`          // Usage percentage
-	RequestCount    int     `json:"request_count"`       // Total API requests
-	ExpiresAt       int64   `json:"expires_at"`          // Expiration timestamp (0 = never)
-	Status          int     `json:"status"`              // 1=active, 2=expired, 3=disabled
-	Locked          int     `json:"locked"`              // 1=locked, 0=unlocked
+	PlanType        string  `json:"plan_type"`     // subscription, consumption, trial, enterprise
+	QuotaUSD        float64 `json:"quota_usd"`     // Remaining quota in USD
+	UsedUSD         float64 `json:"used_usd"`      // Used quota in USD
+	TotalUSD        float64 `json:"total_usd"`     // Total quota (used + remaining) in USD
+	UsageRate       float64 `json:"usage_rate"`    // Usage percentage
+	RequestCount    int     `json:"request_count"` // Total API requests
+	ExpiresAt       int64   `json:"expires_at"`    // Expiration timestamp (0 = never)
+	Status          int     `json:"status"`        // 1=active, 2=expired, 3=disabled
+	Locked          int     `json:"locked"`        // 1=locked, 0=unlocked
 	LockedReason    string  `json:"locked_reason"`
 }
 
 // PlanUsageFilters represents filter parameters for plan usage queries
 type PlanUsageFilters struct {
-	UserId    int    `form:"user_id"`     // Filter by user ID
-	PlanType  string `form:"plan_type"`   // Filter by plan type
-	Status    string `form:"status"`      // active, expiring, expired, locked
-	TimeRange string `form:"time_range"`  // Time range for usage data: "1d", "7d", "30d", "90d"
-	Page      int    `form:"page"`        // Page number (1-based)
-	PageSize  int    `form:"page_size"`   // Items per page
+	UserId    int    `form:"user_id"`    // Filter by user ID
+	PlanType  string `form:"plan_type"`  // Filter by plan type
+	Status    string `form:"status"`     // active, expiring, expired, locked
+	TimeRange string `form:"time_range"` // Time range for usage data: "1d", "7d", "30d", "90d"
+	Page      int    `form:"page"`       // Page number (1-based)
+	PageSize  int    `form:"page_size"`  // Items per page
 }
 
 // PlanUsageListResponse represents paginated plan usage list response
@@ -263,68 +263,90 @@ type PlanUsageListResponse struct {
 
 // PlanTypeDistribution represents distribution of plans by type
 type PlanTypeDistribution struct {
-	PlanType  string  `json:"plan_type"`   // subscription, consumption, trial, enterprise
-	UserCount int     `json:"user_count"`  // Number of users with this plan type
-	TotalUSD  float64 `json:"total_usd"`   // Total allocated quota in USD
+	PlanType   string  `json:"plan_type"`  // subscription, consumption, trial, enterprise
+	UserCount  int     `json:"user_count"` // Number of users with this plan type
+	TotalUSD   float64 `json:"total_usd"`  // Total allocated quota in USD
 	Percentage float64 `json:"percentage"` // Percentage of total quota
 }
 
 // PlanConsumptionRank represents top consuming plans
 type PlanConsumptionRank struct {
-	Rank            int     `json:"rank"`
-	PlanId          int     `json:"plan_id"`
-	PlanName        string  `json:"plan_name"`
-	PlanDisplayName string  `json:"plan_display_name"`
+	Rank             int     `json:"rank"`
+	PlanId           int     `json:"plan_id"`
+	PlanName         string  `json:"plan_name"`
+	PlanDisplayName  string  `json:"plan_display_name"`
 	TotalConsumedUSD float64 `json:"total_consumed_usd"` // Total consumed in USD
-	UserCount       int     `json:"user_count"`         // Number of users with this plan
-	RequestCount    int     `json:"request_count"`      // Total requests
+	UserCount        int     `json:"user_count"`         // Number of users with this plan
+	RequestCount     int     `json:"request_count"`      // Total requests
 }
 
 // UserDailyUsageItem represents a single day's usage for a user plan
 type UserDailyUsageItem struct {
-	Date           string  `json:"date"`             // YYYY-MM-DD
-	UsedQuota      int64   `json:"used_quota"`       // Quota used on this day
-	UsedUSD        float64 `json:"used_usd"`         // Used quota in USD
-	RequestCount   int     `json:"request_count"`    // Number of requests on this day
-	DailyLimit     int64   `json:"daily_limit"`      // Daily limit quota (0 = no limit)
-	DailyLimitUSD  float64 `json:"daily_limit_usd"`  // Daily limit in USD
-	UsagePercent   float64 `json:"usage_percent"`    // Percentage of daily limit used
+	Date          string  `json:"date"`            // YYYY-MM-DD
+	UsedQuota     int64   `json:"used_quota"`      // Quota used on this day
+	UsedUSD       float64 `json:"used_usd"`        // Used quota in USD
+	RequestCount  int     `json:"request_count"`   // Number of requests on this day
+	DailyLimit    int64   `json:"daily_limit"`     // Daily limit quota (0 = no limit)
+	DailyLimitUSD float64 `json:"daily_limit_usd"` // Daily limit in USD
+	UsagePercent  float64 `json:"usage_percent"`   // Percentage of daily limit used
 }
 
 // UserDailyUsageRequest represents request parameters for user daily usage
 type UserDailyUsageRequest struct {
-	UserPlanId int    `form:"user_plan_id" binding:"required"` // User plan ID
-	Days       int    `form:"days"`                            // Number of days to retrieve (default 30)
+	UserPlanId int `form:"user_plan_id" binding:"required"` // User plan ID
+	Days       int `form:"days"`                            // Number of days to retrieve (default 30)
 }
 
 // UserDailyUsageResponse represents the response for user daily usage
 type UserDailyUsageResponse struct {
-	UserPlanId      int                  `json:"user_plan_id"`
-	UserId          int                  `json:"user_id"`
-	Username        string               `json:"username"`
-	PlanName        string               `json:"plan_name"`
-	PlanDisplayName string               `json:"plan_display_name"`
-	PlanType        string               `json:"plan_type"`
-	DailyQuotaLimit int64                `json:"daily_quota_limit"`     // Plan's daily quota limit
-	DailyLimitUSD   float64              `json:"daily_limit_usd"`       // Daily limit in USD
-	TodayUsed       int64                `json:"today_used"`            // Today's usage
-	TodayUsedUSD    float64              `json:"today_used_usd"`        // Today's usage in USD
-	TodayRemaining  int64                `json:"today_remaining"`       // Today's remaining quota
-	TodayRemainingUSD float64            `json:"today_remaining_usd"`   // Today's remaining in USD
-	DailyHistory    []UserDailyUsageItem `json:"daily_history"`         // Daily usage history
+	UserPlanId        int                  `json:"user_plan_id"`
+	UserId            int                  `json:"user_id"`
+	Username          string               `json:"username"`
+	PlanName          string               `json:"plan_name"`
+	PlanDisplayName   string               `json:"plan_display_name"`
+	PlanType          string               `json:"plan_type"`
+	DailyQuotaLimit   int64                `json:"daily_quota_limit"`   // Plan's daily quota limit
+	DailyLimitUSD     float64              `json:"daily_limit_usd"`     // Daily limit in USD
+	TodayUsed         int64                `json:"today_used"`          // Today's usage
+	TodayUsedUSD      float64              `json:"today_used_usd"`      // Today's usage in USD
+	TodayRemaining    int64                `json:"today_remaining"`     // Today's remaining quota
+	TodayRemainingUSD float64              `json:"today_remaining_usd"` // Today's remaining in USD
+	DailyHistory      []UserDailyUsageItem `json:"daily_history"`       // Daily usage history
 	// DataNotice explains data limitations
 	// When user has multiple concurrent plans, usage data is aggregated by user within
 	// the plan's validity period. Data may include consumption from other overlapping plans.
-	DataNotice      string               `json:"data_notice,omitempty"` // Notice about data limitations
+	DataNotice string `json:"data_notice,omitempty"` // Notice about data limitations
+}
+
+// UserPlanBalance 用户套餐余额信息
+type UserPlanBalance struct {
+	UserPlanID      int     `json:"user_plan_id"`
+	PlanName        string  `json:"plan_name"`
+	PlanDisplayName string  `json:"plan_display_name"`
+	PlanType        string  `json:"plan_type"`     // subscription, consumption, trial
+	PlanCategory    string  `json:"plan_category"` // daily, weekly, monthly, payg
+	IsCurrent       int     `json:"is_current"`
+	QuotaUSD        float64 `json:"quota_usd"`       // 剩余额度
+	UsedQuotaUSD    float64 `json:"used_quota_usd"`  // 已用额度
+	TotalQuotaUSD   float64 `json:"total_quota_usd"` // 总额度
+	UsagePercent    float64 `json:"usage_percent"`   // 使用率
+	ExpiresAt       int64   `json:"expires_at"`      // 过期时间
+	Status          int     `json:"status"`          // 状态
+	// 订阅套餐每日限额相关
+	DailyQuotaLimit    int64   `json:"daily_quota_limit"`     // 每日限额（原始值）
+	DailyQuotaLimitUSD float64 `json:"daily_quota_limit_usd"` // 每日限额USD
+	TodayUsedUSD       float64 `json:"today_used_usd"`        // 今日已用
+	TodayRemainingUSD  float64 `json:"today_remaining_usd"`   // 今日剩余
 }
 
 // UserConsumptionDetail represents detailed consumption data for a specific user
 type UserConsumptionDetail struct {
-	UserInfo              UserBasicInfo              `json:"user_info"`
-	DailyConsumption      []DailyConsumptionItem     `json:"daily_consumption"`
-	PlanDailyConsumption  []PlanConsumptionDetail    `json:"plan_daily_consumption"`
-	ModelSummary          []ModelConsumptionSummary  `json:"model_summary"`
-	Stats                 UserConsumptionStats       `json:"stats"`
+	UserInfo             UserBasicInfo             `json:"user_info"`
+	DailyConsumption     []DailyConsumptionItem    `json:"daily_consumption"`
+	PlanDailyConsumption []PlanConsumptionDetail   `json:"plan_daily_consumption"`
+	ModelSummary         []ModelConsumptionSummary `json:"model_summary"`
+	UserPlanBalances     []UserPlanBalance         `json:"user_plan_balances"`
+	Stats                UserConsumptionStats      `json:"stats"`
 }
 
 // UserBasicInfo represents basic user information
@@ -338,10 +360,10 @@ type UserBasicInfo struct {
 
 // DailyConsumptionItem represents consumption for a single day
 type DailyConsumptionItem struct {
-	Date         string                     `json:"date"` // YYYY-MM-DD
-	TotalUSD     float64                    `json:"total_usd"`
-	RequestCount int                        `json:"request_count"`
-	Models       []ModelDailyConsumption    `json:"models"`
+	Date         string                  `json:"date"` // YYYY-MM-DD
+	TotalUSD     float64                 `json:"total_usd"`
+	RequestCount int                     `json:"request_count"`
+	Models       []ModelDailyConsumption `json:"models"`
 }
 
 // ModelDailyConsumption represents model-specific consumption for a day
@@ -355,11 +377,11 @@ type ModelDailyConsumption struct {
 
 // PlanConsumptionDetail represents consumption details for a specific plan
 type PlanConsumptionDetail struct {
-	UserPlanID   int                      `json:"user_plan_id"`
-	PlanName     string                   `json:"plan_name"`
-	PlanType     string                   `json:"plan_type"`
-	IsCurrent    int                      `json:"is_current"`
-	DailyData    []PlanDailyData          `json:"daily_data"`
+	UserPlanID int             `json:"user_plan_id"`
+	PlanName   string          `json:"plan_name"`
+	PlanType   string          `json:"plan_type"`
+	IsCurrent  int             `json:"is_current"`
+	DailyData  []PlanDailyData `json:"daily_data"`
 }
 
 // PlanDailyData represents daily consumption data for a plan
@@ -381,35 +403,35 @@ type ModelConsumptionSummary struct {
 
 // UserConsumptionStats represents statistical summary
 type UserConsumptionStats struct {
-	TotalDays       int     `json:"total_days"`
-	TotalUSD        float64 `json:"total_usd"`
-	AvgDailyUSD     float64 `json:"avg_daily_usd"`
-	PeakDailyUSD    float64 `json:"peak_daily_usd"`
-	TotalRequests   int     `json:"total_requests"`
+	TotalDays     int     `json:"total_days"`
+	TotalUSD      float64 `json:"total_usd"`
+	AvgDailyUSD   float64 `json:"avg_daily_usd"`
+	PeakDailyUSD  float64 `json:"peak_daily_usd"`
+	TotalRequests int     `json:"total_requests"`
 }
 
 // ChannelQuotaMetrics represents quota-based statistics for a channel
 type ChannelQuotaMetrics struct {
-	ChannelId       int     `json:"channel_id"`
-	ChannelName     string  `json:"channel_name"`
-	TotalRequests   int     `json:"total_requests"`
-	TotalQuota      int64   `json:"total_quota"`       // Total quota consumed
-	TotalQuotaUSD   float64 `json:"total_quota_usd"`   // Total quota in USD
-	AvgQuota        float64 `json:"avg_quota"`         // Average quota per request
-	AvgQuotaUSD     float64 `json:"avg_quota_usd"`     // Average quota in USD per request
-	TotalTokens     int64   `json:"total_tokens"`      // Total tokens (prompt + completion)
-	PromptTokens    int64   `json:"prompt_tokens"`     // Total prompt tokens
-	CompletionTokens int64  `json:"completion_tokens"` // Total completion tokens
+	ChannelId        int     `json:"channel_id"`
+	ChannelName      string  `json:"channel_name"`
+	TotalRequests    int     `json:"total_requests"`
+	TotalQuota       int64   `json:"total_quota"`       // Total quota consumed
+	TotalQuotaUSD    float64 `json:"total_quota_usd"`   // Total quota in USD
+	AvgQuota         float64 `json:"avg_quota"`         // Average quota per request
+	AvgQuotaUSD      float64 `json:"avg_quota_usd"`     // Average quota in USD per request
+	TotalTokens      int64   `json:"total_tokens"`      // Total tokens (prompt + completion)
+	PromptTokens     int64   `json:"prompt_tokens"`     // Total prompt tokens
+	CompletionTokens int64   `json:"completion_tokens"` // Total completion tokens
 }
 
 // QuotaTrendPoint represents quota consumption trend for a specific date
 type QuotaTrendPoint struct {
-	Date          string  `json:"date"`           // YYYY-MM-DD
-	TotalQuota    int64   `json:"total_quota"`    // Total quota consumed
+	Date          string  `json:"date"`            // YYYY-MM-DD
+	TotalQuota    int64   `json:"total_quota"`     // Total quota consumed
 	TotalQuotaUSD float64 `json:"total_quota_usd"` // Total quota in USD
-	RequestCount  int     `json:"request_count"`  // Number of requests
-	AvgQuota      float64 `json:"avg_quota"`      // Average quota per request
-	AvgQuotaUSD   float64 `json:"avg_quota_usd"`  // Average quota in USD per request
+	RequestCount  int     `json:"request_count"`   // Number of requests
+	AvgQuota      float64 `json:"avg_quota"`       // Average quota per request
+	AvgQuotaUSD   float64 `json:"avg_quota_usd"`   // Average quota in USD per request
 }
 
 // ChannelQuotaAnalysisResponse represents the complete quota-based channel analysis
@@ -430,14 +452,14 @@ type ChannelQuotaSummary struct {
 
 // ChannelDailyQuotaPoint represents daily quota consumption for a single channel
 type ChannelDailyQuotaPoint struct {
-	Date          string  `json:"date"`           // YYYY-MM-DD
+	Date          string  `json:"date"` // YYYY-MM-DD
 	ChannelId     int     `json:"channel_id"`
 	ChannelName   string  `json:"channel_name"`
-	TotalQuota    int64   `json:"total_quota"`    // Total quota consumed on this day
+	TotalQuota    int64   `json:"total_quota"`     // Total quota consumed on this day
 	TotalQuotaUSD float64 `json:"total_quota_usd"` // Total quota in USD
-	RequestCount  int     `json:"request_count"`  // Number of requests
-	AvgQuota      float64 `json:"avg_quota"`      // Average quota per request
-	AvgQuotaUSD   float64 `json:"avg_quota_usd"`  // Average quota in USD per request
+	RequestCount  int     `json:"request_count"`   // Number of requests
+	AvgQuota      float64 `json:"avg_quota"`       // Average quota per request
+	AvgQuotaUSD   float64 `json:"avg_quota_usd"`   // Average quota in USD per request
 }
 
 // ChannelDailyQuotaTrendResponse represents daily quota consumption trends by channel
@@ -447,7 +469,7 @@ type ChannelDailyQuotaTrendResponse struct {
 
 // UserDailyConsumptionPoint represents daily consumption data for a single user
 type UserDailyConsumptionPoint struct {
-	Date          string  `json:"date"`            // YYYY-MM-DD
+	Date          string  `json:"date"` // YYYY-MM-DD
 	UserId        int     `json:"user_id"`
 	Username      string  `json:"username"`
 	DisplayName   string  `json:"display_name"`

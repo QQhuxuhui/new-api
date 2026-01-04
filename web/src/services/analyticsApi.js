@@ -398,6 +398,50 @@ export const AnalyticsAPI = {
       throw error;
     }
   },
+
+  /**
+   * Fetch user wallet top-up records
+   * @param {number} userId - User ID
+   * @param {number} page - Current page number
+   * @param {number} pageSize - Page size
+   * @returns {Promise<Object>} items + total + page + page_size
+   */
+  async fetchUserTopUps(userId, page = 1, pageSize = 10) {
+    try {
+      const response = await API.get(`${BASE_URL}/user-topups/${userId}`, {
+        params: { page, page_size: pageSize },
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data.message || 'Failed to fetch user top-ups');
+    } catch (error) {
+      showError(error.message || 'Failed to fetch user top-ups');
+      throw error;
+    }
+  },
+
+  /**
+   * Fetch user plan order records
+   * @param {number} userId - User ID
+   * @param {number} page - Current page number
+   * @param {number} pageSize - Page size
+   * @returns {Promise<Object>} items + total + page + page_size
+   */
+  async fetchUserPlanOrders(userId, page = 1, pageSize = 10) {
+    try {
+      const response = await API.get(`${BASE_URL}/user-plan-orders/${userId}`, {
+        params: { page, page_size: pageSize },
+      });
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data.message || 'Failed to fetch user plan orders');
+    } catch (error) {
+      showError(error.message || 'Failed to fetch user plan orders');
+      throw error;
+    }
+  },
 };
 
 export default AnalyticsAPI;

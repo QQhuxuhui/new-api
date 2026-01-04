@@ -119,12 +119,12 @@ export const OnboardingAnalytics = {
   },
 
   // Track wizard completion
-  trackCompleted: (timeSpent, completionRate, createdToken, toppedUp) => {
+  trackCompleted: (timeSpent, completionRate, createdToken, usageModeSelected) => {
     trackEvent('onboarding_completed', {
       time_spent: timeSpent,
       completion_rate: completionRate,
       created_token: createdToken,
-      topped_up: toppedUp,
+      usage_mode_selected: usageModeSelected,
     });
   },
 

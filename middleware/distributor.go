@@ -460,6 +460,8 @@ func Distribute() func(c *gin.Context) {
 								ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
 								sessionManager.BindChannel(userId, modelRequest.Model, usingGroup, channel.Id, time.Duration(ttl)*time.Second)
 								common.SetContextKey(c, constant.ContextKeyStickySessionNew, true)
+								// 记录选择渠道时的优先级索引，用于重试时继续遍历
+								common.SetContextKey(c, constant.ContextKeyChannelPriorityIndex, retry)
 								break
 							}
 							// channel == nil means no healthy channels at this priority, continue to next
@@ -494,6 +496,8 @@ func Distribute() func(c *gin.Context) {
 
 						if channel != nil {
 							// Found healthy channel
+							// 记录选择渠道时的优先级索引，用于重试时继续遍历
+							common.SetContextKey(c, constant.ContextKeyChannelPriorityIndex, retry)
 							break
 						}
 						// channel == nil means no healthy channels at this priority, continue to next
@@ -794,7 +798,8 @@ func Distribute() func(c *gin.Context) {
 
 						newAPIError = SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 						if newAPIError == nil {
-							// Success, exit all loops
+							// Success, update priority index for controller retry
+							common.SetContextKey(c, constant.ContextKeyChannelPriorityIndex, retry)
 							break retryLoop
 						}
 

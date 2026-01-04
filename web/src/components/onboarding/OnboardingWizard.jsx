@@ -23,16 +23,22 @@ import {
   useOnboarding,
   useOnboardingProgress,
 } from '../../hooks/useOnboarding';
-import { trackEvent } from '../../helpers/analytics';
+import { trackEvent, OnboardingAnalytics } from '../../helpers/analytics';
 import ProgressBar from './ProgressBar';
 import WelcomeStep from './steps/WelcomeStep';
-import TopupStep from './steps/TopupStep';
+import UsageModeStep from './steps/UsageModeStep';
 import CreateTokenStep from './steps/CreateTokenStep';
-import GetStartedStep from './steps/GetStartedStep';
+import TutorialStep from './steps/TutorialStep';
 
 /**
  * Main onboarding wizard component
  * Guides new users through account setup
+ *
+ * Steps:
+ * 1. Welcome - Platform overview and API endpoints
+ * 2. UsageMode - Choose subscription plan, pay-as-you-go, or redemption code
+ * 3. CreateToken - Create API token for Claude Code/Codex/Gemini
+ * 4. Tutorial - Guide to installation tutorials
  */
 const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
   const { progress, updateProgress, markComplete, markDismissed } =
@@ -48,7 +54,7 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
   const [createdToken, setCreatedToken] = useState(
     progress.createdToken || null,
   );
-  const [topupData, setTopupData] = useState(progress.topupData || null);
+  const [usageModeData, setUsageModeData] = useState(progress.usageModeData || null);
 
   // Track session number for analytics
   const sessionCountRef = useRef(progress.sessionCount || 1);
@@ -63,7 +69,7 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
       setCompletedSteps([]); // UI shows fresh progress bar
       setSkippedSteps([]);   // UI resets skipped state
       setCreatedToken(null); // UI resets token display
-      setTopupData(null);    // UI resets topup display
+      setUsageModeData(null);    // UI resets usage mode display
 
       // Prepare batch update for localStorage
       const progressUpdates = {
@@ -140,11 +146,11 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
     // Prepare updates for localStorage (single batch update)
     const progressUpdates = {};
 
-    // Handle step 2: topup data
+    // Handle step 2: usage mode data
     if (currentStep === 2 && data.method) {
-      const newTopupData = data;
-      setTopupData(newTopupData);
-      progressUpdates.topupData = newTopupData;
+      const newUsageModeData = data;
+      setUsageModeData(newUsageModeData);
+      progressUpdates.usageModeData = newUsageModeData;
     }
 
     // Handle step 3: created token
@@ -287,17 +293,21 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
 
     // Combine current session state with persisted analytics data
     const hasCreatedToken = createdToken || progress.createdToken;
-    const hasTopupData = topupData || progress.topupData;
+    const hasUsageModeData = usageModeData || progress.usageModeData;
 
-    // Track completion
+    // Track completion (keep helper compatibility)
+    const completionRate = getCompletionRate(finalCompletedSteps, totalSteps);
+    OnboardingAnalytics.trackCompleted(
+      timeSpent,
+      completionRate,
+      !!hasCreatedToken,
+      !!hasUsageModeData,
+    );
     trackEvent('onboarding_completed', {
       time_spent: timeSpent,
-      completion_rate: getCompletionRate(
-        finalCompletedSteps,
-        totalSteps,
-      ),
+      completion_rate: completionRate,
       created_token: !!hasCreatedToken,
-      topped_up: !!hasTopupData,
+      usage_mode_selected: !!hasUsageModeData,
       total_sessions: sessionCountRef.current,
     });
 
@@ -338,7 +348,7 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
         return <WelcomeStep onNext={handleNext} onSkip={handleSkip} />;
       case 2:
         return (
-          <TopupStep
+          <UsageModeStep
             onNext={handleNext}
             onPrev={handlePrev}
             onSkip={handleSkip}
@@ -354,7 +364,7 @@ const OnboardingWizard = ({ visible, onClose, autoStart = false }) => {
         );
       case 4:
         return (
-          <GetStartedStep
+          <TutorialStep
             createdToken={createdToken}
             onComplete={handleComplete}
           />

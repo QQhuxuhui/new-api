@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -157,8 +158,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}()
 
+	// 获取中间件选择渠道时的优先级索引，重试时从下一个优先级继续
+	basePriorityIndex := common.GetContextKeyInt(c, constant.ContextKeyChannelPriorityIndex)
+
 	for i := 0; i <= common.RetryTimes; i++ {
-		channel, err := getChannel(c, group, originalModel, i)
+		// 计算实际的优先级索引：首次请求使用中间件的索引，重试时继续往后遍历
+		priorityIndex := basePriorityIndex + i
+
+		channel, err := getChannel(c, group, originalModel, i, priorityIndex)
 		if err != nil {
 			logger.LogError(c, err.Error())
 			newAPIError = err
@@ -334,7 +341,7 @@ func addUsedChannel(c *gin.Context, channelId int) {
 	c.Set("use_channel", useChannel)
 }
 
-func getChannel(c *gin.Context, group, originalModel string, retryCount int) (*model.Channel, *types.NewAPIError) {
+func getChannel(c *gin.Context, group, originalModel string, retryCount int, priorityIndex int) (*model.Channel, *types.NewAPIError) {
 	if retryCount == 0 {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
@@ -348,17 +355,30 @@ func getChannel(c *gin.Context, group, originalModel string, retryCount int) (*m
 			AutoBan: &autoBanInt,
 		}, nil
 	}
-	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(c, group, originalModel, retryCount)
+
+	// Build exclude list from previously used channels in this request
+	excludeIds := make(map[int]bool)
+	for _, idStr := range c.GetStringSlice("use_channel") {
+		if channelId, err := strconv.Atoi(idStr); err == nil {
+			excludeIds[channelId] = true
+		}
+	}
+
+	// Use excluding version to avoid retrying the same channel
+	// 使用 priorityIndex 而不是 retryCount，从中间件停止的位置继续遍历优先级
+	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannelExcluding(c, group, originalModel, priorityIndex, excludeIds)
 	if err != nil {
 		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, originalModel, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 	if channel == nil {
 		// No healthy channel at this priority - allow retry with next priority
 		// Don't use SkipRetry so the loop can continue
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的优先级 %d 无健康渠道（retry）", selectGroup, originalModel, retryCount), types.ErrorCodeGetChannelFailed)
+		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的优先级 %d 无健康渠道（retry）", selectGroup, originalModel, priorityIndex), types.ErrorCodeGetChannelFailed)
 	}
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, originalModel)
 	if newAPIError != nil {
+		// 标记已尝试的渠道，避免下一轮重试再次选中同一条受限渠道
+		addUsedChannel(c, channel.Id)
 		return nil, newAPIError
 	}
 	return channel, nil
@@ -572,8 +592,13 @@ func RelayTask(c *gin.Context) {
 		}
 	}
 
+	// 记录中间件选择渠道时的优先级索引，重试时从下一个优先级继续
+	basePriorityIndex := common.GetContextKeyInt(c, constant.ContextKeyChannelPriorityIndex)
+
 	for i := 0; shouldRetryTaskRelay(c, channelId, taskErr, retryTimes) && i < retryTimes; i++ {
-		channel, newAPIError := getChannel(c, group, originalModel, i)
+		// Task relay 使用简单的重试逻辑：从中间件已停留的优先级往后继续
+		priorityIndex := basePriorityIndex + i
+		channel, newAPIError := getChannel(c, group, originalModel, i, priorityIndex)
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("CacheGetRandomSatisfiedChannel failed: %s", newAPIError.Error()))
 			taskErr = service.TaskErrorWrapperLocal(newAPIError.Err, "get_channel_failed", http.StatusInternalServerError)

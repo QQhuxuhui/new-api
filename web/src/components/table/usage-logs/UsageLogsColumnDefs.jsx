@@ -320,19 +320,23 @@ export const getLogsColumns = ({
       dataIndex: 'username',
       render: (text, record, index) => {
         return isAdminUser ? (
-          <div>
+          <div
+            style={{ cursor: 'pointer' }}
+            onClick={(event) => {
+              event.stopPropagation();
+              showUserInfoFunc(record.user_id, text);
+            }}
+          >
             <Avatar
               size='extra-small'
               color={stringToColor(text)}
               style={{ marginRight: 4 }}
-              onClick={(event) => {
-                event.stopPropagation();
-                showUserInfoFunc(record.user_id);
-              }}
             >
               {typeof text === 'string' && text.slice(0, 1)}
             </Avatar>
-            {text}
+            <span style={{ color: '#1890ff', textDecoration: 'underline', textDecorationStyle: 'dotted' }}>
+              {text}
+            </span>
           </div>
         ) : (
           <></>
@@ -538,22 +542,14 @@ export const getLogsColumns = ({
           return <></>;
         }
         let content = t('渠道') + `：${record.channel}`;
-        if (record.other !== '') {
-          let other = JSON.parse(record.other);
-          if (other === null) {
-            return <></>;
+        try {
+          const other = getLogOther(record.other);
+          if (other?.admin_info?.use_channel?.length) {
+            const useChannelStr = other.admin_info.use_channel.join('->');
+            content = t('渠道') + `：${useChannelStr}`;
           }
-          if (other.admin_info !== undefined) {
-            if (
-              other.admin_info.use_channel !== null &&
-              other.admin_info.use_channel !== undefined &&
-              other.admin_info.use_channel !== ''
-            ) {
-              let useChannel = other.admin_info.use_channel;
-              let useChannelStr = useChannel.join('->');
-              content = t('渠道') + `：${useChannelStr}`;
-            }
-          }
+        } catch (e) {
+          console.error('Failed to parse retry info from record.other', e);
         }
         return isAdminUser ? <div>{content}</div> : <></>;
       },

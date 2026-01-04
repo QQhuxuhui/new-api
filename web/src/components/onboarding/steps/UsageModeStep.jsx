@@ -24,32 +24,31 @@ import {
   Space,
   Input,
   Card,
-  Spin,
   Banner,
+  Tag,
 } from '@douyinfe/semi-ui';
 import {
   IconTicketCodeStroked,
-  IconUserCardPhone,
+  IconCreditCard,
+  IconBox,
 } from '@douyinfe/semi-icons';
+import { useNavigate } from 'react-router-dom';
 import { API, showError, showSuccess, renderQuota } from '../../../helpers';
 import { UserContext } from '../../../context/User';
-import { StatusContext } from '../../../context/Status';
 import { OnboardingAnalytics } from '../../../helpers/analytics';
 
 const { Title, Text, Paragraph } = Typography;
 
 /**
- * Top-up step of onboarding wizard
- * Allows users to add credits to their account
+ * Usage mode selection step of onboarding wizard
+ * Allows users to choose between subscription plans, pay-as-you-go, or redemption code
  */
-const TopupStep = ({ onNext, onPrev, onSkip }) => {
+const UsageModeStep = ({ onNext, onPrev, onSkip }) => {
+  const navigate = useNavigate();
   const [userState, userDispatch] = useContext(UserContext);
-  const [statusState] = useContext(StatusContext);
 
   const [redemptionCode, setRedemptionCode] = useState('');
   const [isRedeeming, setIsRedeeming] = useState(false);
-
-  const xianyuShopLink = statusState?.status?.xianyu_shop_link || '';
 
   /**
    * Handle redemption code submission
@@ -106,45 +105,118 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
   };
 
   /**
+   * Handle view plans - navigate to plans page
+   */
+  const handleViewPlans = () => {
+    // Record selection so向导可以前进到下一步
+    onNext({ method: 'plan_subscription', destination: '/plans' });
+    navigate('/plans');
+  };
+
+  /**
+   * Handle go to topup - navigate to wallet page
+   */
+  const handleGoToTopup = () => {
+    // 记录按量付费选择并继续向导
+    onNext({ method: 'payg_topup', destination: '/console/topup' });
+    navigate('/console/topup');
+  };
+
+  /**
    * Handle skip step
    */
   const handleSkip = () => {
     onSkip({ skipped: true });
   };
 
-  /**
-   * Open Xianyu shop in new tab
-   */
-  const handleXianyuShop = () => {
-    if (!xianyuShopLink) {
-      showError('管理员未设置闲鱼店铺链接');
-      return;
-    }
-    window.open(xianyuShopLink, '_blank');
-  };
-
   return (
     <div style={{ padding: '20px 0' }}>
       {/* Title */}
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <Title heading={4}>充值账户</Title>
+        <Title heading={4}>选择使用模式</Title>
         <Paragraph type='tertiary' style={{ marginTop: 8 }}>
-          选择一种方式为您的账户充值
+          选择一种方式为您的账户获取额度
         </Paragraph>
       </div>
 
       {/* Info banner */}
       <Banner
         type='info'
-        description='新用户赠送的额度可以直接使用,无需充值'
+        description='新用户赠送的额度可以直接使用，无需充值'
         style={{ marginBottom: 24 }}
       />
+
+      {/* Subscription Plans Option */}
+      <Card
+        shadows='hover'
+        style={{
+          marginBottom: 16,
+          border: '1px solid var(--semi-color-border)',
+          cursor: 'pointer',
+        }}
+        onClick={handleViewPlans}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <IconBox
+              size='large'
+              style={{ color: 'var(--semi-color-primary)' }}
+            />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Text strong style={{ fontSize: 16 }}>
+                  套餐订阅
+                </Text>
+                <Tag color='blue' size='small'>推荐</Tag>
+              </div>
+              <Text type='tertiary' size='small'>
+                日卡/周卡/月卡等，固定额度更划算
+              </Text>
+            </div>
+          </div>
+          <Button theme='solid' type='primary' onClick={(e) => { e.stopPropagation(); handleViewPlans(); }}>
+            查看套餐
+          </Button>
+        </div>
+      </Card>
+
+      {/* Pay-as-you-go Option */}
+      <Card
+        shadows='hover'
+        style={{
+          marginBottom: 16,
+          border: '1px solid var(--semi-color-border)',
+          cursor: 'pointer',
+        }}
+        onClick={handleGoToTopup}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <IconCreditCard
+              size='large'
+              style={{ color: 'var(--semi-color-success)' }}
+            />
+            <div>
+              <Text strong style={{ fontSize: 16 }}>
+                按量付费
+              </Text>
+              <br />
+              <Text type='tertiary' size='small'>
+                充值后按实际使用量扣费，不限时，灵活使用
+              </Text>
+            </div>
+          </div>
+          <Button theme='light' type='primary' onClick={(e) => { e.stopPropagation(); handleGoToTopup(); }}>
+            前往充值
+          </Button>
+        </div>
+      </Card>
 
       {/* Redemption Code Option */}
       <Card
         shadows='hover'
         style={{
-          marginBottom: 16,
+          marginBottom: 32,
           border: '1px solid var(--semi-color-border)',
         }}
       >
@@ -152,7 +224,7 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <IconTicketCodeStroked
               size='large'
-              style={{ color: 'var(--semi-color-primary)' }}
+              style={{ color: 'var(--semi-color-warning)' }}
             />
             <div>
               <Text strong style={{ fontSize: 16 }}>
@@ -160,7 +232,7 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
               </Text>
               <br />
               <Text type='tertiary' size='small'>
-                输入兑换码即可快速充值
+                输入兑换码即可快速获取额度
               </Text>
             </div>
           </div>
@@ -179,56 +251,13 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
             />
             <Button
               theme='solid'
-              type='primary'
+              type='warning'
               onClick={handleRedeem}
               loading={isRedeeming}
               disabled={!redemptionCode.trim()}
             >
               兑换
             </Button>
-          </Space>
-        </Space>
-      </Card>
-
-      {/* Contact Admin or Xianyu Shop Option */}
-      <Card
-        shadows='hover'
-        style={{
-          marginBottom: 32,
-          border: '1px solid var(--semi-color-border)',
-        }}
-      >
-        <Space vertical spacing='medium' style={{ width: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <IconUserCardPhone
-              size='large'
-              style={{ color: 'var(--semi-color-warning)' }}
-            />
-            <div>
-              <Text strong style={{ fontSize: 16 }}>
-                联系管理员或闲鱼店铺购买
-              </Text>
-              <br />
-              <Text type='tertiary' size='small'>
-                如需帮助，请联系平台管理员或访问闲鱼店铺购买
-              </Text>
-            </div>
-          </div>
-
-          <Space style={{ width: '100%' }}>
-            <Button theme='solid' type='secondary' block>
-              联系管理员
-            </Button>
-            {xianyuShopLink && (
-              <Button
-                theme='solid'
-                type='secondary'
-                onClick={handleXianyuShop}
-                block
-              >
-                闲鱼店铺
-              </Button>
-            )}
           </Space>
         </Space>
       </Card>
@@ -246,4 +275,4 @@ const TopupStep = ({ onNext, onPrev, onSkip }) => {
   );
 };
 
-export default TopupStep;
+export default UsageModeStep;

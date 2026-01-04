@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -25,10 +24,9 @@ const (
 	LowTrafficFailureRate    = 0.80 // 80% failure rate for low-traffic suspension
 
 	// Health State Thresholds
-	SuspensionThreshold   = 3    // high-failure-rate periods to trigger suspension
-	DisableThreshold      = 10   // periods to trigger permanent disable
-	BaseSuspensionMinutes = 5.0  // base minutes for exponential backoff
-	MaxSuspensionMinutes  = 60.0 // max minutes cap for suspension
+	SuspensionThreshold      = 3                  // high-failure-rate periods to trigger suspension
+	DisableThreshold         = 10                 // periods to trigger permanent disable
+	FixedSuspensionDuration  = 2 * time.Minute    // fixed suspension duration (no exponential backoff)
 
 	// Redis key prefixes
 	keyBucketTotal     = "channel:health:%d:bucket:%d:total"
@@ -532,28 +530,25 @@ func GetBatchChannelHealth(channelIDs []int) ([]*ChannelHealth, error) {
 	return results, nil
 }
 
-// suspendChannel temporarily suspends channel with exponential backoff
+// suspendChannel temporarily suspends channel with fixed duration
 func suspendChannel(channelID int) error {
 	ctx := context.Background()
 	rdb := common.RDB
 
-	// Increment suspension count (tracks number of times suspended)
+	// Increment suspension count (for statistics tracking only)
 	suspensionCountKey := fmt.Sprintf(keySuspensionCount, channelID)
 	count, err := rdb.Incr(ctx, suspensionCountKey).Result()
 	if err != nil {
 		return err
 	}
 
-	// Calculate cooldown duration with exponential backoff
-	// Formula: min(BASE * 2^(count-1), MAX)
-	// 1st: 5min, 2nd: 10min, 3rd: 20min, 4th: 40min, 5th+: 60min
-	cooldownMinutes := math.Min(
-		BaseSuspensionMinutes*math.Pow(2, float64(count-1)),
-		MaxSuspensionMinutes,
-	)
-	cooldownDuration := time.Duration(cooldownMinutes) * time.Minute
+	// Fixed suspension duration: 2 minutes
+	// Rationale: Upstream recovery time is unpredictable, shorter suspension allows
+	// faster detection of recovery. The sliding window mechanism will re-suspend
+	// if the channel is still unhealthy after the suspension expires.
+	cooldownDuration := FixedSuspensionDuration
 
-	// Set suspension flag with calculated TTL
+	// Set suspension flag with fixed TTL
 	suspendedKey := fmt.Sprintf(keySuspended, channelID)
 	err = rdb.Set(ctx, suspendedKey, "1", cooldownDuration).Err()
 	if err != nil {
