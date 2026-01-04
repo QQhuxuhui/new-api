@@ -33,12 +33,15 @@ import {
   Row,
   Col,
   Table,
+  Progress,
 } from '@douyinfe/semi-ui';
 import { VChart } from '@visactor/react-vchart';
 import { IconClose, IconUser, IconCalendar } from '@douyinfe/semi-icons';
 import { AnalyticsAPI } from '../../../../services/analyticsApi';
 import { formatUSDAmount } from '../../../../utils/currency';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
+import { timestamp2string } from '../../../../helpers';
+import { timestamp2string } from '../../../../helpers';
 
 const { Text, Title } = Typography;
 
@@ -54,6 +57,20 @@ const UserDetailModal = ({ visible, user, onClose }) => {
   const [data, setData] = useState(null);
   const [selectedDays, setSelectedDays] = useState(30);
   const [activeTab, setActiveTab] = useState('daily');
+  const [topups, setTopups] = useState([]);
+  const [planOrders, setPlanOrders] = useState([]);
+  const [topupPagination, setTopupPagination] = useState({
+    currentPage: 1,
+    pageSize: 10,
+    total: 0,
+  });
+  const [planOrderPagination, setPlanOrderPagination] = useState({
+    currentPage: 1,
+    pageSize: 10,
+    total: 0,
+  });
+  const [topupLoading, setTopupLoading] = useState(false);
+  const [planOrderLoading, setPlanOrderLoading] = useState(false);
 
   // Fetch consumption data
   useEffect(() => {
@@ -61,6 +78,63 @@ const UserDetailModal = ({ visible, user, onClose }) => {
       fetchData();
     }
   }, [visible, user?.id, selectedDays]);
+
+  // reset pagination when user changes
+  useEffect(() => {
+    if (visible) {
+      setTopupPagination((prev) => ({ ...prev, currentPage: 1, pageSize: 10, total: 0 }));
+      setPlanOrderPagination((prev) => ({ ...prev, currentPage: 1, pageSize: 10, total: 0 }));
+      setTopups([]);
+      setPlanOrders([]);
+    }
+  }, [user?.id, visible]);
+
+  // fetch records when records tab opens
+  useEffect(() => {
+    if (visible && user?.id && activeTab === 'records') {
+      fetchTopups(1, topupPagination.pageSize);
+      fetchPlanOrders(1, planOrderPagination.pageSize);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, visible, user?.id]);
+
+  // Fetch top-up records
+  const fetchTopups = async (page = 1, pageSize = 10) => {
+    if (!user?.id) return;
+    setTopupLoading(true);
+    try {
+      const res = await AnalyticsAPI.fetchUserTopUps(user.id, page, pageSize);
+      setTopups(res.items || []);
+      setTopupPagination({
+        currentPage: res.page || page,
+        pageSize: res.page_size || pageSize,
+        total: res.total || 0,
+      });
+    } catch (error) {
+      console.error('Failed to fetch user topups:', error);
+    } finally {
+      setTopupLoading(false);
+    }
+  };
+
+  // Fetch plan order records
+  const fetchPlanOrders = async (page = 1, pageSize = 10) => {
+    if (!user?.id) return;
+    setPlanOrderLoading(true);
+    try {
+      const res = await AnalyticsAPI.fetchUserPlanOrders(user.id, page, pageSize);
+      setPlanOrders(res.items || []);
+      setPlanOrderPagination({
+        currentPage: res.page || page,
+        pageSize: res.page_size || pageSize,
+        total: res.total || 0,
+      });
+    } catch (error) {
+      console.error('Failed to fetch user plan orders:', error);
+    } finally {
+      setPlanOrderLoading(false);
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -448,6 +522,159 @@ const UserDetailModal = ({ visible, user, onClose }) => {
     },
   ];
 
+  // Plan balance columns
+  const balanceColumns = [
+    {
+      title: t('套餐名称'),
+      dataIndex: 'plan_display_name',
+      render: (text, record) => text || record.plan_name || '-',
+    },
+    {
+      title: t('类型'),
+      dataIndex: 'plan_type',
+      render: (val) => {
+        const map = {
+          subscription: t('订阅'),
+          consumption: t('消耗'),
+          trial: t('试用'),
+        };
+        return map[val] || val || '-';
+      },
+    },
+    {
+      title: t('状态'),
+      dataIndex: 'is_current',
+      render: (v) => (v === 1 ? <Tag color="green" size="small">{t('当前')}</Tag> : null),
+    },
+    {
+      title: t('总额度'),
+      dataIndex: 'total_quota_usd',
+      render: (val) => formatUSDAmount(val),
+    },
+    {
+      title: t('已用'),
+      dataIndex: 'used_quota_usd',
+      render: (val) => formatUSDAmount(val),
+    },
+    {
+      title: t('剩余'),
+      dataIndex: 'quota_usd',
+      render: (val) => formatUSDAmount(val),
+    },
+    {
+      title: t('使用率'),
+      dataIndex: 'usage_percent',
+      render: (val) => (
+        <div style={{ minWidth: 100 }}>
+          <Progress percent={Math.min(Number(val) || 0, 100)} size="small" showInfo />
+        </div>
+      ),
+    },
+    {
+      title: t('今日限额'),
+      dataIndex: 'daily_quota_limit_usd',
+      render: (val) => (val && Number(val) > 0 ? formatUSDAmount(val) : '-'),
+    },
+    {
+      title: t('今日已用'),
+      dataIndex: 'today_used_usd',
+      render: (val) => formatUSDAmount(val),
+    },
+    {
+      title: t('今日剩余'),
+      dataIndex: 'today_remaining_usd',
+      render: (val) => formatUSDAmount(val),
+    },
+    {
+      title: t('过期时间'),
+      dataIndex: 'expires_at',
+      render: (val) => {
+        const num = Number(val);
+        if (num === 0) return t('永久');
+        if (!num) return '-';
+        const seconds = num > 1e12 ? Math.floor(num / 1000) : Math.floor(num);
+        return timestamp2string(seconds);
+      },
+    },
+  ];
+
+  // Topup columns
+  const topupColumns = [
+    { title: t('订单号'), dataIndex: 'trade_no' },
+    { title: t('金额'), dataIndex: 'money', render: (v) => formatUSDAmount(v) },
+    { title: t('支付方式'), dataIndex: 'payment_method' },
+    { title: t('状态'), dataIndex: 'status' },
+    {
+      title: t('创建时间'),
+      dataIndex: 'create_time',
+      render: (v) => {
+        const num = Number(v);
+        if (!num) return '-';
+        const seconds = num > 1e12 ? Math.floor(num / 1000) : Math.floor(num);
+        return timestamp2string(seconds);
+      },
+    },
+    {
+      title: t('完成时间'),
+      dataIndex: 'complete_time',
+      render: (v) => {
+        const num = Number(v);
+        if (!num) return '-';
+        const seconds = num > 1e12 ? Math.floor(num / 1000) : Math.floor(num);
+        return timestamp2string(seconds);
+      },
+    },
+  ];
+
+  // Plan order columns
+  const planOrderColumns = [
+    { title: t('订单号'), dataIndex: 'order_no' },
+    {
+      title: t('套餐名称'),
+      dataIndex: 'plan_display_name',
+      render: (text, record) => text || record.plan_name || '-',
+    },
+    { title: t('价格'), dataIndex: 'final_price', render: (v) => formatUSDAmount(v) },
+    { title: t('支付方式'), dataIndex: 'payment_method' },
+    { title: t('状态'), dataIndex: 'status' },
+    {
+      title: t('创建时间'),
+      dataIndex: 'created_at',
+      render: (v) => {
+        const num = Number(v);
+        if (!num) return '-';
+        const seconds = num > 1e12 ? Math.floor(num / 1000) : Math.floor(num);
+        return timestamp2string(seconds);
+      },
+    },
+    {
+      title: t('支付时间'),
+      dataIndex: 'paid_at',
+      render: (v) => {
+        const num = Number(v);
+        if (!num) return '-';
+        const seconds = num > 1e12 ? Math.floor(num / 1000) : Math.floor(num);
+        return timestamp2string(seconds);
+      },
+    },
+  ];
+
+  const handleTopupPageChange = (page, pageSize) => {
+    fetchTopups(page, pageSize || topupPagination.pageSize);
+  };
+
+  const handleTopupPageSizeChange = (pageSize) => {
+    fetchTopups(1, pageSize);
+  };
+
+  const handlePlanOrderPageChange = (page, pageSize) => {
+    fetchPlanOrders(page, pageSize || planOrderPagination.pageSize);
+  };
+
+  const handlePlanOrderPageSizeChange = (pageSize) => {
+    fetchPlanOrders(1, pageSize);
+  };
+
   return (
     <SideSheet
       title={
@@ -503,6 +730,22 @@ const UserDetailModal = ({ visible, user, onClose }) => {
                     {t('请求数')}: {data.user_info.request_count.toLocaleString()}
                   </Tag>
                 </Space>
+              </Card>
+
+              {/* Plan balance info */}
+              <Card style={{ marginBottom: 20 }}>
+                <Title heading={5} style={{ marginBottom: 12 }}>
+                  {t('套餐余额')}
+                </Title>
+                <Table
+                  columns={balanceColumns}
+                  dataSource={data.user_plan_balances || []}
+                  rowKey="plan_name"
+                  size="small"
+                  pagination={false}
+                  empty={<Empty description={t('暂无套餐数据')} />}
+                  scroll={{ x: 1200 }}
+                />
               </Card>
 
               {/* Statistics cards */}
@@ -565,23 +808,78 @@ const UserDetailModal = ({ visible, user, onClose }) => {
                           <Empty description={t('暂无数据')} />
                         )}
                       </Col>
-                      <Col span={isMobile ? 24 : 12}>
-                        <Table
-                          columns={modelTableColumns}
-                          dataSource={data.model_summary || []}
-                          rowKey="model_name"
-                          pagination={false}
-                          size="small"
-                          style={{ marginTop: isMobile ? 20 : 0 }}
-                        />
-                      </Col>
-                    </Row>
-                  </TabPane>
-                </Tabs>
-              </Card>
-            </>
-          ) : (
-            <Empty description={t('暂无数据')} />
+                  <Col span={isMobile ? 24 : 12}>
+                    <Table
+                      columns={modelTableColumns}
+                      dataSource={data.model_summary || []}
+                      rowKey="model_name"
+                      pagination={false}
+                      size="small"
+                      style={{ marginTop: isMobile ? 20 : 0 }}
+                    />
+                  </Col>
+                </Row>
+              </TabPane>
+
+              <TabPane
+                tab={t('消费记录')}
+                itemKey="records"
+              >
+                <Space vertical style={{ width: '100%' }} size="large">
+                  <Card>
+                    <Title heading={5} style={{ marginBottom: 12 }}>
+                      {t('钱包充值记录')}
+                    </Title>
+                    <Table
+                      columns={topupColumns}
+                      dataSource={topups}
+                      loading={topupLoading}
+                      rowKey="trade_no"
+                      size="small"
+                      pagination={{
+                        currentPage: topupPagination.currentPage,
+                        pageSize: topupPagination.pageSize,
+                        total: topupPagination.total,
+                        showSizeChanger: true,
+                        pageSizeOpts: [10, 20, 50, 100],
+                        onPageChange: handleTopupPageChange,
+                        onPageSizeChange: handleTopupPageSizeChange,
+                      }}
+                      empty={<Empty description={t('暂无充值记录')} />}
+                      scroll={{ x: 900 }}
+                    />
+                  </Card>
+
+                  <Card>
+                    <Title heading={5} style={{ marginBottom: 12 }}>
+                      {t('套餐订单记录')}
+                    </Title>
+                    <Table
+                      columns={planOrderColumns}
+                      dataSource={planOrders}
+                      loading={planOrderLoading}
+                      rowKey="order_no"
+                      size="small"
+                      pagination={{
+                        currentPage: planOrderPagination.currentPage,
+                        pageSize: planOrderPagination.pageSize,
+                        total: planOrderPagination.total,
+                        showSizeChanger: true,
+                        pageSizeOpts: [10, 20, 50, 100],
+                        onPageChange: handlePlanOrderPageChange,
+                        onPageSizeChange: handlePlanOrderPageSizeChange,
+                      }}
+                      empty={<Empty description={t('暂无套餐订单')} />}
+                      scroll={{ x: 1000 }}
+                    />
+                  </Card>
+                </Space>
+              </TabPane>
+            </Tabs>
+          </Card>
+        </>
+      ) : (
+        <Empty description={t('暂无数据')} />
           )}
         </div>
       </Spin>

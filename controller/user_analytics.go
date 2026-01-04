@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
@@ -280,6 +281,85 @@ func GetUserBalanceAnalysis(c *gin.Context) {
 	})
 }
 
+// GetUserTopUpHistory 获取指定用户的充值记录（管理员）
+func GetUserTopUpHistory(c *gin.Context) {
+	userIdStr := c.Param("user_id")
+	userId, err := strconv.Atoi(userIdStr)
+	if err != nil || userId <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid user ID",
+		})
+		return
+	}
+
+	pageInfo := common.GetPageQuery(c)
+	topups, total, err := model.GetUserTopUps(userId, pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(topups)
+	common.ApiSuccess(c, pageInfo)
+}
+
+// GetUserPlanOrders 获取指定用户的套餐订单记录（管理员）
+func GetUserPlanOrders(c *gin.Context) {
+	userIdStr := c.Param("user_id")
+	userId, err := strconv.Atoi(userIdStr)
+	if err != nil || userId <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid user ID",
+		})
+		return
+	}
+
+	pageInfo := common.GetPageQuery(c)
+	page := pageInfo.GetPage()
+	pageSize := pageInfo.GetPageSize()
+
+	orders, total, err := model.GetUserOrders(userId, page, pageSize)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Build response list with plan display name fallback
+	orderList := make([]gin.H, 0, len(orders))
+	for _, order := range orders {
+		item := gin.H{
+			"order_id":       order.Id,
+			"order_no":       order.OrderNo,
+			"plan_id":        order.PlanId,
+			"final_price":    order.FinalPrice,
+			"original_price": order.PlanOriginalPrice,
+			"status":         order.Status,
+			"payment_method": order.PaymentMethod,
+			"expired_at":     order.ExpiredAt,
+			"created_at":     order.CreatedAt,
+			"paid_at":        order.PaidAt,
+			"delivered_at":   order.DeliveredAt,
+		}
+
+		if order.PlanDisplayName != "" {
+			item["plan_name"] = order.PlanDisplayName
+		} else if order.Plan != nil {
+			item["plan_name"] = order.Plan.DisplayName
+		} else if order.PlanName != "" {
+			item["plan_name"] = order.PlanName
+		}
+
+		orderList = append(orderList, item)
+	}
+
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(orderList)
+	common.ApiSuccess(c, pageInfo)
+}
+
 // GetUserConsumptionDetail returns detailed consumption data for a specific user
 // including daily trends, plan-wise consumption, and model usage breakdown
 func GetUserConsumptionDetail(c *gin.Context) {
@@ -339,5 +419,3 @@ func GetUserDailyConsumptionTrend(c *gin.Context) {
 		"data":    result,
 	})
 }
-
-

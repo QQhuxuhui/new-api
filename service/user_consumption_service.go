@@ -65,6 +65,11 @@ func GetUserConsumptionDetail(userId int, days int) (*dto.UserConsumptionDetail,
 		return nil, fmt.Errorf("failed to get model summary: %w", err)
 	}
 
+	userPlanBalances, err := getUserPlanBalances(userId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user plan balances: %w", err)
+	}
+
 	// Calculate statistics (using actual totalDays for average calculation)
 	stats := calculateConsumptionStats(dailyConsumption, days)
 
@@ -79,10 +84,117 @@ func GetUserConsumptionDetail(userId int, days int) (*dto.UserConsumptionDetail,
 		DailyConsumption:     dailyConsumption,
 		PlanDailyConsumption: planConsumption,
 		ModelSummary:         modelSummary,
+		UserPlanBalances:     userPlanBalances,
 		Stats:                stats,
 	}
 
 	return result, nil
+}
+
+// getUserPlanBalances builds balance details for all user plans
+func getUserPlanBalances(userId int) ([]dto.UserPlanBalance, error) {
+	userPlans, err := model.GetAllUserPlans(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	// Prepare time range for today's usage (Beijing timezone)
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	if loc == nil {
+		loc = time.FixedZone("CST", 8*3600)
+	}
+	now := time.Now().In(loc)
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).Unix()
+	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, loc).Unix()
+
+	var balances []dto.UserPlanBalance
+
+	for _, up := range userPlans {
+		planName := up.PlanName
+		planDisplayName := up.PlanDisplayName
+		planType := up.PlanType
+		planCategory := up.PlanCategory
+
+		// Fallback to plan template if snapshot missing
+		if up.Plan != nil {
+			if planName == "" {
+				planName = up.Plan.Name
+			}
+			if planDisplayName == "" {
+				planDisplayName = up.Plan.DisplayName
+			}
+			if planType == "" {
+				planType = up.Plan.Type
+			}
+			if planCategory == "" {
+				planCategory = up.Plan.Category
+			}
+		}
+
+		// Compute quotas
+		totalQuota := up.OriginalQuota
+		if totalQuota == 0 {
+			totalQuota = up.Quota + up.UsedQuota
+		}
+		if totalQuota < 0 {
+			totalQuota = 0
+		}
+
+		totalQuotaUSD := common.QuotaToUSD(int(totalQuota))
+		remainingUSD := common.QuotaToUSD(int(up.Quota))
+		usedUSD := common.QuotaToUSD(int(up.UsedQuota))
+
+		usagePercent := float64(0)
+		if totalQuotaUSD > 0 {
+			usagePercent = (usedUSD / totalQuotaUSD) * 100
+		}
+
+		// Daily limit data (for subscription plans)
+		dailyLimit := up.GetPlanDailyQuotaLimit()
+		dailyLimitUSD := common.QuotaToUSD(int(dailyLimit))
+
+		var todayUsedUSD float64
+		var todayRemainingUSD float64
+		if dailyLimit > 0 {
+			// Query today's usage from logs by user_plan_id
+			type result struct {
+				TotalQuota int64
+			}
+			var r result
+			query := `
+				SELECT COALESCE(SUM(quota), 0) AS total_quota
+				FROM logs
+				WHERE user_id = ? AND user_plan_id = ? AND type = ? AND created_at >= ? AND created_at <= ?`
+			if err := model.LOG_DB.Raw(query, up.UserId, up.Id, model.LogTypeConsume, startOfDay, endOfDay).Scan(&r).Error; err == nil {
+				todayUsedUSD = common.QuotaToUSD(int(r.TotalQuota))
+			}
+			todayRemainingUSD = dailyLimitUSD - todayUsedUSD
+			if todayRemainingUSD < 0 {
+				todayRemainingUSD = 0
+			}
+		}
+
+		balances = append(balances, dto.UserPlanBalance{
+			UserPlanID:         up.Id,
+			PlanName:           planName,
+			PlanDisplayName:    planDisplayName,
+			PlanType:           planType,
+			PlanCategory:       planCategory,
+			IsCurrent:          up.IsCurrent,
+			QuotaUSD:           remainingUSD,
+			UsedQuotaUSD:       usedUSD,
+			TotalQuotaUSD:      totalQuotaUSD,
+			UsagePercent:       usagePercent,
+			ExpiresAt:          up.ExpiresAt,
+			Status:             up.Status,
+			DailyQuotaLimit:    dailyLimit,
+			DailyQuotaLimitUSD: dailyLimitUSD,
+			TodayUsedUSD:       todayUsedUSD,
+			TodayRemainingUSD:  todayRemainingUSD,
+		})
+	}
+
+	return balances, nil
 }
 
 // getUserDailyConsumption retrieves daily consumption with model breakdown
