@@ -20,7 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  SideSheet,
+  Modal,
   Card,
   Spin,
   Typography,
@@ -34,6 +34,7 @@ import {
   Col,
   Table,
   Progress,
+  Button,
 } from '@douyinfe/semi-ui';
 import { VChart } from '@visactor/react-vchart';
 import { IconClose, IconUser, IconCalendar } from '@douyinfe/semi-icons';
@@ -675,7 +676,7 @@ const UserDetailModal = ({ visible, user, onClose }) => {
   };
 
   return (
-    <SideSheet
+    <Modal
       title={
         <Space>
           <IconUser />
@@ -687,24 +688,23 @@ const UserDetailModal = ({ visible, user, onClose }) => {
       visible={visible}
       onCancel={onClose}
       width={isMobile ? '100%' : 1200}
-      placement="right"
-      bodyStyle={{ padding: 0 }}
+      centered
+      bodyStyle={{ padding: 0, maxHeight: '70vh', overflowY: 'auto' }}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Space>
-            <Select
-              value={selectedDays}
-              onChange={setSelectedDays}
-              style={{ width: 150 }}
-              prefix={<IconCalendar />}
-            >
-              <Select.Option value={7}>{t('最近7天')}</Select.Option>
-              <Select.Option value={15}>{t('最近15天')}</Select.Option>
-              <Select.Option value={30}>{t('最近30天')}</Select.Option>
-              <Select.Option value={60}>{t('最近60天')}</Select.Option>
-              <Select.Option value={90}>{t('最近90天')}</Select.Option>
-            </Select>
-          </Space>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Select
+            value={selectedDays}
+            onChange={setSelectedDays}
+            style={{ width: 150 }}
+            prefix={<IconCalendar />}
+          >
+            <Select.Option value={7}>{t('最近7天')}</Select.Option>
+            <Select.Option value={15}>{t('最近15天')}</Select.Option>
+            <Select.Option value={30}>{t('最近30天')}</Select.Option>
+            <Select.Option value={60}>{t('最近60天')}</Select.Option>
+            <Select.Option value={90}>{t('最近90天')}</Select.Option>
+          </Select>
+          <Button onClick={onClose}>{t('关闭')}</Button>
         </div>
       }
       closeIcon={<IconClose />}
@@ -882,7 +882,7 @@ const UserDetailModal = ({ visible, user, onClose }) => {
           )}
         </div>
       </Spin>
-    </SideSheet>
+    </Modal>
   );
 };
 
