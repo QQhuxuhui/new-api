@@ -320,19 +320,23 @@ export const getLogsColumns = ({
       dataIndex: 'username',
       render: (text, record, index) => {
         return isAdminUser ? (
-          <div>
+          <div
+            style={{ cursor: 'pointer' }}
+            onClick={(event) => {
+              event.stopPropagation();
+              showUserInfoFunc(record.user_id, text);
+            }}
+          >
             <Avatar
               size='extra-small'
               color={stringToColor(text)}
               style={{ marginRight: 4 }}
-              onClick={(event) => {
-                event.stopPropagation();
-                showUserInfoFunc(record.user_id);
-              }}
             >
               {typeof text === 'string' && text.slice(0, 1)}
             </Avatar>
-            {text}
+            <span style={{ color: '#1890ff', textDecoration: 'underline', textDecorationStyle: 'dotted' }}>
+              {text}
+            </span>
           </div>
         ) : (
           <></>
