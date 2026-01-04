@@ -542,22 +542,14 @@ export const getLogsColumns = ({
           return <></>;
         }
         let content = t('渠道') + `：${record.channel}`;
-        if (record.other !== '') {
-          let other = JSON.parse(record.other);
-          if (other === null) {
-            return <></>;
+        try {
+          const other = getLogOther(record.other);
+          if (other?.admin_info?.use_channel?.length) {
+            const useChannelStr = other.admin_info.use_channel.join('->');
+            content = t('渠道') + `：${useChannelStr}`;
           }
-          if (other.admin_info !== undefined) {
-            if (
-              other.admin_info.use_channel !== null &&
-              other.admin_info.use_channel !== undefined &&
-              other.admin_info.use_channel !== ''
-            ) {
-              let useChannel = other.admin_info.use_channel;
-              let useChannelStr = useChannel.join('->');
-              content = t('渠道') + `：${useChannelStr}`;
-            }
-          }
+        } catch (e) {
+          console.error('Failed to parse retry info from record.other', e);
         }
         return isAdminUser ? <div>{content}</div> : <></>;
       },

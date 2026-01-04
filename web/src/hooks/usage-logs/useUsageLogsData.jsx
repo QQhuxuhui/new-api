@@ -653,11 +653,11 @@ export const useLogsData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadLogs(activePage, size)
-      .then()
-      .catch((reason) => {
-        showError(reason);
-      });
+    try {
+      await loadLogs(1, size);
+    } catch (reason) {
+      showError(reason);
+    }
   };
 
   // Refresh function
