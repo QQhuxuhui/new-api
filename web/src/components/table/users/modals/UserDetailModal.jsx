@@ -41,7 +41,6 @@ import { AnalyticsAPI } from '../../../../services/analyticsApi';
 import { formatUSDAmount } from '../../../../utils/currency';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import { timestamp2string } from '../../../../helpers';
-import { timestamp2string } from '../../../../helpers';
 
 const { Text, Title } = Typography;
 
