@@ -641,8 +641,21 @@ func Distribute() func(c *gin.Context) {
 								userQuota := common.GetContextKeyInt(c, constant.ContextKeyUserQuota)
 								userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 
+								// Wallet fallback permission check:
+								// 1) user directly allowed on parent tokenGroup, OR
+								// 2) any child group of the parent is allowed for the user (covers parent-group tokens)
+								walletGroupAllowed := service.GroupInUserUsableGroups(userGroup, tokenGroup)
+								if !walletGroupAllowed {
+									for _, child := range untriedGroups {
+										if service.GroupInUserUsableGroups(userGroup, child) {
+											walletGroupAllowed = true
+											break
+										}
+									}
+								}
+
 								// Check if token group is within user's usable groups (for wallet billing)
-								if userQuota > 0 && service.GroupInUserUsableGroups(userGroup, tokenGroup) {
+								if userQuota > 0 && walletGroupAllowed {
 									// CRITICAL: Check if current plan allows auto-switch before wallet fallback
 									// If auto_switch is disabled, user explicitly wants to stay on their plan
 									// and should NOT be automatically switched to wallet billing
