@@ -624,7 +624,6 @@ const FailoverRules = () => {
                 scroll={{ x: 1000 }}
                 empty={
                   <Empty
-                    image={<Empty.Image />}
                     description={t('暂无规则，点击上方按钮创建')}
                     style={{ padding: '40px 0' }}
                   />
