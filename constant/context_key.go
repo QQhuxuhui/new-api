@@ -37,6 +37,7 @@ const (
 	ContextKeyChannelKey               ContextKey = "channel_key"
 	ContextKeyChannelRatio             ContextKey = "channel_ratio"
 	ContextKeyChannelModelRatio        ContextKey = "channel_model_ratio" // float64: 渠道模型倍率
+	ContextKeyChannelPriorityIndex     ContextKey = "channel_priority_index" // int: 中间件选择渠道时的优先级索引，用于重试时继续遍历
 
 	/* user related keys */
 	ContextKeyUserId      ContextKey = "id"
