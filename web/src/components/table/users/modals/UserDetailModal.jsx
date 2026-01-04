@@ -564,11 +564,19 @@ const UserDetailModal = ({ visible, user, onClose }) => {
     {
       title: t('使用率'),
       dataIndex: 'usage_percent',
-      render: (val) => (
-        <div style={{ minWidth: 100 }}>
-          <Progress percent={Math.min(Number(val) || 0, 100)} size="small" showInfo />
-        </div>
-      ),
+      render: (val) => {
+        const percent = Math.min(Number(val) || 0, 100);
+        return (
+          <div style={{ minWidth: 100 }}>
+            <Progress
+              percent={percent}
+              size="small"
+              showInfo
+              format={(p) => `${p.toFixed(1)}%`}
+            />
+          </div>
+        );
+      },
     },
     {
       title: t('今日限额'),
