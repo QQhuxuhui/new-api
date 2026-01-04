@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -348,7 +349,17 @@ func getChannel(c *gin.Context, group, originalModel string, retryCount int) (*m
 			AutoBan: &autoBanInt,
 		}, nil
 	}
-	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(c, group, originalModel, retryCount)
+
+	// Build exclude list from previously used channels in this request
+	excludeIds := make(map[int]bool)
+	for _, idStr := range c.GetStringSlice("use_channel") {
+		if channelId, err := strconv.Atoi(idStr); err == nil {
+			excludeIds[channelId] = true
+		}
+	}
+
+	// Use excluding version to avoid retrying the same channel
+	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannelExcluding(c, group, originalModel, retryCount, excludeIds)
 	if err != nil {
 		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, originalModel, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
@@ -359,6 +370,8 @@ func getChannel(c *gin.Context, group, originalModel string, retryCount int) (*m
 	}
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, originalModel)
 	if newAPIError != nil {
+		// 标记已尝试的渠道，避免下一轮重试再次选中同一条受限渠道
+		addUsedChannel(c, channel.Id)
 		return nil, newAPIError
 	}
 	return channel, nil
