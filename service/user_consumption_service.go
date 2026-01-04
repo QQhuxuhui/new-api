@@ -219,6 +219,18 @@ func getUserPlanConsumption(userId int, startTime, endTime int64, days int) ([]d
 		})
 	}
 
+	// Append wallet consumption (user_plan_id = 0) if present
+	walletDailyData, _ := getWalletDailyConsumption(userId, startTime, endTime, days)
+	if len(walletDailyData) > 0 {
+		planDetails = append(planDetails, dto.PlanConsumptionDetail{
+			UserPlanID: 0,
+			PlanName:   "钱包",
+			PlanType:   "wallet",
+			IsCurrent:  0,
+			DailyData:  walletDailyData,
+		})
+	}
+
 	return planDetails, nil
 }
 
@@ -300,6 +312,85 @@ func getPlanDailyConsumption(userPlanId int, userId int, startTime, endTime int6
 	}
 
 	// Sort by date descending
+	sort.Slice(dailyData, func(i, j int) bool {
+		return dailyData[i].Date > dailyData[j].Date
+	})
+
+	return dailyData, nil
+}
+
+// getWalletDailyConsumption retrieves daily consumption for wallet (user_plan_id = 0)
+func getWalletDailyConsumption(userId int, startTime, endTime int64, days int) ([]dto.PlanDailyData, error) {
+	type DailyModelData struct {
+		Date         string
+		ModelName    string
+		TotalQuota   int
+		RequestCount int
+	}
+
+	// Use log database dialect for date formatting
+	dateFormat := getLogDBDateFormat()
+
+	var results []DailyModelData
+	query := fmt.Sprintf(`
+		SELECT
+			%s as date,
+			model_name,
+			SUM(quota) as total_quota,
+			COUNT(*) as request_count
+		FROM logs
+		WHERE user_id = ?
+			AND user_plan_id = 0
+			AND type = 2
+			AND created_at >= ?
+			AND created_at <= ?
+		GROUP BY %s, model_name
+		ORDER BY date DESC, total_quota DESC
+	`, dateFormat, dateFormat)
+
+	err := model.LOG_DB.Raw(query, userId, startTime, endTime).Scan(&results).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Group by date
+	dailyMap := make(map[string]*dto.PlanDailyData)
+	for _, row := range results {
+		if _, exists := dailyMap[row.Date]; !exists {
+			dailyMap[row.Date] = &dto.PlanDailyData{
+				Date:          row.Date,
+				UsedUSD:       0,
+				DailyLimitUSD: 0, // Wallet has no daily limit
+				UsagePercent:  0,
+				Models:        []dto.ModelDailyConsumption{},
+			}
+		}
+
+		usd := common.QuotaToUSD(row.TotalQuota)
+		dailyMap[row.Date].UsedUSD += usd
+		dailyMap[row.Date].Models = append(dailyMap[row.Date].Models, dto.ModelDailyConsumption{
+			ModelName:    row.ModelName,
+			USD:          usd,
+			Quota:        row.TotalQuota,
+			RequestCount: row.RequestCount,
+		})
+	}
+
+	// Calculate model percentages (usage percent remains 0 because limit is unlimited)
+	for _, item := range dailyMap {
+		for i := range item.Models {
+			if item.UsedUSD > 0 {
+				item.Models[i].Percentage = (item.Models[i].USD / item.UsedUSD) * 100
+			}
+		}
+	}
+
+	// Convert to array and sort by date descending
+	var dailyData []dto.PlanDailyData
+	for _, item := range dailyMap {
+		dailyData = append(dailyData, *item)
+	}
+
 	sort.Slice(dailyData, func(i, j int) bool {
 		return dailyData[i].Date > dailyData[j].Date
 	})
