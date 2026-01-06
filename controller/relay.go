@@ -351,53 +351,70 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			relayInfo.UsingGroup = walletGroup
 			common.SetContextKey(c, constant.ContextKeyUsingGroup, walletGroup)
 
-			// 初始化新渠道上下文
-			setupErr := middleware.SetupContextForSelectedChannel(c, walletChannel, originalModel)
-			if setupErr != nil {
-				logger.LogWarn(c, fmt.Sprintf("[WalletFallback] setup failed: %v", setupErr.Error()))
-				newAPIError = setupErr
+			// 重新计算价格并预扣（钱包计费）
+			relayInfo.InitChannelMeta(c)
+			newPriceData, priceErr := helper.ModelPriceHelper(c, relayInfo, relayInfo.PromptTokens, meta)
+			if priceErr != nil {
+				logger.LogWarn(c, fmt.Sprintf("[WalletFallback] price calc failed: %v", priceErr))
+				newAPIError = types.NewError(priceErr, types.ErrorCodeModelPriceError)
 			} else {
-				// 重新计算价格并预扣（钱包计费）
-				relayInfo.InitChannelMeta(c)
-				newPriceData, priceErr := helper.ModelPriceHelper(c, relayInfo, relayInfo.PromptTokens, meta)
-				if priceErr != nil {
-					logger.LogWarn(c, fmt.Sprintf("[WalletFallback] price calc failed: %v", priceErr))
-					newAPIError = types.NewError(priceErr, types.ErrorCodeModelPriceError)
-				} else {
-					if !newPriceData.FreeModel {
-						preConsumeErr := service.PreConsumeQuota(c, newPriceData.QuotaToPreConsume, relayInfo)
-						if preConsumeErr != nil {
-							logger.LogWarn(c, fmt.Sprintf("[WalletFallback] wallet quota insufficient: %v", preConsumeErr.Error()))
-							newAPIError = preConsumeErr
-						}
+				if !newPriceData.FreeModel {
+					preConsumeErr := service.PreConsumeQuota(c, newPriceData.QuotaToPreConsume, relayInfo)
+					if preConsumeErr != nil {
+						logger.LogWarn(c, fmt.Sprintf("[WalletFallback] wallet quota insufficient: %v", preConsumeErr.Error()))
+						newAPIError = preConsumeErr
 					}
 				}
 			}
 
+			// 在钱包分组内按优先级继续遍历，直到成功或耗尽
 			if newAPIError == nil {
-				// 用钱包渠道再发一次请求
-				requestBody, _ := common.GetRequestBody(c)
-				c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+				const maxPriorityLevelsWallet = 1000
+				attemptsWallet := 0
+				for priorityIndex := 0; priorityIndex < maxPriorityLevelsWallet; priorityIndex++ {
+					// 获取渠道（避免重复使用已尝试渠道）
+					channel, chErr := getChannel(c, walletGroup, originalModel, attemptsWallet, priorityIndex)
+					if chErr != nil {
+						logger.LogError(c, chErr.Error())
+						newAPIError = chErr
+						if types.IsSkipRetryError(chErr) {
+							break
+						}
+						continue
+					}
+					if channel == nil {
+						continue
+					}
 
-				switch relayFormat {
-				case types.RelayFormatOpenAIRealtime:
-					newAPIError = relay.WssHelper(c, relayInfo)
-				case types.RelayFormatClaude:
-					newAPIError = relay.ClaudeHelper(c, relayInfo)
-				case types.RelayFormatGemini:
-					newAPIError = geminiRelayHandler(c, relayInfo)
-				default:
-					newAPIError = relayHandler(c, relayInfo)
-				}
+					addUsedChannel(c, channel.Id)
 
-				if newAPIError == nil {
-					service.RecordChannelSuccess(walletChannel.Id)
-					return
-				}
+					requestBody, _ := common.GetRequestBody(c)
+					c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 
-				if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) ||
-					newAPIError.StatusCode == 504 || newAPIError.StatusCode == 524 {
-					service.RecordChannelFailure(walletChannel.Id, newAPIError.StatusCode, newAPIError.Error())
+					var err *types.NewAPIError
+					switch relayFormat {
+					case types.RelayFormatOpenAIRealtime:
+						err = relay.WssHelper(c, relayInfo)
+					case types.RelayFormatClaude:
+						err = relay.ClaudeHelper(c, relayInfo)
+					case types.RelayFormatGemini:
+						err = geminiRelayHandler(c, relayInfo)
+					default:
+						err = relayHandler(c, relayInfo)
+					}
+					attemptsWallet++
+
+					if err == nil {
+						service.RecordChannelSuccess(channel.Id)
+						return
+					}
+
+					newAPIError = err
+					if service.ShouldTriggerChannelFailover(err.StatusCode, err.Error()) ||
+						err.StatusCode == 504 || err.StatusCode == 524 {
+						service.RecordChannelFailure(channel.Id, err.StatusCode, err.Error())
+					}
+					// 继续尝试钱包分组下一优先级
 				}
 			}
 		}
