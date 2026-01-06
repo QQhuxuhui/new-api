@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -171,6 +172,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if err != nil {
 			logger.LogError(c, err.Error())
 			newAPIError = err
+			// 优先级已耗尽：退出优先级循环，进入跨计划/钱包降级
+			if errors.Is(err.Err, model.ErrPriorityExhausted) {
+				break
+			}
 			// Check if this is a SkipRetry error (real failure)
 			// or a retriable error (no healthy channel at this priority)
 			if types.IsSkipRetryError(err) {
@@ -475,7 +480,11 @@ func getChannel(c *gin.Context, group, originalModel string, retryCount int, pri
 	// 使用 priorityIndex 而不是 retryCount，从中间件停止的位置继续遍历优先级
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannelExcluding(c, group, originalModel, priorityIndex, excludeIds)
 	if err != nil {
-		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, originalModel, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		// 优先级耗尽：不标记 SkipRetry，交由上层进行计划/钱包降级
+		if errors.Is(err, model.ErrPriorityExhausted) {
+			return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道耗尽: %w", selectGroup, originalModel, err), types.ErrorCodeGetChannelFailed)
+		}
+		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %w", selectGroup, originalModel, err), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 	if channel == nil {
 		// No healthy channel at this priority - allow retry with next priority
