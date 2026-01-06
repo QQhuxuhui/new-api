@@ -179,6 +179,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			// Continue to next priority if available
 			continue
 		}
+		if channel == nil {
+			// 没有可用渠道但也没有错误，继续尝试下一优先级
+			continue
+		}
 
 		addUsedChannel(c, channel.Id)
 
@@ -333,6 +337,12 @@ failoverEnd:
 	if len(useChannel) > 1 {
 		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
+	}
+
+	// 如果没有任何渠道被调用且未生成错误，向客户端返回可用性错误
+	if newAPIError == nil && attempts == 0 {
+		err := types.NewError(fmt.Errorf("当前分组无可用渠道"), types.ErrorCodeGetChannelFailed)
+		c.JSON(http.StatusServiceUnavailable, err)
 	}
 }
 
@@ -610,6 +620,10 @@ func RelayTask(c *gin.Context) {
 			if types.IsSkipRetryError(newAPIError) {
 				break
 			}
+			continue
+		}
+		if channel == nil {
+			// 当前优先级无可用渠道，继续下一优先级
 			continue
 		}
 
