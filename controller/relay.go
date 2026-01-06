@@ -380,8 +380,8 @@ func getChannel(c *gin.Context, group, originalModel string, retryCount int, pri
 	}
 	if channel == nil {
 		// No healthy channel at this priority - allow retry with next priority
-		// Don't use SkipRetry so the loop can continue
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的优先级 %d 无健康渠道（retry）", selectGroup, originalModel, priorityIndex), types.ErrorCodeGetChannelFailed)
+		// 返回 nil,nil 以避免日志刷屏，外层继续尝试下一个优先级
+		return nil, nil
 	}
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, originalModel)
 	if newAPIError != nil {
