@@ -49,6 +49,26 @@ func IsChannelHealthy(channelID int) bool {
 	return true
 }
 
+// IsChannelWarning checks if channel is in warning state (degraded but not suspended)
+// Fail open on Redis errors to avoid过度降权
+func IsChannelWarning(channelID int) bool {
+	ctx := context.Background()
+	rdb := common.RDB
+
+	if rdb == nil {
+		return false
+	}
+
+	warningKey := fmt.Sprintf("channel:health:%d:warning", channelID)
+	exists, err := rdb.Exists(ctx, warningKey).Result()
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Redis error checking channel %d warning, failing open: %v", channelID, err))
+		return false
+	}
+
+	return exists > 0
+}
+
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
 		return
@@ -190,6 +210,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	// get the priority for the given retry number
 	var sumWeight = 0
 	var targetChannels []*Channel
+	var targetWeights []int
 	var suspendedCount = 0
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
@@ -199,8 +220,17 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 					suspendedCount++
 					continue
 				}
-				sumWeight += channel.GetWeight()
+				weight := channel.GetWeight()
+				if IsChannelWarning(channelId) {
+					penalty := common.WarningWeightPenaltyPercent
+					weight = int(float64(weight) * float64(100-penalty) / 100.0)
+					if weight < 1 {
+						weight = 1
+					}
+				}
+				sumWeight += weight
 				targetChannels = append(targetChannels, channel)
+				targetWeights = append(targetWeights, weight)
 			}
 		} else {
 			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
@@ -209,10 +239,11 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 
 	if len(targetChannels) == 0 {
 		// Return nil (not error) to allow retry with next priority
-		// Error would stop the retry loop in relay controller
-		// Log detailed info for debugging: total channels for model, priorities available, suspended count
-		common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended_at_priority=%d)",
-			targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount))
+		// Only log once at the first miss to avoid flooding when priority跨度很大
+		if retry == 0 {
+			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended_at_priority=%d)",
+				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount))
+		}
 		return nil, nil
 	}
 
@@ -237,8 +268,8 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	randomWeight := rand.Intn(totalWeight)
 
 	// Find a channel based on its weight
-	for _, channel := range targetChannels {
-		randomWeight -= channel.GetWeight()*smoothingFactor + smoothingAdjustment
+	for idx, channel := range targetChannels {
+		randomWeight -= targetWeights[idx]*smoothingFactor + smoothingAdjustment
 		if randomWeight < 0 {
 			return channel, nil
 		}
@@ -316,6 +347,7 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 	// get the priority for the given retry number, excluding already tried channels
 	var sumWeight = 0
 	var targetChannels []*Channel
+	var targetWeights []int
 	var suspendedCount = 0
 	var excludedCount = 0
 	for _, channelId := range channels {
@@ -331,8 +363,17 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 					suspendedCount++
 					continue
 				}
-				sumWeight += channel.GetWeight()
+				weight := channel.GetWeight()
+				if IsChannelWarning(channelId) {
+					penalty := common.WarningWeightPenaltyPercent
+					weight = int(float64(weight) * float64(100-penalty) / 100.0)
+					if weight < 1 {
+						weight = 1
+					}
+				}
+				sumWeight += weight
 				targetChannels = append(targetChannels, channel)
+				targetWeights = append(targetWeights, weight)
 			}
 		} else {
 			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
@@ -341,9 +382,11 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 
 	if len(targetChannels) == 0 {
 		// No more channels at this priority level (all tried or suspended)
-		// Log detailed info for debugging
-		common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d)",
-			targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount))
+		// Log only on first miss to avoid flooding when priority跨度很大
+		if retry == 0 {
+			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d)",
+				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount))
+		}
 		return nil, nil
 	}
 
@@ -361,8 +404,8 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 	totalWeight := sumWeight * smoothingFactor
 	randomWeight := rand.Intn(totalWeight)
 
-	for _, channel := range targetChannels {
-		randomWeight -= channel.GetWeight()*smoothingFactor + smoothingAdjustment
+	for idx, channel := range targetChannels {
+		randomWeight -= targetWeights[idx]*smoothingFactor + smoothingAdjustment
 		if randomWeight < 0 {
 			return channel, nil
 		}

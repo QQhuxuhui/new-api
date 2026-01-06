@@ -28,7 +28,7 @@ var DisplayTokenStatEnabled = true
 var DrawingEnabled = true
 var TaskEnabled = true
 var DataExportEnabled = true
-var PlanSystemEnabled = false // 套餐系统开关，默认关闭以便渐进式迁移
+var PlanSystemEnabled = false      // 套餐系统开关，默认关闭以便渐进式迁移
 var DataExportInterval = 5         // unit: minute
 var DataExportDefaultTime = "hour" // unit: minute
 var DefaultCollapseSidebar = false // default value of collapse sidebar
@@ -131,6 +131,10 @@ var GeminiSafetySetting string
 var CohereSafetySetting string
 
 var DefaultUserAgent string // Default User-Agent header when client doesn't provide one
+
+// Warning-stage channel handling (lower selection weight but still probed for recovery)
+var WarningWeightPenaltyPercent = 20 // effective weight = weight * (100 - penalty)%  (min 1)
+var WarningTTLSeconds = 60           // warning flag TTL for degraded channels
 
 const (
 	RequestIdKey = "X-Oneapi-Request-Id"

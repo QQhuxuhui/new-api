@@ -24,9 +24,9 @@ const (
 	LowTrafficFailureRate    = 0.80 // 80% failure rate for low-traffic suspension
 
 	// Health State Thresholds
-	SuspensionThreshold      = 3                  // high-failure-rate periods to trigger suspension
-	DisableThreshold         = 10                 // periods to trigger permanent disable
-	FixedSuspensionDuration  = 2 * time.Minute    // fixed suspension duration (no exponential backoff)
+	SuspensionThreshold     = 3               // high-failure-rate periods to trigger suspension
+	DisableThreshold        = 10              // periods to trigger permanent disable
+	FixedSuspensionDuration = 2 * time.Minute // fixed suspension duration (no exponential backoff)
 
 	// Redis key prefixes
 	keyBucketTotal     = "channel:health:%d:bucket:%d:total"
@@ -38,16 +38,17 @@ const (
 	keyLastSuccess     = "channel:health:%d:last_success"
 	keyTotalFailures   = "channel:health:%d:total_failures"
 	keyTotalSuccesses  = "channel:health:%d:total_successes"
+	keyWarning         = "channel:health:%d:warning"
 )
 
 // ChannelHealth represents the health state of a channel
 type ChannelHealth struct {
 	ChannelID           int       `json:"channel_id"`
-	ConsecutiveFailures int       `json:"consecutive_failures"`  // consecutive high-failure-rate periods
-	CurrentFailureRate  float64   `json:"current_failure_rate"`  // current window failure rate (0.0-1.0)
+	ConsecutiveFailures int       `json:"consecutive_failures"` // consecutive high-failure-rate periods
+	CurrentFailureRate  float64   `json:"current_failure_rate"` // current window failure rate (0.0-1.0)
 	IsSuspended         bool      `json:"is_suspended"`
 	SuspendedUntil      time.Time `json:"suspended_until,omitempty"`
-	SuspensionCount     int       `json:"suspension_count"`       // for exponential backoff
+	SuspensionCount     int       `json:"suspension_count"` // for exponential backoff
 	LastFailureTime     time.Time `json:"last_failure_time,omitempty"`
 	LastSuccessTime     time.Time `json:"last_success_time,omitempty"`
 	TotalFailures       int64     `json:"total_failures"`
@@ -258,6 +259,12 @@ func RecordChannelFailure(channelID int, statusCode int, errorMessage string) er
 		return nil
 	}
 
+	// Mark warning (degraded) state with TTL to down-weight selection probability
+	warningKey := fmt.Sprintf(keyWarning, channelID)
+	if err := rdb.Set(ctx, warningKey, 1, time.Duration(common.WarningTTLSeconds)*time.Second).Err(); err != nil {
+		common.SysLog(fmt.Sprintf("Channel %d warning flag set failed: %v", channelID, err))
+	}
+
 	// 3. High failure rate detected - increment consecutive high-failure-rate period counter
 	common.SysLog(fmt.Sprintf("Channel %d high failure rate: %s, counting consecutive period",
 		channelID, reason))
@@ -318,6 +325,10 @@ func RecordChannelSuccess(channelID int) error {
 	// 2. Reset consecutive failures
 	failuresKey := fmt.Sprintf(keyFailures, channelID)
 	rdb.Del(ctx, failuresKey)
+
+	// 3. Clear warning flag to restore full weight
+	warningKey := fmt.Sprintf(keyWarning, channelID)
+	rdb.Del(ctx, warningKey)
 
 	// 3. Remove suspension if exists
 	suspendedKey := fmt.Sprintf(keySuspended, channelID)
@@ -451,25 +462,25 @@ func GetBatchChannelHealth(channelIDs []int) ([]*ChannelHealth, error) {
 	// Use Pipeline to batch all remaining Redis GET operations
 	pipe := rdb.Pipeline()
 	type channelCmds struct {
-		failures       *redis.StringCmd
-		suspendedTTL   *redis.DurationCmd
+		failures        *redis.StringCmd
+		suspendedTTL    *redis.DurationCmd
 		suspensionCount *redis.StringCmd
-		lastFailure    *redis.StringCmd
-		lastSuccess    *redis.StringCmd
-		totalFailures  *redis.StringCmd
-		totalSuccesses *redis.StringCmd
+		lastFailure     *redis.StringCmd
+		lastSuccess     *redis.StringCmd
+		totalFailures   *redis.StringCmd
+		totalSuccesses  *redis.StringCmd
 	}
 	cmdMap := make(map[int]*channelCmds)
 
 	for _, channelID := range channelIDs {
 		cmds := &channelCmds{
-			failures:       pipe.Get(ctx, fmt.Sprintf(keyFailures, channelID)),
-			suspendedTTL:   pipe.TTL(ctx, fmt.Sprintf(keySuspended, channelID)),
+			failures:        pipe.Get(ctx, fmt.Sprintf(keyFailures, channelID)),
+			suspendedTTL:    pipe.TTL(ctx, fmt.Sprintf(keySuspended, channelID)),
 			suspensionCount: pipe.Get(ctx, fmt.Sprintf(keySuspensionCount, channelID)),
-			lastFailure:    pipe.Get(ctx, fmt.Sprintf(keyLastFailure, channelID)),
-			lastSuccess:    pipe.Get(ctx, fmt.Sprintf(keyLastSuccess, channelID)),
-			totalFailures:  pipe.Get(ctx, fmt.Sprintf(keyTotalFailures, channelID)),
-			totalSuccesses: pipe.Get(ctx, fmt.Sprintf(keyTotalSuccesses, channelID)),
+			lastFailure:     pipe.Get(ctx, fmt.Sprintf(keyLastFailure, channelID)),
+			lastSuccess:     pipe.Get(ctx, fmt.Sprintf(keyLastSuccess, channelID)),
+			totalFailures:   pipe.Get(ctx, fmt.Sprintf(keyTotalFailures, channelID)),
+			totalSuccesses:  pipe.Get(ctx, fmt.Sprintf(keyTotalSuccesses, channelID)),
 		}
 		cmdMap[channelID] = cmds
 	}

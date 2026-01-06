@@ -161,11 +161,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	// 获取中间件选择渠道时的优先级索引，重试时从下一个优先级继续
 	basePriorityIndex := common.GetContextKeyInt(c, constant.ContextKeyChannelPriorityIndex)
 
-	for i := 0; i <= common.RetryTimes; i++ {
-		// 计算实际的优先级索引：首次请求使用中间件的索引，重试时继续往后遍历
-		priorityIndex := basePriorityIndex + i
-
-		channel, err := getChannel(c, group, originalModel, i, priorityIndex)
+	// 解耦优先级遍历与重试预算：
+	// - priorityIndex 只负责“往后扫描不同优先级”
+	// - attempts 仅用于计数和日志，不再限制优先级遍历
+	const maxPriorityLevels = 1000
+	attempts := 0
+	for priorityIndex := basePriorityIndex; priorityIndex < basePriorityIndex+maxPriorityLevels; priorityIndex++ {
+		channel, err := getChannel(c, group, originalModel, attempts, priorityIndex)
 		if err != nil {
 			logger.LogError(c, err.Error())
 			newAPIError = err
@@ -177,15 +179,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			// Continue to next priority if available
 			continue
 		}
+		if channel == nil {
+			// 没有可用渠道但也没有错误，继续尝试下一优先级
+			continue
+		}
 
 		addUsedChannel(c, channel.Id)
 
 		// 调试日志：记录重试时的渠道和令牌信息
 		contextKey := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
 		maskedKey := maskApiKeyForDebug(contextKey)
-		if i > 0 {
+		if attempts > 0 {
 			logger.LogInfo(c, fmt.Sprintf("[TokenDebug] 重试 %d: 切换到渠道 #%d (%s), Context令牌: %s",
-				i, channel.Id, channel.Name, maskedKey))
+				attempts, channel.Id, channel.Name, maskedKey))
 		} else {
 			logger.LogInfo(c, fmt.Sprintf("[TokenDebug] 首次请求: 渠道 #%d (%s), Context令牌: %s",
 				channel.Id, channel.Name, maskedKey))
@@ -194,6 +200,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		requestBody, _ := common.GetRequestBody(c)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 
+		// 实际发起一次上游调用，消耗一次尝试额度
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
 			newAPIError = relay.WssHelper(c, relayInfo)
@@ -204,6 +211,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		default:
 			newAPIError = relayHandler(c, relayInfo)
 		}
+		attempts++
 
 		// Record channel health based on result
 		if newAPIError == nil {
@@ -223,9 +231,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-i) {
+		// remainingRetries 用于 shouldRetry 的“次数”判定，这里用一个足够大的剩余额度，避免受 RetryTimes 限制
+		remainingRetries := maxPriorityLevels - attempts
+		if !shouldRetry(c, newAPIError, remainingRetries) {
 			break
 		}
+
+		// 如果还可以重试，继续尝试下一层优先级
 	}
 
 	// After all retries within current plan failed, attempt cross-plan failover
@@ -319,12 +331,107 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 		}
 	}
+
+	// Wallet fallback: if plan failover failed and用户仍有钱包余额/授权，尝试钱包计费的子分组
+	if newAPIError != nil && (common.GetContextKeyInt(c, constant.ContextKeyUserQuota) > 0) {
+		walletChannel, walletGroup, walletErr := service.AttemptWalletFallbackAfterRetry(c, originalModel)
+		if walletErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("[WalletFallback] failed: %v", walletErr))
+		} else if walletChannel != nil {
+			logger.LogInfo(c, fmt.Sprintf("[WalletFallback] using channel=%d group=%s (wallet billing)", walletChannel.Id, walletGroup))
+
+			// 返还旧预扣，切换计费来源到钱包
+			if relayInfo.FinalPreConsumedQuota != 0 {
+				service.ReturnPreConsumedQuota(c, relayInfo)
+				relayInfo.FinalPreConsumedQuota = 0
+			}
+			relayInfo.BillingSource = service.BillingSourceUserBalance
+			relayInfo.UserPlanId = 0
+			relayInfo.PlanId = 0
+			relayInfo.UsingGroup = walletGroup
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, walletGroup)
+
+			// 重新计算价格并预扣（钱包计费）
+			relayInfo.InitChannelMeta(c)
+			newPriceData, priceErr := helper.ModelPriceHelper(c, relayInfo, relayInfo.PromptTokens, meta)
+			if priceErr != nil {
+				logger.LogWarn(c, fmt.Sprintf("[WalletFallback] price calc failed: %v", priceErr))
+				newAPIError = types.NewError(priceErr, types.ErrorCodeModelPriceError)
+			} else {
+				if !newPriceData.FreeModel {
+					preConsumeErr := service.PreConsumeQuota(c, newPriceData.QuotaToPreConsume, relayInfo)
+					if preConsumeErr != nil {
+						logger.LogWarn(c, fmt.Sprintf("[WalletFallback] wallet quota insufficient: %v", preConsumeErr.Error()))
+						newAPIError = preConsumeErr
+					}
+				}
+			}
+
+			// 在钱包分组内按优先级继续遍历，直到成功或耗尽
+			if newAPIError == nil {
+				const maxPriorityLevelsWallet = 1000
+				// 从 retryCount=1 开始，避免 getChannel 返回初始上下文渠道
+				attemptsWallet := 1
+				for priorityIndex := 0; priorityIndex < maxPriorityLevelsWallet; priorityIndex++ {
+					// 获取渠道（避免重复使用已尝试渠道）
+					channel, chErr := getChannel(c, walletGroup, originalModel, attemptsWallet, priorityIndex)
+					if chErr != nil {
+						logger.LogError(c, chErr.Error())
+						newAPIError = chErr
+						if types.IsSkipRetryError(chErr) {
+							break
+						}
+						continue
+					}
+					if channel == nil {
+						continue
+					}
+
+					addUsedChannel(c, channel.Id)
+
+					requestBody, _ := common.GetRequestBody(c)
+					c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+
+					var err *types.NewAPIError
+					switch relayFormat {
+					case types.RelayFormatOpenAIRealtime:
+						err = relay.WssHelper(c, relayInfo)
+					case types.RelayFormatClaude:
+						err = relay.ClaudeHelper(c, relayInfo)
+					case types.RelayFormatGemini:
+						err = geminiRelayHandler(c, relayInfo)
+					default:
+						err = relayHandler(c, relayInfo)
+					}
+					attemptsWallet++
+
+					if err == nil {
+						service.RecordChannelSuccess(channel.Id)
+						return
+					}
+
+					newAPIError = err
+					if service.ShouldTriggerChannelFailover(err.StatusCode, err.Error()) ||
+						err.StatusCode == 504 || err.StatusCode == 524 {
+						service.RecordChannelFailure(channel.Id, err.StatusCode, err.Error())
+					}
+					// 继续尝试钱包分组下一优先级
+				}
+			}
+		}
+	}
 failoverEnd:
 
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {
 		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
+	}
+
+	// 如果没有任何渠道被调用且未生成错误，向客户端返回可用性错误
+	if newAPIError == nil && attempts == 0 {
+		err := types.NewError(fmt.Errorf("当前分组无可用渠道"), types.ErrorCodeGetChannelFailed)
+		c.JSON(http.StatusServiceUnavailable, err)
 	}
 }
 
@@ -372,8 +479,8 @@ func getChannel(c *gin.Context, group, originalModel string, retryCount int, pri
 	}
 	if channel == nil {
 		// No healthy channel at this priority - allow retry with next priority
-		// Don't use SkipRetry so the loop can continue
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的优先级 %d 无健康渠道（retry）", selectGroup, originalModel, priorityIndex), types.ErrorCodeGetChannelFailed)
+		// 返回 nil,nil 以避免日志刷屏，外层继续尝试下一个优先级
+		return nil, nil
 	}
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, originalModel)
 	if newAPIError != nil {
@@ -412,10 +519,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return true
 	}
 	if openaiErr.StatusCode/100 == 5 {
-		// 超时允许有限的渠道切换重试（改善低流量用户体验）
+		// 504/524 也按 5xx 处理：只要还有剩余重试额度就继续往后切渠道
 		if openaiErr.StatusCode == 504 || openaiErr.StatusCode == 524 {
-			// 只在首次失败时允许重试1次（retryTimes == common.RetryTimes表示首次失败）
-			return retryTimes == common.RetryTimes
+			return retryTimes > 0
 		}
 		return true
 	}
@@ -567,7 +673,6 @@ func RelayNotFound(c *gin.Context) {
 }
 
 func RelayTask(c *gin.Context) {
-	retryTimes := common.RetryTimes
 	channelId := c.GetInt("channel_id")
 	group := c.GetString("group")
 	originalModel := c.GetString("original_model")
@@ -582,7 +687,6 @@ func RelayTask(c *gin.Context) {
 	if taskErr == nil {
 		// Success - record to health tracker
 		service.RecordChannelSuccess(channelId)
-		retryTimes = 0
 	} else {
 		// Error occurred - check if it should trigger health tracking
 		// Record timeout errors (504/524) and other upstream errors to health tracker
@@ -595,25 +699,33 @@ func RelayTask(c *gin.Context) {
 	// 记录中间件选择渠道时的优先级索引，重试时从下一个优先级继续
 	basePriorityIndex := common.GetContextKeyInt(c, constant.ContextKeyChannelPriorityIndex)
 
-	for i := 0; shouldRetryTaskRelay(c, channelId, taskErr, retryTimes) && i < retryTimes; i++ {
-		// Task relay 使用简单的重试逻辑：从中间件已停留的优先级往后继续
-		priorityIndex := basePriorityIndex + i
-		channel, newAPIError := getChannel(c, group, originalModel, i, priorityIndex)
+	const maxPriorityLevelsTask = 1000
+	attemptsTask := 0
+	for priorityIndex := basePriorityIndex; priorityIndex < basePriorityIndex+maxPriorityLevelsTask; priorityIndex++ {
+		channel, newAPIError := getChannel(c, group, originalModel, attemptsTask, priorityIndex)
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("CacheGetRandomSatisfiedChannel failed: %s", newAPIError.Error()))
 			taskErr = service.TaskErrorWrapperLocal(newAPIError.Err, "get_channel_failed", http.StatusInternalServerError)
-			break
+			if types.IsSkipRetryError(newAPIError) {
+				break
+			}
+			continue
 		}
+		if channel == nil {
+			// 当前优先级无可用渠道，继续下一优先级
+			continue
+		}
+
 		channelId = channel.Id
 		useChannel := c.GetStringSlice("use_channel")
 		useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
 		c.Set("use_channel", useChannel)
-		logger.LogInfo(c, fmt.Sprintf("using channel #%d to retry (remain times %d)", channel.Id, i))
-		//middleware.SetupContextForSelectedChannel(c, channel, originalModel)
+		logger.LogInfo(c, fmt.Sprintf("using channel #%d to retry (remain times %d)", channel.Id, attemptsTask))
 
 		requestBody, _ := common.GetRequestBody(c)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 		taskErr = taskRelayHandler(c, relayInfo)
+		attemptsTask++
 
 		// Record channel health based on retry result
 		if taskErr == nil {
@@ -627,6 +739,12 @@ func RelayTask(c *gin.Context) {
 			taskErr.StatusCode == 504 || taskErr.StatusCode == 524 {
 			service.RecordChannelFailure(channelId, taskErr.StatusCode, taskErr.Message)
 		}
+
+		remainingRetries := maxPriorityLevelsTask - attemptsTask
+		if !shouldRetryTaskRelay(c, channelId, taskErr, remainingRetries) {
+			break
+		}
+		// 继续下一优先级
 	}
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {
@@ -669,11 +787,8 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 		return true
 	}
 	if taskErr.StatusCode/100 == 5 {
-		// 超时不重试
-		if taskErr.StatusCode == 504 || taskErr.StatusCode == 524 {
-			return false
-		}
-		return true
+		// 任务请求也对 504/524 进行渠道切换重试
+		return retryTimes > 0
 	}
 	if taskErr.StatusCode == http.StatusBadRequest {
 		return false
