@@ -309,7 +309,8 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 	// For single channel, check if it's excluded or suspended
 	if len(channels) == 1 {
 		if excludeIds != nil && excludeIds[channels[0]] {
-			return nil, nil // Channel already tried
+			// 单渠道且已在本次请求中尝试过，视为该优先级耗尽，触发后续降级
+			return nil, ErrPriorityExhausted
 		}
 		if channel, ok := channelsIDM[channels[0]]; ok {
 			// Check health status for single channel (fix: previously skipped health check)
