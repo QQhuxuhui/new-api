@@ -370,7 +370,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			// 在钱包分组内按优先级继续遍历，直到成功或耗尽
 			if newAPIError == nil {
 				const maxPriorityLevelsWallet = 1000
-				attemptsWallet := 0
+				// 从 retryCount=1 开始，避免 getChannel 返回初始上下文渠道
+				attemptsWallet := 1
 				for priorityIndex := 0; priorityIndex < maxPriorityLevelsWallet; priorityIndex++ {
 					// 获取渠道（避免重复使用已尝试渠道）
 					channel, chErr := getChannel(c, walletGroup, originalModel, attemptsWallet, priorityIndex)
