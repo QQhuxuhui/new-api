@@ -574,7 +574,6 @@ func RelayNotFound(c *gin.Context) {
 }
 
 func RelayTask(c *gin.Context) {
-	retryTimes := common.RetryTimes
 	channelId := c.GetInt("channel_id")
 	group := c.GetString("group")
 	originalModel := c.GetString("original_model")
@@ -589,7 +588,6 @@ func RelayTask(c *gin.Context) {
 	if taskErr == nil {
 		// Success - record to health tracker
 		service.RecordChannelSuccess(channelId)
-		retryTimes = 0
 	} else {
 		// Error occurred - check if it should trigger health tracking
 		// Record timeout errors (504/524) and other upstream errors to health tracker
