@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -72,13 +73,21 @@ func AttemptWalletFallbackAfterRetry(c *gin.Context, modelName string) (*model.C
 	}
 
 	// Try each untried child group for a channel
+	// 构造本次请求已尝试渠道的排除列表，避免钱包重试再次命中同一条失败渠道
+	excludeIds := make(map[int]bool)
+	for _, idStr := range c.GetStringSlice("use_channel") {
+		if channelId, err := strconv.Atoi(idStr); err == nil {
+			excludeIds[channelId] = true
+		}
+	}
+
 	for _, childGroup := range untried {
 		// Override plan groups context so selector will use this group
 		common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{childGroup})
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, childGroup)
 
 		for retry := 0; retry < 1000; retry++ {
-			channel, _, err := CacheGetRandomSatisfiedChannel(c, childGroup, modelName, retry)
+			channel, _, err := CacheGetRandomSatisfiedChannelExcluding(c, childGroup, modelName, retry, excludeIds)
 
 			if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
 				err = nil
