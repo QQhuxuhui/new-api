@@ -239,10 +239,11 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 
 	if len(targetChannels) == 0 {
 		// Return nil (not error) to allow retry with next priority
-		// Error would stop the retry loop in relay controller
-		// Log detailed info for debugging: total channels for model, priorities available, suspended count
-		common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended_at_priority=%d)",
-			targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount))
+		// Log throttled to avoid flooding when priorities很多
+		if retry < 5 || retry%50 == 0 {
+			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended_at_priority=%d)",
+				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount))
+		}
 		return nil, nil
 	}
 
@@ -381,9 +382,11 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 
 	if len(targetChannels) == 0 {
 		// No more channels at this priority level (all tried or suspended)
-		// Log detailed info for debugging
-		common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d)",
-			targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount))
+		// Throttle logging to avoid flooding when priority span is large
+		if retry < 5 || retry%50 == 0 {
+			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d)",
+				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount))
+		}
 		return nil, nil
 	}
 
