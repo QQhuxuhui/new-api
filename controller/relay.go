@@ -331,6 +331,77 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 		}
 	}
+
+	// Wallet fallback: if plan failover failed and用户仍有钱包余额/授权，尝试钱包计费的子分组
+	if newAPIError != nil && (common.GetContextKeyInt(c, constant.ContextKeyUserQuota) > 0) {
+		walletChannel, walletGroup, walletErr := service.AttemptWalletFallbackAfterRetry(c, originalModel)
+		if walletErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("[WalletFallback] failed: %v", walletErr))
+		} else if walletChannel != nil {
+			logger.LogInfo(c, fmt.Sprintf("[WalletFallback] using channel=%d group=%s (wallet billing)", walletChannel.Id, walletGroup))
+
+			// 返还旧预扣，切换计费来源到钱包
+			if relayInfo.FinalPreConsumedQuota != 0 {
+				service.ReturnPreConsumedQuota(c, relayInfo)
+				relayInfo.FinalPreConsumedQuota = 0
+			}
+			relayInfo.BillingSource = service.BillingSourceUserBalance
+			relayInfo.UserPlanId = 0
+			relayInfo.PlanId = 0
+			relayInfo.UsingGroup = walletGroup
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, walletGroup)
+
+			// 初始化新渠道上下文
+			setupErr := middleware.SetupContextForSelectedChannel(c, walletChannel, originalModel)
+			if setupErr != nil {
+				logger.LogWarn(c, fmt.Sprintf("[WalletFallback] setup failed: %v", setupErr.Error()))
+				newAPIError = setupErr
+			} else {
+				// 重新计算价格并预扣（钱包计费）
+				relayInfo.InitChannelMeta(c)
+				newPriceData, priceErr := helper.ModelPriceHelper(c, relayInfo, relayInfo.PromptTokens, meta)
+				if priceErr != nil {
+					logger.LogWarn(c, fmt.Sprintf("[WalletFallback] price calc failed: %v", priceErr))
+					newAPIError = types.NewError(priceErr, types.ErrorCodeModelPriceError)
+				} else {
+					if !newPriceData.FreeModel {
+						preConsumeErr := service.PreConsumeQuota(c, newPriceData.QuotaToPreConsume, relayInfo)
+						if preConsumeErr != nil {
+							logger.LogWarn(c, fmt.Sprintf("[WalletFallback] wallet quota insufficient: %v", preConsumeErr.Error()))
+							newAPIError = preConsumeErr
+						}
+					}
+				}
+			}
+
+			if newAPIError == nil {
+				// 用钱包渠道再发一次请求
+				requestBody, _ := common.GetRequestBody(c)
+				c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+
+				switch relayFormat {
+				case types.RelayFormatOpenAIRealtime:
+					newAPIError = relay.WssHelper(c, relayInfo)
+				case types.RelayFormatClaude:
+					newAPIError = relay.ClaudeHelper(c, relayInfo)
+				case types.RelayFormatGemini:
+					newAPIError = geminiRelayHandler(c, relayInfo)
+				default:
+					newAPIError = relayHandler(c, relayInfo)
+				}
+
+				if newAPIError == nil {
+					service.RecordChannelSuccess(walletChannel.Id)
+					return
+				}
+
+				if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) ||
+					newAPIError.StatusCode == 504 || newAPIError.StatusCode == 524 {
+					service.RecordChannelFailure(walletChannel.Id, newAPIError.StatusCode, newAPIError.Error())
+				}
+			}
+		}
+	}
 failoverEnd:
 
 	useChannel := c.GetStringSlice("use_channel")
