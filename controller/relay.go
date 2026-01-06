@@ -161,11 +161,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	// 获取中间件选择渠道时的优先级索引，重试时从下一个优先级继续
 	basePriorityIndex := common.GetContextKeyInt(c, constant.ContextKeyChannelPriorityIndex)
 
-	for i := 0; i <= common.RetryTimes; i++ {
-		// 计算实际的优先级索引：首次请求使用中间件的索引，重试时继续往后遍历
-		priorityIndex := basePriorityIndex + i
-
-		channel, err := getChannel(c, group, originalModel, i, priorityIndex)
+	// 解耦优先级遍历与重试预算：
+	// - priorityIndex 只负责“往后扫描不同优先级”
+	// - attempts 仅用于计数和日志，不再限制优先级遍历
+	const maxPriorityLevels = 1000
+	attempts := 0
+	for priorityIndex := basePriorityIndex; priorityIndex < basePriorityIndex+maxPriorityLevels; priorityIndex++ {
+		channel, err := getChannel(c, group, originalModel, attempts, priorityIndex)
 		if err != nil {
 			logger.LogError(c, err.Error())
 			newAPIError = err
@@ -183,9 +185,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		// 调试日志：记录重试时的渠道和令牌信息
 		contextKey := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
 		maskedKey := maskApiKeyForDebug(contextKey)
-		if i > 0 {
+		if attempts > 0 {
 			logger.LogInfo(c, fmt.Sprintf("[TokenDebug] 重试 %d: 切换到渠道 #%d (%s), Context令牌: %s",
-				i, channel.Id, channel.Name, maskedKey))
+				attempts, channel.Id, channel.Name, maskedKey))
 		} else {
 			logger.LogInfo(c, fmt.Sprintf("[TokenDebug] 首次请求: 渠道 #%d (%s), Context令牌: %s",
 				channel.Id, channel.Name, maskedKey))
@@ -194,6 +196,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		requestBody, _ := common.GetRequestBody(c)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 
+		// 实际发起一次上游调用，消耗一次尝试额度
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
 			newAPIError = relay.WssHelper(c, relayInfo)
@@ -204,6 +207,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		default:
 			newAPIError = relayHandler(c, relayInfo)
 		}
+		attempts++
 
 		// Record channel health based on result
 		if newAPIError == nil {
@@ -223,9 +227,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-i) {
+		// remainingRetries 用于 shouldRetry 的“次数”判定，这里用一个足够大的剩余额度，避免受 RetryTimes 限制
+		remainingRetries := maxPriorityLevels - attempts
+		if !shouldRetry(c, newAPIError, remainingRetries) {
 			break
 		}
+
+		// 如果还可以重试，继续尝试下一层优先级
 	}
 
 	// After all retries within current plan failed, attempt cross-plan failover
@@ -412,10 +420,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return true
 	}
 	if openaiErr.StatusCode/100 == 5 {
-		// 超时允许有限的渠道切换重试（改善低流量用户体验）
+		// 504/524 也按 5xx 处理：只要还有剩余重试额度就继续往后切渠道
 		if openaiErr.StatusCode == 504 || openaiErr.StatusCode == 524 {
-			// 只在首次失败时允许重试1次（retryTimes == common.RetryTimes表示首次失败）
-			return retryTimes == common.RetryTimes
+			return retryTimes > 0
 		}
 		return true
 	}
@@ -595,25 +602,29 @@ func RelayTask(c *gin.Context) {
 	// 记录中间件选择渠道时的优先级索引，重试时从下一个优先级继续
 	basePriorityIndex := common.GetContextKeyInt(c, constant.ContextKeyChannelPriorityIndex)
 
-	for i := 0; shouldRetryTaskRelay(c, channelId, taskErr, retryTimes) && i < retryTimes; i++ {
-		// Task relay 使用简单的重试逻辑：从中间件已停留的优先级往后继续
-		priorityIndex := basePriorityIndex + i
-		channel, newAPIError := getChannel(c, group, originalModel, i, priorityIndex)
+	const maxPriorityLevelsTask = 1000
+	attemptsTask := 0
+	for priorityIndex := basePriorityIndex; priorityIndex < basePriorityIndex+maxPriorityLevelsTask; priorityIndex++ {
+		channel, newAPIError := getChannel(c, group, originalModel, attemptsTask, priorityIndex)
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("CacheGetRandomSatisfiedChannel failed: %s", newAPIError.Error()))
 			taskErr = service.TaskErrorWrapperLocal(newAPIError.Err, "get_channel_failed", http.StatusInternalServerError)
-			break
+			if types.IsSkipRetryError(newAPIError) {
+				break
+			}
+			continue
 		}
+
 		channelId = channel.Id
 		useChannel := c.GetStringSlice("use_channel")
 		useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
 		c.Set("use_channel", useChannel)
-		logger.LogInfo(c, fmt.Sprintf("using channel #%d to retry (remain times %d)", channel.Id, i))
-		//middleware.SetupContextForSelectedChannel(c, channel, originalModel)
+		logger.LogInfo(c, fmt.Sprintf("using channel #%d to retry (remain times %d)", channel.Id, attemptsTask))
 
 		requestBody, _ := common.GetRequestBody(c)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 		taskErr = taskRelayHandler(c, relayInfo)
+		attemptsTask++
 
 		// Record channel health based on retry result
 		if taskErr == nil {
@@ -627,6 +638,12 @@ func RelayTask(c *gin.Context) {
 			taskErr.StatusCode == 504 || taskErr.StatusCode == 524 {
 			service.RecordChannelFailure(channelId, taskErr.StatusCode, taskErr.Message)
 		}
+
+		remainingRetries := maxPriorityLevelsTask - attemptsTask
+		if !shouldRetryTaskRelay(c, channelId, taskErr, remainingRetries) {
+			break
+		}
+		// 继续下一优先级
 	}
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {
@@ -669,11 +686,8 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 		return true
 	}
 	if taskErr.StatusCode/100 == 5 {
-		// 超时不重试
-		if taskErr.StatusCode == 504 || taskErr.StatusCode == 524 {
-			return false
-		}
-		return true
+		// 任务请求也对 504/524 进行渠道切换重试
+		return retryTimes > 0
 	}
 	if taskErr.StatusCode == http.StatusBadRequest {
 		return false
