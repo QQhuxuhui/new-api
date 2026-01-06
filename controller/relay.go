@@ -368,7 +368,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					if preConsumeErr != nil {
 						logger.LogWarn(c, fmt.Sprintf("[WalletFallback] wallet quota insufficient: %v", preConsumeErr.Error()))
 						newAPIError = preConsumeErr
+					} else {
+						// 价格与预扣都成功，清除之前的错误以便进入钱包渠道重试循环
+						newAPIError = nil
 					}
+				} else {
+					// 免费模型，费用已确定，清除之前的错误
+					newAPIError = nil
 				}
 			}
 
