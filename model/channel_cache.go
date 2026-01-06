@@ -239,8 +239,8 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 
 	if len(targetChannels) == 0 {
 		// Return nil (not error) to allow retry with next priority
-		// Log throttled to avoid flooding when priorities很多
-		if retry < 5 || retry%50 == 0 {
+		// Only log once at the first miss to avoid flooding when priority跨度很大
+		if retry == 0 {
 			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended_at_priority=%d)",
 				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount))
 		}
@@ -382,8 +382,8 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 
 	if len(targetChannels) == 0 {
 		// No more channels at this priority level (all tried or suspended)
-		// Throttle logging to avoid flooding when priority span is large
-		if retry < 5 || retry%50 == 0 {
+		// Log only on first miss to avoid flooding when priority跨度很大
+		if retry == 0 {
 			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d)",
 				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount))
 		}
