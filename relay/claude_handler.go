@@ -127,7 +127,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 				}
 			}
 
-			maskedBody, originalUserID, maskedUserID := claude.MasqueradeMetadataInBody(body, channelID, channelHash, maxSessions)
+			maskedBody, originalUserID, maskedUserID := claude.MasqueradeMetadataInBody(body, channelID, channelHash, maxSessions, info.ApiKey)
 			body = maskedBody
 			logger.LogInfo(c, fmt.Sprintf("[Claude Native/PT] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, maskedUserID))
 		}

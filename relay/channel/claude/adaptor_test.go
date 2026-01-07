@@ -221,6 +221,7 @@ func TestConvertClaudeRequest_MetadataMasquerade(t *testing.T) {
 			info := &relaycommon.RelayInfo{
 				OriginModelName: "claude-3-5-sonnet-20241022",
 				Channel:         channel,
+				ChannelMeta:     &relaycommon.ChannelMeta{ApiKey: "test-api-key"},
 			}
 
 			// Create request with initial metadata
@@ -311,6 +312,7 @@ func TestConvertClaudeRequest_PreservesOtherFields(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		OriginModelName: "claude-3-5-sonnet-20241022",
 		Channel:         &model.Channel{Id: 1001002, MasqueradeHash: &masqueradeHash},
+		ChannelMeta:     &relaycommon.ChannelMeta{ApiKey: "test-api-key"},
 	}
 
 	// Create request with various fields

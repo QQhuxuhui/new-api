@@ -3,6 +3,7 @@ package claude
 import (
 	crand "crypto/rand"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -404,4 +405,113 @@ func TestSelectWeightedSession_TwoSessions(t *testing.T) {
 		counts["second"], float64(counts["second"])/float64(iterations)*100,
 		ratio,
 	)
+}
+
+// makeDeterministicPool seeds a fixed set of sessions to remove randomness from
+// consistent hashing tests.
+func makeDeterministicPool(t *testing.T, base time.Time) *ChannelSessionPool {
+	t.Helper()
+
+	p := newChannelSessionPool(1, "hash", 5, defaultMasqueradeRotationInterval)
+	ids := []string{
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+		"33333333-3333-3333-3333-333333333333",
+		"44444444-4444-4444-4444-444444444444",
+		"55555555-5555-5555-5555-555555555555",
+	}
+
+	p.sessions = make([]SessionEntry, len(ids))
+	for i, id := range ids {
+		p.sessions[i] = SessionEntry{
+			UUID:      id,
+			CreatedAt: base.Add(-time.Duration(len(ids)-i) * time.Minute),
+		}
+	}
+
+	return p
+}
+
+func TestSelectSessionByKey_EmptyKeyFallsBackToRandom(t *testing.T) {
+	base := time.Now()
+	p := makeDeterministicPool(t, base)
+	active := p.getActiveSessions(base)
+	activeSet := make(map[string]struct{}, len(active))
+	for _, s := range active {
+		activeSet[s] = struct{}{}
+	}
+
+	for i := 0; i < 20; i++ {
+		selected := p.SelectSessionByKey("", base)
+		if _, ok := activeSet[selected]; !ok {
+			t.Fatalf("expected selected session %s to be active", selected)
+		}
+	}
+}
+
+func TestSelectSessionByKey_ConsistentMapping(t *testing.T) {
+	base := time.Now()
+	p := makeDeterministicPool(t, base)
+	key := "api-key-constant"
+
+	first := p.SelectSessionByKey(key, base)
+	for i := 0; i < 100; i++ {
+		if got := p.SelectSessionByKey(key, base); got != first {
+			t.Fatalf("expected consistent session for key %q, got %q (want %q)", key, got, first)
+		}
+	}
+}
+
+func TestSelectSessionByKey_DifferentKeysDistribute(t *testing.T) {
+	base := time.Now()
+	p := makeDeterministicPool(t, base)
+	counts := make(map[string]int)
+
+	for i := 0; i < 100; i++ {
+		key := "key-" + strconv.Itoa(i)
+		session := p.SelectSessionByKey(key, base)
+		counts[session]++
+	}
+
+	if len(counts) == 1 {
+		t.Fatalf("expected keys to distribute across multiple sessions, got single session mapping")
+	}
+}
+
+func TestSelectSessionByKey_RotationRemapsMinimally(t *testing.T) {
+	base := time.Now()
+	p := makeDeterministicPool(t, base)
+
+	keys := make([]string, 0, 10)
+	for i := 0; i < 10; i++ {
+		keys = append(keys, "key-"+strconv.Itoa(i))
+	}
+
+	original := make(map[string]string)
+	for _, k := range keys {
+		original[k] = p.SelectSessionByKey(k, base)
+	}
+
+	// Allow rotation to proceed immediately.
+	p.lastRotation = base.Add(-p.rotationInterval - time.Second)
+	p.rotateOldestSession(base)
+
+	// Stabilize the new session UUID for deterministic assertions.
+	if len(p.sessions) > p.maxSessions {
+		p.sessions[len(p.sessions)-1].UUID = "66666666-6666-6666-6666-666666666666"
+	}
+
+	afterRotation := base.Add(defaultMasqueradeGracePeriod + time.Second)
+	p.cleanupExpiredSessions(afterRotation)
+
+	unchanged := 0
+	for _, k := range keys {
+		if p.SelectSessionByKey(k, afterRotation) == original[k] {
+			unchanged++
+		}
+	}
+
+	if unchanged < len(keys)/2 {
+		t.Fatalf("expected at least half of keys to keep their mapping after rotation, kept %d/%d", unchanged, len(keys))
+	}
 }
