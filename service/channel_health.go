@@ -15,12 +15,12 @@ const (
 	BucketSize     = 10 * time.Second // 10-second bucket granularity
 	BucketCount    = 6                // 60/10 = 6 buckets
 
-	// Failure Rate Thresholds
-	FailureRateThreshold     = 0.30 // 30% failure rate for standard traffic
-	FailureRateThresholdHigh = 0.50 // 50% for low-traffic channels
-	MinSampleSize            = 5    // minimum requests before evaluation (faster detection)
+	// Failure Rate Thresholds (温和优化配置)
+	FailureRateThreshold     = 0.25 // 25% failure rate for standard traffic (原30%)
+	FailureRateThresholdHigh = 0.40 // 40% for low-traffic channels (原50%)
+	MinSampleSize            = 3    // minimum requests before evaluation (原5，更快检测)
 	LowTrafficThreshold      = 30   // requests/min threshold for "low traffic"
-	LowTrafficMinFailures    = 5    // minimum failures for low-traffic handling
+	LowTrafficMinFailures    = 3    // minimum failures for low-traffic handling (原5)
 	LowTrafficFailureRate    = 0.80 // 80% failure rate for low-traffic suspension
 
 	// Health State Thresholds
