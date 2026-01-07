@@ -212,6 +212,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	var targetChannels []*Channel
 	var targetWeights []int
 	var suspendedCount = 0
+	var warningSkippedCount = 0
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
 			if channel.GetPriority() == targetPriority {
@@ -220,14 +221,15 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 					suspendedCount++
 					continue
 				}
-				weight := channel.GetWeight()
+				// Probabilistic filter for warning-state channels
+				// Each warning channel independently rolls for eligibility this round
 				if IsChannelWarning(channelId) {
-					penalty := common.WarningWeightPenaltyPercent
-					weight = int(float64(weight) * float64(100-penalty) / 100.0)
-					if weight < 1 {
-						weight = 1
+					if rand.Intn(100) >= common.WarningProbePercent {
+						warningSkippedCount++
+						continue // Skip this warning channel, try others at same priority
 					}
 				}
+				weight := channel.GetWeight()
 				sumWeight += weight
 				targetChannels = append(targetChannels, channel)
 				targetWeights = append(targetWeights, weight)
@@ -241,8 +243,8 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 		// Return nil (not error) to allow retry with next priority
 		// Only log once at the first miss to avoid flooding when priority跨度很大
 		if retry == 0 {
-			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended_at_priority=%d)",
-				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount))
+			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, warning_skipped=%d)",
+				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, warningSkippedCount))
 		}
 		return nil, nil
 	}
@@ -351,6 +353,7 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 	var targetWeights []int
 	var suspendedCount = 0
 	var excludedCount = 0
+	var warningSkippedCount = 0
 	for _, channelId := range channels {
 		// Skip if this channel was already tried
 		if excludeIds != nil && excludeIds[channelId] {
@@ -364,14 +367,15 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 					suspendedCount++
 					continue
 				}
-				weight := channel.GetWeight()
+				// Probabilistic filter for warning-state channels
+				// Each warning channel independently rolls for eligibility this round
 				if IsChannelWarning(channelId) {
-					penalty := common.WarningWeightPenaltyPercent
-					weight = int(float64(weight) * float64(100-penalty) / 100.0)
-					if weight < 1 {
-						weight = 1
+					if rand.Intn(100) >= common.WarningProbePercent {
+						warningSkippedCount++
+						continue // Skip this warning channel, try others at same priority
 					}
 				}
+				weight := channel.GetWeight()
 				sumWeight += weight
 				targetChannels = append(targetChannels, channel)
 				targetWeights = append(targetWeights, weight)
@@ -385,8 +389,8 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 		// No more channels at this priority level (all tried or suspended)
 		// Log only on first miss to avoid flooding when priority跨度很大
 		if retry == 0 {
-			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d)",
-				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount))
+			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d, warning_skipped=%d)",
+				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount, warningSkippedCount))
 		}
 		return nil, nil
 	}

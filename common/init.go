@@ -105,7 +105,7 @@ func InitEnv() {
 	CriticalRateLimitDuration = int64(GetEnvOrDefault("CRITICAL_RATE_LIMIT_DURATION", 20*60))
 
 	// Warning-stage channel handling
-	WarningWeightPenaltyPercent = GetEnvOrDefault("WARNING_WEIGHT_PENALTY_PERCENT", WarningWeightPenaltyPercent)
+	WarningProbePercent = GetEnvOrDefault("WARNING_PROBE_PERCENT", WarningProbePercent)
 	WarningTTLSeconds = GetEnvOrDefault("WARNING_TTL_SECONDS", WarningTTLSeconds)
 	initConstantEnv()
 }

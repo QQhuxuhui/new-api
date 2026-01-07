@@ -132,9 +132,9 @@ var CohereSafetySetting string
 
 var DefaultUserAgent string // Default User-Agent header when client doesn't provide one
 
-// Warning-stage channel handling (lower selection weight but still probed for recovery)
-var WarningWeightPenaltyPercent = 20 // effective weight = weight * (100 - penalty)%  (min 1)
-var WarningTTLSeconds = 60           // warning flag TTL for degraded channels
+// Warning-stage channel handling (probabilistic probe for recovery)
+var WarningProbePercent = 20 // probability (0-100) to use a warning-state channel for probing recovery
+var WarningTTLSeconds = 60   // warning flag TTL for degraded channels
 
 const (
 	RequestIdKey = "X-Oneapi-Request-Id"
