@@ -2,9 +2,13 @@ package claude
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
+	"math"
 	"math/big"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -180,12 +184,14 @@ func (p *ChannelSessionPool) SetHash(hash string) {
 	p.mu.Unlock()
 }
 
-func (p *ChannelSessionPool) SelectRandomSession(now time.Time) string {
+func (p *ChannelSessionPool) getActiveSessions(now time.Time) []string {
 	if now.IsZero() {
 		now = time.Now()
 	}
 
 	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	active := make([]string, 0, len(p.sessions))
 	for _, s := range p.sessions {
 		// Skip sessions not yet activated (soft rotation: new session waiting)
@@ -198,8 +204,11 @@ func (p *ChannelSessionPool) SelectRandomSession(now time.Time) string {
 		}
 		active = append(active, s.UUID)
 	}
-	p.mu.RUnlock()
+	return active
+}
 
+func (p *ChannelSessionPool) SelectRandomSession(now time.Time) string {
+	active := p.getActiveSessions(now)
 	if len(active) == 0 {
 		return defaultMasqueradeSessionUUID
 	}
@@ -246,7 +255,41 @@ func selectWeightedSession(sessions []string) string {
 	return sessions[n-1]
 }
 
-func (p *ChannelSessionPool) MasqueradeMetadata(raw json.RawMessage) (json.RawMessage, string, string) {
+// SelectSessionByKey chooses a session using consistent hashing.
+// Falls back to random selection when apiKey is empty.
+func (p *ChannelSessionPool) SelectSessionByKey(apiKey string, now time.Time) string {
+	if apiKey == "" {
+		return p.SelectRandomSession(now)
+	}
+
+	active := p.getActiveSessions(now)
+	if len(active) == 0 {
+		return defaultMasqueradeSessionUUID
+	}
+	if len(active) == 1 {
+		return active[0]
+	}
+
+	targetHash := hashToUint64(apiKey)
+	bestSession := active[0]
+	bestDistance := uint64(math.MaxUint64)
+
+	for _, session := range active {
+		for i := 0; i < 100; i++ {
+			virtualKey := session + ":" + strconv.Itoa(i)
+			nodeHash := hashToUint64(virtualKey)
+			distance := ringDistance(targetHash, nodeHash)
+			if distance < bestDistance {
+				bestDistance = distance
+				bestSession = session
+			}
+		}
+	}
+
+	return bestSession
+}
+
+func (p *ChannelSessionPool) MasqueradeMetadata(raw json.RawMessage, apiKey string) (json.RawMessage, string, string) {
 	originalUserID := "<empty>"
 
 	meta := make(map[string]any)
@@ -260,7 +303,7 @@ func (p *ChannelSessionPool) MasqueradeMetadata(raw json.RawMessage) (json.RawMe
 		}
 	}
 
-	sessionUUID := p.SelectRandomSession(time.Now())
+	sessionUUID := p.SelectSessionByKey(apiKey, time.Now())
 
 	p.mu.RLock()
 	hashPart := p.hashPart
@@ -427,4 +470,17 @@ func generateRandomUUID() (string, error) {
 		return "", err
 	}
 	return strings.ToLower(u.String()), nil
+}
+
+func hashToUint64(s string) uint64 {
+	sum := sha256.Sum256([]byte(s))
+	return binary.BigEndian.Uint64(sum[0:8])
+}
+
+// ringDistance returns clockwise distance from a to b on a uint64 ring.
+func ringDistance(a, b uint64) uint64 {
+	if b >= a {
+		return b - a
+	}
+	return (math.MaxUint64 - a) + b + 1
 }
