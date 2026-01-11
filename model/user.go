@@ -42,6 +42,7 @@ type User struct {
 	AffHistoryQuota  int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
 	InviterId        int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
 	DeletedAt        gorm.DeletedAt `gorm:"index"`
+	MaxConcurrency   int            `json:"max_concurrency" gorm:"type:int;default:0;column:max_concurrency" validate:"min=0"` // 0 表示不限制
 	LinuxDOId        string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
 	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
@@ -50,13 +51,14 @@ type User struct {
 
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
-		Id:       user.Id,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
+		Id:             user.Id,
+		Group:          user.Group,
+		Quota:          user.Quota,
+		Status:         user.Status,
+		Username:       user.Username,
+		Setting:        user.Setting,
+		Email:          user.Email,
+		MaxConcurrency: user.MaxConcurrency,
 	}
 	return cache
 }
@@ -488,11 +490,12 @@ func (user *User) Edit(updatePassword bool) error {
 
 	newUser := *user
 	updates := map[string]interface{}{
-		"username":     newUser.Username,
-		"display_name": newUser.DisplayName,
-		"group":        newUser.Group,
-		"quota":        newUser.Quota,
-		"remark":       newUser.Remark,
+		"username":        newUser.Username,
+		"display_name":    newUser.DisplayName,
+		"group":           newUser.Group,
+		"quota":           newUser.Quota,
+		"remark":          newUser.Remark,
+		"max_concurrency": newUser.MaxConcurrency,
 	}
 	if updatePassword {
 		updates["password"] = newUser.Password

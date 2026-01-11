@@ -30,6 +30,39 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// checkUserConcurrencyLimit enforces per-user concurrent request limits using Redis.
+// Returns true if the counter was incremented and should be decremented later.
+func checkUserConcurrencyLimit(userId, maxConcurrency int) (bool, *types.NewAPIError) {
+	if userId == 0 || maxConcurrency <= 0 {
+		return false, nil
+	}
+	if !common.RedisEnabled {
+		return false, nil // fail-open if Redis is disabled
+	}
+
+	current, err := model.IncrUserConcurrency(userId)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("failed to increment user concurrency: %v", err))
+		return false, nil // fail-open on Redis errors
+	}
+
+	if current > int64(maxConcurrency) {
+		// rollback increment to keep counter accurate
+		if decrErr := model.DecrUserConcurrency(userId); decrErr != nil {
+			common.SysLog(fmt.Sprintf("failed to rollback user concurrency: %v", decrErr))
+		}
+		msg := fmt.Sprintf("user concurrency limit exceeded: current=%d limit=%d", current-1, maxConcurrency)
+		return false, types.NewErrorWithStatusCode(
+			errors.New(msg),
+			types.ErrorCodeUserConcurrencyLimit,
+			http.StatusTooManyRequests,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+
+	return true, nil
+}
+
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
 	switch info.RelayMode {
@@ -68,6 +101,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	requestId := c.GetString(common.RequestIdKey)
 	group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	originalModel := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
+	userId := common.GetContextKeyInt(c, constant.ContextKeyUserId)
+	userMaxConcurrency := common.GetContextKeyInt(c, constant.ContextKeyUserMaxConcurrency)
 
 	var (
 		newAPIError *types.NewAPIError
@@ -108,6 +143,20 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest)
 		return
+	}
+
+	// Enforce user-level concurrency limit (if configured)
+	userConcurrencyTracked := false
+	if incremented, err := checkUserConcurrencyLimit(userId, userMaxConcurrency); err != nil {
+		newAPIError = err
+		return
+	} else if incremented {
+		userConcurrencyTracked = true
+		defer func() {
+			if decrErr := model.DecrUserConcurrency(userId); decrErr != nil {
+				common.SysLog(fmt.Sprintf("failed to decrement user concurrency: %v", decrErr))
+			}
+		}()
 	}
 
 	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)

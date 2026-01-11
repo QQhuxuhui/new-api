@@ -76,6 +76,7 @@ const EditUserModal = (props) => {
     telegram_id: '',
     email: '',
     quota: 0,
+    max_concurrency: 0,
     group: 'default',
     remark: '',
   });
@@ -116,6 +117,8 @@ const EditUserModal = (props) => {
     let payload = { ...values };
     if (typeof payload.quota === 'string')
       payload.quota = parseInt(payload.quota) || 0;
+    if (typeof payload.max_concurrency === 'string')
+      payload.max_concurrency = parseInt(payload.max_concurrency) || 0;
     if (userId) {
       payload.id = parseInt(userId);
     }
@@ -304,6 +307,18 @@ const EditUserModal = (props) => {
                             onClick={() => setIsModalOpen(true)}
                           />
                         </Form.Slot>
+                      </Col>
+
+                      <Col span={24}>
+                        <Form.InputNumber
+                          field='max_concurrency'
+                          label={t('最大并发数')}
+                          placeholder={t('0 表示不限制')}
+                          min={0}
+                          step={1}
+                          extraText={t('0 表示不限制')}
+                          style={{ width: '100%' }}
+                        />
                       </Col>
                     </Row>
                   </Card>

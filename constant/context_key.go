@@ -36,18 +36,19 @@ const (
 	ContextKeyChannelMultiKeyIndex     ContextKey = "channel_multi_key_index"
 	ContextKeyChannelKey               ContextKey = "channel_key"
 	ContextKeyChannelRatio             ContextKey = "channel_ratio"
-	ContextKeyChannelModelRatio        ContextKey = "channel_model_ratio" // float64: 渠道模型倍率
+	ContextKeyChannelModelRatio        ContextKey = "channel_model_ratio"    // float64: 渠道模型倍率
 	ContextKeyChannelPriorityIndex     ContextKey = "channel_priority_index" // int: 中间件选择渠道时的优先级索引，用于重试时继续遍历
 
 	/* user related keys */
-	ContextKeyUserId      ContextKey = "id"
-	ContextKeyUserSetting ContextKey = "user_setting"
-	ContextKeyUserQuota   ContextKey = "user_quota"
-	ContextKeyUserStatus  ContextKey = "user_status"
-	ContextKeyUserEmail   ContextKey = "user_email"
-	ContextKeyUserGroup   ContextKey = "user_group"
-	ContextKeyUsingGroup  ContextKey = "group"
-	ContextKeyUserName    ContextKey = "username"
+	ContextKeyUserId             ContextKey = "id"
+	ContextKeyUserSetting        ContextKey = "user_setting"
+	ContextKeyUserQuota          ContextKey = "user_quota"
+	ContextKeyUserStatus         ContextKey = "user_status"
+	ContextKeyUserEmail          ContextKey = "user_email"
+	ContextKeyUserGroup          ContextKey = "user_group"
+	ContextKeyUsingGroup         ContextKey = "group"
+	ContextKeyUserName           ContextKey = "username"
+	ContextKeyUserMaxConcurrency ContextKey = "user_max_concurrency"
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"
 
