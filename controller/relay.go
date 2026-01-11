@@ -146,12 +146,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	// Enforce user-level concurrency limit (if configured)
-	userConcurrencyTracked := false
 	if incremented, err := checkUserConcurrencyLimit(userId, userMaxConcurrency); err != nil {
 		newAPIError = err
 		return
 	} else if incremented {
-		userConcurrencyTracked = true
 		defer func() {
 			if decrErr := model.DecrUserConcurrency(userId); decrErr != nil {
 				common.SysLog(fmt.Sprintf("failed to decrement user concurrency: %v", decrErr))
