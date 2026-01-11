@@ -29,6 +29,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { API, showError, getRelativeTime } from '../../helpers';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import {
   IllustrationNoContent,
   IllustrationNoContentDark,
@@ -53,6 +54,18 @@ const NoticeModal = ({
   const announcements = statusState?.status?.announcements || [];
 
   const unreadSet = useMemo(() => new Set(unreadKeys), [unreadKeys]);
+
+  // 统一的 Markdown/HTML 处理：支持换行并进行安全清洗，避免渲染失败或 XSS 风险
+  const parseContent = (raw) => {
+    if (!raw) return '';
+    try {
+      const html = marked.parse(raw, { breaks: true, gfm: true });
+      return DOMPurify.sanitize(html);
+    } catch (err) {
+      console.error('公告内容解析失败:', err);
+      return DOMPurify.sanitize(raw); // 失败时至少以纯文本方式显示
+    }
+  };
 
   const getKeyForItem = (item) =>
     `${item?.publishDate || ''}-${(item?.content || '').slice(0, 30)}`;
@@ -89,8 +102,7 @@ const NoticeModal = ({
       const { success, message, data } = res.data;
       if (success) {
         if (data !== '') {
-          const htmlNotice = marked.parse(data);
-          setNoticeContent(htmlNotice);
+          setNoticeContent(parseContent(data));
         } else {
           setNoticeContent('');
         }
@@ -170,8 +182,8 @@ const NoticeModal = ({
       <div className='max-h-[55vh] overflow-y-auto pr-2 card-content-scroll'>
         <Timeline mode='left'>
           {processedAnnouncements.map((item, idx) => {
-            const htmlContent = marked.parse(item.content || '');
-            const htmlExtra = item.extra ? marked.parse(item.extra) : '';
+            const htmlContent = parseContent(item.content);
+            const htmlExtra = item.extra ? parseContent(item.extra) : '';
             return (
               <Timeline.Item
                 key={idx}
