@@ -21,11 +21,27 @@ import React from 'react';
 import { Card, Tag, Timeline, Empty } from '@douyinfe/semi-ui';
 import { Bell } from 'lucide-react';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import '../common/markdown/markdown.css';
 import {
   IllustrationConstruction,
   IllustrationConstructionDark,
 } from '@douyinfe/semi-illustrations';
 import ScrollableContainer from '../common/ui/ScrollableContainer';
+
+const parseContent = (raw) => {
+  if (!raw) return '';
+  try {
+    const html = marked.parse(raw, { breaks: true, gfm: true });
+    return DOMPurify.sanitize(html, {
+      ADD_TAGS: ['iframe'],
+      ADD_ATTR: ['target', 'rel', 'style'],
+    });
+  } catch (err) {
+    console.error('公告内容解析失败:', err);
+    return DOMPurify.sanitize(raw);
+  }
+};
 
 const AnnouncementsPanel = ({
   announcementData,
@@ -80,7 +96,8 @@ const AnnouncementsPanel = ({
         {announcementData.length > 0 ? (
           <Timeline mode='left'>
             {announcementData.map((item, idx) => {
-              const htmlExtra = item.extra ? marked.parse(item.extra) : '';
+              const htmlExtra = item.extra ? parseContent(item.extra) : '';
+              const htmlContent = parseContent(item.content);
               return (
                 <Timeline.Item
                   key={idx}
@@ -89,7 +106,7 @@ const AnnouncementsPanel = ({
                   extra={
                     item.extra ? (
                       <div
-                        className='text-xs text-gray-500'
+                        className='markdown-body text-xs text-gray-500'
                         dangerouslySetInnerHTML={{ __html: htmlExtra }}
                       />
                     ) : null
@@ -97,9 +114,8 @@ const AnnouncementsPanel = ({
                 >
                   <div>
                     <div
-                      dangerouslySetInnerHTML={{
-                        __html: marked.parse(item.content || ''),
-                      }}
+                      className='markdown-body'
+                      dangerouslySetInnerHTML={{ __html: htmlContent }}
                     />
                   </div>
                 </Timeline.Item>
