@@ -453,7 +453,8 @@ const PlansTable = () => {
         daily_quota_limit: dailyQuotaLimit,
         default_quota_usd: defaultQuotaUsd,
         daily_quota_limit_usd: dailyQuotaLimitUsd,
-        quota_usd: defaultQuotaUsd,
+        // 保留原有 quota_usd，只在为空时使用计算值
+        quota_usd: editingPlan.quota_usd || defaultQuotaUsd,
         // Convert int (0/1) to boolean for Switch component
         default_allow_switch: editingPlan.default_allow_switch === 1,
         default_allow_toggle: editingPlan.default_allow_toggle === 1,
@@ -486,12 +487,14 @@ const PlansTable = () => {
   };
 
   // Update form values when opening edit modal or switching plans
+  // 只在弹窗打开或切换套餐时触发，避免 quotaPerUnit 变化导致表单重置
   useEffect(() => {
     if (!showEdit || !editFormApi) return;
     const initValues = getEditFormInitValues();
     editFormApi.setValues(initValues);
     setFormPlanType(initValues.type || PLAN_TYPES.CONSUMPTION);
-  }, [showEdit, editingPlan, editFormApi, quotaPerUnit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEdit, editingPlan?.id, editFormApi]);
 
   return (
     <Card
@@ -777,8 +780,7 @@ const PlansTable = () => {
             min={0}
             precision={2}
             prefix="$"
-            extraText={t('自动与默认额度同步，用于在定价页面显示')}
-            disabled
+            extraText={t('用于在定价页面显示，修改默认额度时自动同步')}
           />
 
           {/* Display Settings */}
