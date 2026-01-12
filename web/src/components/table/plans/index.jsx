@@ -333,69 +333,6 @@ const PlansTable = () => {
     },
   ];
 
-  // Prepare form initial values
-  const getEditFormInitValues = () => {
-    if (editingPlan.id) {
-      // Parse channel_groups
-      let channel_groups_array = [];
-      try {
-        channel_groups_array = editingPlan.channel_groups ? JSON.parse(editingPlan.channel_groups) : [];
-      } catch (e) {
-        if (editingPlan.channel_group) {
-          channel_groups_array = [editingPlan.channel_group];
-        }
-      }
-
-      // Parse rate_limit_rules
-      let rate_limit_rules_array = [];
-      try {
-        rate_limit_rules_array = editingPlan.rate_limit_rules ? JSON.parse(editingPlan.rate_limit_rules) : [];
-      } catch (e) {
-        rate_limit_rules_array = [];
-      }
-
-      // Parse custom_features
-      let custom_features_array = [];
-      try {
-        custom_features_array = editingPlan.custom_features ? JSON.parse(editingPlan.custom_features) : [];
-      } catch (e) {
-        custom_features_array = [];
-      }
-
-      return {
-        ...editingPlan,
-        channel_groups: channel_groups_array,
-        rate_limit_rules: rate_limit_rules_array,
-        custom_features: custom_features_array,
-        // Convert int (0/1) to boolean for Switch component
-        default_allow_switch: editingPlan.default_allow_switch === 1,
-        default_allow_toggle: editingPlan.default_allow_toggle === 1,
-        purchasable: editingPlan.purchasable === 1,
-        show_in_pricing: editingPlan.show_in_pricing === 1,
-      };
-    }
-    return {
-      status: PLAN_STATUS.ENABLED,
-      type: PLAN_TYPES.CONSUMPTION,
-      category: 'monthly', // 默认为月卡
-      priority: 0,
-      default_quota: 0,
-      daily_quota_limit: 0,
-      validity_days: 0,
-      default_allow_switch: true,
-      default_allow_toggle: true,
-      purchasable: true,
-      show_in_pricing: true,
-      price: 0,
-      original_price: 0,
-      quota_usd: 0,
-      sort_order: 0,
-      channel_groups: [],
-      rate_limit_rules: [],
-      custom_features: [],
-    };
-  };
-
   // Handle form submit
   const handleSubmit = async () => {
     if (!editFormApi) return;
@@ -434,10 +371,6 @@ const PlansTable = () => {
 
   // Watch form type change
   const [formPlanType, setFormPlanType] = useState(PLAN_TYPES.CONSUMPTION);
-  const [formDefaultQuota, setFormDefaultQuota] = useState(0);
-  const [formDailyQuotaLimit, setFormDailyQuotaLimit] = useState(0);
-  const [formQuotaUsd, setFormQuotaUsd] = useState(0);
-  const [formDailyQuotaLimitUsd, setFormDailyQuotaLimitUsd] = useState(0);
   const [quotaPerUnit, setQuotaPerUnit] = useState(null);
 
   // Load quota_per_unit from localStorage
@@ -472,25 +405,93 @@ const PlansTable = () => {
     return quota / quotaPerUnit;
   };
 
-  // Update formPlanType when editing an existing plan
-  useEffect(() => {
-    if (showEdit && editingPlan && editingPlan.id) {
-      // Editing existing plan - set type from plan data
-      setFormPlanType(editingPlan.type || PLAN_TYPES.CONSUMPTION);
-      setFormDefaultQuota(editingPlan.default_quota || 0);
-      setFormDailyQuotaLimit(editingPlan.daily_quota_limit || 0);
-      // Calculate USD values from quota
-      setFormQuotaUsd(convertQuotaToUsd(editingPlan.default_quota || 0));
-      setFormDailyQuotaLimitUsd(convertQuotaToUsd(editingPlan.daily_quota_limit || 0));
-    } else if (showEdit && (!editingPlan || !editingPlan.id)) {
-      // Creating new plan - reset to default
-      setFormPlanType(PLAN_TYPES.CONSUMPTION);
-      setFormDefaultQuota(0);
-      setFormDailyQuotaLimit(0);
-      setFormQuotaUsd(0);
-      setFormDailyQuotaLimitUsd(0);
+  // Prepare form initial values
+  const getEditFormInitValues = () => {
+    const hasQuotaPerUnit = Number.isFinite(quotaPerUnit) && quotaPerUnit > 0;
+    const defaultQuota = editingPlan.default_quota || 0;
+    const dailyQuotaLimit = editingPlan.daily_quota_limit || 0;
+    const defaultQuotaUsd = hasQuotaPerUnit
+      ? convertQuotaToUsd(defaultQuota)
+      : (editingPlan.quota_usd || 0);
+    const dailyQuotaLimitUsd = hasQuotaPerUnit
+      ? convertQuotaToUsd(dailyQuotaLimit)
+      : 0;
+
+    if (editingPlan.id) {
+      // Parse channel_groups
+      let channel_groups_array = [];
+      try {
+        channel_groups_array = editingPlan.channel_groups ? JSON.parse(editingPlan.channel_groups) : [];
+      } catch (e) {
+        if (editingPlan.channel_group) {
+          channel_groups_array = [editingPlan.channel_group];
+        }
+      }
+
+      // Parse rate_limit_rules
+      let rate_limit_rules_array = [];
+      try {
+        rate_limit_rules_array = editingPlan.rate_limit_rules ? JSON.parse(editingPlan.rate_limit_rules) : [];
+      } catch (e) {
+        rate_limit_rules_array = [];
+      }
+
+      // Parse custom_features
+      let custom_features_array = [];
+      try {
+        custom_features_array = editingPlan.custom_features ? JSON.parse(editingPlan.custom_features) : [];
+      } catch (e) {
+        custom_features_array = [];
+      }
+
+      return {
+        ...editingPlan,
+        channel_groups: channel_groups_array,
+        rate_limit_rules: rate_limit_rules_array,
+        custom_features: custom_features_array,
+        default_quota: defaultQuota,
+        daily_quota_limit: dailyQuotaLimit,
+        default_quota_usd: defaultQuotaUsd,
+        daily_quota_limit_usd: dailyQuotaLimitUsd,
+        quota_usd: defaultQuotaUsd,
+        // Convert int (0/1) to boolean for Switch component
+        default_allow_switch: editingPlan.default_allow_switch === 1,
+        default_allow_toggle: editingPlan.default_allow_toggle === 1,
+        purchasable: editingPlan.purchasable === 1,
+        show_in_pricing: editingPlan.show_in_pricing === 1,
+      };
     }
-  }, [showEdit, editingPlan]);
+    return {
+      status: PLAN_STATUS.ENABLED,
+      type: PLAN_TYPES.CONSUMPTION,
+      category: 'monthly', // 默认为月卡
+      priority: 0,
+      default_quota: 0,
+      daily_quota_limit: 0,
+      default_quota_usd: 0,
+      daily_quota_limit_usd: 0,
+      validity_days: 0,
+      default_allow_switch: true,
+      default_allow_toggle: true,
+      purchasable: true,
+      show_in_pricing: true,
+      price: 0,
+      original_price: 0,
+      quota_usd: 0,
+      sort_order: 0,
+      channel_groups: [],
+      rate_limit_rules: [],
+      custom_features: [],
+    };
+  };
+
+  // Update form values when opening edit modal or switching plans
+  useEffect(() => {
+    if (!showEdit || !editFormApi) return;
+    const initValues = getEditFormInitValues();
+    editFormApi.setValues(initValues);
+    setFormPlanType(initValues.type || PLAN_TYPES.CONSUMPTION);
+  }, [showEdit, editingPlan, editFormApi, quotaPerUnit]);
 
   return (
     <Card
@@ -587,12 +588,6 @@ const PlansTable = () => {
             if (values.type !== undefined) {
               setFormPlanType(values.type);
             }
-            if (values.default_quota !== undefined) {
-              setFormDefaultQuota(values.default_quota);
-            }
-            if (values.daily_quota_limit !== undefined) {
-              setFormDailyQuotaLimit(values.daily_quota_limit);
-            }
           }}
         >
           <Form.Input
@@ -642,22 +637,20 @@ const PlansTable = () => {
             precision={2}
             prefix="$"
             extraText={quotaPerUnit ? t('套餐包含的消费额度（美元）') : t('⚠️ 系统配置 quota_per_unit 无效，无法输入')}
-            initValue={formQuotaUsd}
             disabled={!quotaPerUnit}
             onChange={(value) => {
-              setFormQuotaUsd(value || 0);
+              if (!editFormApi) return;
+              const usdValue = value || 0;
               // Auto-calculate token quota
-              const tokenQuota = convertUsdToQuota(value || 0);
-              setFormDefaultQuota(tokenQuota);
-              if (editFormApi) {
-                editFormApi.setValue('default_quota', tokenQuota);
-              }
+              const tokenQuota = convertUsdToQuota(usdValue);
+              editFormApi.setValue('default_quota', tokenQuota);
+              // Keep pricing display aligned with default quota
+              editFormApi.setValue('quota_usd', usdValue);
             }}
           />
           <Form.InputNumber
             field='default_quota'
             style={{ display: 'none' }}
-            initValue={formDefaultQuota}
           />
 
           {/* Daily Quota Limit - only for subscription plans */}
@@ -672,22 +665,18 @@ const PlansTable = () => {
                 prefix="$"
                 suffix={t('（订阅套餐）')}
                 extraText={quotaPerUnit ? t('每日最大消费额度，0表示无限制') : t('⚠️ 系统配置 quota_per_unit 无效，无法输入')}
-                initValue={formDailyQuotaLimitUsd}
                 disabled={!quotaPerUnit}
                 onChange={(value) => {
-                  setFormDailyQuotaLimitUsd(value || 0);
+                  if (!editFormApi) return;
+                  const usdValue = value || 0;
                   // Auto-calculate token quota
-                  const tokenQuota = convertUsdToQuota(value || 0);
-                  setFormDailyQuotaLimit(tokenQuota);
-                  if (editFormApi) {
-                    editFormApi.setValue('daily_quota_limit', tokenQuota);
-                  }
+                  const tokenQuota = convertUsdToQuota(usdValue);
+                  editFormApi.setValue('daily_quota_limit', tokenQuota);
                 }}
               />
               <Form.InputNumber
                 field='daily_quota_limit'
                 style={{ display: 'none' }}
-                initValue={formDailyQuotaLimit}
               />
             </>
           )}
@@ -788,7 +777,8 @@ const PlansTable = () => {
             min={0}
             precision={2}
             prefix="$"
-            extraText={t('用于在定价页面显示套餐额度的美元价值')}
+            extraText={t('自动与默认额度同步，用于在定价页面显示')}
+            disabled
           />
 
           {/* Display Settings */}
