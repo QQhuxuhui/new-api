@@ -26,6 +26,7 @@ import { useActualTheme } from '../../context/Theme';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { useTranslation } from 'react-i18next';
+import '../../components/common/markdown/markdown.css';
 import { IconPlay, IconFile, IconGithubLogo } from '@douyinfe/semi-icons';
 import { Link, useNavigate } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
@@ -332,9 +333,12 @@ const Home = () => {
             />
           ) : (
             <div
-              className='mt-[60px]'
+              className='markdown-body mt-[60px]'
               dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(homePageContent),
+                __html: DOMPurify.sanitize(homePageContent, {
+                  ADD_TAGS: ['iframe'],
+                  ADD_ATTR: ['target', 'rel', 'style'],
+                }),
               }}
             />
           )}
