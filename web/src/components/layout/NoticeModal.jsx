@@ -30,6 +30,7 @@ import { useTranslation } from 'react-i18next';
 import { API, showError, getRelativeTime } from '../../helpers';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import '../common/markdown/markdown.css';
 import {
   IllustrationNoContent,
   IllustrationNoContentDark,
@@ -60,10 +61,13 @@ const NoticeModal = ({
     if (!raw) return '';
     try {
       const html = marked.parse(raw, { breaks: true, gfm: true });
-      return DOMPurify.sanitize(html);
+      return DOMPurify.sanitize(html, {
+        ADD_TAGS: ['iframe'],
+        ADD_ATTR: ['target', 'rel', 'style'],
+      });
     } catch (err) {
       console.error('公告内容解析失败:', err);
-      return DOMPurify.sanitize(raw); // 失败时至少以纯文本方式显示
+      return DOMPurify.sanitize(raw);
     }
   };
 
@@ -156,7 +160,7 @@ const NoticeModal = ({
     return (
       <div
         dangerouslySetInnerHTML={{ __html: noticeContent }}
-        className='notice-content-scroll max-h-[55vh] overflow-y-auto pr-2'
+        className='markdown-body notice-content-scroll max-h-[55vh] overflow-y-auto pr-2'
       />
     );
   };
@@ -192,7 +196,7 @@ const NoticeModal = ({
                 extra={
                   item.extra ? (
                     <div
-                      className='text-xs text-gray-500'
+                      className='markdown-body text-xs text-gray-500'
                       dangerouslySetInnerHTML={{ __html: htmlExtra }}
                     />
                   ) : null
@@ -201,7 +205,7 @@ const NoticeModal = ({
               >
                 <div>
                   <div
-                    className={item.isUnread ? 'shine-text' : ''}
+                    className={`markdown-body ${item.isUnread ? 'shine-text' : ''}`}
                     dangerouslySetInnerHTML={{ __html: htmlContent }}
                   />
                 </div>
