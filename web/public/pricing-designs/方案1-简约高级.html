@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API服务定价 - 简约高级风格</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2563EB;
+            --primary-light: #3B82F6;
+            --cta: #F97316;
+            --bg: #F8FAFC;
+            --text: #1E293B;
+            --text-muted: #475569;
+            --border: #E2E8F0;
+            --success: #10B981;
+        }
+
+        body {
+            font-family: 'Open Sans', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: 'Poppins', sans-serif;
+        }
+
+        /* Hero Section */
+        .hero {
+            text-align: center;
+            padding: 80px 24px 60px;
+            background: white;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 5vw, 3.5rem);
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 16px;
+            letter-spacing: -0.02em;
+        }
+
+        .hero .subtitle {
+            font-size: 1.25rem;
+            color: var(--text-muted);
+            max-width: 600px;
+            margin: 0 auto 32px;
+        }
+
+        .hero .trust-badges {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+            margin-top: 48px;
+        }
+
+        .trust-badge {
+            text-align: center;
+        }
+
+        .trust-badge .number {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary);
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .trust-badge .label {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Pricing Cards */
+        .pricing-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 60px 24px;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 2rem;
+            font-weight: 600;
+            margin-bottom: 48px;
+            color: var(--text);
+        }
+
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin-bottom: 40px;
+        }
+
+        .pricing-card {
+            background: white;
+            border-radius: 20px;
+            padding: 32px;
+            border: 2px solid var(--border);
+            transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .pricing-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 60px rgba(37, 99, 235, 0.15);
+            border-color: var(--primary);
+        }
+
+        .pricing-card.recommended {
+            border-color: var(--primary);
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.03), rgba(59, 130, 246, 0.03));
+        }
+
+        .pricing-card.recommended::before {
+            content: '⭐ 最受欢迎';
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white;
+            padding: 6px 20px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .card-header {
+            margin-bottom: 24px;
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        .card-duration {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .card-price {
+            margin-bottom: 24px;
+        }
+
+        .price-main {
+            font-size: 3rem;
+            font-weight: 700;
+            color: var(--primary);
+            font-family: 'Poppins', sans-serif;
+            line-height: 1;
+        }
+
+        .price-unit {
+            font-size: 1rem;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        .card-quota {
+            background: rgba(37, 99, 235, 0.08);
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+        }
+
+        .quota-label {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .quota-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary);
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .unit-price {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-top: 8px;
+        }
+
+        .unit-price .highlight {
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        .cta-button {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 200ms;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .cta-button.primary {
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white;
+        }
+
+        .cta-button.primary:hover {
+            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .cta-button.secondary {
+            background: white;
+            color: var(--primary);
+            border: 2px solid var(--primary);
+        }
+
+        .cta-button.secondary:hover {
+            background: rgba(37, 99, 235, 0.05);
+        }
+
+        /* Tab Switch */
+        .tab-switch {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 48px;
+        }
+
+        .tab-container {
+            display: inline-flex;
+            background: white;
+            border-radius: 12px;
+            padding: 6px;
+            border: 1px solid var(--border);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        .tab-btn {
+            padding: 12px 32px;
+            border: none;
+            background: transparent;
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 200ms;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .tab-btn:hover {
+            color: var(--text);
+        }
+
+        .tab-btn.active {
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Pay as you go section */
+        .payg-section {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .payg-card {
+            background: white;
+            border: 2px solid var(--border);
+            border-radius: 20px;
+            padding: 48px;
+            text-align: center;
+        }
+
+        .payg-card:hover {
+            border-color: var(--primary);
+            box-shadow: 0 20px 60px rgba(37, 99, 235, 0.15);
+        }
+
+        .payg-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 24px;
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(59, 130, 246, 0.1));
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+        }
+
+        .payg-title {
+            font-size: 1.75rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .payg-desc {
+            color: var(--text-muted);
+            max-width: 500px;
+            margin: 0 auto 32px;
+            line-height: 1.8;
+        }
+
+        .payg-price {
+            margin-bottom: 32px;
+        }
+
+        .payg-price .price-main {
+            font-size: 4rem;
+        }
+
+        .payg-features {
+            display: flex;
+            justify-content: center;
+            gap: 32px;
+            flex-wrap: wrap;
+            margin-bottom: 32px;
+        }
+
+        .payg-feature {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+        }
+
+        .payg-feature .check {
+            color: var(--success);
+            font-weight: bold;
+        }
+
+        /* Features comparison */
+        .features-section {
+            max-width: 1200px;
+            margin: 80px auto;
+            padding: 0 24px;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 32px;
+            margin-top: 40px;
+        }
+
+        .feature-item {
+            text-align: center;
+        }
+
+        .feature-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 16px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+        }
+
+        .feature-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .feature-desc {
+            color: var(--text-muted);
+            font-size: 0.9375rem;
+        }
+
+        /* Testimonials */
+        .testimonials {
+            background: white;
+            padding: 80px 24px;
+            margin-top: 60px;
+        }
+
+        .testimonials-grid {
+            max-width: 1200px;
+            margin: 40px auto 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 32px;
+        }
+
+        .testimonial-card {
+            background: var(--bg);
+            padding: 32px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .testimonial-text {
+            font-style: italic;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+            line-height: 1.8;
+        }
+
+        .testimonial-author {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .author-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .author-info .name {
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .author-info .role {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        /* FAQ */
+        .faq-section {
+            max-width: 800px;
+            margin: 80px auto;
+            padding: 0 24px;
+        }
+
+        .faq-item {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .faq-question {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        .faq-answer {
+            color: var(--text-muted);
+        }
+
+        /* Final CTA */
+        .final-cta {
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white;
+            padding: 80px 24px;
+            text-align: center;
+        }
+
+        .final-cta h2 {
+            font-size: 2.5rem;
+            margin-bottom: 16px;
+        }
+
+        .final-cta p {
+            font-size: 1.25rem;
+            margin-bottom: 32px;
+            opacity: 0.9;
+        }
+
+        .final-cta .cta-button {
+            max-width: 300px;
+            margin: 0 auto;
+            background: white;
+            color: var(--primary);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2rem;
+            }
+
+            .payg-content {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .pricing-card.recommended::before {
+                font-size: 0.7rem;
+                padding: 4px 16px;
+            }
+        }
+
+        /* Accessibility */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <h1>选择适合您的API服务套餐</h1>
+        <p class="subtitle">灵活的计费方式，让您的AI应用成本可控。按需付费或订阅套餐，自由选择。</p>
+
+        <div class="trust-badges">
+            <div class="trust-badge">
+                <div class="number">50,000+</div>
+                <div class="label">活跃用户</div>
+            </div>
+            <div class="trust-badge">
+                <div class="number">99.9%</div>
+                <div class="label">服务可用性</div>
+            </div>
+            <div class="trust-badge">
+                <div class="number">24/7</div>
+                <div class="label">技术支持</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Cards -->
+    <section class="pricing-container">
+        <!-- Tab Switch -->
+        <div class="tab-switch">
+            <div class="tab-container">
+                <button class="tab-btn active" data-tab="subscription">订阅套餐</button>
+                <button class="tab-btn" data-tab="payg">按量付费</button>
+            </div>
+        </div>
+
+        <!-- Subscription Plans -->
+        <div id="subscription" class="tab-content active">
+            <div class="cards-grid">
+                <!-- Daily Plan -->
+                <div class="pricing-card">
+                    <div class="card-header">
+                        <h3 class="card-title">日卡</h3>
+                        <p class="card-duration">24小时有效期</p>
+                    </div>
+                    <div class="card-price">
+                        <span class="price-main">¥18</span>
+                    </div>
+                    <div class="card-quota">
+                        <div class="quota-label">可用额度</div>
+                        <div class="quota-value">$40</div>
+                    </div>
+                    <div class="unit-price">
+                        单价 <span class="highlight">¥0.45/美金</span><br>
+                        比按量节省 10%
+                    </div>
+                    <button class="cta-button secondary">选择日卡</button>
+                </div>
+
+                <!-- Weekly Plan -->
+                <div class="pricing-card">
+                    <div class="card-header">
+                        <h3 class="card-title">周卡</h3>
+                        <p class="card-duration">7天有效期</p>
+                    </div>
+                    <div class="card-price">
+                        <span class="price-main">¥55</span>
+                    </div>
+                    <div class="card-quota">
+                        <div class="quota-label">可用额度</div>
+                        <div class="quota-value">$140</div>
+                    </div>
+                    <div class="unit-price">
+                        单价 <span class="highlight">¥0.39/美金</span><br>
+                        比按量节省 22%
+                    </div>
+                    <button class="cta-button secondary">选择周卡</button>
+                </div>
+
+                <!-- Monthly Basic -->
+                <div class="pricing-card">
+                    <div class="card-header">
+                        <h3 class="card-title">基础月卡</h3>
+                        <p class="card-duration">30天有效期</p>
+                    </div>
+                    <div class="card-price">
+                        <span class="price-main">¥69</span>
+                    </div>
+                    <div class="card-quota">
+                        <div class="quota-label">可用额度</div>
+                        <div class="quota-value">$180</div>
+                    </div>
+                    <div class="unit-price">
+                        单价 <span class="highlight">¥0.38/美金</span><br>
+                        比按量节省 24%
+                    </div>
+                    <button class="cta-button secondary">选择基础月卡</button>
+                </div>
+
+                <!-- Monthly Standard (Recommended) -->
+                <div class="pricing-card recommended">
+                    <div class="card-header">
+                        <h3 class="card-title">标准月卡</h3>
+                        <p class="card-duration">30天有效期</p>
+                    </div>
+                    <div class="card-price">
+                        <span class="price-main">¥129</span>
+                    </div>
+                    <div class="card-quota">
+                        <div class="quota-label">可用额度</div>
+                        <div class="quota-value">$350</div>
+                    </div>
+                    <div class="unit-price">
+                        单价 <span class="highlight">¥0.37/美金</span><br>
+                        比按量节省 26%
+                    </div>
+                    <button class="cta-button primary">立即购买</button>
+                </div>
+
+                <!-- Monthly Pro -->
+                <div class="pricing-card">
+                    <div class="card-header">
+                        <h3 class="card-title">专业月卡</h3>
+                        <p class="card-duration">30天有效期</p>
+                    </div>
+                    <div class="card-price">
+                        <span class="price-main">¥249</span>
+                    </div>
+                    <div class="card-quota">
+                        <div class="quota-label">可用额度</div>
+                        <div class="quota-value">$700</div>
+                    </div>
+                    <div class="unit-price">
+                        单价 <span class="highlight">¥0.36/美金</span><br>
+                        比按量节省 28%
+                    </div>
+                    <button class="cta-button secondary">选择专业月卡</button>
+                </div>
+
+                <!-- Monthly Flagship -->
+                <div class="pricing-card">
+                    <div class="card-header">
+                        <h3 class="card-title">旗舰月卡</h3>
+                        <p class="card-duration">30天有效期</p>
+                    </div>
+                    <div class="card-price">
+                        <span class="price-main">¥449</span>
+                    </div>
+                    <div class="card-quota">
+                        <div class="quota-label">可用额度</div>
+                        <div class="quota-value">$1300</div>
+                    </div>
+                    <div class="unit-price">
+                        单价 <span class="highlight">¥0.35/美金</span><br>
+                        比按量节省 30%
+                    </div>
+                    <button class="cta-button secondary">选择旗舰月卡</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pay as you go -->
+        <div id="payg" class="tab-content">
+            <div class="payg-section">
+                <div class="pricing-card payg-card">
+                    <div class="payg-icon">💳</div>
+                    <h3 class="payg-title">按量付费</h3>
+                    <p class="payg-desc">适合偶尔使用或需求波动大的用户，随用随扣，不浪费一分钱。套餐额度用完后也会自动按此价格继续计费。</p>
+                    <div class="payg-price">
+                        <span class="price-main">¥0.50</span>
+                        <span class="price-unit"> / 美金</span>
+                    </div>
+                    <div class="payg-features">
+                        <div class="payg-feature">
+                            <span class="check">✓</span>
+                            <span>无最低消费</span>
+                        </div>
+                        <div class="payg-feature">
+                            <span class="check">✓</span>
+                            <span>余额永不过期</span>
+                        </div>
+                        <div class="payg-feature">
+                            <span class="check">✓</span>
+                            <span>随时充值</span>
+                        </div>
+                    </div>
+                    <button class="cta-button primary" style="max-width: 300px; margin: 0 auto;">立即充值</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features-section">
+        <h2 class="section-title">所有套餐均包含</h2>
+        <div class="features-grid">
+            <div class="feature-item">
+                <div class="feature-icon">⚡</div>
+                <h3 class="feature-title">闪电响应</h3>
+                <p class="feature-desc">毫秒级API响应速度，保障您的应用流畅运行</p>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">🔒</div>
+                <h3 class="feature-title">安全可靠</h3>
+                <p class="feature-desc">企业级安全防护，数据传输全程加密</p>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">📊</div>
+                <h3 class="feature-title">实时监控</h3>
+                <p class="feature-desc">可视化控制台，实时查看使用情况和余额</p>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">🎯</div>
+                <h3 class="feature-title">灵活切换</h3>
+                <p class="feature-desc">支持多种AI模型，一个接口全部搞定</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials -->
+    <section class="testimonials">
+        <h2 class="section-title">用户评价</h2>
+        <div class="testimonials-grid">
+            <div class="testimonial-card">
+                <p class="testimonial-text">"用了标准月卡后，成本降低了30%，而且再也不用担心余额不足了。强烈推荐！"</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">李</div>
+                    <div class="author-info">
+                        <div class="name">李明</div>
+                        <div class="role">AI应用开发者</div>
+                    </div>
+                </div>
+            </div>
+            <div class="testimonial-card">
+                <p class="testimonial-text">"日卡非常适合我这种需求波动大的场景，活动期间买一张，用完就走，很方便。"</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">张</div>
+                    <div class="author-info">
+                        <div class="name">张小雨</div>
+                        <div class="role">独立开发者</div>
+                    </div>
+                </div>
+            </div>
+            <div class="testimonial-card">
+                <p class="testimonial-text">"服务稳定，响应快，价格也很合理。客服24小时在线，遇到问题都能快速解决。"</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">王</div>
+                    <div class="author-info">
+                        <div class="name">王峰</div>
+                        <div class="role">创业公司CTO</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq-section">
+        <h2 class="section-title">常见问题</h2>
+        <div class="faq-item">
+            <div class="faq-question">Q: 套餐额度用完后怎么办？</div>
+            <div class="faq-answer">A: 套餐额度用完后，系统会自动按照按量付费价格（¥0.50/美金）继续计费，无需担心服务中断。</div>
+        </div>
+        <div class="faq-item">
+            <div class="faq-question">Q: 可以随时升级或降级套餐吗？</div>
+            <div class="faq-answer">A: 是的，您可以随时购买新的套餐。新套餐会在当前套餐到期后自动生效，不会浪费您的已购额度。</div>
+        </div>
+        <div class="faq-item">
+            <div class="faq-question">Q: 支持哪些支付方式？</div>
+            <div class="faq-answer">A: 我们支持支付宝、微信支付、银行卡等多种支付方式，安全便捷。</div>
+        </div>
+        <div class="faq-item">
+            <div class="faq-question">Q: 有技术支持吗？</div>
+            <div class="faq-answer">A: 所有用户都享有24/7在线技术支持，我们的团队会在第一时间帮您解决问题。</div>
+        </div>
+    </section>
+
+    <!-- Final CTA -->
+    <section class="final-cta">
+        <h2>准备好开始了吗？</h2>
+        <p>选择最适合您的套餐，立即开启高效的AI开发之旅</p>
+        <button class="cta-button">立即选购套餐</button>
+    </section>
+
+    <script>
+        // Tab switching logic
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Update button states
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                // Update content visibility
+                const tabId = btn.dataset.tab;
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById(tabId).classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>

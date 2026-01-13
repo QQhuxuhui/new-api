@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API服务定价 - 优雅极简风格</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --black: #000000;
+            --white: #FFFFFF;
+            --gray-100: #F5F5F5;
+            --gray-200: #E5E5E5;
+            --gray-400: #A0A0A0;
+            --gray-600: #666666;
+            --accent: #2563EB;
+        }
+
+        body {
+            font-family: 'Open Sans', -apple-system, sans-serif;
+            background: var(--white);
+            color: var(--black);
+            line-height: 1.5;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: 'Poppins', sans-serif;
+            font-weight: 900;
+            letter-spacing: -0.05em;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 120px 40px;
+            text-align: center;
+            border-bottom: 1px solid var(--black);
+        }
+
+        .hero h1 {
+            font-size: clamp(4rem, 12vw, 10rem);
+            line-height: 0.95;
+            margin-bottom: 60px;
+            font-weight: 900;
+        }
+
+        .hero-subtitle {
+            font-size: clamp(1.25rem, 2.5vw, 2rem);
+            font-weight: 300;
+            max-width: 800px;
+            margin: 0 auto;
+            color: var(--gray-600);
+        }
+
+        /* Price Grid */
+        .price-section {
+            padding: 160px 40px;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        .section-label {
+            font-size: 0.875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            margin-bottom: 80px;
+            color: var(--gray-400);
+        }
+
+        .price-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1px;
+            background: var(--black);
+            border: 1px solid var(--black);
+        }
+
+        .price-cell {
+            background: var(--white);
+            padding: 60px 40px;
+            position: relative;
+            transition: all 250ms;
+            cursor: pointer;
+        }
+
+        .price-cell:hover {
+            background: var(--gray-100);
+            z-index: 1;
+        }
+
+        .price-cell.featured {
+            background: var(--black);
+            color: var(--white);
+        }
+
+        .price-cell.featured:hover {
+            background: var(--gray-600);
+        }
+
+        .price-cell.featured .plan-name,
+        .price-cell.featured .plan-duration,
+        .price-cell.featured .plan-price,
+        .price-cell.featured .plan-quota-value,
+        .price-cell.featured .plan-save {
+            color: var(--white);
+        }
+
+        .price-cell.featured .plan-quota-label {
+            color: var(--gray-400);
+        }
+
+        .plan-name {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .plan-duration {
+            font-size: 0.875rem;
+            color: var(--gray-400);
+            margin-bottom: 60px;
+            font-weight: 500;
+        }
+
+        .plan-price {
+            font-size: 5rem;
+            font-weight: 900;
+            line-height: 1;
+            margin-bottom: 40px;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .plan-quota {
+            margin-bottom: 40px;
+            padding: 24px 0;
+            border-top: 1px solid var(--gray-200);
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .price-cell.featured .plan-quota {
+            border-color: var(--gray-600);
+        }
+
+        .plan-quota-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--gray-400);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .plan-quota-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .plan-save {
+            font-size: 0.9375rem;
+            color: var(--gray-600);
+            margin-bottom: 40px;
+            font-weight: 500;
+        }
+
+        .plan-save strong {
+            color: var(--black);
+            font-weight: 700;
+        }
+
+        .price-cell.featured .plan-save strong {
+            color: var(--white);
+        }
+
+        .buy-btn {
+            width: 100%;
+            padding: 20px;
+            background: var(--black);
+            color: var(--white);
+            border: 2px solid var(--black);
+            font-size: 0.875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            cursor: pointer;
+            transition: all 200ms;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .buy-btn:hover {
+            background: var(--white);
+            color: var(--black);
+        }
+
+        .price-cell.featured .buy-btn {
+            background: var(--white);
+            color: var(--black);
+            border-color: var(--white);
+        }
+
+        .price-cell.featured .buy-btn:hover {
+            background: transparent;
+            color: var(--white);
+        }
+
+        .featured-badge {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 12px;
+            height: 12px;
+            background: var(--white);
+            border-radius: 50%;
+        }
+
+        /* Pay as you go */
+        .payg-section {
+            padding: 0 40px 160px;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        .payg-container {
+            border: 2px solid var(--black);
+            padding: 80px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 60px;
+            flex-wrap: wrap;
+        }
+
+        .payg-info h2 {
+            font-size: clamp(2rem, 4vw, 3.5rem);
+            margin-bottom: 20px;
+        }
+
+        .payg-info p {
+            font-size: 1.125rem;
+            color: var(--gray-600);
+            max-width: 500px;
+            font-weight: 300;
+        }
+
+        .payg-price-area {
+            text-align: right;
+        }
+
+        .payg-price {
+            font-size: 6rem;
+            font-weight: 900;
+            line-height: 1;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .payg-unit {
+            font-size: 1.25rem;
+            color: var(--gray-600);
+            margin-top: 12px;
+        }
+
+        /* Features */
+        .features-section {
+            padding: 160px 40px;
+            border-top: 1px solid var(--black);
+        }
+
+        .features-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 80px;
+            margin-top: 100px;
+        }
+
+        .feature-item h3 {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            font-weight: 900;
+        }
+
+        .feature-item p {
+            font-size: 1.125rem;
+            color: var(--gray-600);
+            line-height: 1.8;
+            font-weight: 300;
+        }
+
+        .feature-number {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--gray-400);
+            margin-bottom: 12px;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        /* Stats Section */
+        .stats-section {
+            padding: 160px 40px;
+            background: var(--black);
+            color: var(--white);
+            border-top: 1px solid var(--black);
+        }
+
+        .stats-grid {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 80px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 6rem;
+            font-weight: 900;
+            line-height: 1;
+            margin-bottom: 20px;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--gray-400);
+            font-weight: 600;
+        }
+
+        /* Testimonials */
+        .testimonials-section {
+            padding: 160px 40px;
+            border-top: 1px solid var(--black);
+        }
+
+        .testimonials-container {
+            max-width: 1200px;
+            margin: 80px auto 0;
+        }
+
+        .testimonial-item {
+            padding: 60px 0;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .testimonial-item:first-child {
+            border-top: 1px solid var(--gray-200);
+        }
+
+        .testimonial-quote {
+            font-size: clamp(1.5rem, 3vw, 2.5rem);
+            line-height: 1.5;
+            margin-bottom: 40px;
+            font-weight: 300;
+        }
+
+        .testimonial-author {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .author-name {
+            font-size: 1rem;
+            font-weight: 700;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .author-role {
+            font-size: 0.875rem;
+            color: var(--gray-600);
+            margin-top: 4px;
+        }
+
+        /* Final CTA */
+        .final-cta {
+            padding: 200px 40px;
+            text-align: center;
+            border-top: 1px solid var(--black);
+        }
+
+        .final-cta h2 {
+            font-size: clamp(3rem, 8vw, 7rem);
+            margin-bottom: 60px;
+            line-height: 1;
+        }
+
+        .cta-button {
+            display: inline-block;
+            padding: 28px 80px;
+            background: var(--black);
+            color: var(--white);
+            font-size: 0.875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            border: 2px solid var(--black);
+            cursor: pointer;
+            transition: all 200ms;
+            font-family: 'Poppins', sans-serif;
+            text-decoration: none;
+        }
+
+        .cta-button:hover {
+            background: var(--white);
+            color: var(--black);
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .features-grid {
+                grid-template-columns: 1fr;
+                gap: 60px;
+            }
+
+            .price-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .hero {
+                padding: 80px 24px;
+            }
+
+            .price-section,
+            .payg-section,
+            .features-section,
+            .stats-section,
+            .testimonials-section,
+            .final-cta {
+                padding-left: 24px;
+                padding-right: 24px;
+            }
+
+            .payg-container {
+                padding: 40px;
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .payg-price-area {
+                text-align: center;
+            }
+
+            .price-cell {
+                padding: 40px 24px;
+            }
+
+            .plan-price {
+                font-size: 4rem;
+            }
+
+            .stats-grid {
+                gap: 60px;
+            }
+        }
+
+        /* Accessibility */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+
+        /* Focus states for accessibility */
+        button:focus-visible,
+        a:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 4px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero -->
+    <section class="hero">
+        <div>
+            <h1>定价</h1>
+            <p class="hero-subtitle">简单透明的计费方式，让您专注于创造价值</p>
+        </div>
+    </section>
+
+    <!-- Pricing Grid -->
+    <section class="price-section">
+        <div class="section-label">订阅套餐</div>
+
+        <div class="price-grid">
+            <!-- Daily -->
+            <div class="price-cell">
+                <div class="plan-name">日卡</div>
+                <div class="plan-duration">24小时</div>
+                <div class="plan-price">¥18</div>
+                <div class="plan-quota">
+                    <div class="plan-quota-label">额度</div>
+                    <div class="plan-quota-value">$40</div>
+                </div>
+                <div class="plan-save">节省 <strong>10%</strong></div>
+                <button class="buy-btn">购买</button>
+            </div>
+
+            <!-- Weekly -->
+            <div class="price-cell">
+                <div class="plan-name">周卡</div>
+                <div class="plan-duration">7天</div>
+                <div class="plan-price">¥55</div>
+                <div class="plan-quota">
+                    <div class="plan-quota-label">额度</div>
+                    <div class="plan-quota-value">$140</div>
+                </div>
+                <div class="plan-save">节省 <strong>22%</strong></div>
+                <button class="buy-btn">购买</button>
+            </div>
+
+            <!-- Monthly Basic -->
+            <div class="price-cell">
+                <div class="plan-name">基础月卡</div>
+                <div class="plan-duration">30天</div>
+                <div class="plan-price">¥69</div>
+                <div class="plan-quota">
+                    <div class="plan-quota-label">额度</div>
+                    <div class="plan-quota-value">$180</div>
+                </div>
+                <div class="plan-save">节省 <strong>24%</strong></div>
+                <button class="buy-btn">购买</button>
+            </div>
+
+            <!-- Monthly Standard (Featured) -->
+            <div class="price-cell featured">
+                <span class="featured-badge"></span>
+                <div class="plan-name">标准月卡</div>
+                <div class="plan-duration">30天</div>
+                <div class="plan-price">¥129</div>
+                <div class="plan-quota">
+                    <div class="plan-quota-label">额度</div>
+                    <div class="plan-quota-value">$350</div>
+                </div>
+                <div class="plan-save">节省 <strong>26%</strong></div>
+                <button class="buy-btn">购买</button>
+            </div>
+
+            <!-- Monthly Pro -->
+            <div class="price-cell">
+                <div class="plan-name">专业月卡</div>
+                <div class="plan-duration">30天</div>
+                <div class="plan-price">¥249</div>
+                <div class="plan-quota">
+                    <div class="plan-quota-label">额度</div>
+                    <div class="plan-quota-value">$700</div>
+                </div>
+                <div class="plan-save">节省 <strong>28%</strong></div>
+                <button class="buy-btn">购买</button>
+            </div>
+
+            <!-- Monthly Flagship -->
+            <div class="price-cell">
+                <div class="plan-name">旗舰月卡</div>
+                <div class="plan-duration">30天</div>
+                <div class="plan-price">¥449</div>
+                <div class="plan-quota">
+                    <div class="plan-quota-label">额度</div>
+                    <div class="plan-quota-value">$1300</div>
+                </div>
+                <div class="plan-save">节省 <strong>30%</strong></div>
+                <button class="buy-btn">购买</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pay as you go -->
+    <section class="payg-section">
+        <div class="payg-container">
+            <div class="payg-info">
+                <h2>按量付费</h2>
+                <p>灵活自由，无需承诺。适合偶尔使用或测试阶段的用户。套餐用完后也按此价格计费。</p>
+            </div>
+            <div class="payg-price-area">
+                <div class="payg-price">¥0.50</div>
+                <div class="payg-unit">每美金</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features-section">
+        <div class="features-container">
+            <div class="section-label">核心优势</div>
+            <div class="features-grid">
+                <div class="feature-item">
+                    <div class="feature-number">01</div>
+                    <h3>极速响应</h3>
+                    <p>全球分布式架构，平均响应时间低于50毫秒。无论您身在何处，都能获得闪电般的服务体验。</p>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-number">02</div>
+                    <h3>安全可靠</h3>
+                    <p>企业级加密传输，99.99%服务可用性保障。您的数据安全是我们的首要任务。</p>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-number">03</div>
+                    <h3>透明计费</h3>
+                    <p>实时监控面板，精确到每一次调用。没有隐藏费用，让您的每一分钱都花得清清楚楚。</p>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-number">04</div>
+                    <h3>全模型支持</h3>
+                    <p>一个接口，调用所有主流AI模型。从GPT到Claude，从文本到图像，全部搞定。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats -->
+    <section class="stats-section">
+        <div class="stats-grid">
+            <div class="stat-item">
+                <div class="stat-number">100K+</div>
+                <div class="stat-label">活跃开发者</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">99.99%</div>
+                <div class="stat-label">服务可用性</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">< 50ms</div>
+                <div class="stat-label">平均响应时间</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials -->
+    <section class="testimonials-section">
+        <div class="section-label">用户评价</div>
+        <div class="testimonials-container">
+            <div class="testimonial-item">
+                <p class="testimonial-quote">"标准月卡让我的成本降低了30%，而且服务非常稳定。作为创业公司，这对我们来说太重要了。"</p>
+                <div class="testimonial-author">
+                    <div>
+                        <div class="author-name">张伟</div>
+                        <div class="author-role">AI创业公司CEO</div>
+                    </div>
+                </div>
+            </div>
+            <div class="testimonial-item">
+                <p class="testimonial-quote">"日卡和周卡完美解决了我需求波动大的问题。用的时候买一张，灵活又经济。"</p>
+                <div class="testimonial-author">
+                    <div>
+                        <div class="author-name">李晓明</div>
+                        <div class="author-role">独立开发者</div>
+                    </div>
+                </div>
+            </div>
+            <div class="testimonial-item">
+                <p class="testimonial-quote">"响应速度真的很快，文档也很详细。价格透明，没有套路，非常满意。"</p>
+                <div class="testimonial-author">
+                    <div>
+                        <div class="author-name">王芳</div>
+                        <div class="author-role">全栈工程师</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Final CTA -->
+    <section class="final-cta">
+        <h2>开始使用</h2>
+        <a href="#" class="cta-button">选择套餐</a>
+    </section>
+</body>
+</html>

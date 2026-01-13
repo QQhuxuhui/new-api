@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API服务定价 - 现代渐变风格</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --gradient-1: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-2: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --gradient-3: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --gradient-4: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            --gradient-5: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            --gradient-6: linear-gradient(135deg, #30cfd0 0%, #330867 100%);
+            --bg: #FFFFFF;
+            --text: #1E293B;
+            --text-muted: #64748B;
+        }
+
+        body {
+            font-family: 'Open Sans', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: 'Poppins', sans-serif;
+        }
+
+        /* Animated gradient background */
+        .hero {
+            position: relative;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 80px 24px;
+            overflow: hidden;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.1) 0%, transparent 50%);
+            animation: rotate 20s linear infinite;
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 5rem);
+            font-weight: 900;
+            color: white;
+            margin-bottom: 24px;
+            letter-spacing: -0.03em;
+            text-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        }
+
+        .hero .subtitle {
+            font-size: clamp(1.125rem, 2vw, 1.5rem);
+            color: rgba(255,255,255,0.95);
+            margin-bottom: 48px;
+            line-height: 1.6;
+        }
+
+        .hero-stats {
+            display: flex;
+            justify-content: center;
+            gap: 60px;
+            flex-wrap: wrap;
+            margin-top: 60px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 3rem;
+            font-weight: 800;
+            color: white;
+            font-family: 'Poppins', sans-serif;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .stat-label {
+            font-size: 1rem;
+            color: rgba(255,255,255,0.9);
+            margin-top: 8px;
+        }
+
+        /* Scroll indicator */
+        .scroll-indicator {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 2rem;
+            animation: bounce 2s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translate(-50%, 0); }
+            50% { transform: translate(-50%, 10px); }
+        }
+
+        /* Pricing section */
+        .pricing-section {
+            padding: 100px 24px;
+            background: white;
+        }
+
+        .section-header {
+            text-align: center;
+            max-width: 700px;
+            margin: 0 auto 80px;
+        }
+
+        .section-header h2 {
+            font-size: clamp(2rem, 4vw, 3rem);
+            font-weight: 800;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .section-header p {
+            font-size: 1.125rem;
+            color: var(--text-muted);
+        }
+
+        /* Pricing grid */
+        .pricing-grid {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 32px;
+        }
+
+        .pricing-card {
+            position: relative;
+            background: white;
+            border-radius: 24px;
+            padding: 0;
+            overflow: hidden;
+            transition: all 400ms cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            border: 2px solid #f1f5f9;
+        }
+
+        .pricing-card:hover {
+            transform: translateY(-12px) scale(1.02);
+            box-shadow: 0 30px 80px rgba(102, 126, 234, 0.25);
+        }
+
+        .card-gradient-header {
+            padding: 40px 32px 32px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card-gradient-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            opacity: 1;
+            z-index: 0;
+        }
+
+        .pricing-card:nth-child(1) .card-gradient-header::before { background: var(--gradient-3); }
+        .pricing-card:nth-child(2) .card-gradient-header::before { background: var(--gradient-4); }
+        .pricing-card:nth-child(3) .card-gradient-header::before { background: var(--gradient-5); }
+        .pricing-card:nth-child(4) .card-gradient-header::before { background: var(--gradient-1); }
+        .pricing-card:nth-child(5) .card-gradient-header::before { background: var(--gradient-2); }
+        .pricing-card:nth-child(6) .card-gradient-header::before { background: var(--gradient-6); }
+
+        .card-header-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: white;
+            margin-bottom: 8px;
+        }
+
+        .card-duration {
+            font-size: 0.9375rem;
+            color: rgba(255,255,255,0.9);
+        }
+
+        .card-price {
+            margin-top: 24px;
+        }
+
+        .price-amount {
+            font-size: 4rem;
+            font-weight: 900;
+            color: white;
+            line-height: 1;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .card-body {
+            padding: 32px;
+        }
+
+        .quota-info {
+            background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+            padding: 20px;
+            border-radius: 16px;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .quota-label {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .quota-value {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .savings {
+            text-align: center;
+            padding: 16px;
+            background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+            border-radius: 12px;
+            margin-bottom: 24px;
+        }
+
+        .savings-label {
+            font-size: 0.875rem;
+            color: #065f46;
+            font-weight: 600;
+        }
+
+        .savings-value {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #059669;
+            margin-top: 4px;
+        }
+
+        .buy-button {
+            width: 100%;
+            padding: 18px;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.0625rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 300ms;
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .buy-button:hover {
+            box-shadow: 0 8px 30px rgba(102, 126, 234, 0.5);
+            transform: translateY(-2px);
+        }
+
+        /* Recommended badge */
+        .recommended-badge {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8125rem;
+            font-weight: 700;
+            z-index: 2;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+        }
+
+        /* Pay as you go section */
+        .payg-section {
+            margin-top: 60px;
+            max-width: 1400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .payg-card {
+            background: linear-gradient(135deg, #f8fafc, #ffffff);
+            border: 3px dashed #cbd5e1;
+            border-radius: 24px;
+            padding: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 40px;
+            flex-wrap: wrap;
+        }
+
+        .payg-info h3 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .payg-info p {
+            font-size: 1.0625rem;
+            color: var(--text-muted);
+            max-width: 500px;
+        }
+
+        .payg-price-box {
+            text-align: center;
+            background: white;
+            padding: 32px 48px;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+        }
+
+        .payg-price {
+            font-size: 4rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-family: 'Poppins', sans-serif;
+            line-height: 1;
+        }
+
+        .payg-unit {
+            font-size: 1.125rem;
+            color: var(--text-muted);
+            margin-top: 8px;
+        }
+
+        /* Features section */
+        .features-section {
+            padding: 100px 24px;
+            background: linear-gradient(135deg, #f8fafc, #ffffff);
+        }
+
+        .features-grid {
+            max-width: 1200px;
+            margin: 60px auto 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 40px;
+        }
+
+        .feature-card {
+            text-align: center;
+            padding: 40px 32px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.06);
+            transition: all 300ms;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 60px rgba(102, 126, 234, 0.15);
+        }
+
+        .feature-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 24px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+        }
+
+        .feature-card:nth-child(1) .feature-icon { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .feature-card:nth-child(2) .feature-icon { background: linear-gradient(135deg, #f093fb, #f5576c); }
+        .feature-card:nth-child(3) .feature-icon { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+        .feature-card:nth-child(4) .feature-icon { background: linear-gradient(135deg, #43e97b, #38f9d7); }
+
+        .feature-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .feature-desc {
+            color: var(--text-muted);
+            line-height: 1.7;
+        }
+
+        /* Testimonials */
+        .testimonials-section {
+            padding: 100px 24px;
+            background: white;
+        }
+
+        .testimonials-container {
+            max-width: 1200px;
+            margin: 60px auto 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 40px;
+        }
+
+        .testimonial-card {
+            background: linear-gradient(135deg, #f8fafc, #ffffff);
+            padding: 40px;
+            border-radius: 20px;
+            position: relative;
+            border: 2px solid #f1f5f9;
+        }
+
+        .quote-icon {
+            font-size: 3rem;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1;
+            margin-bottom: 16px;
+        }
+
+        .testimonial-text {
+            font-style: italic;
+            color: var(--text);
+            line-height: 1.8;
+            margin-bottom: 24px;
+            font-size: 1.0625rem;
+        }
+
+        .testimonial-author {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .author-avatar {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 1.25rem;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .testimonial-card:nth-child(1) .author-avatar { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .testimonial-card:nth-child(2) .author-avatar { background: linear-gradient(135deg, #f093fb, #f5576c); }
+        .testimonial-card:nth-child(3) .author-avatar { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+
+        .author-name {
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .author-role {
+            font-size: 0.9375rem;
+            color: var(--text-muted);
+        }
+
+        /* CTA Section */
+        .cta-section {
+            padding: 120px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            color: white;
+            text-align: center;
+        }
+
+        .cta-section h2 {
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 900;
+            margin-bottom: 24px;
+        }
+
+        .cta-section p {
+            font-size: 1.25rem;
+            margin-bottom: 48px;
+            opacity: 0.95;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .cta-button {
+            display: inline-block;
+            padding: 20px 48px;
+            background: white;
+            color: #667eea;
+            font-size: 1.125rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 300ms;
+            font-family: 'Poppins', sans-serif;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+
+        .cta-button:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .pricing-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .payg-card {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .hero-stats {
+                gap: 40px;
+            }
+
+            .recommended-badge {
+                top: 12px;
+                right: 12px;
+                font-size: 0.75rem;
+                padding: 6px 12px;
+            }
+        }
+
+        /* Accessibility */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>让AI触手可及</h1>
+            <p class="subtitle">无论您是个人开发者还是企业用户，我们都有最适合您的定价方案。灵活、透明、高性价比。</p>
+            <div class="hero-stats">
+                <div class="stat-item">
+                    <div class="stat-number">100K+</div>
+                    <div class="stat-label">开发者信赖</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">99.99%</div>
+                    <div class="stat-label">在线时间</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">< 50ms</div>
+                    <div class="stat-label">平均响应</div>
+                </div>
+            </div>
+        </div>
+        <div class="scroll-indicator">↓</div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section class="pricing-section">
+        <div class="section-header">
+            <h2>选择您的专属套餐</h2>
+            <p>从日卡到月卡，从轻度使用到重度需求，总有一款适合您</p>
+        </div>
+
+        <div class="pricing-grid">
+            <!-- Daily -->
+            <div class="pricing-card">
+                <div class="card-gradient-header">
+                    <div class="card-header-content">
+                        <h3 class="card-title">日卡</h3>
+                        <p class="card-duration">24小时畅享</p>
+                        <div class="card-price">
+                            <div class="price-amount">¥18</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="quota-info">
+                        <div class="quota-label">包含额度</div>
+                        <div class="quota-value">$40</div>
+                    </div>
+                    <div class="savings">
+                        <div class="savings-label">相比按量节省</div>
+                        <div class="savings-value">10%</div>
+                    </div>
+                    <button class="buy-button">立即购买</button>
+                </div>
+            </div>
+
+            <!-- Weekly -->
+            <div class="pricing-card">
+                <div class="card-gradient-header">
+                    <div class="card-header-content">
+                        <h3 class="card-title">周卡</h3>
+                        <p class="card-duration">7天无忧使用</p>
+                        <div class="card-price">
+                            <div class="price-amount">¥55</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="quota-info">
+                        <div class="quota-label">包含额度</div>
+                        <div class="quota-value">$140</div>
+                    </div>
+                    <div class="savings">
+                        <div class="savings-label">相比按量节省</div>
+                        <div class="savings-value">22%</div>
+                    </div>
+                    <button class="buy-button">立即购买</button>
+                </div>
+            </div>
+
+            <!-- Monthly Basic -->
+            <div class="pricing-card">
+                <div class="card-gradient-header">
+                    <div class="card-header-content">
+                        <h3 class="card-title">基础月卡</h3>
+                        <p class="card-duration">30天稳定供应</p>
+                        <div class="card-price">
+                            <div class="price-amount">¥69</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="quota-info">
+                        <div class="quota-label">包含额度</div>
+                        <div class="quota-value">$180</div>
+                    </div>
+                    <div class="savings">
+                        <div class="savings-label">相比按量节省</div>
+                        <div class="savings-value">24%</div>
+                    </div>
+                    <button class="buy-button">立即购买</button>
+                </div>
+            </div>
+
+            <!-- Monthly Standard (Recommended) -->
+            <div class="pricing-card">
+                <span class="recommended-badge">⭐ 最受欢迎</span>
+                <div class="card-gradient-header">
+                    <div class="card-header-content">
+                        <h3 class="card-title">标准月卡</h3>
+                        <p class="card-duration">30天高性价比</p>
+                        <div class="card-price">
+                            <div class="price-amount">¥129</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="quota-info">
+                        <div class="quota-label">包含额度</div>
+                        <div class="quota-value">$350</div>
+                    </div>
+                    <div class="savings">
+                        <div class="savings-label">相比按量节省</div>
+                        <div class="savings-value">26%</div>
+                    </div>
+                    <button class="buy-button">立即购买</button>
+                </div>
+            </div>
+
+            <!-- Monthly Pro -->
+            <div class="pricing-card">
+                <div class="card-gradient-header">
+                    <div class="card-header-content">
+                        <h3 class="card-title">专业月卡</h3>
+                        <p class="card-duration">30天专业保障</p>
+                        <div class="card-price">
+                            <div class="price-amount">¥249</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="quota-info">
+                        <div class="quota-label">包含额度</div>
+                        <div class="quota-value">$700</div>
+                    </div>
+                    <div class="savings">
+                        <div class="savings-label">相比按量节省</div>
+                        <div class="savings-value">28%</div>
+                    </div>
+                    <button class="buy-button">立即购买</button>
+                </div>
+            </div>
+
+            <!-- Monthly Flagship -->
+            <div class="pricing-card">
+                <div class="card-gradient-header">
+                    <div class="card-header-content">
+                        <h3 class="card-title">旗舰月卡</h3>
+                        <p class="card-duration">30天旗舰体验</p>
+                        <div class="card-price">
+                            <div class="price-amount">¥449</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="quota-info">
+                        <div class="quota-label">包含额度</div>
+                        <div class="quota-value">$1300</div>
+                    </div>
+                    <div class="savings">
+                        <div class="savings-label">相比按量节省</div>
+                        <div class="savings-value">30%</div>
+                    </div>
+                    <button class="buy-button">立即购买</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pay as you go -->
+        <div class="payg-section">
+            <div class="payg-card">
+                <div class="payg-info">
+                    <h3>按量付费</h3>
+                    <p>适合偶尔使用或不确定用量的用户。随用随付，灵活自由，不浪费一分钱。</p>
+                </div>
+                <div class="payg-price-box">
+                    <div class="payg-price">¥0.50</div>
+                    <div class="payg-unit">每美金</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features-section">
+        <div class="section-header">
+            <h2>为什么选择我们？</h2>
+            <p>企业级服务，个人开发者也能轻松享用</p>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3 class="feature-title">超快响应</h3>
+                <p class="feature-desc">全球CDN加速，平均响应时间低于50ms，让您的应用丝滑流畅</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🛡️</div>
+                <h3 class="feature-title">安全可靠</h3>
+                <p class="feature-desc">企业级加密防护，99.99%在线率保障，您的数据安全无忧</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3 class="feature-title">实时监控</h3>
+                <p class="feature-desc">可视化仪表板，实时查看用量、余额和统计数据</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎯</div>
+                <h3 class="feature-title">多模型支持</h3>
+                <p class="feature-desc">支持主流AI模型，一个接口调用所有服务</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials -->
+    <section class="testimonials-section">
+        <div class="section-header">
+            <h2>用户怎么说</h2>
+            <p>真实的反馈，真诚的推荐</p>
+        </div>
+
+        <div class="testimonials-container">
+            <div class="testimonial-card">
+                <div class="quote-icon">"</div>
+                <p class="testimonial-text">
+                    作为创业公司，成本控制很重要。用了标准月卡后，每月能节省30%的开支，而且服务特别稳定，客服响应也很及时！
+                </p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">张</div>
+                    <div>
+                        <div class="author-name">张伟</div>
+                        <div class="author-role">AI创业公司CEO</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="testimonial-card">
+                <div class="quote-icon">"</div>
+                <p class="testimonial-text">
+                    我是独立开发者，需求时高时低。日卡和周卡完美解决了我的痛点，活动期买张周卡，平时按量付费，太灵活了！
+                </p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">李</div>
+                    <div>
+                        <div class="author-name">李晓明</div>
+                        <div class="author-role">独立开发者</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="testimonial-card">
+                <div class="quote-icon">"</div>
+                <p class="testimonial-text">
+                    API响应速度真的很快，而且文档详细，集成起来非常简单。价格也很透明，没有任何隐藏费用，强烈推荐！
+                </p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">王</div>
+                    <div>
+                        <div class="author-name">王芳</div>
+                        <div class="author-role">全栈工程师</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Final CTA -->
+    <section class="cta-section">
+        <h2>准备好开始了吗？</h2>
+        <p>选择最适合您的方案，立即体验高品质的API服务</p>
+        <button class="cta-button">查看所有套餐</button>
+    </section>
+</body>
+</html>
