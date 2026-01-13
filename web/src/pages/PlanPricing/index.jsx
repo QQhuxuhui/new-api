@@ -25,22 +25,13 @@ import {
   Typography,
   Tag,
   Button,
-  Space,
   Empty,
-  Spin,
-  Tooltip,
-  Banner,
   Skeleton,
-  Collapsible,
 } from '@douyinfe/semi-ui';
 import {
-  IconTick,
-  IconClock,
   IconBox,
   IconCalendarClock,
-  IconBolt,
   IconCreditCard,
-  IconShoppingBag,
   IconStar,
   IconGift,
   IconRefresh,
@@ -770,40 +761,137 @@ const PlanPricing = () => {
 
     const validity = getValidityDisplay(plan.category);
 
+    // 计算节省百分比
+    const discountPercent = getDiscountPercent(plan.price, plan.original_price);
+
+    // 计算单价（人民币/美金）
+    const unitPrice = plan.quota_usd > 0 ? (plan.price / plan.quota_usd).toFixed(2) : null;
+
     return (
       <div
         key={plan.id}
-        className='group relative transition-all duration-300 ease-in-out transform hover:-translate-y-2'
+        className='group relative cursor-pointer'
+        style={{
+          transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-8px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
       >
         <Card
-          className='relative h-full bg-white dark:bg-gray-800 border-2 border-slate-200 dark:border-gray-700 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-500/10 transition-all duration-300 cursor-pointer flex flex-col'
-          style={{ borderRadius: '20px', overflow: 'hidden' }}
+          className='relative h-full bg-white dark:bg-gray-800 flex flex-col'
+          style={{
+            borderRadius: '20px',
+            overflow: 'hidden',
+            border: '2px solid #E2E8F0',
+            transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+          }}
           bodyStyle={{ padding: '32px', display: 'flex', flexDirection: 'column', height: '100%' }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = '#2563EB';
+            e.currentTarget.style.boxShadow = '0 20px 60px rgba(37, 99, 235, 0.15)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = '#E2E8F0';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
         >
           {/* Header */}
           <div className='mb-6'>
-            <Title heading={4} className='m-0 mb-2 text-slate-800 dark:text-white'>
+            <Title
+              heading={4}
+              className='m-0 mb-2'
+              style={{ color: '#1E293B', fontFamily: "'Poppins', 'Inter', system-ui, sans-serif" }}
+            >
               {plan.display_name || plan.name}
             </Title>
             {validity && (
-              <Tag color='blue' size='small' shape='circle' className='bg-blue-500/10 text-blue-600 border-none'>
+              <span
+                className='inline-block px-3 py-1 rounded-xl text-sm font-semibold'
+                style={{
+                  background: 'rgba(37, 99, 235, 0.1)',
+                  color: '#2563EB',
+                }}
+              >
                 ⏱️ {t(validity)}
-              </Tag>
+              </span>
             )}
           </div>
 
           {/* Price */}
           <div className='mb-6'>
-            <span className='text-5xl font-bold text-blue-600 dark:text-blue-400'>¥{plan.price}</span>
+            <span
+              className='price-animated'
+              style={{
+                fontSize: '3rem',
+                fontWeight: 700,
+                color: '#2563EB',
+                fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+                lineHeight: 1,
+              }}
+            >
+              ¥{plan.price}
+            </span>
           </div>
 
           {/* Quota Info Box */}
           {plan.quota_usd > 0 && (
-            <div className='bg-gradient-to-br from-sky-50 to-blue-50 dark:from-blue-900/20 dark:to-sky-900/20 rounded-xl p-5 mb-5'>
-              <Text className='text-slate-500 dark:text-slate-400 text-sm block mb-3 font-medium'>{t('您将获得')}</Text>
-              <Text className='text-3xl font-bold text-blue-600 dark:text-blue-400 block'>
+            <div
+              className='rounded-xl p-5 mb-5'
+              style={{
+                background: 'linear-gradient(135deg, #F0F9FF, #E0F2FE)',
+              }}
+            >
+              <Text className='text-sm block mb-3 font-medium' style={{ color: '#475569' }}>
+                {t('您将获得')}
+              </Text>
+              <Text
+                className='price-animated block mb-3'
+                style={{
+                  fontSize: '2rem',
+                  fontWeight: 700,
+                  color: '#2563EB',
+                  fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+                }}
+              >
                 ${plan.quota_usd} {t('美金额度')}
               </Text>
+              {/* 用量等价说明 */}
+              <div
+                className='rounded-lg p-3 flex items-center gap-2'
+                style={{ background: 'white' }}
+              >
+                <span style={{ fontSize: '1.25rem', color: '#2563EB', fontWeight: 700 }}>≈</span>
+                <Text className='text-sm' style={{ color: '#1E293B' }}>
+                  {t('约')} {Math.round(plan.quota_usd * 20)} {t('次 GPT-4o-mini 对话')}
+                </Text>
+              </div>
+            </div>
+          )}
+
+          {/* Savings Badge */}
+          {discountPercent > 0 && (
+            <div
+              className='inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold mb-5 self-start'
+              style={{
+                background: 'linear-gradient(135deg, #ECFDF5, #D1FAE5)',
+                color: '#065F46',
+              }}
+            >
+              💰 {t('相比按量付费节省')} <span style={{ fontSize: '1.125rem', color: '#10B981' }}>{discountPercent}%</span>
+            </div>
+          )}
+
+          {/* Unit Price Info */}
+          {unitPrice && (
+            <div
+              className='rounded-lg p-4 mb-6 text-sm'
+              style={{ background: '#F8FAFC', color: '#475569' }}
+            >
+              {t('单价仅')} <span style={{ color: '#10B981', fontWeight: 700, fontSize: '1rem' }}>¥{unitPrice}/{t('美金')}</span>
             </div>
           )}
 
@@ -811,8 +899,8 @@ const PlanPricing = () => {
           {features.length > 0 && (
             <div className='space-y-2 mb-6'>
               {features.map((feature, idx) => (
-                <div key={idx} className='flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm'>
-                  <span className='text-emerald-500 font-bold'>✓</span>
+                <div key={idx} className='flex items-center gap-2 text-sm' style={{ color: '#475569' }}>
+                  <span style={{ color: '#10B981', fontWeight: 700 }}>✓</span>
                   {feature.text}
                 </div>
               ))}
@@ -827,11 +915,45 @@ const PlanPricing = () => {
               size='large'
               block
               onClick={() => handlePurchase(plan)}
+              className='cursor-pointer'
               style={{
                 borderRadius: '12px',
                 height: '48px',
                 fontWeight: 600,
-                background: isRecommended ? 'linear-gradient(135deg, #2563EB, #3B82F6)' : undefined,
+                fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+                transition: 'all 250ms cubic-bezier(0.4, 0, 0.2, 1)',
+                ...(isRecommended
+                  ? {
+                      background: 'linear-gradient(135deg, #2563EB, #3B82F6)',
+                      border: 'none',
+                    }
+                  : {
+                      background: 'white',
+                      color: '#2563EB',
+                      border: '2px solid #2563EB',
+                    }),
+              }}
+              onMouseEnter={(e) => {
+                if (isRecommended) {
+                  e.currentTarget.style.boxShadow = '0 8px 24px rgba(37, 99, 235, 0.35)';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.background = 'linear-gradient(135deg, #1D4ED8, #2563EB)';
+                } else {
+                  e.currentTarget.style.background = 'rgba(37, 99, 235, 0.08)';
+                  e.currentTarget.style.borderColor = '#1D4ED8';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (isRecommended) {
+                  e.currentTarget.style.boxShadow = 'none';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.background = 'linear-gradient(135deg, #2563EB, #3B82F6)';
+                } else {
+                  e.currentTarget.style.background = 'white';
+                  e.currentTarget.style.borderColor = '#2563EB';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }
               }}
             >
               {t('选择') + (categoryConfig?.label || '')}
@@ -856,12 +978,34 @@ const PlanPricing = () => {
     return (
       <div
         key={`topup-${value}`}
-        className='group relative transition-all duration-300 ease-in-out transform hover:-translate-y-2'
+        className='group relative cursor-pointer'
+        style={{
+          transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-8px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
       >
         <Card
-          className='relative h-full bg-white dark:bg-gray-800 border-2 border-slate-200 dark:border-gray-700 hover:border-green-500 hover:shadow-xl hover:shadow-green-500/10 transition-all duration-300 cursor-pointer flex flex-col'
-          style={{ borderRadius: '20px', overflow: 'hidden' }}
+          className='relative h-full bg-white dark:bg-gray-800 flex flex-col'
+          style={{
+            borderRadius: '20px',
+            overflow: 'hidden',
+            border: '2px solid #E2E8F0',
+            transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+          }}
           bodyStyle={{ padding: '32px', display: 'flex', flexDirection: 'column', height: '100%' }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = '#2563EB';
+            e.currentTarget.style.boxShadow = '0 20px 60px rgba(37, 99, 235, 0.15)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = '#E2E8F0';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
         >
           {/* Recommended Badge */}
           {isRecommended && (
@@ -875,57 +1019,128 @@ const PlanPricing = () => {
 
           {/* Header */}
           <div className='mb-6'>
-            <Title heading={4} className='m-0 mb-2 text-slate-800 dark:text-white'>
+            <Title
+              heading={4}
+              className='m-0 mb-2'
+              style={{ color: '#1E293B', fontFamily: "'Poppins', 'Inter', system-ui, sans-serif" }}
+            >
               ${value} {t('额度')}
             </Title>
-            <Tag color='green' size='small' shape='circle' className='bg-green-500/10 text-green-600 border-none'>
+            <span
+              className='inline-block px-3 py-1 rounded-xl text-sm font-semibold'
+              style={{
+                background: 'rgba(16, 185, 129, 0.1)',
+                color: '#10B981',
+              }}
+            >
               💳 {t('钱包充值')}
-            </Tag>
+            </span>
           </div>
 
           {/* Price */}
           <div className='mb-6'>
-            <span className='text-5xl font-bold text-green-600 dark:text-green-400'>¥{finalPrice.toFixed(0)}</span>
+            <span
+              className='price-animated'
+              style={{
+                fontSize: '3rem',
+                fontWeight: 700,
+                color: '#F59E0B',
+                fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+                lineHeight: 1,
+              }}
+            >
+              ¥{finalPrice.toFixed(0)}
+            </span>
             {hasDiscount && (
-              <span className='text-lg text-slate-400 line-through ml-3'>¥{originalPrice.toFixed(0)}</span>
+              <span className='text-lg ml-3 line-through' style={{ color: '#94A3B8' }}>
+                ¥{originalPrice.toFixed(0)}
+              </span>
+            )}
+          </div>
+
+          {/* Unit Price Info */}
+          <div
+            className='rounded-lg p-3 mb-5 text-sm'
+            style={{ background: '#F8FAFC', color: '#475569' }}
+          >
+            {t('单价')}: <span style={{ color: '#10B981', fontWeight: 700 }}>¥{priceRatio.toFixed(2)}/{t('美金')}</span>
+            {hasDiscount && (
+              <span className='ml-2' style={{ color: '#F59E0B' }}>
+                ({t('优惠后')} ¥{(priceRatio * discount).toFixed(2)}/{t('美金')})
+              </span>
             )}
           </div>
 
           {/* Discount Badge */}
           {hasDiscount && (
-            <div className='inline-flex items-center gap-1.5 bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/20 dark:to-orange-900/20 text-red-600 dark:text-red-400 px-4 py-2 rounded-lg text-sm font-semibold mb-5 self-start'>
+            <div
+              className='inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold mb-5 self-start'
+              style={{
+                background: 'linear-gradient(135deg, #FEF3C7, #FDE68A)',
+                color: '#92400E',
+              }}
+            >
               🎉 {t('优惠')} {discountPercent}%
             </div>
           )}
 
           {/* Features */}
-          <div className='space-y-2 mb-6'>
+          <div className='space-y-3 mb-6'>
             {[
-              { text: t('永不过期') },
-              { text: t('按量扣费') },
-              { text: t('即时到账') },
+              { text: t('无最低消费') },
+              { text: t('余额永不过期') },
+              { text: t('随时充值') },
+              { text: t('透明计费') },
             ].map((feature, idx) => (
-              <div key={idx} className='flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm'>
-                <span className='text-emerald-500 font-bold'>✓</span>
+              <div key={idx} className='flex items-center gap-2 text-sm' style={{ color: '#475569' }}>
+                <span style={{ color: '#10B981', fontWeight: 700, fontSize: '1.125rem' }}>✓</span>
                 {feature.text}
               </div>
             ))}
           </div>
 
+          {/* Usage Reference Box */}
+          <div
+            className='rounded-xl p-5 mb-6'
+            style={{ background: '#F8FAFC' }}
+          >
+            <Text className='text-sm block mb-2' style={{ color: '#475569' }}>
+              {t('用量参考')}
+            </Text>
+            <Text className='text-sm leading-relaxed' style={{ color: '#1E293B' }}>
+              ${value} ≈ {value * 20} {t('次 GPT-4o-mini 对话')}<br />
+              {t('或')} {value} {t('次 GPT-4 对话')}
+            </Text>
+          </div>
+
           {/* CTA Button - pushed to bottom */}
           <div className='mt-auto'>
             <Button
-              theme={isRecommended ? 'solid' : 'light'}
+              theme='solid'
               type='primary'
               size='large'
               block
               loading={creatingOrder}
               onClick={() => handleTopupPurchase(value)}
+              className='cursor-pointer'
               style={{
                 borderRadius: '12px',
                 height: '48px',
                 fontWeight: 600,
-                background: isRecommended ? 'linear-gradient(135deg, #10b981, #059669)' : undefined,
+                fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+                background: 'linear-gradient(135deg, #2563EB, #3B82F6)',
+                border: 'none',
+                transition: 'all 250ms cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow = '0 8px 24px rgba(37, 99, 235, 0.35)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.background = 'linear-gradient(135deg, #1D4ED8, #2563EB)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.background = 'linear-gradient(135deg, #2563EB, #3B82F6)';
               }}
             >
               {t('立即充值')}
@@ -937,19 +1152,38 @@ const PlanPricing = () => {
   };
 
   return (
-    <div className='min-h-screen bg-slate-50 dark:bg-gray-900'>
+    <div className='plan-pricing-page min-h-screen bg-[#F8FAFC] dark:bg-gray-900'>
       {/* Hero Section - 简约高级风格 */}
       <section className='relative text-center py-20 px-6 bg-white dark:bg-gray-800 overflow-hidden'>
-        {/* 背景装饰 */}
-        <div className='absolute inset-0 pointer-events-none'>
-          <div className='absolute top-0 left-0 w-full h-full bg-gradient-to-br from-blue-500/5 via-transparent to-blue-400/3'></div>
+        {/* 背景装饰 - 渐变光晕效果 */}
+        <div className='absolute inset-0 pointer-events-none overflow-hidden'>
+          <div
+            className='absolute w-[200%] h-[200%]'
+            style={{
+              top: '-50%',
+              left: '-50%',
+              background: 'radial-gradient(circle at 30% 20%, rgba(37, 99, 235, 0.08) 0%, transparent 50%), radial-gradient(circle at 70% 80%, rgba(59, 130, 246, 0.04) 0%, transparent 50%)',
+            }}
+          ></div>
         </div>
 
         <div className='relative z-10 max-w-3xl mx-auto'>
-          <Title heading={1} className='m-0 mb-4 text-slate-800 dark:text-white' style={{ fontSize: 'clamp(2.5rem, 5vw, 3.5rem)', fontWeight: 700, letterSpacing: '-0.02em' }}>
+          <Title
+            heading={1}
+            className='m-0 mb-4 text-[#1E293B] dark:text-white'
+            style={{
+              fontSize: 'clamp(2.5rem, 5vw, 3.5rem)',
+              fontWeight: 700,
+              letterSpacing: '-0.02em',
+              fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+            }}
+          >
             {t('选择适合您的API服务方案')}
           </Title>
-          <Text className='text-slate-500 dark:text-slate-400 text-xl block'>
+          <Text
+            className='text-[#475569] dark:text-slate-400 block max-w-xl mx-auto'
+            style={{ fontSize: '1.25rem', lineHeight: 1.6 }}
+          >
             {t('两种计费方式，灵活组合使用。先用订阅套餐，用完自动切换按量付费，无缝衔接。')}
           </Text>
         </div>
@@ -957,29 +1191,79 @@ const PlanPricing = () => {
 
       {/* Pricing Section */}
       <section className='max-w-7xl mx-auto px-6 py-16'>
-        {/* Tab Switch - 简约风格 */}
+        {/* Tab Switch - 简约高级风格 */}
         <div className='flex justify-center mb-12'>
-          <div className='inline-flex bg-white dark:bg-gray-800 rounded-2xl p-1.5 border-2 border-slate-200 dark:border-gray-700 shadow-sm'>
+          <div
+            className='inline-flex bg-white dark:bg-gray-800 rounded-2xl p-1.5 shadow-sm'
+            style={{
+              border: '2px solid #E2E8F0',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+            }}
+          >
             <button
               onClick={() => setActiveTab('subscription')}
-              className={`px-9 py-3.5 rounded-xl font-semibold text-base transition-all duration-250 flex items-center gap-2 ${
-                activeTab === 'subscription'
-                  ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/30'
-                  : 'text-slate-500 hover:text-slate-700 hover:bg-blue-50 dark:hover:bg-gray-700'
-              }`}
+              className='cursor-pointer px-9 py-3.5 rounded-xl font-semibold text-base flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2'
+              style={{
+                transition: 'all 250ms cubic-bezier(0.4, 0, 0.2, 1)',
+                fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+                ...(activeTab === 'subscription'
+                  ? {
+                      background: 'linear-gradient(135deg, #2563EB, #3B82F6)',
+                      color: 'white',
+                      boxShadow: '0 4px 16px rgba(37, 99, 235, 0.3)',
+                    }
+                  : {
+                      color: '#475569',
+                      background: 'transparent',
+                    }),
+              }}
+              onMouseEnter={(e) => {
+                if (activeTab !== 'subscription') {
+                  e.currentTarget.style.color = '#1E293B';
+                  e.currentTarget.style.background = 'rgba(37, 99, 235, 0.05)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (activeTab !== 'subscription') {
+                  e.currentTarget.style.color = '#475569';
+                  e.currentTarget.style.background = 'transparent';
+                }
+              }}
             >
-              <span className='text-xl'>📦</span>
+              <IconBox size='large' />
               <span>{t('订阅套餐')}</span>
             </button>
             <button
               onClick={() => setActiveTab('payg')}
-              className={`px-9 py-3.5 rounded-xl font-semibold text-base transition-all duration-250 flex items-center gap-2 ${
-                activeTab === 'payg'
-                  ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/30'
-                  : 'text-slate-500 hover:text-slate-700 hover:bg-blue-50 dark:hover:bg-gray-700'
-              }`}
+              className='cursor-pointer px-9 py-3.5 rounded-xl font-semibold text-base flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2'
+              style={{
+                transition: 'all 250ms cubic-bezier(0.4, 0, 0.2, 1)',
+                fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+                ...(activeTab === 'payg'
+                  ? {
+                      background: 'linear-gradient(135deg, #2563EB, #3B82F6)',
+                      color: 'white',
+                      boxShadow: '0 4px 16px rgba(37, 99, 235, 0.3)',
+                    }
+                  : {
+                      color: '#475569',
+                      background: 'transparent',
+                    }),
+              }}
+              onMouseEnter={(e) => {
+                if (activeTab !== 'payg') {
+                  e.currentTarget.style.color = '#1E293B';
+                  e.currentTarget.style.background = 'rgba(37, 99, 235, 0.05)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (activeTab !== 'payg') {
+                  e.currentTarget.style.color = '#475569';
+                  e.currentTarget.style.background = 'transparent';
+                }
+              }}
             >
-              <span className='text-xl'>💳</span>
+              <IconCreditCard size='large' />
               <span>{t('按量付费')}</span>
             </button>
           </div>
@@ -1074,40 +1358,145 @@ const PlanPricing = () => {
       </section>
 
       {/* How it Works Section */}
-      <section className='bg-gradient-to-br from-blue-500/5 to-blue-400/5 py-16 px-6'>
+      <section
+        className='py-16 px-6'
+        style={{
+          background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.05), rgba(59, 130, 246, 0.05))',
+        }}
+      >
         <div className='max-w-6xl mx-auto'>
-          <Title heading={2} className='text-center m-0 mb-4 text-slate-800 dark:text-white text-2xl font-semibold'>
+          <Title
+            heading={2}
+            className='text-center m-0 mb-4'
+            style={{
+              color: '#1E293B',
+              fontSize: '1.75rem',
+              fontWeight: 600,
+              fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+            }}
+          >
             {t('计费方式说明')}
           </Title>
-          <Text className='text-center text-slate-500 dark:text-slate-400 block mb-12'>
+          <Text
+            className='text-center block mb-12'
+            style={{ color: '#475569', fontSize: '1rem' }}
+          >
             {t('订阅和按量付费可以同时拥有，系统会智能选择最优惠的方式扣费')}
           </Text>
 
           {/* Flow Diagram */}
           <div className='flex flex-wrap items-center justify-center gap-6 mb-10'>
-            <div className='bg-white dark:bg-gray-800 px-8 py-6 rounded-xl border-2 border-blue-500 bg-gradient-to-br from-blue-500/5 to-blue-400/5 min-w-[200px] text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-blue-500/10'>
-              <Text className='text-slate-500 dark:text-slate-400 text-sm block mb-2'>{t('第1步')}</Text>
-              <Text className='text-blue-600 dark:text-blue-400 text-xl font-bold'>{t('优先使用订阅')}</Text>
+            {/* Step 1 - Active */}
+            <div
+              className='bg-white dark:bg-gray-800 px-8 py-6 rounded-xl min-w-[200px] text-center cursor-pointer'
+              style={{
+                border: '2px solid #2563EB',
+                background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.05), rgba(59, 130, 246, 0.05))',
+                transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-4px)';
+                e.currentTarget.style.boxShadow = '0 8px 24px rgba(37, 99, 235, 0.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              <Text className='text-sm block mb-2' style={{ color: '#475569' }}>{t('第1步')}</Text>
+              <Text
+                className='text-xl font-bold'
+                style={{ color: '#2563EB', fontFamily: "'Poppins', 'Inter', system-ui, sans-serif" }}
+              >
+                {t('优先使用订阅')}
+              </Text>
             </div>
-            <span className='text-3xl text-blue-500 hidden md:block'>→</span>
-            <span className='text-3xl text-blue-500 md:hidden rotate-90'>→</span>
-            <div className='bg-white dark:bg-gray-800 px-8 py-6 rounded-xl border-2 border-slate-200 dark:border-gray-700 min-w-[200px] text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-blue-400'>
-              <Text className='text-slate-500 dark:text-slate-400 text-sm block mb-2'>{t('订阅用完/过期')}</Text>
-              <Text className='text-blue-600 dark:text-blue-400 text-xl font-bold'>{t('自动切换')}</Text>
+
+            <span className='text-3xl hidden md:block' style={{ color: '#2563EB' }}>→</span>
+            <span className='text-3xl md:hidden' style={{ color: '#2563EB', transform: 'rotate(90deg)' }}>→</span>
+
+            {/* Step 2 */}
+            <div
+              className='bg-white dark:bg-gray-800 px-8 py-6 rounded-xl min-w-[200px] text-center cursor-pointer'
+              style={{
+                border: '2px solid #E2E8F0',
+                transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-4px)';
+                e.currentTarget.style.boxShadow = '0 8px 24px rgba(37, 99, 235, 0.1)';
+                e.currentTarget.style.borderColor = '#3B82F6';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.borderColor = '#E2E8F0';
+              }}
+            >
+              <Text className='text-sm block mb-2' style={{ color: '#475569' }}>{t('订阅用完/过期')}</Text>
+              <Text
+                className='text-xl font-bold'
+                style={{ color: '#2563EB', fontFamily: "'Poppins', 'Inter', system-ui, sans-serif" }}
+              >
+                {t('自动切换')}
+              </Text>
             </div>
-            <span className='text-3xl text-blue-500 hidden md:block'>→</span>
-            <span className='text-3xl text-blue-500 md:hidden rotate-90'>→</span>
-            <div className='bg-white dark:bg-gray-800 px-8 py-6 rounded-xl border-2 border-slate-200 dark:border-gray-700 min-w-[200px] text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-blue-400'>
-              <Text className='text-slate-500 dark:text-slate-400 text-sm block mb-2'>{t('第2步')}</Text>
-              <Text className='text-blue-600 dark:text-blue-400 text-xl font-bold'>{t('使用钱包余额')}</Text>
+
+            <span className='text-3xl hidden md:block' style={{ color: '#2563EB' }}>→</span>
+            <span className='text-3xl md:hidden' style={{ color: '#2563EB', transform: 'rotate(90deg)' }}>→</span>
+
+            {/* Step 3 */}
+            <div
+              className='bg-white dark:bg-gray-800 px-8 py-6 rounded-xl min-w-[200px] text-center cursor-pointer'
+              style={{
+                border: '2px solid #E2E8F0',
+                transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-4px)';
+                e.currentTarget.style.boxShadow = '0 8px 24px rgba(37, 99, 235, 0.1)';
+                e.currentTarget.style.borderColor = '#3B82F6';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.borderColor = '#E2E8F0';
+              }}
+            >
+              <Text className='text-sm block mb-2' style={{ color: '#475569' }}>{t('第2步')}</Text>
+              <Text
+                className='text-xl font-bold'
+                style={{ color: '#2563EB', fontFamily: "'Poppins', 'Inter', system-ui, sans-serif" }}
+              >
+                {t('使用钱包余额')}
+              </Text>
             </div>
           </div>
 
           {/* Comparison Cards */}
           <div className='grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto'>
-            <Card className='border-2 border-blue-500' style={{ borderRadius: '16px' }} bodyStyle={{ padding: '32px' }}>
-              <Tag color='blue' size='small' shape='circle' className='mb-3'>{t('订阅套餐')}</Tag>
-              <Title heading={4} className='m-0 mb-4 text-slate-800 dark:text-white'>{t('限时优惠包')}</Title>
+            {/* Subscription Card */}
+            <Card
+              className='bg-white dark:bg-gray-800'
+              style={{
+                borderRadius: '16px',
+                border: '2px solid #2563EB',
+              }}
+              bodyStyle={{ padding: '32px' }}
+            >
+              <span
+                className='inline-block px-3 py-1 rounded-xl text-xs font-semibold mb-3'
+                style={{ background: '#DBEAFE', color: '#1E40AF' }}
+              >
+                {t('订阅套餐')}
+              </span>
+              <Title
+                heading={4}
+                className='m-0 mb-4'
+                style={{ color: '#1E293B', fontFamily: "'Poppins', 'Inter', system-ui, sans-serif" }}
+              >
+                {t('限时优惠包')}
+              </Title>
               <ul className='list-none p-0 m-0 space-y-2'>
                 {[
                   t('有效期限制（24小时-30天）'),
@@ -1115,17 +1504,36 @@ const PlanPricing = () => {
                   t('过期后剩余额度清零'),
                   t('适合稳定高频使用'),
                 ].map((item, idx) => (
-                  <li key={idx} className='flex items-start gap-2 text-slate-600 dark:text-slate-300'>
-                    <span className='text-emerald-500 font-bold flex-shrink-0'>✓</span>
+                  <li key={idx} className='flex items-start gap-2 text-sm' style={{ color: '#475569', padding: '8px 0' }}>
+                    <span style={{ color: '#10B981', fontWeight: 700, flexShrink: 0 }}>✓</span>
                     <span>{item}</span>
                   </li>
                 ))}
               </ul>
             </Card>
 
-            <Card className='border-2 border-slate-200 dark:border-gray-700' style={{ borderRadius: '16px' }} bodyStyle={{ padding: '32px' }}>
-              <Tag color='amber' size='small' shape='circle' className='mb-3'>{t('按量付费')}</Tag>
-              <Title heading={4} className='m-0 mb-4 text-slate-800 dark:text-white'>{t('充值钱包余额')}</Title>
+            {/* PAYG Card */}
+            <Card
+              className='bg-white dark:bg-gray-800'
+              style={{
+                borderRadius: '16px',
+                border: '2px solid #E2E8F0',
+              }}
+              bodyStyle={{ padding: '32px' }}
+            >
+              <span
+                className='inline-block px-3 py-1 rounded-xl text-xs font-semibold mb-3'
+                style={{ background: '#FEF3C7', color: '#92400E' }}
+              >
+                {t('按量付费')}
+              </span>
+              <Title
+                heading={4}
+                className='m-0 mb-4'
+                style={{ color: '#1E293B', fontFamily: "'Poppins', 'Inter', system-ui, sans-serif" }}
+              >
+                {t('充值钱包余额')}
+              </Title>
               <ul className='list-none p-0 m-0 space-y-2'>
                 {[
                   t('永久有效，随时可用'),
@@ -1133,8 +1541,8 @@ const PlanPricing = () => {
                   t('余额永不过期'),
                   t('适合偶尔使用或保底'),
                 ].map((item, idx) => (
-                  <li key={idx} className='flex items-start gap-2 text-slate-600 dark:text-slate-300'>
-                    <span className='text-emerald-500 font-bold flex-shrink-0'>✓</span>
+                  <li key={idx} className='flex items-start gap-2 text-sm' style={{ color: '#475569', padding: '8px 0' }}>
+                    <span style={{ color: '#10B981', fontWeight: 700, flexShrink: 0 }}>✓</span>
                     <span>{item}</span>
                   </li>
                 ))}
@@ -1146,7 +1554,16 @@ const PlanPricing = () => {
 
       {/* FAQ Section */}
       <section className='max-w-4xl mx-auto py-20 px-6'>
-        <Title heading={2} className='text-center m-0 mb-12 text-slate-800 dark:text-white text-2xl font-semibold'>
+        <Title
+          heading={2}
+          className='text-center m-0 mb-12'
+          style={{
+            color: '#1E293B',
+            fontSize: '1.75rem',
+            fontWeight: 600,
+            fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+          }}
+        >
           {t('常见问题')}
         </Title>
 
@@ -1168,21 +1585,43 @@ const PlanPricing = () => {
               q: t('费用是怎么计算的？'),
               a: t('按照token用量和模型价格计算得出，以实际消费为准。'),
             },
+            {
+              q: t('可以退款吗？'),
+              a: t('订阅套餐一经购买不支持退款，但钱包余额永久有效，可随时使用。建议首次购买选择小额套餐试用。'),
+            },
           ].map((faq, idx) => (
             <div
               key={idx}
-              className='bg-white dark:bg-gray-800 rounded-xl border-2 border-slate-200 dark:border-gray-700 transition-all duration-250 hover:border-blue-500 hover:shadow-md cursor-pointer'
+              className='bg-white dark:bg-gray-800 rounded-xl cursor-pointer'
+              style={{
+                border: '2px solid #E2E8F0',
+                transition: 'all 250ms cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
               onClick={() => setExpandedFaq(expandedFaq === idx ? null : idx)}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#2563EB';
+                e.currentTarget.style.boxShadow = '0 4px 20px rgba(37, 99, 235, 0.08)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#E2E8F0';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
             >
               <div className='p-7 flex items-center justify-between'>
-                <Text className='font-semibold text-slate-800 dark:text-white flex items-center gap-2'>
+                <Text
+                  className='font-semibold flex items-center gap-2'
+                  style={{ color: '#1E293B', fontSize: '1.0625rem' }}
+                >
                   <span>💡</span> {faq.q}
                 </Text>
-                {expandedFaq === idx ? <IconChevronUp className='text-slate-400' /> : <IconChevronDown className='text-slate-400' />}
+                {expandedFaq === idx
+                  ? <IconChevronUp style={{ color: '#94A3B8' }} />
+                  : <IconChevronDown style={{ color: '#94A3B8' }} />
+                }
               </div>
               {expandedFaq === idx && (
                 <div className='px-7 pb-7 pt-0'>
-                  <Text className='text-slate-500 dark:text-slate-400 leading-relaxed'>{faq.a}</Text>
+                  <Text style={{ color: '#475569', lineHeight: 1.7 }}>{faq.a}</Text>
                 </div>
               )}
             </div>
@@ -1198,6 +1637,42 @@ const PlanPricing = () => {
         }
         .animate-fadeIn {
           animation: fadeIn 300ms ease;
+        }
+
+        @keyframes priceReveal {
+          0% {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .price-animated {
+          display: inline-block;
+          animation: priceReveal 600ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
+
+        /* Selection color */
+        .plan-pricing-page ::selection {
+          background: rgba(37, 99, 235, 0.2);
+          color: #1E293B;
+        }
+
+        /* Better focus indicators */
+        .plan-pricing-page a:focus-visible,
+        .plan-pricing-page button:focus-visible {
+          outline: 2px solid #2563EB;
+          outline-offset: 2px;
+        }
+
+        /* Accessibility - reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+          .plan-pricing-page * {
+            animation: none !important;
+            transition: none !important;
+          }
         }
       `}</style>
     </div>
