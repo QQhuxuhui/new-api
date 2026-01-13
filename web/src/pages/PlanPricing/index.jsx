@@ -31,6 +31,7 @@ import {
   Tooltip,
   Banner,
   Skeleton,
+  Collapsible,
 } from '@douyinfe/semi-ui';
 import {
   IconTick,
@@ -43,6 +44,8 @@ import {
   IconStar,
   IconGift,
   IconRefresh,
+  IconChevronDown,
+  IconChevronUp,
 } from '@douyinfe/semi-icons';
 import { API, showError, convertUSDToCurrency } from '../../helpers';
 import { StatusContext } from '../../context/Status';
@@ -83,8 +86,13 @@ const PlanPricing = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [plans, setPlans] = useState([]);
+  // Tab state: 'subscription' or 'payg'
+  const initialTab = searchParams.get('category') === 'payg' ? 'payg' : 'subscription';
+  const [activeTab, setActiveTab] = useState(initialTab);
   // 从 URL 参数读取初始分类，支持 ?category=payg 预选
   const [filter, setFilter] = useState(searchParams.get('category') || 'all');
+  // FAQ展开状态
+  const [expandedFaq, setExpandedFaq] = useState(null);
 
   // 按量付费（充值）相关状态
   const [topupLoading, setTopupLoading] = useState(false);
@@ -218,6 +226,16 @@ const PlanPricing = () => {
       loadTopupInfo();
     }
   }, [filter]);
+
+  // 同步标签页与过滤条件，避免进入 payg 后切换回来仍按 payg 过滤导致订阅列表为空
+  useEffect(() => {
+    if (activeTab === 'payg') {
+      setFilter('payg');
+    } else if (filter === 'payg') {
+      // 仅当此前处于 payg 过滤时重置，保留其他可能的分类过滤
+      setFilter('all');
+    }
+  }, [activeTab, filter]);
 
   // Filter and sort plans (先拷贝再排序，避免修改原数组)
   const filteredPlans = useMemo(() => {
@@ -729,139 +747,459 @@ const PlanPricing = () => {
     );
   };
 
-  return (
-    <div className='min-h-screen bg-[var(--semi-color-bg-0)]'>
-      {/* Hero Section */}
-      <div className='relative overflow-hidden bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 py-16 px-4'>
-        <div className='absolute inset-0 bg-[url("https://www.transparenttextures.com/patterns/cubes.png")] opacity-10'></div>
-        <div className='absolute -bottom-20 -right-20 w-80 h-80 bg-white opacity-5 rounded-full blur-3xl'></div>
-        <div className='absolute top-10 left-10 w-40 h-40 bg-purple-500 opacity-20 rounded-full blur-2xl'></div>
+  // 新版套餐卡片 - 简约高级风格
+  const renderNewPlanCard = (plan) => {
+    const categoryConfig = getCategoryConfig(plan.category);
+    if (!categoryConfig) return null;
 
-        <div className='max-w-6xl mx-auto text-center relative z-10'>
-          <Title heading={1} className='text-white m-0 mb-4 font-bold'>
-            {t('选择适合您的套餐')}
-          </Title>
-          <Text className='text-blue-100 text-lg block max-w-2xl mx-auto'>
-            {t('灵活的定价方案，满足各种使用需求。按需选择，即买即用。')}
-          </Text>
-        </div>
-      </div>
+    const features = extractFeatures(plan);
+    const isRecommended = recommendedPlanId
+      ? plan.id === recommendedPlanId
+      : plan.priority >= 100;
 
-      {/* Main Content */}
-      <div className='max-w-6xl mx-auto px-4 py-12'>
-        {/* Category Filter */}
-        <div className='flex flex-wrap justify-center gap-3 mb-10'>
-          {categoryOptions.map(option => (
+    // 获取有效期显示
+    const getValidityDisplay = (category) => {
+      const validityMap = {
+        daily: '24小时有效',
+        weekly: '7天有效',
+        biweekly: '14天有效',
+        monthly: '30天有效',
+      };
+      return validityMap[category] || '';
+    };
+
+    const validity = getValidityDisplay(plan.category);
+
+    return (
+      <div
+        key={plan.id}
+        className='group relative transition-all duration-300 ease-in-out transform hover:-translate-y-2'
+      >
+        <Card
+          className='relative h-full bg-white dark:bg-gray-800 border-2 border-slate-200 dark:border-gray-700 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-500/10 transition-all duration-300 cursor-pointer flex flex-col'
+          style={{ borderRadius: '20px', overflow: 'hidden' }}
+          bodyStyle={{ padding: '32px', display: 'flex', flexDirection: 'column', height: '100%' }}
+        >
+          {/* Header */}
+          <div className='mb-6'>
+            <Title heading={4} className='m-0 mb-2 text-slate-800 dark:text-white'>
+              {plan.display_name || plan.name}
+            </Title>
+            {validity && (
+              <Tag color='blue' size='small' shape='circle' className='bg-blue-500/10 text-blue-600 border-none'>
+                ⏱️ {t(validity)}
+              </Tag>
+            )}
+          </div>
+
+          {/* Price */}
+          <div className='mb-6'>
+            <span className='text-5xl font-bold text-blue-600 dark:text-blue-400'>¥{plan.price}</span>
+          </div>
+
+          {/* Quota Info Box */}
+          {plan.quota_usd > 0 && (
+            <div className='bg-gradient-to-br from-sky-50 to-blue-50 dark:from-blue-900/20 dark:to-sky-900/20 rounded-xl p-5 mb-5'>
+              <Text className='text-slate-500 dark:text-slate-400 text-sm block mb-3 font-medium'>{t('您将获得')}</Text>
+              <Text className='text-3xl font-bold text-blue-600 dark:text-blue-400 block'>
+                ${plan.quota_usd} {t('美金额度')}
+              </Text>
+            </div>
+          )}
+
+          {/* Custom Features */}
+          {features.length > 0 && (
+            <div className='space-y-2 mb-6'>
+              {features.map((feature, idx) => (
+                <div key={idx} className='flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm'>
+                  <span className='text-emerald-500 font-bold'>✓</span>
+                  {feature.text}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* CTA Button - pushed to bottom */}
+          <div className='mt-auto'>
             <Button
-              key={option.key}
-              theme={filter === option.key ? 'solid' : 'light'}
-              type={filter === option.key ? 'primary' : 'tertiary'}
-              onClick={() => setFilter(option.key)}
-              style={{ borderRadius: '20px' }}
+              theme={isRecommended ? 'solid' : 'light'}
+              type='primary'
+              size='large'
+              block
+              onClick={() => handlePurchase(plan)}
+              style={{
+                borderRadius: '12px',
+                height: '48px',
+                fontWeight: 600,
+                background: isRecommended ? 'linear-gradient(135deg, #2563EB, #3B82F6)' : undefined,
+              }}
             >
-              {option.label}
+              {t('选择') + (categoryConfig?.label || '')}
             </Button>
-          ))}
-        </div>
+          </div>
+        </Card>
+      </div>
+    );
+  };
 
-        {/* Plans Grid */}
-        {loading || (filter === 'payg' && topupLoading) ? (
-          // 加载骨架
-          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
-            {[1, 2, 3].map((i) => (
-              <Card
-                key={i}
-                className='border-none shadow-sm'
-                style={{ borderRadius: '20px', overflow: 'hidden' }}
-                bodyStyle={{ padding: '0' }}
-              >
-                <div className='p-6 bg-gray-100 dark:bg-gray-700'>
-                  <Skeleton.Title style={{ width: 60, marginBottom: 12 }} />
-                  <Skeleton.Title style={{ width: '80%', marginBottom: 8 }} />
-                  <Skeleton.Paragraph rows={1} style={{ width: 100 }} />
-                </div>
-                <div className='px-6 py-5 border-b border-gray-100 dark:border-gray-700'>
-                  <Skeleton.Title style={{ width: '50%' }} />
-                  <Skeleton.Paragraph rows={1} style={{ width: '70%', marginTop: 8 }} />
-                </div>
-                <div className='px-6 py-5'>
-                  <Skeleton.Paragraph rows={3} />
-                </div>
-                <div className='px-6 pb-6'>
-                  <Skeleton.Button style={{ width: '100%', height: 48 }} />
-                </div>
-              </Card>
+  // 新版充值卡片 - 简约高级风格
+  const renderNewTopupCard = (topupAmount, index) => {
+    const { value, discount } = topupAmount;
+    const hasDiscount = discount < 1;
+    const discountPercent = hasDiscount ? Math.round((1 - discount) * 100) : 0;
+    const priceRatio = statusState?.status?.price || 7; // 从后端读取单价
+    const originalPrice = value * priceRatio;
+    const finalPrice = originalPrice * discount;
+    // 中间的卡片标记为推荐
+    const isRecommended = index === Math.floor(topupAmounts.length / 2);
+
+    return (
+      <div
+        key={`topup-${value}`}
+        className='group relative transition-all duration-300 ease-in-out transform hover:-translate-y-2'
+      >
+        <Card
+          className='relative h-full bg-white dark:bg-gray-800 border-2 border-slate-200 dark:border-gray-700 hover:border-green-500 hover:shadow-xl hover:shadow-green-500/10 transition-all duration-300 cursor-pointer flex flex-col'
+          style={{ borderRadius: '20px', overflow: 'hidden' }}
+          bodyStyle={{ padding: '32px', display: 'flex', flexDirection: 'column', height: '100%' }}
+        >
+          {/* Recommended Badge */}
+          {isRecommended && (
+            <div className='absolute top-4 right-4'>
+              <Tag color='green' size='small' shape='circle'>
+                <IconStar className='mr-1' size='small' />
+                {t('推荐')}
+              </Tag>
+            </div>
+          )}
+
+          {/* Header */}
+          <div className='mb-6'>
+            <Title heading={4} className='m-0 mb-2 text-slate-800 dark:text-white'>
+              ${value} {t('额度')}
+            </Title>
+            <Tag color='green' size='small' shape='circle' className='bg-green-500/10 text-green-600 border-none'>
+              💳 {t('钱包充值')}
+            </Tag>
+          </div>
+
+          {/* Price */}
+          <div className='mb-6'>
+            <span className='text-5xl font-bold text-green-600 dark:text-green-400'>¥{finalPrice.toFixed(0)}</span>
+            {hasDiscount && (
+              <span className='text-lg text-slate-400 line-through ml-3'>¥{originalPrice.toFixed(0)}</span>
+            )}
+          </div>
+
+          {/* Discount Badge */}
+          {hasDiscount && (
+            <div className='inline-flex items-center gap-1.5 bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/20 dark:to-orange-900/20 text-red-600 dark:text-red-400 px-4 py-2 rounded-lg text-sm font-semibold mb-5 self-start'>
+              🎉 {t('优惠')} {discountPercent}%
+            </div>
+          )}
+
+          {/* Features */}
+          <div className='space-y-2 mb-6'>
+            {[
+              { text: t('永不过期') },
+              { text: t('按量扣费') },
+              { text: t('即时到账') },
+            ].map((feature, idx) => (
+              <div key={idx} className='flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm'>
+                <span className='text-emerald-500 font-bold'>✓</span>
+                {feature.text}
+              </div>
             ))}
           </div>
-        ) : error ? (
-          // 错误状态
-          <div className='bg-white dark:bg-gray-800 p-12 rounded-3xl shadow-sm text-center'>
-            <IconBox size='extra-large' className='text-red-300 text-6xl mb-4' />
-            <Title heading={4} className='mb-2'>{t('加载失败')}</Title>
-            <Text type='tertiary' className='block mb-6'>{error}</Text>
+
+          {/* CTA Button - pushed to bottom */}
+          <div className='mt-auto'>
             <Button
-              theme='solid'
+              theme={isRecommended ? 'solid' : 'light'}
               type='primary'
-              icon={<IconRefresh />}
-              onClick={loadPlans}
-              style={{ borderRadius: '12px' }}
+              size='large'
+              block
+              loading={creatingOrder}
+              onClick={() => handleTopupPurchase(value)}
+              style={{
+                borderRadius: '12px',
+                height: '48px',
+                fontWeight: 600,
+                background: isRecommended ? 'linear-gradient(135deg, #10b981, #059669)' : undefined,
+              }}
             >
-              {t('重试')}
+              {t('立即充值')}
             </Button>
           </div>
-        ) : filter === 'payg' ? (
-          // 按量付费 - 显示充值金额卡片
-          topupAmounts.length > 0 ? (
-            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
-              {topupAmounts.map((amount, index) => renderTopupCard(amount, index))}
-            </div>
-          ) : (
-            <Empty
-              image={<IconCreditCard size='extra-large' className='text-gray-300 text-6xl' />}
-              title={t('暂无充值选项')}
-              description={t('管理员尚未配置充值金额选项，请联系管理员或访问钱包页面。')}
-              className='bg-white dark:bg-gray-800 p-12 rounded-3xl shadow-sm'
-            />
-          )
-        ) : (() => {
-          // 先过滤掉禁用分类的卡片，再判断是否为空
-          const renderedCards = filteredPlans
-            .map(plan => renderPlanCard(plan))
-            .filter(Boolean); // 过滤掉null值（禁用分类的卡片）
-
-          return renderedCards.length > 0 ? (
-            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
-              {renderedCards}
-            </div>
-          ) : (
-            <Empty
-              image={<IconBox size='extra-large' className='text-gray-300 text-6xl' />}
-              title={t('暂无可用套餐')}
-              description={t('目前没有可购买的套餐，请稍后再试。')}
-              className='bg-white dark:bg-gray-800 p-12 rounded-3xl shadow-sm'
-            />
-          );
-        })()}
-
-        {/* Info Section */}
-        <div className='mt-16'>
-          <Banner
-            type='info'
-            description={
-              <div className='space-y-2'>
-                <Text strong className='block'>{t('关于套餐说明')}</Text>
-                <ul className='list-disc list-inside text-sm space-y-1 text-gray-600 dark:text-gray-300'>
-                  <li>{t('订阅套餐购买后进入队列，按顺序自动激活')}</li>
-                  <li>{t('日卡可与其他套餐叠加使用，当日有效')}</li>
-                  <li>{t('额度为预估值，实际扣费以使用量为准')}</li>
-                  <li>{t('如有疑问，请联系管理员')}</li>
-                </ul>
-              </div>
-            }
-            className='rounded-2xl border-none'
-          />
-        </div>
+        </Card>
       </div>
+    );
+  };
+
+  return (
+    <div className='min-h-screen bg-slate-50 dark:bg-gray-900'>
+      {/* Hero Section - 简约高级风格 */}
+      <section className='relative text-center py-20 px-6 bg-white dark:bg-gray-800 overflow-hidden'>
+        {/* 背景装饰 */}
+        <div className='absolute inset-0 pointer-events-none'>
+          <div className='absolute top-0 left-0 w-full h-full bg-gradient-to-br from-blue-500/5 via-transparent to-blue-400/3'></div>
+        </div>
+
+        <div className='relative z-10 max-w-3xl mx-auto'>
+          <Title heading={1} className='m-0 mb-4 text-slate-800 dark:text-white' style={{ fontSize: 'clamp(2.5rem, 5vw, 3.5rem)', fontWeight: 700, letterSpacing: '-0.02em' }}>
+            {t('选择适合您的API服务方案')}
+          </Title>
+          <Text className='text-slate-500 dark:text-slate-400 text-xl block'>
+            {t('两种计费方式，灵活组合使用。先用订阅套餐，用完自动切换按量付费，无缝衔接。')}
+          </Text>
+        </div>
+      </section>
+
+      {/* Pricing Section */}
+      <section className='max-w-7xl mx-auto px-6 py-16'>
+        {/* Tab Switch - 简约风格 */}
+        <div className='flex justify-center mb-12'>
+          <div className='inline-flex bg-white dark:bg-gray-800 rounded-2xl p-1.5 border-2 border-slate-200 dark:border-gray-700 shadow-sm'>
+            <button
+              onClick={() => setActiveTab('subscription')}
+              className={`px-9 py-3.5 rounded-xl font-semibold text-base transition-all duration-250 flex items-center gap-2 ${
+                activeTab === 'subscription'
+                  ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/30'
+                  : 'text-slate-500 hover:text-slate-700 hover:bg-blue-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              <span className='text-xl'>📦</span>
+              <span>{t('订阅套餐')}</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('payg')}
+              className={`px-9 py-3.5 rounded-xl font-semibold text-base transition-all duration-250 flex items-center gap-2 ${
+                activeTab === 'payg'
+                  ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/30'
+                  : 'text-slate-500 hover:text-slate-700 hover:bg-blue-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              <span className='text-xl'>💳</span>
+              <span>{t('按量付费')}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Subscription Tab Content */}
+        {activeTab === 'subscription' && (
+          <div className='animate-fadeIn'>
+            <div className='text-center mb-12'>
+              <Title heading={2} className='m-0 mb-4 text-slate-800 dark:text-white text-2xl font-semibold'>
+                {t('订阅套餐 - 限时特惠')}
+              </Title>
+              <Text className='text-slate-500 dark:text-slate-400'>
+                {t('承诺使用时间，享受更低价格')}
+              </Text>
+            </div>
+
+            {loading ? (
+              <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'>
+                {[1, 2, 3, 4].map((i) => (
+                  <Card key={i} className='border-2 border-slate-200 dark:border-gray-700' style={{ borderRadius: '20px' }} bodyStyle={{ padding: 0 }}>
+                    <div className='p-8'>
+                      <Skeleton.Title style={{ width: 80, marginBottom: 12 }} />
+                      <Skeleton.Title style={{ width: '60%', marginBottom: 24 }} />
+                      <Skeleton.Paragraph rows={4} />
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : error ? (
+              <div className='bg-white dark:bg-gray-800 p-12 rounded-3xl text-center'>
+                <IconBox size='extra-large' className='text-slate-300 text-6xl mb-4' />
+                <Title heading={4} className='mb-2'>{t('加载失败')}</Title>
+                <Text type='tertiary' className='block mb-6'>{error}</Text>
+                <Button theme='solid' type='primary' icon={<IconRefresh />} onClick={loadPlans} style={{ borderRadius: '12px' }}>
+                  {t('重试')}
+                </Button>
+              </div>
+            ) : filteredPlans.length > 0 ? (
+              <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'>
+                {filteredPlans.filter(p => p.category !== 'payg').map(plan => renderNewPlanCard(plan))}
+              </div>
+            ) : (
+              <Empty
+                image={<IconBox size='extra-large' className='text-slate-300 text-6xl' />}
+                title={t('暂无可用套餐')}
+                description={t('目前没有可购买的套餐，请稍后再试。')}
+                className='bg-white dark:bg-gray-800 p-12 rounded-3xl'
+              />
+            )}
+          </div>
+        )}
+
+        {/* Pay-as-you-go Tab Content */}
+        {activeTab === 'payg' && (
+          <div className='animate-fadeIn'>
+            <div className='text-center mb-12'>
+              <Title heading={2} className='m-0 mb-4 text-slate-800 dark:text-white text-2xl font-semibold'>
+                {t('按量付费 - 钱包充值')}
+              </Title>
+              <Text className='text-slate-500 dark:text-slate-400'>
+                {t('充值到钱包，随用随扣，余额永不过期')}
+              </Text>
+            </div>
+
+            {topupLoading ? (
+              <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
+                {[1, 2, 3].map((i) => (
+                  <Card key={i} className='border-2 border-slate-200 dark:border-gray-700' style={{ borderRadius: '20px' }} bodyStyle={{ padding: 0 }}>
+                    <div className='p-8'>
+                      <Skeleton.Title style={{ width: 80, marginBottom: 12 }} />
+                      <Skeleton.Title style={{ width: '60%', marginBottom: 24 }} />
+                      <Skeleton.Paragraph rows={3} />
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : topupAmounts.length > 0 ? (
+              <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
+                {topupAmounts.map((amount, index) => renderNewTopupCard(amount, index))}
+              </div>
+            ) : (
+              <Empty
+                image={<IconCreditCard size='extra-large' className='text-slate-300 text-6xl' />}
+                title={t('暂无充值选项')}
+                description={t('管理员尚未配置充值金额选项，请联系管理员或访问钱包页面。')}
+                className='bg-white dark:bg-gray-800 p-12 rounded-3xl'
+              />
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* How it Works Section */}
+      <section className='bg-gradient-to-br from-blue-500/5 to-blue-400/5 py-16 px-6'>
+        <div className='max-w-6xl mx-auto'>
+          <Title heading={2} className='text-center m-0 mb-4 text-slate-800 dark:text-white text-2xl font-semibold'>
+            {t('计费方式说明')}
+          </Title>
+          <Text className='text-center text-slate-500 dark:text-slate-400 block mb-12'>
+            {t('订阅和按量付费可以同时拥有，系统会智能选择最优惠的方式扣费')}
+          </Text>
+
+          {/* Flow Diagram */}
+          <div className='flex flex-wrap items-center justify-center gap-6 mb-10'>
+            <div className='bg-white dark:bg-gray-800 px-8 py-6 rounded-xl border-2 border-blue-500 bg-gradient-to-br from-blue-500/5 to-blue-400/5 min-w-[200px] text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-blue-500/10'>
+              <Text className='text-slate-500 dark:text-slate-400 text-sm block mb-2'>{t('第1步')}</Text>
+              <Text className='text-blue-600 dark:text-blue-400 text-xl font-bold'>{t('优先使用订阅')}</Text>
+            </div>
+            <span className='text-3xl text-blue-500 hidden md:block'>→</span>
+            <span className='text-3xl text-blue-500 md:hidden rotate-90'>→</span>
+            <div className='bg-white dark:bg-gray-800 px-8 py-6 rounded-xl border-2 border-slate-200 dark:border-gray-700 min-w-[200px] text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-blue-400'>
+              <Text className='text-slate-500 dark:text-slate-400 text-sm block mb-2'>{t('订阅用完/过期')}</Text>
+              <Text className='text-blue-600 dark:text-blue-400 text-xl font-bold'>{t('自动切换')}</Text>
+            </div>
+            <span className='text-3xl text-blue-500 hidden md:block'>→</span>
+            <span className='text-3xl text-blue-500 md:hidden rotate-90'>→</span>
+            <div className='bg-white dark:bg-gray-800 px-8 py-6 rounded-xl border-2 border-slate-200 dark:border-gray-700 min-w-[200px] text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-blue-400'>
+              <Text className='text-slate-500 dark:text-slate-400 text-sm block mb-2'>{t('第2步')}</Text>
+              <Text className='text-blue-600 dark:text-blue-400 text-xl font-bold'>{t('使用钱包余额')}</Text>
+            </div>
+          </div>
+
+          {/* Comparison Cards */}
+          <div className='grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto'>
+            <Card className='border-2 border-blue-500' style={{ borderRadius: '16px' }} bodyStyle={{ padding: '32px' }}>
+              <Tag color='blue' size='small' shape='circle' className='mb-3'>{t('订阅套餐')}</Tag>
+              <Title heading={4} className='m-0 mb-4 text-slate-800 dark:text-white'>{t('限时优惠包')}</Title>
+              <ul className='list-none p-0 m-0 space-y-2'>
+                {[
+                  t('有效期限制（24小时-30天）'),
+                  t('价格最优惠（比按量便宜10%-30%）'),
+                  t('过期后剩余额度清零'),
+                  t('适合稳定高频使用'),
+                ].map((item, idx) => (
+                  <li key={idx} className='flex items-start gap-2 text-slate-600 dark:text-slate-300'>
+                    <span className='text-emerald-500 font-bold flex-shrink-0'>✓</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+
+            <Card className='border-2 border-slate-200 dark:border-gray-700' style={{ borderRadius: '16px' }} bodyStyle={{ padding: '32px' }}>
+              <Tag color='amber' size='small' shape='circle' className='mb-3'>{t('按量付费')}</Tag>
+              <Title heading={4} className='m-0 mb-4 text-slate-800 dark:text-white'>{t('充值钱包余额')}</Title>
+              <ul className='list-none p-0 m-0 space-y-2'>
+                {[
+                  t('永久有效，随时可用'),
+                  t('标准价格（¥0.50/美金）'),
+                  t('余额永不过期'),
+                  t('适合偶尔使用或保底'),
+                ].map((item, idx) => (
+                  <li key={idx} className='flex items-start gap-2 text-slate-600 dark:text-slate-300'>
+                    <span className='text-emerald-500 font-bold flex-shrink-0'>✓</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ Section */}
+      <section className='max-w-4xl mx-auto py-20 px-6'>
+        <Title heading={2} className='text-center m-0 mb-12 text-slate-800 dark:text-white text-2xl font-semibold'>
+          {t('常见问题')}
+        </Title>
+
+        <div className='space-y-4'>
+          {[
+            {
+              q: t('订阅套餐用完后会怎样？'),
+              a: t('系统会自动切换到您的钱包余额继续计费（按¥0.50/美金），不会中断服务。建议钱包保持一定余额作为保底。'),
+            },
+            {
+              q: t('订阅套餐过期了，剩余额度还在吗？'),
+              a: t('订阅套餐过期后，剩余额度会清零。所以建议根据实际使用量选择合适的套餐，避免浪费。如果用不完，可以选择更小的套餐或直接用按量付费。'),
+            },
+            {
+              q: t('我同时购买了多个订阅套餐，怎么扣费？'),
+              a: t('系统会优先使用即将过期的套餐，避免浪费。多个套餐的有效期是独立计算的，不会叠加。'),
+            },
+            {
+              q: t('费用是怎么计算的？'),
+              a: t('按照token用量和模型价格计算得出，以实际消费为准。'),
+            },
+          ].map((faq, idx) => (
+            <div
+              key={idx}
+              className='bg-white dark:bg-gray-800 rounded-xl border-2 border-slate-200 dark:border-gray-700 transition-all duration-250 hover:border-blue-500 hover:shadow-md cursor-pointer'
+              onClick={() => setExpandedFaq(expandedFaq === idx ? null : idx)}
+            >
+              <div className='p-7 flex items-center justify-between'>
+                <Text className='font-semibold text-slate-800 dark:text-white flex items-center gap-2'>
+                  <span>💡</span> {faq.q}
+                </Text>
+                {expandedFaq === idx ? <IconChevronUp className='text-slate-400' /> : <IconChevronDown className='text-slate-400' />}
+              </div>
+              {expandedFaq === idx && (
+                <div className='px-7 pb-7 pt-0'>
+                  <Text className='text-slate-500 dark:text-slate-400 leading-relaxed'>{faq.a}</Text>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* CSS for animations */}
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeIn {
+          animation: fadeIn 300ms ease;
+        }
+      `}</style>
     </div>
   );
 };
