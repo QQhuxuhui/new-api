@@ -30,3 +30,6 @@ concurrency_translations.txt
 
 .cache*
 .gomod**.out
+
+.claude*
+.gomod*
