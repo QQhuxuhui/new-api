@@ -67,27 +67,40 @@ function App() {
   const location = useLocation();
   const [statusState] = useContext(StatusContext);
 
-  // 获取模型广场权限配置
-  const pricingRequireAuth = useMemo(() => {
+  // 解析顶栏模块配置
+  const headerNavModules = useMemo(() => {
     const headerNavModulesConfig = statusState?.status?.HeaderNavModules;
     if (headerNavModulesConfig) {
       try {
-        const modules = JSON.parse(headerNavModulesConfig);
-
-        // 处理向后兼容性：如果pricing是boolean，默认不需要登录
-        if (typeof modules.pricing === 'boolean') {
-          return false; // 默认不需要登录鉴权
-        }
-
-        // 如果是对象格式，使用requireAuth配置
-        return modules.pricing?.requireAuth === true;
+        return JSON.parse(headerNavModulesConfig);
       } catch (error) {
         console.error('解析顶栏模块配置失败:', error);
-        return false; // 默认不需要登录
+        return {};
       }
     }
-    return false; // 默认不需要登录
+    return {};
   }, [statusState?.status?.HeaderNavModules]);
+
+  // 获取模型广场权限配置
+  const pricingRequireAuth = useMemo(() => {
+    // 处理向后兼容性：如果pricing是boolean，默认不需要登录
+    if (typeof headerNavModules.pricing === 'boolean') {
+      return false; // 默认不需要登录鉴权
+    }
+
+    // 如果是对象格式，使用requireAuth配置
+    return headerNavModules.pricing?.requireAuth === true;
+  }, [headerNavModules]);
+
+  // 获取产品定价页面是否启用
+  const plansEnabled = useMemo(() => {
+    // 配置未加载时默认不显示，避免闪烁
+    if (!statusState?.status?.HeaderNavModules) {
+      return false;
+    }
+    // 配置已加载，只有明确设置为 false 时才禁用
+    return headerNavModules.plans !== false;
+  }, [headerNavModules, statusState?.status?.HeaderNavModules]);
 
   return (
     <SetupCheck>
@@ -368,14 +381,16 @@ function App() {
             )
           }
         />
-        <Route
-          path='/plans'
-          element={
-            <Suspense fallback={<Loading></Loading>} key={location.pathname}>
-              <PlanPricing />
-            </Suspense>
-          }
-        />
+        {plansEnabled && (
+          <Route
+            path='/plans'
+            element={
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <PlanPricing />
+              </Suspense>
+            }
+          />
+        )}
         <Route
           path='/about'
           element={
