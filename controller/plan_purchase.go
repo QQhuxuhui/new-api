@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/url"
+	"sort"
 	"strconv"
 	"time"
 
@@ -195,7 +196,26 @@ func PayPlanOrder(c *gin.Context) {
 	})
 }
 
-// GetMyPlanOrders returns the current user's plan orders
+// UnifiedOrder represents a unified order structure for both plan and topup orders
+type UnifiedOrder struct {
+	OrderId       int     `json:"order_id"`
+	OrderNo       string  `json:"order_no"`
+	OrderType     string  `json:"order_type"` // "plan" or "topup"
+	PlanId        *int    `json:"plan_id,omitempty"`
+	PlanName      string  `json:"plan_name"`
+	FinalPrice    float64 `json:"final_price"`
+	OriginalPrice float64 `json:"original_price"`
+	Status        string  `json:"status"`
+	PaymentMethod string  `json:"payment_method"`
+	ExpiredAt     int64   `json:"expired_at"`
+	CreatedAt     int64   `json:"created_at"`
+	PaidAt        int64   `json:"paid_at"`
+	DeliveredAt   int64   `json:"delivered_at,omitempty"`
+	Quota         int64   `json:"quota,omitempty"`  // For topup orders
+	Amount        float64 `json:"amount,omitempty"` // For topup orders (USD amount)
+}
+
+// GetMyPlanOrders returns the current user's plan orders and topup orders merged
 func GetMyPlanOrders(c *gin.Context) {
 	userId := c.GetInt("id")
 	if userId == 0 {
@@ -216,45 +236,220 @@ func GetMyPlanOrders(c *gin.Context) {
 		pageSize = 20
 	}
 
-	orders, total, err := model.GetUserOrders(userId, page, pageSize)
+	// Get order type filter (optional): "all", "plan", "topup"
+	orderType := c.DefaultQuery("order_type", "all")
+	if orderType != "all" && orderType != "plan" && orderType != "topup" {
+		orderType = "all"
+	}
+
+	// Always query totals for UI counts
+	var planOrders []*model.PlanOrder
+	var topupOrders []*model.TopupOrder
+	var planTotal, topupTotal int64
+
+	err = model.DB.Model(&model.PlanOrder{}).
+		Where("user_id = ?", userId).
+		Count(&planTotal).Error
 	if err != nil {
-		common.ApiError(c, fmt.Errorf("获取订单列表失败: %w", err))
+		common.ApiError(c, fmt.Errorf("获取套餐订单数量失败: %w", err))
 		return
 	}
 
-	// Build response with plan names
-	orderList := make([]gin.H, 0, len(orders))
-	for _, order := range orders {
-		orderInfo := gin.H{
-			"order_id":       order.Id,
-			"order_no":       order.OrderNo,
-			"plan_id":        order.PlanId,
-			"final_price":    order.FinalPrice,
-			"original_price": order.PlanOriginalPrice,
-			"status":         order.Status,
-			"payment_method": order.PaymentMethod,
-			"expired_at":     order.ExpiredAt,
-			"created_at":     order.CreatedAt,
-			"paid_at":        order.PaidAt,
-			"delivered_at":   order.DeliveredAt,
+	err = model.DB.Model(&model.TopupOrder{}).
+		Where("user_id = ?", userId).
+		Count(&topupTotal).Error
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("获取充值订单数量失败: %w", err))
+		return
+	}
+
+	var total int64
+	var allOrders []UnifiedOrder
+
+	switch orderType {
+	case "plan":
+		planOrders, _, err = model.GetUserOrders(userId, page, pageSize)
+		if err != nil {
+			common.ApiError(c, fmt.Errorf("获取套餐订单失败: %w", err))
+			return
+		}
+		allOrders = make([]UnifiedOrder, 0, len(planOrders))
+		total = planTotal
+	case "topup":
+		topupOrders, _, err = model.GetUserTopupOrders(userId, page, pageSize)
+		if err != nil {
+			common.ApiError(c, fmt.Errorf("获取充值订单失败: %w", err))
+			return
+		}
+		allOrders = make([]UnifiedOrder, 0, len(topupOrders))
+		total = topupTotal
+	default: // "all"
+		limit := page * pageSize
+		if limit < 1 {
+			limit = pageSize
 		}
 
-		// Prefer snapshot fields over Plan relation
-		// Plan relation may be null if plan template was deleted
-		if order.PlanDisplayName != "" {
-			orderInfo["plan_name"] = order.PlanDisplayName
-		} else if order.Plan != nil {
-			orderInfo["plan_name"] = order.Plan.DisplayName
+		err = model.DB.Preload("Plan").
+			Where("user_id = ?", userId).
+			Order("created_at DESC").
+			Limit(limit).
+			Find(&planOrders).Error
+		if err != nil {
+			common.ApiError(c, fmt.Errorf("获取套餐订单失败: %w", err))
+			return
 		}
 
-		orderList = append(orderList, orderInfo)
+		err = model.DB.Where("user_id = ?", userId).
+			Order("created_at DESC").
+			Limit(limit).
+			Find(&topupOrders).Error
+		if err != nil {
+			common.ApiError(c, fmt.Errorf("获取充值订单失败: %w", err))
+			return
+		}
+
+		allOrders = make([]UnifiedOrder, 0, len(planOrders)+len(topupOrders))
+		total = planTotal + topupTotal
+	}
+
+	// Convert plan orders
+	for _, order := range planOrders {
+		planName := order.PlanDisplayName
+		if planName == "" && order.Plan != nil {
+			planName = order.Plan.DisplayName
+		}
+		if planName == "" {
+			planName = order.PlanName
+		}
+
+		allOrders = append(allOrders, UnifiedOrder{
+			OrderId:       order.Id,
+			OrderNo:       order.OrderNo,
+			OrderType:     "plan",
+			PlanId:        order.PlanId,
+			PlanName:      planName,
+			FinalPrice:    order.FinalPrice,
+			OriginalPrice: order.PlanOriginalPrice,
+			Status:        order.Status,
+			PaymentMethod: order.PaymentMethod,
+			ExpiredAt:     order.ExpiredAt,
+			CreatedAt:     order.CreatedAt,
+			PaidAt:        order.PaidAt,
+			DeliveredAt:   order.DeliveredAt,
+		})
+	}
+
+	// Convert topup orders
+	for _, order := range topupOrders {
+		allOrders = append(allOrders, UnifiedOrder{
+			OrderId:       order.Id,
+			OrderNo:       order.OrderNo,
+			OrderType:     "topup",
+			PlanName:      "钱包充值",
+			FinalPrice:    order.FinalPrice,
+			OriginalPrice: order.OriginalPrice,
+			Status:        order.Status,
+			PaymentMethod: order.PaymentMethod,
+			ExpiredAt:     order.ExpiredAt,
+			CreatedAt:     order.CreatedAt,
+			PaidAt:        order.PaidAt,
+			Quota:         order.Quota,
+			Amount:        order.Amount,
+		})
+	}
+
+	// Sort by created_at DESC (only needed when mixing)
+	if orderType == "all" {
+		sort.Slice(allOrders, func(i, j int) bool {
+			return allOrders[i].CreatedAt > allOrders[j].CreatedAt
+		})
+	}
+
+	var paginatedOrders []UnifiedOrder
+	if orderType == "all" {
+		// Apply pagination only for merged list
+		start := (page - 1) * pageSize
+		end := start + pageSize
+		if start > len(allOrders) {
+			start = len(allOrders)
+		}
+		if end > len(allOrders) {
+			end = len(allOrders)
+		}
+		paginatedOrders = allOrders[start:end]
+	} else {
+		// Already paginated at DB level
+		paginatedOrders = allOrders
 	}
 
 	common.ApiSuccess(c, gin.H{
-		"orders":    orderList,
-		"total":     total,
-		"page":      page,
-		"page_size": pageSize,
+		"orders":      paginatedOrders,
+		"total":       total,
+		"plan_total":  planTotal,
+		"topup_total": topupTotal,
+		"page":        page,
+		"page_size":   pageSize,
+	})
+}
+
+// GetPlanOrderDetail returns plan order detail for order confirmation page
+func GetPlanOrderDetail(c *gin.Context) {
+	orderIdStr := c.Param("id")
+	orderId, err := strconv.Atoi(orderIdStr)
+	if err != nil {
+		common.ApiError(c, errors.New("订单ID无效"))
+		return
+	}
+
+	userId := c.GetInt("id")
+	if userId == 0 {
+		c.JSON(401, gin.H{
+			"success": false,
+			"message": "未登录",
+		})
+		return
+	}
+
+	var order model.PlanOrder
+	err = model.DB.Preload("Plan").
+		Where("id = ?", orderId).
+		First(&order).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ApiError(c, errors.New("订单不存在"))
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+
+	if order.UserId != userId {
+		common.ApiError(c, errors.New("订单不属于当前用户"))
+		return
+	}
+
+	planName := order.PlanDisplayName
+	if planName == "" && order.Plan != nil {
+		planName = order.Plan.DisplayName
+	}
+	if planName == "" {
+		planName = order.PlanName
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"order_id":       order.Id,
+		"order_no":       order.OrderNo,
+		"order_type":     "plan",
+		"plan_id":        order.PlanId,
+		"plan_name":      planName,
+		"original_price": order.PlanOriginalPrice,
+		"final_price":    order.FinalPrice,
+		"status":         order.Status,
+		"created_at":     order.CreatedAt,
+		"expired_at":     order.ExpiredAt,
+		"paid_at":        order.PaidAt,
+		"delivered_at":   order.DeliveredAt,
+		"payment_method": order.PaymentMethod,
 	})
 }
 
