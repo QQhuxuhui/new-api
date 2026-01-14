@@ -474,9 +474,10 @@ func SeedDefaultPlans() error {
 	return nil
 }
 
-// SyncUserPlanSnapshots synchronizes plan configuration to all user_plans snapshots
-// This ensures that when admin updates plan settings, existing users get the updated configuration
-// Fields synced: name, display_name, type, category, priority, channel_group(s), rate_limit_rules, daily_quota_limit, validity_days
+// SyncUserPlanSnapshots synchronizes ONLY operational config fields to user_plans snapshots
+// This ensures channel routing works after admin updates, while preserving purchase-time attributes
+// Fields synced (operational): channel_group, channel_groups, rate_limit_rules
+// Fields NOT synced (purchase-locked): name, display_name, type, category, priority, validity_days, daily_quota_limit
 // This function handles both snapshot update AND cache invalidation to ensure consistency
 func SyncUserPlanSnapshots(planId int) error {
 	if planId == 0 {
@@ -511,18 +512,14 @@ func syncUserPlanSnapshotsOnly(planId int) error {
 
 	// Update all user_plans with this plan_id
 	// Only sync to active plans (status = 1) to avoid modifying historical data
+	// IMPORTANT: Only sync operational config fields that affect functionality
+	// Purchase-locked fields (name, display_name, category, priority, type, validity_days, daily_quota_limit)
+	// are preserved from purchase time per the snapshot design principle
 	updates := map[string]interface{}{
-		"plan_name":              plan.Name,
-		"plan_display_name":      plan.DisplayName,
-		"plan_type":              plan.Type,
-		"plan_category":          plan.Category,
-		"plan_priority":          plan.Priority,
-		"plan_channel_group":     plan.ChannelGroup,
-		"plan_channel_groups":    plan.ChannelGroups,
-		"plan_rate_limit_rules":  plan.RateLimitRules,
-		"plan_daily_quota_limit": plan.DailyQuotaLimit,
-		"plan_validity_days":     plan.ValidityDays,
-		"updated_at":             time.Now().UnixMilli(),
+		"plan_channel_group":    plan.ChannelGroup,
+		"plan_channel_groups":   plan.ChannelGroups,
+		"plan_rate_limit_rules": plan.RateLimitRules,
+		"updated_at":            time.Now().UnixMilli(),
 	}
 
 	result := DB.Model(&UserPlan{}).
