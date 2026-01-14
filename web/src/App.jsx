@@ -66,6 +66,7 @@ const Analytics = lazy(() => import('./pages/Analytics'));
 function App() {
   const location = useLocation();
   const [statusState] = useContext(StatusContext);
+  const isStatusLoaded = statusState?.status !== undefined;
 
   // 解析顶栏模块配置
   const headerNavModules = useMemo(() => {
@@ -94,13 +95,13 @@ function App() {
 
   // 获取产品定价页面是否启用
   const plansEnabled = useMemo(() => {
-    // 配置未加载时默认不显示，避免闪烁
-    if (!statusState?.status?.HeaderNavModules) {
-      return false;
+    // 配置未加载时使用中间态，避免闪烁
+    if (!isStatusLoaded) {
+      return null;
     }
     // 配置已加载，只有明确设置为 false 时才禁用
     return headerNavModules.plans !== false;
-  }, [headerNavModules, statusState?.status?.HeaderNavModules]);
+  }, [headerNavModules, isStatusLoaded]);
 
   return (
     <SetupCheck>
@@ -381,15 +382,19 @@ function App() {
             )
           }
         />
-        {plansEnabled && (
-          <Route
-            path='/plans'
-            element={
-              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
-                <PlanPricing />
-              </Suspense>
-            }
-          />
+        {plansEnabled === null ? (
+          <Route path='/plans' element={<Loading></Loading>} />
+        ) : (
+          plansEnabled && (
+            <Route
+              path='/plans'
+              element={
+                <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                  <PlanPricing />
+                </Suspense>
+              }
+            />
+          )
         )}
         <Route
           path='/about'

@@ -48,6 +48,7 @@ const UsageModeStep = ({ onNext, onPrev, onSkip }) => {
   const navigate = useNavigate();
   const [userState, userDispatch] = useContext(UserContext);
   const [statusState] = useContext(StatusContext);
+  const isStatusLoaded = statusState?.status !== undefined;
 
   const [redemptionCode, setRedemptionCode] = useState('');
   const [isRedeeming, setIsRedeeming] = useState(false);
@@ -55,18 +56,21 @@ const UsageModeStep = ({ onNext, onPrev, onSkip }) => {
   // 获取产品定价页面是否启用
   const plansEnabled = useMemo(() => {
     const headerNavModulesConfig = statusState?.status?.HeaderNavModules;
-    // 配置未加载时默认不显示，避免闪烁
+    // 配置未加载时使用中间态，避免闪烁
+    if (!isStatusLoaded) {
+      return null;
+    }
     if (!headerNavModulesConfig) {
-      return false;
+      return true;
     }
     try {
       const modules = JSON.parse(headerNavModulesConfig);
       // 配置已加载，只有明确设置为 false 时才禁用
       return modules.plans !== false;
     } catch (error) {
-      return false; // 解析失败时默认不显示
+      return true; // 解析失败时回退为默认启用
     }
-  }, [statusState?.status?.HeaderNavModules]);
+  }, [isStatusLoaded, statusState?.status?.HeaderNavModules]);
 
   /**
    * Handle redemption code submission
@@ -165,7 +169,7 @@ const UsageModeStep = ({ onNext, onPrev, onSkip }) => {
       />
 
       {/* Subscription Plans Option - 仅在启用时显示 */}
-      {plansEnabled && (
+      {plansEnabled === true && (
         <Card
           shadows='hover'
           style={{
