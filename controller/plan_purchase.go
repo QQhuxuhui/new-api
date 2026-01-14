@@ -392,8 +392,8 @@ func GetMyPlanOrders(c *gin.Context) {
 	})
 }
 
-// GetPlanOrderDetail returns plan order detail for order confirmation page
-func GetPlanOrderDetail(c *gin.Context) {
+// GetMyPlanOrderDetail returns plan order detail for order confirmation page (user)
+func GetMyPlanOrderDetail(c *gin.Context) {
 	orderIdStr := c.Param("id")
 	orderId, err := strconv.Atoi(orderIdStr)
 	if err != nil {
