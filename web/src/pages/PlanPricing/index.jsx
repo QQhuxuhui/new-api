@@ -1005,7 +1005,7 @@ const PlanPricing = () => {
           {/* Header */}
           <div className='mb-6'>
             <span
-              className='inline-block px-3 py-1 rounded-xl text-sm font-semibold mb-3'
+              className='inline-block px-3 py-1 rounded-xl text-sm font-semibold'
               style={{
                 background: 'rgba(16, 185, 129, 0.1)',
                 color: '#10B981',
@@ -1013,13 +1013,6 @@ const PlanPricing = () => {
             >
               💳 {t('钱包充值')}
             </span>
-            <Title
-              heading={4}
-              className='m-0'
-              style={{ color: '#1E293B', fontFamily: "'Poppins', 'Inter', system-ui, sans-serif" }}
-            >
-              {t('充值')} ${value}
-            </Title>
           </div>
 
           {/* Price */}
