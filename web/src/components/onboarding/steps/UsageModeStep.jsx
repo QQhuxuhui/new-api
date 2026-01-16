@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useMemo } from 'react';
 import {
   Button,
   Typography,
@@ -35,6 +35,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { API, showError, showSuccess, renderQuota } from '../../../helpers';
 import { UserContext } from '../../../context/User';
+import { StatusContext } from '../../../context/Status';
 import { OnboardingAnalytics } from '../../../helpers/analytics';
 
 const { Title, Text, Paragraph } = Typography;
@@ -46,9 +47,30 @@ const { Title, Text, Paragraph } = Typography;
 const UsageModeStep = ({ onNext, onPrev, onSkip }) => {
   const navigate = useNavigate();
   const [userState, userDispatch] = useContext(UserContext);
+  const [statusState] = useContext(StatusContext);
+  const isStatusLoaded = statusState?.status !== undefined;
 
   const [redemptionCode, setRedemptionCode] = useState('');
   const [isRedeeming, setIsRedeeming] = useState(false);
+
+  // 获取产品定价页面是否启用
+  const plansEnabled = useMemo(() => {
+    const headerNavModulesConfig = statusState?.status?.HeaderNavModules;
+    // 配置未加载时使用中间态，避免闪烁
+    if (!isStatusLoaded) {
+      return null;
+    }
+    if (!headerNavModulesConfig) {
+      return true;
+    }
+    try {
+      const modules = JSON.parse(headerNavModulesConfig);
+      // 配置已加载，只有明确设置为 false 时才禁用
+      return modules.plans !== false;
+    } catch (error) {
+      return true; // 解析失败时回退为默认启用
+    }
+  }, [isStatusLoaded, statusState?.status?.HeaderNavModules]);
 
   /**
    * Handle redemption code submission
@@ -146,39 +168,41 @@ const UsageModeStep = ({ onNext, onPrev, onSkip }) => {
         style={{ marginBottom: 24 }}
       />
 
-      {/* Subscription Plans Option */}
-      <Card
-        shadows='hover'
-        style={{
-          marginBottom: 16,
-          border: '1px solid var(--semi-color-border)',
-          cursor: 'pointer',
-        }}
-        onClick={handleViewPlans}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <IconBox
-              size='large'
-              style={{ color: 'var(--semi-color-primary)' }}
-            />
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Text strong style={{ fontSize: 16 }}>
-                  套餐订阅
+      {/* Subscription Plans Option - 仅在启用时显示 */}
+      {plansEnabled === true && (
+        <Card
+          shadows='hover'
+          style={{
+            marginBottom: 16,
+            border: '1px solid var(--semi-color-border)',
+            cursor: 'pointer',
+          }}
+          onClick={handleViewPlans}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <IconBox
+                size='large'
+                style={{ color: 'var(--semi-color-primary)' }}
+              />
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Text strong style={{ fontSize: 16 }}>
+                    套餐订阅
+                  </Text>
+                  <Tag color='blue' size='small'>推荐</Tag>
+                </div>
+                <Text type='tertiary' size='small'>
+                  日卡/周卡/月卡等，固定额度更划算
                 </Text>
-                <Tag color='blue' size='small'>推荐</Tag>
               </div>
-              <Text type='tertiary' size='small'>
-                日卡/周卡/月卡等，固定额度更划算
-              </Text>
             </div>
+            <Button theme='solid' type='primary' onClick={(e) => { e.stopPropagation(); handleViewPlans(); }}>
+              查看套餐
+            </Button>
           </div>
-          <Button theme='solid' type='primary' onClick={(e) => { e.stopPropagation(); handleViewPlans(); }}>
-            查看套餐
-          </Button>
-        </div>
-      </Card>
+        </Card>
+      )}
 
       {/* Pay-as-you-go Option */}
       <Card

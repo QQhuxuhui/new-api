@@ -147,21 +147,14 @@ const OrderConfirm = () => {
           return;
         }
       } else {
-        // Load plan order from list
-        const res = await API.get('/api/user/plan/purchase/my-orders?page=1&page_size=100');
+        // Load plan order directly by ID
+        const res = await API.get(`/api/user/plan/purchase/order/${orderId}`);
         const { success, message, data } = res.data;
-        if (success && data && data.orders) {
-          const foundOrder = data.orders.find(o => o.order_id === parseInt(orderId));
-          if (foundOrder) {
-            targetOrder = {
-              ...foundOrder,
-              order_type: 'plan',
-            };
-          } else {
-            showError(t('订单不存在'));
-            navigate('/plans');
-            return;
-          }
+        if (success && data) {
+          targetOrder = {
+            ...data,
+            order_type: 'plan',
+          };
         } else {
           showError(message || t('加载订单失败'));
           navigate('/plans');

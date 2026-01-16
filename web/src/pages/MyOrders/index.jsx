@@ -30,6 +30,7 @@ import {
   Spin,
   Modal,
   Space,
+  Select,
 } from '@douyinfe/semi-ui';
 import {
   IconRefresh,
@@ -44,25 +45,31 @@ const MyOrders = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState([]);
+  const [orderType, setOrderType] = useState('all'); // 'all', 'plan', 'topup'
   const [pagination, setPagination] = useState({
     currentPage: 1,
     pageSize: 20,
     total: 0,
+    planTotal: 0,
+    topupTotal: 0,
   });
+  const allTotal = pagination.planTotal + pagination.topupTotal;
 
   // Load orders
-  const loadOrders = async (page = 1) => {
+  const loadOrders = async (page = 1, type = orderType) => {
     setLoading(true);
     try {
-      const res = await API.get(`/api/user/plan/purchase/my-orders?page=${page}&page_size=${pagination.pageSize}`);
+      const res = await API.get(`/api/user/plan/purchase/my-orders?page=${page}&page_size=${pagination.pageSize}&order_type=${type}`);
       const { success, message, data } = res.data;
       if (success && data) {
         setOrders(data.orders || []);
-        setPagination({
-          ...pagination,
+        setPagination((prev) => ({
+          ...prev,
           currentPage: data.page || page,
           total: data.total || 0,
-        });
+          planTotal: data.plan_total || 0,
+          topupTotal: data.topup_total || 0,
+        }));
       } else {
         showError(message || t('加载失败'));
       }
@@ -73,11 +80,11 @@ const MyOrders = () => {
   };
 
   useEffect(() => {
-    loadOrders(1);
-  }, []);
+    loadOrders(1, orderType);
+  }, [orderType]);
 
   // Cancel order
-  const handleCancelOrder = (orderId, orderNo) => {
+  const handleCancelOrder = (orderId, orderNo, orderTypeVal) => {
     Modal.confirm({
       title: t('取消订单'),
       content: t('确定要取消订单 {{orderNo}} 吗？取消后无法恢复。', { orderNo }),
@@ -86,13 +93,17 @@ const MyOrders = () => {
       okType: 'danger',
       onOk: async () => {
         try {
-          const res = await API.post('/api/user/plan/purchase/cancel', {
+          // Use different API based on order type
+          const apiUrl = orderTypeVal === 'topup'
+            ? '/api/user/topup/order/cancel'
+            : '/api/user/plan/purchase/cancel';
+          const res = await API.post(apiUrl, {
             order_id: orderId,
           });
           const { success, message } = res.data;
           if (success) {
             showSuccess(t('订单已取消'));
-            loadOrders(pagination.currentPage);
+            loadOrders(pagination.currentPage, orderType);
           } else {
             showError(message || t('取消失败'));
           }
@@ -101,6 +112,14 @@ const MyOrders = () => {
         }
       },
     });
+  };
+
+  // Get order type tag
+  const getOrderTypeTag = (type) => {
+    if (type === 'topup') {
+      return <Tag color='cyan'>{t('充值')}</Tag>;
+    }
+    return <Tag color='violet'>{t('套餐')}</Tag>;
   };
 
   // Get status tag
@@ -126,7 +145,14 @@ const MyOrders = () => {
       render: (text) => <span style={{ fontFamily: 'monospace' }}>{text}</span>,
     },
     {
-      title: t('套餐'),
+      title: t('类型'),
+      dataIndex: 'order_type',
+      key: 'order_type',
+      width: 80,
+      render: (type) => getOrderTypeTag(type),
+    },
+    {
+      title: t('名称'),
       dataIndex: 'plan_name',
       key: 'plan_name',
     },
@@ -171,20 +197,23 @@ const MyOrders = () => {
           const now = Date.now();
           const isExpired = record.expired_at && now > record.expired_at;
           if (!isExpired) {
+            const orderConfirmPath = record.order_type === 'topup'
+              ? `/console/order-confirm/${record.order_id}?type=topup`
+              : `/console/order-confirm/${record.order_id}`;
             return (
               <Space>
                 <Button
                   size='small'
                   theme='solid'
                   type='primary'
-                  onClick={() => navigate(`/console/order-confirm/${record.order_id}`)}
+                  onClick={() => navigate(orderConfirmPath)}
                 >
                   {t('继续支付')}
                 </Button>
                 <Button
                   size='small'
                   type='danger'
-                  onClick={() => handleCancelOrder(record.order_id, record.order_no)}
+                  onClick={() => handleCancelOrder(record.order_id, record.order_no, record.order_type)}
                 >
                   {t('取消')}
                 </Button>
@@ -210,13 +239,30 @@ const MyOrders = () => {
           <Title heading={3} className='m-0'>
             {t('我的订单')}
           </Title>
-          <Button
-            icon={<IconRefresh />}
-            onClick={() => loadOrders(pagination.currentPage)}
-            loading={loading}
-          >
-            {t('刷新')}
-          </Button>
+          <Space>
+            <Select
+              value={orderType}
+              onChange={(value) => setOrderType(value)}
+              style={{ width: 120 }}
+            >
+              <Select.Option value='all'>
+                {t('全部')} ({allTotal})
+              </Select.Option>
+              <Select.Option value='plan'>
+                {t('套餐')} ({pagination.planTotal})
+              </Select.Option>
+              <Select.Option value='topup'>
+                {t('充值')} ({pagination.topupTotal})
+              </Select.Option>
+            </Select>
+            <Button
+              icon={<IconRefresh />}
+              onClick={() => loadOrders(pagination.currentPage)}
+              loading={loading}
+            >
+              {t('刷新')}
+            </Button>
+          </Space>
         </div>
 
         {/* Table */}
@@ -236,7 +282,7 @@ const MyOrders = () => {
               showSizeChanger: false,
             }}
             loading={loading}
-            rowKey='order_id'
+            rowKey='order_no'
           />
         ) : (
           <Empty

@@ -764,9 +764,6 @@ const PlanPricing = () => {
     // 计算节省百分比
     const discountPercent = getDiscountPercent(plan.price, plan.original_price);
 
-    // 计算单价（人民币/美金）
-    const unitPrice = plan.quota_usd > 0 ? (plan.price / plan.quota_usd).toFixed(2) : null;
-
     return (
       <div
         key={plan.id}
@@ -849,26 +846,19 @@ const PlanPricing = () => {
                 {t('您将获得')}
               </Text>
               <Text
-                className='price-animated block mb-3'
+                className='price-animated block'
                 style={{
-                  fontSize: '2rem',
+                  fontSize: '1.75rem',
                   fontWeight: 700,
                   color: '#2563EB',
                   fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
                 }}
               >
-                ${plan.quota_usd} {t('美金额度')}
+                ${plan.quota_usd}
               </Text>
-              {/* 用量等价说明 */}
-              <div
-                className='rounded-lg p-3 flex items-center gap-2'
-                style={{ background: 'white' }}
-              >
-                <span style={{ fontSize: '1.25rem', color: '#2563EB', fontWeight: 700 }}>≈</span>
-                <Text className='text-sm' style={{ color: '#1E293B' }}>
-                  {t('约')} {Math.round(plan.quota_usd * 20)} {t('次 GPT-4o-mini 对话')}
-                </Text>
-              </div>
+              <Text className='text-sm' style={{ color: '#475569' }}>
+                {t('美金额度')}
+              </Text>
             </div>
           )}
 
@@ -885,25 +875,20 @@ const PlanPricing = () => {
             </div>
           )}
 
-          {/* Unit Price Info */}
-          {unitPrice && (
+          {/* Custom Features - 从后台配置读取 */}
+          {features.length > 0 && (
             <div
-              className='rounded-lg p-4 mb-6 text-sm'
+              className='rounded-lg p-4 mb-6'
               style={{ background: '#F8FAFC', color: '#475569' }}
             >
-              {t('单价仅')} <span style={{ color: '#10B981', fontWeight: 700, fontSize: '1rem' }}>¥{unitPrice}/{t('美金')}</span>
-            </div>
-          )}
-
-          {/* Custom Features */}
-          {features.length > 0 && (
-            <div className='space-y-2 mb-6'>
-              {features.map((feature, idx) => (
-                <div key={idx} className='flex items-center gap-2 text-sm' style={{ color: '#475569' }}>
-                  <span style={{ color: '#10B981', fontWeight: 700 }}>✓</span>
-                  {feature.text}
-                </div>
-              ))}
+              <div className='space-y-2'>
+                {features.map((feature, idx) => (
+                  <div key={idx} className='flex items-center gap-2 text-sm'>
+                    <span style={{ color: '#10B981', fontWeight: 700 }}>✓</span>
+                    {feature.text}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -1019,13 +1004,6 @@ const PlanPricing = () => {
 
           {/* Header */}
           <div className='mb-6'>
-            <Title
-              heading={4}
-              className='m-0 mb-2'
-              style={{ color: '#1E293B', fontFamily: "'Poppins', 'Inter', system-ui, sans-serif" }}
-            >
-              ${value} {t('额度')}
-            </Title>
             <span
               className='inline-block px-3 py-1 rounded-xl text-sm font-semibold'
               style={{
@@ -1058,19 +1036,6 @@ const PlanPricing = () => {
             )}
           </div>
 
-          {/* Unit Price Info */}
-          <div
-            className='rounded-lg p-3 mb-5 text-sm'
-            style={{ background: '#F8FAFC', color: '#475569' }}
-          >
-            {t('单价')}: <span style={{ color: '#10B981', fontWeight: 700 }}>¥{priceRatio.toFixed(2)}/{t('美金')}</span>
-            {hasDiscount && (
-              <span className='ml-2' style={{ color: '#F59E0B' }}>
-                ({t('优惠后')} ¥{(priceRatio * discount).toFixed(2)}/{t('美金')})
-              </span>
-            )}
-          </div>
-
           {/* Discount Badge */}
           {hasDiscount && (
             <div
@@ -1084,32 +1049,29 @@ const PlanPricing = () => {
             </div>
           )}
 
-          {/* Features */}
-          <div className='space-y-3 mb-6'>
-            {[
-              { text: t('无最低消费') },
-              { text: t('余额永不过期') },
-              { text: t('随时充值') },
-              { text: t('透明计费') },
-            ].map((feature, idx) => (
-              <div key={idx} className='flex items-center gap-2 text-sm' style={{ color: '#475569' }}>
-                <span style={{ color: '#10B981', fontWeight: 700, fontSize: '1.125rem' }}>✓</span>
-                {feature.text}
-              </div>
-            ))}
-          </div>
-
-          {/* Usage Reference Box */}
+          {/* Quota Info - 美金额度显示在下方 */}
           <div
             className='rounded-xl p-5 mb-6'
-            style={{ background: '#F8FAFC' }}
+            style={{
+              background: 'linear-gradient(135deg, #F0F9FF, #E0F2FE)',
+            }}
           >
-            <Text className='text-sm block mb-2' style={{ color: '#475569' }}>
-              {t('用量参考')}
+            <Text className='text-sm block mb-2 font-medium' style={{ color: '#475569' }}>
+              {t('获得额度')}
             </Text>
-            <Text className='text-sm leading-relaxed' style={{ color: '#1E293B' }}>
-              ${value} ≈ {value * 20} {t('次 GPT-4o-mini 对话')}<br />
-              {t('或')} {value} {t('次 GPT-4 对话')}
+            <Text
+              className='price-animated block'
+              style={{
+                fontSize: '1.75rem',
+                fontWeight: 700,
+                color: '#2563EB',
+                fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+              }}
+            >
+              ${value}
+            </Text>
+            <Text className='text-sm' style={{ color: '#475569' }}>
+              {t('美金')}
             </Text>
           </div>
 
@@ -1182,7 +1144,7 @@ const PlanPricing = () => {
           </Title>
           <Text
             className='text-[#475569] dark:text-slate-400 block max-w-xl mx-auto'
-            style={{ fontSize: '1.25rem', lineHeight: 1.6 }}
+            style={{ fontSize: '1.25rem', lineHeight: 1.6, marginTop: '20px' }}
           >
             {t('两种计费方式，灵活组合使用。先用订阅套餐，用完自动切换按量付费，无缝衔接。')}
           </Text>
@@ -1320,13 +1282,38 @@ const PlanPricing = () => {
         {/* Pay-as-you-go Tab Content */}
         {activeTab === 'payg' && (
           <div className='animate-fadeIn'>
-            <div className='text-center mb-12'>
+            <div className='text-center mb-8'>
               <Title heading={2} className='m-0 mb-4 text-slate-800 dark:text-white text-2xl font-semibold'>
                 {t('按量付费 - 钱包充值')}
               </Title>
               <Text className='text-slate-500 dark:text-slate-400'>
                 {t('充值到钱包，随用随扣，余额永不过期')}
               </Text>
+            </div>
+
+            {/* 通用特色说明 - 提取到卡片上方 */}
+            <div
+              className='flex flex-wrap justify-center gap-6 mb-10 px-4'
+            >
+              {[
+                { text: t('无最低消费'), icon: '💰' },
+                { text: t('余额永不过期'), icon: '♾️' },
+                { text: t('随时充值'), icon: '⚡' },
+                { text: t('透明计费'), icon: '📊' },
+              ].map((feature, idx) => (
+                <div
+                  key={idx}
+                  className='flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium'
+                  style={{
+                    background: 'white',
+                    border: '2px solid #E2E8F0',
+                    color: '#475569',
+                  }}
+                >
+                  <span>{feature.icon}</span>
+                  {feature.text}
+                </div>
+              ))}
             </div>
 
             {topupLoading ? (
@@ -1499,8 +1486,8 @@ const PlanPricing = () => {
               </Title>
               <ul className='list-none p-0 m-0 space-y-2'>
                 {[
-                  t('有效期限制（24小时-30天）'),
-                  t('价格最优惠（比按量便宜10%-30%）'),
+                  t('有效期限制'),
+                  t('价格最优惠'),
                   t('过期后剩余额度清零'),
                   t('适合稳定高频使用'),
                 ].map((item, idx) => (
@@ -1537,7 +1524,7 @@ const PlanPricing = () => {
               <ul className='list-none p-0 m-0 space-y-2'>
                 {[
                   t('永久有效，随时可用'),
-                  t('标准价格（¥0.50/美金）'),
+                  t('标准价格'),
                   t('余额永不过期'),
                   t('适合偶尔使用或保底'),
                 ].map((item, idx) => (
@@ -1584,10 +1571,6 @@ const PlanPricing = () => {
             {
               q: t('费用是怎么计算的？'),
               a: t('按照token用量和模型价格计算得出，以实际消费为准。'),
-            },
-            {
-              q: t('可以退款吗？'),
-              a: t('订阅套餐一经购买不支持退款，但钱包余额永久有效，可随时使用。建议首次购买选择小额套餐试用。'),
             },
           ].map((faq, idx) => (
             <div
