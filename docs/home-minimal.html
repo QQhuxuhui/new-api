@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spark Code - 多模型AI网关</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* Minimalism & Swiss Style - 极简主义 */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.5;
+      color: #000000;
+      background-color: #FFFFFF;
+      font-weight: 400;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    /* Grid System */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 1rem;
+    }
+
+    /* Header */
+    .header {
+      padding: 2rem 0;
+      border-bottom: 1px solid #000000;
+    }
+
+    .logo {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #000000;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 6rem 0 4rem;
+    }
+
+    .hero-content {
+      max-width: 800px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      border: 1px solid #000000;
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 2rem;
+    }
+
+    .headline {
+      font-size: 3rem;
+      font-weight: 700;
+      line-height: 1.1;
+      color: #000000;
+      margin-bottom: 1.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    @media (min-width: 768px) {
+      .headline { font-size: 4.5rem; }
+    }
+
+    .accent-text {
+      color: #0066FF;
+    }
+
+    .subheadline {
+      font-size: 1.125rem;
+      color: #000000;
+      margin-bottom: 2.5rem;
+      line-height: 1.6;
+      max-width: 600px;
+    }
+
+    .cta-button {
+      display: inline-block;
+      padding: 1rem 2.5rem;
+      background: #000000;
+      color: #FFFFFF;
+      border: none;
+      font-weight: 600;
+      font-size: 0.875rem;
+      text-decoration: none;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    .cta-button:hover {
+      background: #0066FF;
+    }
+
+    /* Section */
+    .section {
+      padding: 4rem 0;
+      border-top: 1px solid #E5E5E5;
+    }
+
+    .section-header {
+      margin-bottom: 3rem;
+    }
+
+    .section-title {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      color: #000000;
+      letter-spacing: -0.02em;
+    }
+
+    .section-subtitle {
+      color: #666666;
+      font-size: 1rem;
+    }
+
+    /* Payment Grid */
+    .payment-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+
+    @media (min-width: 768px) {
+      .payment-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .payment-card {
+      border: 1px solid #E5E5E5;
+      padding: 2.5rem;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    .payment-card:hover {
+      border-color: #000000;
+    }
+
+    .payment-card.featured {
+      background: #000000;
+      color: #FFFFFF;
+      border-color: #000000;
+    }
+
+    .payment-card.featured .payment-title,
+    .payment-card.featured .payment-desc,
+    .payment-card.featured .payment-features li {
+      color: #FFFFFF;
+    }
+
+    .payment-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      color: #000000;
+      letter-spacing: -0.01em;
+    }
+
+    .payment-desc {
+      color: #666666;
+      margin-bottom: 2rem;
+      font-size: 0.9375rem;
+    }
+
+    .payment-card.featured .payment-desc {
+      color: #CCCCCC;
+    }
+
+    .payment-features {
+      list-style: none;
+    }
+
+    .payment-features li {
+      margin-bottom: 0.75rem;
+      color: #000000;
+      font-size: 0.9375rem;
+      padding-left: 1.5rem;
+      position: relative;
+    }
+
+    .payment-features li::before {
+      content: '—';
+      position: absolute;
+      left: 0;
+      font-weight: 700;
+    }
+
+    .note-box {
+      border: 1px solid #E5E5E5;
+      padding: 2rem;
+      margin-top: 1rem;
+      background: #F5F5F5;
+    }
+
+    .note-box p {
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      color: #000000;
+    }
+
+    .note-box strong {
+      font-weight: 700;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+
+    @media (min-width: 768px) {
+      .stats-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    .stat-card {
+      border: 1px solid #E5E5E5;
+      padding: 2.5rem;
+      text-align: center;
+      transition: all 0.2s ease;
+    }
+
+    .stat-card:hover {
+      border-color: #000000;
+    }
+
+    .stat-value {
+      font-size: 3rem;
+      font-weight: 700;
+      color: #000000;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    .stat-label {
+      color: #666666;
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Footer */
+    .footer {
+      padding: 3rem 0;
+      border-top: 1px solid #000000;
+      text-align: center;
+      color: #666666;
+      font-size: 0.875rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="container">
+      <div class="logo">Spark Code</div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-content">
+        <div class="badge">一个账号 · 三大模型</div>
+
+        <h1 class="headline">
+          <span class="accent-text">Claude · GPT · Gemini</span><br>
+          统一接入，极致性价比
+        </h1>
+
+        <p class="subheadline">
+          无需多个账号，一站式访问三大AI模型。标准1:1倍率，GPT系列仅0.2倍率，为您节省80%成本。
+        </p>
+
+        <a href="/login" class="cta-button">立即开始</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Payment Section -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">灵活的付费方式</h2>
+        <p class="section-subtitle">两种模式可叠加使用，优先消耗套餐额度</p>
+      </div>
+
+      <div class="payment-grid">
+        <div class="payment-card">
+          <h3 class="payment-title">按量计费</h3>
+          <p class="payment-desc">用多少付多少，无需预付费</p>
+          <ul class="payment-features">
+            <li>无最低消费</li>
+            <li>实时计费</li>
+            <li>随时充值</li>
+            <li>适合轻度使用</li>
+          </ul>
+        </div>
+
+        <div class="payment-card featured">
+          <h3 class="payment-title">包月套餐</h3>
+          <p class="payment-desc">限时额度，成本更低</p>
+          <ul class="payment-features">
+            <li>有效期内使用</li>
+            <li>比按量更便宜</li>
+            <li>多种额度可选</li>
+            <li>优先消耗套餐</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="note-box">
+        <p>
+          <strong>智能叠加：</strong>
+          同时购买包月套餐和按量充值，系统将优先使用包月套餐额度，套餐用完后自动切换至按量计费，无缝衔接，不影响使用。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats Section -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">服务保障</h2>
+        <p class="section-subtitle">稳定可靠，值得信赖</p>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">&gt;95%</div>
+          <div class="stat-label">服务可用性保障</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-value">Low Latency</div>
+          <div class="stat-label">全球加速节点</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-value">Secure</div>
+          <div class="stat-label">企业级安全防护</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      &copy; 2025 Spark Code. All rights reserved.
+    </div>
+  </footer>
+</body>
+</html>

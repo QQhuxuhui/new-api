@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spark Code - 多模型AI网关</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* Bento Grid Style - Apple风格卡片网格 */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.6;
+      color: #1D1D1F;
+      background-color: #F5F5F7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Header */
+    .header {
+      padding: 1.5rem 0;
+      background: rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(20px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #1D1D1F;
+      text-align: center;
+      letter-spacing: -0.02em;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 4rem 0 3rem;
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      border-radius: 100px;
+      background: #FFFFFF;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      font-size: 0.875rem;
+      font-weight: 500;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #34C759;
+    }
+
+    .headline {
+      font-size: 2.5rem;
+      font-weight: 700;
+      line-height: 1.1;
+      color: #1D1D1F;
+      margin-bottom: 1rem;
+      letter-spacing: -0.03em;
+    }
+
+    @media (min-width: 768px) {
+      .headline { font-size: 4rem; }
+    }
+
+    .gradient-text {
+      background: linear-gradient(90deg, #007AFF, #5856D6, #AF52DE);
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subheadline {
+      font-size: 1.125rem;
+      color: #6E6E73;
+      margin-bottom: 2rem;
+      max-width: 42rem;
+      margin-left: auto;
+      margin-right: auto;
+      line-height: 1.6;
+      font-weight: 400;
+    }
+
+    .cta-button {
+      display: inline-block;
+      padding: 0.875rem 2rem;
+      border-radius: 100px;
+      font-weight: 600;
+      font-size: 1rem;
+      background: #007AFF;
+      color: white;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0, 122, 255, 0.3);
+      transition: all 0.3s ease;
+      text-decoration: none;
+    }
+
+    .cta-button:hover {
+      transform: scale(1.02);
+      box-shadow: 0 6px 20px rgba(0, 122, 255, 0.4);
+    }
+
+    /* Bento Grid */
+    .bento-section {
+      padding: 3rem 0;
+    }
+
+    .section-title {
+      font-size: 2rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 0.5rem;
+      color: #1D1D1F;
+      letter-spacing: -0.02em;
+    }
+
+    .section-subtitle {
+      text-align: center;
+      color: #6E6E73;
+      margin-bottom: 2.5rem;
+      font-size: 1rem;
+    }
+
+    .bento-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+
+    @media (min-width: 768px) {
+      .bento-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .bento-card {
+      background: #FFFFFF;
+      border-radius: 24px;
+      padding: 2rem;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+      transition: all 0.3s ease;
+      cursor: pointer;
+      border: 1px solid rgba(0, 0, 0, 0.06);
+    }
+
+    .bento-card:hover {
+      transform: scale(1.02);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    }
+
+    .bento-card.featured {
+      background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+      color: white;
+    }
+
+    .bento-card.featured .bento-title,
+    .bento-card.featured .bento-desc,
+    .bento-card.featured .bento-features li {
+      color: white;
+    }
+
+    .bento-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      color: #1D1D1F;
+      letter-spacing: -0.02em;
+    }
+
+    .bento-desc {
+      color: #6E6E73;
+      margin-bottom: 1.5rem;
+      font-size: 0.9375rem;
+    }
+
+    .bento-features {
+      list-style: none;
+    }
+
+    .bento-features li {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+      color: #1D1D1F;
+      font-size: 0.9375rem;
+    }
+
+    .check-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #34C759;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .bento-card.featured .check-icon {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    .note-card {
+      background: #FFFFFF;
+      border-radius: 24px;
+      padding: 2rem;
+      margin-top: 1rem;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+      border: 1px solid rgba(0, 0, 0, 0.06);
+    }
+
+    .note-card p {
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      color: #1D1D1F;
+    }
+
+    .note-card strong {
+      color: #007AFF;
+      font-weight: 600;
+    }
+
+    /* Stats Grid */
+    .stats-section {
+      padding: 3rem 0;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+
+    @media (min-width: 768px) {
+      .stats-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    .stat-card {
+      text-align: center;
+      padding: 2rem;
+      border-radius: 24px;
+      background: #FFFFFF;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      transition: all 0.3s ease;
+    }
+
+    .stat-card:hover {
+      transform: scale(1.02);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    }
+
+    .stat-value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: #007AFF;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    .stat-label {
+      color: #6E6E73;
+      font-size: 0.9375rem;
+    }
+
+    /* Footer */
+    .footer {
+      padding: 3rem 0 2rem;
+      text-align: center;
+      color: #6E6E73;
+      font-size: 0.875rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="container">
+      <div class="logo">Spark Code</div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="container">
+      <div class="badge">
+        <span class="badge-dot"></span>
+        一个账号 · 三大模型
+      </div>
+
+      <h1 class="headline">
+        <span class="gradient-text">Claude · GPT · Gemini</span><br>
+        统一接入，极致性价比
+      </h1>
+
+      <p class="subheadline">
+        无需多个账号，一站式访问三大AI模型。<br>
+        标准1:1倍率，GPT系列仅0.2倍率，为您节省80%成本。
+      </p>
+
+      <a href="/login" class="cta-button">立即开始</a>
+    </div>
+  </section>
+
+  <!-- Payment Bento Grid -->
+  <section class="bento-section">
+    <div class="container">
+      <h2 class="section-title">灵活的付费方式</h2>
+      <p class="section-subtitle">两种模式可叠加使用，优先消耗套餐额度</p>
+
+      <div class="bento-grid">
+        <div class="bento-card">
+          <h3 class="bento-title">按量计费</h3>
+          <p class="bento-desc">用多少付多少，无需预付费</p>
+          <ul class="bento-features">
+            <li><span class="check-icon">✓</span> 无最低消费</li>
+            <li><span class="check-icon">✓</span> 实时计费</li>
+            <li><span class="check-icon">✓</span> 随时充值</li>
+            <li><span class="check-icon">✓</span> 适合轻度使用</li>
+          </ul>
+        </div>
+
+        <div class="bento-card featured">
+          <h3 class="bento-title">包月套餐 · 推荐</h3>
+          <p class="bento-desc">限时额度，成本更低</p>
+          <ul class="bento-features">
+            <li><span class="check-icon">✓</span> 有效期内使用</li>
+            <li><span class="check-icon">✓</span> 比按量更便宜</li>
+            <li><span class="check-icon">✓</span> 多种额度可选</li>
+            <li><span class="check-icon">✓</span> 优先消耗套餐</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="note-card">
+        <p>
+          <strong>智能叠加</strong> — 同时购买包月套餐和按量充值，系统将优先使用包月套餐额度，套餐用完后自动切换至按量计费，无缝衔接，不影响使用。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats Section -->
+  <section class="stats-section">
+    <div class="container">
+      <h2 class="section-title">服务保障</h2>
+      <p class="section-subtitle">稳定可靠，值得信赖</p>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">&gt;95%</div>
+          <div class="stat-label">服务可用性保障</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-value">Low Latency</div>
+          <div class="stat-label">全球加速节点</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-value">Secure</div>
+          <div class="stat-label">企业级安全防护</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      &copy; 2025 Spark Code. All rights reserved.
+    </div>
+  </footer>
+</body>
+</html>

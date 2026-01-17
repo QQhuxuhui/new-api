@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spark Code - 多模型AI网关</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Libre+Baskerville:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    /* E-Ink / Paper Style - 纸质风格 */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Libre Baskerville', serif;
+      line-height: 1.8;
+      color: #1A1A1A;
+      background-color: #FDFBF7;
+      background-image:
+        radial-gradient(circle at 20% 50%, rgba(0,0,0,0.01) 1px, transparent 1px),
+        radial-gradient(circle at 80% 80%, rgba(0,0,0,0.01) 1px, transparent 1px);
+      background-size: 4px 4px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    .container {
+      width: 100%;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Header */
+    .header {
+      padding: 2rem 0;
+      border-bottom: 2px solid #1A1A1A;
+      margin-bottom: 3rem;
+    }
+
+    .logo {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #1A1A1A;
+      text-align: center;
+      letter-spacing: 0.05em;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 3rem 0;
+      text-align: center;
+      border-bottom: 1px solid #D0D0D0;
+      margin-bottom: 3rem;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 1rem;
+      border: 1px solid #1A1A1A;
+      font-size: 0.75rem;
+      font-weight: 400;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 2rem;
+    }
+
+    .headline {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 2.5rem;
+      font-weight: 700;
+      line-height: 1.3;
+      color: #1A1A1A;
+      margin-bottom: 1.5rem;
+    }
+
+    @media (min-width: 768px) {
+      .headline { font-size: 3.5rem; }
+    }
+
+    .subheadline {
+      font-size: 1rem;
+      color: #4A4A4A;
+      margin-bottom: 2rem;
+      line-height: 1.8;
+    }
+
+    .cta-button {
+      display: inline-block;
+      padding: 0.875rem 2.5rem;
+      background: #1A1A1A;
+      color: #FDFBF7;
+      border: 2px solid #1A1A1A;
+      font-family: 'Libre Baskerville', serif;
+      font-size: 0.875rem;
+      font-weight: 700;
+      text-decoration: none;
+      letter-spacing: 0.05em;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    .cta-button:hover {
+      background: #FDFBF7;
+      color: #1A1A1A;
+    }
+
+    /* Payment Section */
+    .payment-section {
+      padding: 3rem 0;
+      border-bottom: 1px solid #D0D0D0;
+      margin-bottom: 3rem;
+    }
+
+    .section-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 2rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 0.5rem;
+      color: #1A1A1A;
+    }
+
+    .section-subtitle {
+      text-align: center;
+      color: #4A4A4A;
+      margin-bottom: 2.5rem;
+      font-size: 0.875rem;
+    }
+
+    .payment-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 2rem;
+      margin-bottom: 2rem;
+    }
+
+    @media (min-width: 768px) {
+      .payment-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .payment-card {
+      border: 2px solid #1A1A1A;
+      padding: 2rem;
+      background: #F5F5F5;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    .payment-card:hover {
+      background: #FDFBF7;
+      box-shadow: 4px 4px 0 #1A1A1A;
+      transform: translate(-2px, -2px);
+    }
+
+    .payment-card.recommended {
+      background: #1A1A1A;
+      color: #FDFBF7;
+    }
+
+    .payment-card.recommended:hover {
+      background: #2A2A2A;
+    }
+
+    .payment-card.recommended .payment-title,
+    .payment-card.recommended .payment-desc,
+    .payment-card.recommended .payment-features li {
+      color: #FDFBF7;
+    }
+
+    .payment-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      color: #1A1A1A;
+    }
+
+    .payment-desc {
+      color: #4A4A4A;
+      margin-bottom: 1.5rem;
+      font-size: 0.875rem;
+    }
+
+    .payment-features {
+      list-style: none;
+    }
+
+    .payment-features li {
+      margin-bottom: 0.75rem;
+      color: #1A1A1A;
+      font-size: 0.875rem;
+      padding-left: 1.5rem;
+      position: relative;
+    }
+
+    .payment-features li::before {
+      content: '—';
+      position: absolute;
+      left: 0;
+    }
+
+    .note-box {
+      border: 1px solid #1A1A1A;
+      padding: 1.5rem;
+      background: #F5F5F5;
+      margin-top: 2rem;
+    }
+
+    .note-box p {
+      font-size: 0.875rem;
+      line-height: 1.8;
+      color: #1A1A1A;
+    }
+
+    .note-box strong {
+      font-weight: 700;
+    }
+
+    /* Stats Section */
+    .stats-section {
+      padding: 3rem 0;
+      border-bottom: 1px solid #D0D0D0;
+      margin-bottom: 3rem;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
+
+    @media (min-width: 768px) {
+      .stats-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    .stat-card {
+      text-align: center;
+      padding: 2rem;
+      border: 1px solid #D0D0D0;
+      background: #F5F5F5;
+    }
+
+    .stat-value {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: #1A1A1A;
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-label {
+      color: #4A4A4A;
+      font-size: 0.875rem;
+    }
+
+    /* Footer */
+    .footer {
+      padding: 2rem 0;
+      text-align: center;
+      color: #4A4A4A;
+      font-size: 0.75rem;
+      border-top: 2px solid #1A1A1A;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="container">
+      <div class="logo">SPARK CODE</div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="container">
+      <div class="badge">一个账号 · 三大模型</div>
+
+      <h1 class="headline">
+        Claude · GPT · Gemini<br>
+        统一接入，极致性价比
+      </h1>
+
+      <p class="subheadline">
+        无需多个账号，一站式访问三大AI模型。<br>
+        标准1:1倍率，GPT系列仅0.2倍率，为您节省80%成本。
+      </p>
+
+      <a href="/login" class="cta-button">立即开始</a>
+    </div>
+  </section>
+
+  <!-- Payment Options -->
+  <section class="payment-section">
+    <div class="container">
+      <h2 class="section-title">灵活的付费方式</h2>
+      <p class="section-subtitle">两种模式可叠加使用，优先消耗套餐额度</p>
+
+      <div class="payment-grid">
+        <div class="payment-card">
+          <h3 class="payment-title">按量计费</h3>
+          <p class="payment-desc">用多少付多少，无需预付费</p>
+          <ul class="payment-features">
+            <li>无最低消费</li>
+            <li>实时计费</li>
+            <li>随时充值</li>
+            <li>适合轻度使用</li>
+          </ul>
+        </div>
+
+        <div class="payment-card recommended">
+          <h3 class="payment-title">包月套餐</h3>
+          <p class="payment-desc">限时额度，成本更低</p>
+          <ul class="payment-features">
+            <li>有效期内使用</li>
+            <li>比按量更便宜</li>
+            <li>多种额度可选</li>
+            <li>优先消耗套餐</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="note-box">
+        <p>
+          <strong>智能叠加：</strong>
+          同时购买包月套餐和按量充值，系统将优先使用包月套餐额度，套餐用完后自动切换至按量计费，无缝衔接，不影响使用。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats Section -->
+  <section class="stats-section">
+    <div class="container">
+      <h2 class="section-title">服务保障</h2>
+      <p class="section-subtitle">稳定可靠，值得信赖</p>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">&gt;95%</div>
+          <div class="stat-label">服务可用性保障</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-value">Low Latency</div>
+          <div class="stat-label">全球加速节点</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-value">Secure</div>
+          <div class="stat-label">企业级安全防护</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      &copy; 2025 Spark Code. All rights reserved.
+    </div>
+  </footer>
+</body>
+</html>

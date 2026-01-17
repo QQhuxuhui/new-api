@@ -150,7 +150,11 @@ func baiduHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respon
 		return types.NewError(err, types.ErrorCodeBadResponseBody), nil
 	}
 	if baiduResponse.ErrorMsg != "" {
-		return types.NewError(errors.New(baiduResponse.ErrorMsg), types.ErrorCodeBadResponseBody), nil
+		return types.WithOpenAIError(types.OpenAIError{
+			Message: baiduResponse.ErrorMsg,
+			Type:    "baidu_error",
+			Code:    "baidu_error",
+		}, resp.StatusCode), nil
 	}
 	fullTextResponse := responseBaidu2OpenAI(&baiduResponse)
 	jsonResponse, err := json.Marshal(fullTextResponse)
