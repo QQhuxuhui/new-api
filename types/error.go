@@ -166,7 +166,10 @@ func (e *NewAPIError) ToOpenAIError() OpenAIError {
 	}
 	if e.errorCode != ErrorCodeCountTokenFailed {
 		result.Message = common.MaskSensitiveInfo(result.Message)
-		result.Message = common.MaskUpstreamSensitiveError(result.Message)
+		// 只对上游错误进行敏感信息脱敏，本系统错误（如余额不足）保留原始信息
+		if e.errorType != ErrorTypeNewAPIError {
+			result.Message = common.MaskUpstreamSensitiveError(result.Message)
+		}
 	}
 	if result.Message == "" {
 		result.Message = string(e.errorType)
