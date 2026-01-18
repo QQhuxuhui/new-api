@@ -97,7 +97,7 @@ const HomeBento = () => {
             <div className="bento-stat-card bento-animate-on-scroll">
               <div className="bento-stat-value">高可用</div>
               <div className="bento-stat-label">稳定服务保障</div>
-              <div className="bento-stat-note">服务可用性低可联系客服退款</div>
+              <div className="bento-stat-note">若因服务可用性低影响正常使用，可联系客服退款</div>
             </div>
 
             <div className="bento-stat-card bento-animate-on-scroll bento-animate-delay-1">
