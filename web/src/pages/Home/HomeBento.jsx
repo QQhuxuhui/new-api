@@ -95,18 +95,21 @@ const HomeBento = () => {
 
           <div className="bento-stats-grid">
             <div className="bento-stat-card bento-animate-on-scroll">
-              <div className="bento-stat-value">&gt;95%</div>
-              <div className="bento-stat-label">服务可用性保障</div>
+              <div className="bento-stat-value">高可用</div>
+              <div className="bento-stat-label">稳定服务保障</div>
+              <div className="bento-stat-note">服务可用性低可联系客服退款</div>
             </div>
 
             <div className="bento-stat-card bento-animate-on-scroll bento-animate-delay-1">
-              <div className="bento-stat-value">Low Latency</div>
-              <div className="bento-stat-label">全球加速节点</div>
+              <div className="bento-stat-value">真实模型</div>
+              <div className="bento-stat-label">拒绝套壳，支持验证</div>
+              <div className="bento-stat-note">假模型全额双倍退款</div>
             </div>
 
             <div className="bento-stat-card bento-animate-on-scroll bento-animate-delay-2">
-              <div className="bento-stat-value">Secure</div>
+              <div className="bento-stat-value">安全可靠</div>
               <div className="bento-stat-label">企业级安全防护</div>
+              <div className="bento-stat-note">全球加速节点，低延迟</div>
             </div>
           </div>
         </div>
