@@ -77,7 +77,6 @@ const Dashboard = () => {
     dashboardData.consumeTokens,
     dashboardData.times,
     dashboardData.trendData,
-    dashboardData.performanceMetrics,
     dashboardData.navigate,
     dashboardData.t,
   );
@@ -165,6 +164,8 @@ const Dashboard = () => {
         getTrendSpec={getTrendSpec}
         CARD_PROPS={CARD_PROPS}
         CHART_CONFIG={CHART_CONFIG}
+        subscriptionData={dashboardData.subscriptionData}
+        quotaStatus={dashboardData.quotaStatus}
       />
 
       {/* API信息和图表面板 */}

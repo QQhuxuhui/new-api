@@ -54,6 +54,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   // ========== 数据状态 ==========
   const [quotaData, setQuotaData] = useState([]);
+  const [subscriptionData, setSubscriptionData] = useState(null);
+  const [quotaStatus, setQuotaStatus] = useState(null);
   const [consumeQuota, setConsumeQuota] = useState(0);
   const [consumeTokens, setConsumeTokens] = useState(0);
   const [times, setTimes] = useState(0);
@@ -223,11 +225,39 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [userDispatch]);
 
+  const loadSubscriptionData = useCallback(async () => {
+    try {
+      const res = await API.get('/api/my_plans/');
+      const { success, message, data } = res.data;
+      if (success && data) {
+        setSubscriptionData(data);
+      } else if (!success) {
+        console.error('Failed to load subscription data:', message);
+      }
+    } catch (err) {
+      console.error('Error loading subscription data:', err);
+    }
+  }, []);
+
+  const loadQuotaStatus = useCallback(async () => {
+    try {
+      const res = await API.get('/api/my_plans/quota-status');
+      const { success, data } = res.data;
+      if (success && data) {
+        setQuotaStatus(data);
+      }
+    } catch (err) {
+      console.error('Error loading quota status:', err);
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     const data = await loadQuotaData();
     await loadUptimeData();
+    await loadSubscriptionData();
+    await loadQuotaStatus();
     return data;
-  }, [loadQuotaData, loadUptimeData]);
+  }, [loadQuotaData, loadUptimeData, loadSubscriptionData, loadQuotaStatus]);
 
   const handleSearchConfirm = useCallback(
     async (updateChartDataCallback) => {
@@ -251,9 +281,11 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   useEffect(() => {
     if (!initialized.current) {
       getUserData();
+      loadSubscriptionData();
+      loadQuotaStatus();
       initialized.current = true;
     }
-  }, [getUserData]);
+  }, [getUserData, loadSubscriptionData, loadQuotaStatus]);
 
   return {
     // 基础状态
@@ -267,6 +299,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
     // 数据状态
     quotaData,
+    subscriptionData,
+    quotaStatus,
     consumeQuota,
     setConsumeQuota,
     consumeTokens,
