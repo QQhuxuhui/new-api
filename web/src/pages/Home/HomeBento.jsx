@@ -44,7 +44,7 @@ const HomeBento = () => {
 
           <div className="bento-cta-buttons">
             <Link to="/login" className="bento-cta-button">立即开始</Link>
-            <Link to="/pricing" className="bento-cta-button-secondary">产品定价</Link>
+            <Link to="/plans" className="bento-cta-button-secondary">产品定价</Link>
           </div>
         </div>
       </section>
@@ -111,13 +111,6 @@ const HomeBento = () => {
           </div>
         </div>
       </section>
-
-      {/* Footer */}
-      <footer className="bento-footer">
-        <div className="bento-container">
-          &copy; 2025 Spark Code. All rights reserved.
-        </div>
-      </footer>
     </div>
   );
 };
