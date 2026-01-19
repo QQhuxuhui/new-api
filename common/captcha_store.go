@@ -24,6 +24,7 @@ var (
 	captchaMap      = make(map[string]CaptchaData)
 	captchaTokenMap = make(map[string]CaptchaToken)
 	captchaMutex    sync.RWMutex
+	cleanupShutdown = make(chan struct{})
 )
 
 const (
@@ -41,11 +42,16 @@ func init() {
 func backgroundCleanup() {
 	ticker := time.NewTicker(CleanupInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		captchaMutex.Lock()
-		cleanExpiredCaptchaData()
-		cleanExpiredTokens()
-		captchaMutex.Unlock()
+	for {
+		select {
+		case <-ticker.C:
+			captchaMutex.Lock()
+			cleanExpiredCaptchaData()
+			cleanExpiredTokens()
+			captchaMutex.Unlock()
+		case <-cleanupShutdown:
+			return
+		}
 	}
 }
 
@@ -60,7 +66,7 @@ func StoreCaptchaAnswer(captchaID string, correctX int) {
 	}
 
 	// Only clean up if map is getting large
-	if len(captchaMap) > CaptchaMapMaxSize {
+	if len(captchaMap) >= CaptchaMapMaxSize*9/10 {
 		cleanExpiredCaptchaData()
 	}
 }
@@ -103,7 +109,7 @@ func StoreCaptchaToken(token string) {
 	}
 
 	// Only clean up if map is getting large
-	if len(captchaTokenMap) > TokenMapMaxSize {
+	if len(captchaTokenMap) >= TokenMapMaxSize*9/10 {
 		cleanExpiredTokens()
 	}
 }
@@ -159,4 +165,9 @@ func cleanExpiredTokens() {
 // GenerateCaptchaToken 生成唯一的 token
 func GenerateCaptchaToken() string {
 	return uuid.New().String()
+}
+
+// StopBackgroundCleanup stops the background cleanup goroutine
+func StopBackgroundCleanup() {
+	close(cleanupShutdown)
 }
