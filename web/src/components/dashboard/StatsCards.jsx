@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Card, Avatar, Skeleton, Tag, Progress, Button } from '@douyinfe/semi-ui';
+import { Card, Avatar, Skeleton, Tag, Progress, Button, Banner } from '@douyinfe/semi-ui';
 import { VChart } from '@visactor/react-vchart';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -31,6 +31,8 @@ const StatsCards = ({
   CARD_PROPS,
   CHART_CONFIG,
   subscriptionData,
+  subscriptionLoading,
+  subscriptionError,
   quotaStatus,
 }) => {
   const navigate = useNavigate();
@@ -56,10 +58,71 @@ const StatsCards = ({
     return days;
   };
 
-  // Render subscription card
+  // Render subscription card or empty state
   const renderSubscriptionCard = () => {
-    if (!subscriptionData || !subscriptionData.current_plan) return null;
+    if (subscriptionLoading) {
+      return (
+        <Card
+          {...CARD_PROPS}
+          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
+        >
+          <div className="space-y-4">
+            <Skeleton.Title style={{ width: 120, height: 16 }} />
+            <Skeleton.Title style={{ width: '60%', height: 24 }} />
+            <Skeleton.Paragraph rows={2} />
+            <Skeleton.Paragraph rows={2} />
+          </div>
+        </Card>
+      );
+    }
 
+    if (subscriptionError) {
+      return (
+        <Card
+          {...CARD_PROPS}
+          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
+        >
+          <Banner
+            type="danger"
+            closeIcon={null}
+            title={t('订阅信息加载失败')}
+            description={subscriptionError || t('请稍后重试')}
+          />
+        </Card>
+      );
+    }
+
+    // Empty state when no subscription
+    if (!subscriptionData || !subscriptionData.current_plan) {
+      return (
+        <Card
+          {...CARD_PROPS}
+          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
+        >
+          <div className="flex flex-col items-center justify-center py-8 px-4">
+            <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mb-4">
+              <TrendingUp size={32} className="text-blue-600" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {t('暂无订阅套餐')}
+            </h3>
+            <p className="text-sm text-gray-500 mb-4 text-center">
+              {t('选择适合您的套餐方案')}
+            </p>
+            <Button
+              theme="solid"
+              type="primary"
+              size="large"
+              onClick={() => navigate('/plans')}
+            >
+              {t('获取订阅')}
+            </Button>
+          </div>
+        </Card>
+      );
+    }
+
+    // Existing subscription card
     const currentPlan = subscriptionData.current_plan;
     const usedQuota = currentPlan.used_quota || 0;
     const remainingQuota = currentPlan.quota || 0;
@@ -80,7 +143,7 @@ const StatsCards = ({
     return (
       <Card
         {...CARD_PROPS}
-        className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full"
+        className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
         title={
           <div className="flex items-center gap-2">
             <TrendingUp size={16} className="text-blue-600" />
@@ -169,12 +232,19 @@ const StatsCards = ({
   const safeGroupedStatsData = Array.isArray(groupedStatsData) ? groupedStatsData : [];
   const accountData = safeGroupedStatsData[0]; // 账户数据
   const otherStats = safeGroupedStatsData.slice(1); // 使用统计、资源消耗、性能指标
-  const hasAccountData = Boolean(accountData);
+
+  // Flatten all metrics into a single array for horizontal display
+  const allMetrics = otherStats.flatMap(group =>
+    group.items.map(item => ({
+      ...item,
+      groupTitle: group.title
+    }))
+  );
 
   return (
     <div className="mb-4 space-y-4">
       {/* First Row: Subscription + Account Data */}
-      <div className={`grid gap-4 ${subscriptionData?.current_plan && hasAccountData ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
         {/* Subscription Card */}
         {renderSubscriptionCard()}
 
@@ -182,7 +252,7 @@ const StatsCards = ({
         {accountData && (
           <Card
             {...CARD_PROPS}
-            className={`${accountData.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200 ${!subscriptionData?.current_plan ? 'lg:max-w-2xl lg:mx-auto' : ''}`}
+            className={`${accountData.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200`}
             title={accountData.title}
           >
             <div className="space-y-4">
@@ -253,66 +323,47 @@ const StatsCards = ({
         )}
       </div>
 
-      {/* Second Row: Compact Stats Grid */}
-      {otherStats.length > 0 && (
+      {/* Second Row: Compact Horizontal Metrics */}
+      {allMetrics.length > 0 && (
         <Card
           {...CARD_PROPS}
-          className="border-0 !rounded-2xl w-full bg-white"
+          className="border-0 !rounded-2xl w-full bg-white hover:shadow-lg transition-all duration-200"
         >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 divide-y md:divide-y-0 md:divide-x divide-gray-100">
-            {otherStats.map((group, groupIdx) => (
-              <div key={groupIdx} className="pt-6 md:pt-0 md:px-6 first:md:pl-0 last:md:pr-0">
-                <div className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-700">
-                  {group.title}
-                </div>
-                <div className="space-y-3">
-                  {group.items.map((item, itemIdx) => (
-                    <div
-                      key={itemIdx}
-                      className="flex items-center justify-between hover:bg-gray-50 -mx-2 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
-                      onClick={item.onClick}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 divide-x-0 lg:divide-x divide-gray-100">
+            {allMetrics.map((item, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-3 px-2 lg:px-4 py-2 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer"
+                onClick={item.onClick}
+              >
+                <Avatar
+                  size="small"
+                  color={item.avatarColor}
+                  className="flex-shrink-0"
+                >
+                  {item.icon}
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs text-gray-500 truncate">{item.title}</div>
+                  <div className="text-base font-semibold text-gray-900 truncate">
+                    <Skeleton
+                      loading={loading}
+                      active
+                      placeholder={
+                        <Skeleton.Paragraph
+                          active
+                          rows={1}
+                          style={{
+                            width: '50px',
+                            height: '20px',
+                            marginTop: '2px',
+                          }}
+                        />
+                      }
                     >
-                      <div className="flex items-center flex-1 min-w-0">
-                        <Avatar
-                          className="mr-2 flex-shrink-0"
-                          size="extra-small"
-                          color={item.avatarColor}
-                        >
-                          {item.icon}
-                        </Avatar>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs text-gray-500 truncate">{item.title}</div>
-                          <div className="text-base font-semibold text-gray-900 truncate">
-                            <Skeleton
-                              loading={loading}
-                              active
-                              placeholder={
-                                <Skeleton.Paragraph
-                                  active
-                                  rows={1}
-                                  style={{
-                                    width: '50px',
-                                    height: '20px',
-                                    marginTop: '2px',
-                                  }}
-                                />
-                              }
-                            >
-                              {item.value}
-                            </Skeleton>
-                          </div>
-                        </div>
-                      </div>
-                      {(loading || (item.trendData && item.trendData.length > 0)) && (
-                        <div className="w-16 h-8 ml-2 flex-shrink-0">
-                          <VChart
-                            spec={getTrendSpec(item.trendData, item.trendColor)}
-                            option={CHART_CONFIG}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                      {item.value}
+                    </Skeleton>
+                  </div>
                 </div>
               </div>
             ))}

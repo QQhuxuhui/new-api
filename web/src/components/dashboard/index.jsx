@@ -166,6 +166,8 @@ const Dashboard = () => {
         CARD_PROPS={CARD_PROPS}
         CHART_CONFIG={CHART_CONFIG}
         subscriptionData={dashboardData.subscriptionData}
+        subscriptionLoading={dashboardData.subscriptionLoading}
+        subscriptionError={dashboardData.subscriptionError}
         quotaStatus={dashboardData.quotaStatus}
       />
 

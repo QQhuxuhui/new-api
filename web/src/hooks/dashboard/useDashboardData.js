@@ -55,6 +55,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   // ========== 数据状态 ==========
   const [quotaData, setQuotaData] = useState([]);
   const [subscriptionData, setSubscriptionData] = useState(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
+  const [subscriptionError, setSubscriptionError] = useState('');
   const [quotaStatus, setQuotaStatus] = useState(null);
   const [consumeQuota, setConsumeQuota] = useState(0);
   const [consumeTokens, setConsumeTokens] = useState(0);
@@ -226,18 +228,22 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   }, [userDispatch]);
 
   const loadSubscriptionData = useCallback(async () => {
+    setSubscriptionLoading(true);
+    setSubscriptionError('');
     try {
       const res = await API.get('/api/my_plans/');
       const { success, message, data } = res.data;
-      if (success && data) {
-        setSubscriptionData(data);
-      } else if (!success) {
-        console.error('Failed to load subscription data:', message);
+      if (success) {
+        setSubscriptionData(data ?? null);
+      } else {
+        setSubscriptionError(message || t('订阅信息加载失败'));
       }
     } catch (err) {
-      console.error('Error loading subscription data:', err);
+      setSubscriptionError(err?.message || t('订阅信息加载失败'));
+    } finally {
+      setSubscriptionLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const loadQuotaStatus = useCallback(async () => {
     try {
@@ -300,6 +306,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     // 数据状态
     quotaData,
     subscriptionData,
+    subscriptionLoading,
+    subscriptionError,
     quotaStatus,
     consumeQuota,
     setConsumeQuota,
