@@ -29,7 +29,25 @@ var (
 const (
 	CaptchaExpiration      = 2 * time.Minute
 	CaptchaTokenExpiration = 2 * time.Minute
+	CaptchaMapMaxSize      = 10000
+	TokenMapMaxSize        = 10000
+	CleanupInterval        = 1 * time.Minute
 )
+
+func init() {
+	go backgroundCleanup()
+}
+
+func backgroundCleanup() {
+	ticker := time.NewTicker(CleanupInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		captchaMutex.Lock()
+		cleanExpiredCaptchaData()
+		cleanExpiredTokens()
+		captchaMutex.Unlock()
+	}
+}
 
 // StoreCaptchaAnswer 存储验证码答案
 func StoreCaptchaAnswer(captchaID string, correctX int) {
@@ -41,8 +59,10 @@ func StoreCaptchaAnswer(captchaID string, correctX int) {
 		CreatedAt: time.Now(),
 	}
 
-	// 清理过期数据
-	cleanExpiredCaptchaData()
+	// Only clean up if map is getting large
+	if len(captchaMap) > CaptchaMapMaxSize {
+		cleanExpiredCaptchaData()
+	}
 }
 
 // GetCaptchaAnswer 获取验证码答案
@@ -82,8 +102,10 @@ func StoreCaptchaToken(token string) {
 		ExpireAt: time.Now().Add(CaptchaTokenExpiration),
 	}
 
-	// 清理过期 token
-	cleanExpiredTokens()
+	// Only clean up if map is getting large
+	if len(captchaTokenMap) > TokenMapMaxSize {
+		cleanExpiredTokens()
+	}
 }
 
 // VerifyAndUseCaptchaToken 验证并使用 token（一次性）
