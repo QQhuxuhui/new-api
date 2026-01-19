@@ -22,7 +22,7 @@ import { Card, Avatar, Skeleton, Tag, Progress, Button, Banner } from '@douyinfe
 import { VChart } from '@visactor/react-vchart';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Calendar, TrendingUp } from 'lucide-react';
+import { TrendingUp } from 'lucide-react';
 
 const StatsCards = ({
   groupedStatsData,
@@ -56,6 +56,61 @@ const StatsCards = ({
     const diff = expiresAt - now;
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
     return days;
+  };
+
+  // Helper function to convert quota to USD (using same logic as renderQuota)
+  const formatQuotaAsUSD = (quota) => {
+    if (!quota || quota === 0) return '$0.00';
+
+    let quotaPerUnit = localStorage.getItem('quota_per_unit');
+    const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';
+    quotaPerUnit = parseFloat(quotaPerUnit);
+
+    // If quotaPerUnit is invalid, show loading indicator
+    if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) {
+      return '$ ...';
+    }
+
+    // Calculate USD amount using the same formula as renderQuota
+    const resultUSD = quota / quotaPerUnit;
+
+    // Apply currency conversion if needed
+    let symbol = '$';
+    let value = resultUSD;
+
+    if (quotaDisplayType === 'CNY') {
+      const statusStr = localStorage.getItem('status');
+      let usdRate = 1;
+      try {
+        if (statusStr) {
+          const s = JSON.parse(statusStr);
+          usdRate = s?.usd_exchange_rate || 1;
+        }
+      } catch (e) {}
+      value = resultUSD * usdRate;
+      symbol = '¥';
+    } else if (quotaDisplayType === 'CUSTOM') {
+      const statusStr = localStorage.getItem('status');
+      let symbolCustom = '¤';
+      let rate = 1;
+      try {
+        if (statusStr) {
+          const s = JSON.parse(statusStr);
+          symbolCustom = s?.custom_currency_symbol || symbolCustom;
+          rate = s?.custom_currency_exchange_rate || rate;
+        }
+      } catch (e) {}
+      value = resultUSD * rate;
+      symbol = symbolCustom;
+    }
+
+    const fixedResult = value.toFixed(2);
+    if (parseFloat(fixedResult) === 0 && quota > 0 && value > 0) {
+      const minValue = Math.pow(10, -2);
+      return symbol + minValue.toFixed(2);
+    }
+
+    return symbol + fixedResult;
   };
 
   // Render subscription card or empty state
@@ -160,42 +215,52 @@ const StatsCards = ({
           </div>
         }
       >
-        <div className="space-y-4">
-          {/* Plan Name */}
-          <div>
-            <div className="text-sm text-gray-500">{t('当前套餐')}</div>
-            <div className="text-2xl font-bold text-gray-900 mt-1">
-              {currentPlan.plan_display_name || currentPlan.plan_name}
+        <div className="space-y-3">
+          {/* Plan Name & Expiry - Compact Header */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs text-gray-500">{t('当前套餐')}</div>
+              <div className="text-lg font-bold text-gray-900 mt-0.5">
+                {currentPlan.plan_display_name || currentPlan.plan_name}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="text-right">
+                <div className="text-xs text-gray-500">{t('到期')}</div>
+                <div className={`text-xs font-medium mt-0.5 ${isExpiringSoon ? 'text-red-600' : 'text-gray-900'}`}>
+                  {formatDate(currentPlan.expires_at)}
+                </div>
+              </div>
+              {daysRemaining !== null && (
+                <Tag color={isExpiringSoon ? 'red' : 'blue'} size="small">
+                  {daysRemaining > 0 ? `${daysRemaining}${t('天')}` : t('已过期')}
+                </Tag>
+              )}
             </div>
           </div>
 
-          {/* Quota Progress */}
+          {/* Quota Progress - Inline Label */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-600">{t('套餐额度使用')}</span>
-              <span className="text-sm font-semibold text-gray-900">
-                {quotaPercent}%
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs text-gray-600">{t('套餐额度')}</span>
+              <span className="text-xs font-medium text-gray-900">
+                {t('已用')} {formatQuotaAsUSD(usedQuota)} / {t('剩余')} {formatQuotaAsUSD(remainingQuota)}
               </span>
             </div>
             <Progress
               percent={quotaPercent}
               stroke={quotaPercent > 80 ? '#f5222d' : '#1890ff'}
               showInfo={false}
-              size="large"
             />
-            <div className="flex items-center justify-between mt-1 text-xs text-gray-500">
-              <span>{t('已使用')}: {usedQuota.toLocaleString()}</span>
-              <span>{t('剩余')}: {remainingQuota.toLocaleString()}</span>
-            </div>
           </div>
 
-          {/* Daily Quota Progress (if exists) */}
+          {/* Daily Quota Progress - Inline Label (if exists) */}
           {dailyLimit > 0 && (
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-600">{t('今日额度使用')}</span>
-                <span className="text-sm font-semibold text-gray-900">
-                  {dailyUsed.toLocaleString()} / {dailyLimit.toLocaleString()}
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs text-gray-600">{t('今日额度')}</span>
+                <span className="text-xs font-medium text-gray-900">
+                  {formatQuotaAsUSD(dailyUsed)} / {formatQuotaAsUSD(dailyLimit)}
                 </span>
               </div>
               <Progress
@@ -205,24 +270,6 @@ const StatsCards = ({
               />
             </div>
           )}
-
-          {/* Expiry Date */}
-          <div className="flex items-center justify-between pt-2 border-t border-gray-200">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <Calendar size={14} />
-              <span>{t('到期时间')}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-sm font-medium ${isExpiringSoon ? 'text-red-600' : 'text-gray-900'}`}>
-                {formatDate(currentPlan.expires_at)}
-              </span>
-              {daysRemaining !== null && (
-                <Tag color={isExpiringSoon ? 'red' : 'blue'} size="small">
-                  {daysRemaining > 0 ? `${daysRemaining}${t('天')}` : t('已过期')}
-                </Tag>
-              )}
-            </div>
-          </div>
         </div>
       </Card>
     );
