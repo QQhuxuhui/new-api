@@ -61,15 +61,28 @@ const ChartsPanel = ({
               <button
                 key={tab.key}
                 onClick={() => setActiveChartTab(tab.key)}
-                className={`
-                  px-4 py-2 rounded-lg text-sm font-medium
-                  transition-all duration-200 cursor-pointer
-                  ${
-                    activeChartTab === tab.key
-                      ? 'bg-blue-500 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  border: 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  backgroundColor: activeChartTab === tab.key ? '#3b82f6' : '#f3f4f6',
+                  color: activeChartTab === tab.key ? '#ffffff' : '#374151',
+                  boxShadow: activeChartTab === tab.key ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none',
+                }}
+                onMouseEnter={(e) => {
+                  if (activeChartTab !== tab.key) {
+                    e.currentTarget.style.backgroundColor = '#e5e7eb';
                   }
-                `}
+                }}
+                onMouseLeave={(e) => {
+                  if (activeChartTab !== tab.key) {
+                    e.currentTarget.style.backgroundColor = '#f3f4f6';
+                  }
+                }}
               >
                 {tab.label}
               </button>
