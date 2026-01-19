@@ -259,6 +259,42 @@ export const useDashboardCharts = (
     },
   });
 
+  // Token用量趋势折线图
+  const [spec_token_line, setSpecTokenLine] = useState({
+    type: 'line',
+    data: [
+      {
+        id: 'tokenLineData',
+        values: [],
+      },
+    ],
+    xField: 'Time',
+    yField: 'TokenUsed',
+    seriesField: 'Model',
+    legends: {
+      visible: true,
+      selectMode: 'single',
+    },
+    title: {
+      visible: true,
+      text: t('Token用量趋势'),
+      subtext: '',
+    },
+    tooltip: {
+      mark: {
+        content: [
+          {
+            key: (datum) => datum['Model'],
+            value: (datum) => renderNumber(datum['TokenUsed']),
+          },
+        ],
+      },
+    },
+    color: {
+      specified: modelColorMap,
+    },
+  });
+
   // ========== 数据处理函数 ==========
   const generateModelColors = useCallback((uniqueModels, modelColors) => {
     const newModelColors = {};
@@ -439,6 +475,7 @@ export const useDashboardCharts = (
     spec_line,
     spec_model_line,
     spec_rank_bar,
+    spec_token_line,
 
     // 函数
     updateChartData,
