@@ -25,6 +25,7 @@ var (
 	captchaTokenMap = make(map[string]CaptchaToken)
 	captchaMutex    sync.RWMutex
 	cleanupShutdown = make(chan struct{})
+	shutdownOnce    sync.Once
 )
 
 const (
@@ -169,5 +170,7 @@ func GenerateCaptchaToken() string {
 
 // StopBackgroundCleanup stops the background cleanup goroutine
 func StopBackgroundCleanup() {
-	close(cleanupShutdown)
+	shutdownOnce.Do(func() {
+		close(cleanupShutdown)
+	})
 }

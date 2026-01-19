@@ -54,6 +54,7 @@ func main() {
 	}
 
 	defer func() {
+		common.StopBackgroundCleanup()
 		err := model.CloseDB()
 		if err != nil {
 			common.FatalLog("failed to close database: " + err.Error())
