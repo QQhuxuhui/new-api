@@ -145,28 +145,28 @@ const StatsCards = ({
         {...CARD_PROPS}
         className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
         title={
-          <div className="flex items-center gap-2">
-            <TrendingUp size={16} className="text-blue-600" />
-            <span>{t('订阅套餐')}</span>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          {/* Plan Name and Status */}
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm text-gray-500">{t('当前套餐')}</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {currentPlan.plan_display_name || currentPlan.plan_name}
-              </div>
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={16} className="text-blue-600" />
+              <span>{t('订阅套餐')}</span>
             </div>
             <Button
               theme="solid"
               type="primary"
               onClick={() => navigate('/plans')}
             >
-              {t('续费')}
+              {t('获取订阅')}
             </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {/* Plan Name */}
+          <div>
+            <div className="text-sm text-gray-500">{t('当前套餐')}</div>
+            <div className="text-2xl font-bold text-gray-900 mt-1">
+              {currentPlan.plan_display_name || currentPlan.plan_name}
+            </div>
           </div>
 
           {/* Quota Progress */}
