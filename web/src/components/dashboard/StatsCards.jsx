@@ -253,65 +253,54 @@ const StatsCards = ({
           <Card
             {...CARD_PROPS}
             className={`${accountData.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200`}
-            title={accountData.title}
+            title={
+              <div className="flex items-center justify-between w-full">
+                {accountData.title}
+                <Button
+                  theme="solid"
+                  type="primary"
+                  onClick={() => navigate('/console/topup')}
+                >
+                  {t('充值')}
+                </Button>
+              </div>
+            }
           >
-            <div className="grid grid-cols-1 gap-6 py-2">
+            <div className="grid grid-cols-2 gap-4">
               {accountData.items.map((item, itemIdx) => (
                 <div
                   key={itemIdx}
-                  className="flex flex-col items-center text-center cursor-pointer hover:bg-white/50 rounded-xl p-4 transition-all duration-200"
+                  className="flex items-center gap-3 cursor-pointer hover:bg-white/50 rounded-xl p-3 transition-all duration-200"
                   onClick={item.onClick}
                 >
                   <Avatar
-                    className="mb-3"
-                    size="large"
+                    size="default"
                     color={item.avatarColor}
                   >
                     {item.icon}
                   </Avatar>
-                  <div className="text-sm text-gray-500 mb-1">{item.title}</div>
-                  <div className="text-2xl font-bold mb-3">
-                    <Skeleton
-                      loading={loading}
-                      active
-                      placeholder={
-                        <Skeleton.Paragraph
-                          active
-                          rows={1}
-                          style={{
-                            width: '80px',
-                            height: '32px',
-                            marginTop: '4px',
-                          }}
-                        />
-                      }
-                    >
-                      {item.value}
-                    </Skeleton>
+                  <div className="flex-1">
+                    <div className="text-xs text-gray-500">{item.title}</div>
+                    <div className="text-xl font-bold">
+                      <Skeleton
+                        loading={loading}
+                        active
+                        placeholder={
+                          <Skeleton.Paragraph
+                            active
+                            rows={1}
+                            style={{
+                              width: '80px',
+                              height: '28px',
+                              marginTop: '4px',
+                            }}
+                          />
+                        }
+                      >
+                        {item.value}
+                      </Skeleton>
+                    </div>
                   </div>
-                  {item.title === t('当前余额') ? (
-                    <Button
-                      theme="solid"
-                      type="primary"
-                      size="large"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate('/console/topup');
-                      }}
-                    >
-                      {t('充值')}
-                    </Button>
-                  ) : (
-                    (loading ||
-                      (item.trendData && item.trendData.length > 0)) && (
-                      <div className="w-32 h-12 mt-2">
-                        <VChart
-                          spec={getTrendSpec(item.trendData, item.trendColor)}
-                          option={CHART_CONFIG}
-                        />
-                      </div>
-                    )
-                  )}
                 </div>
               ))}
             </div>
