@@ -255,48 +255,44 @@ const StatsCards = ({
             className={`${accountData.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200`}
             title={accountData.title}
           >
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-6 py-2">
               {accountData.items.map((item, itemIdx) => (
                 <div
                   key={itemIdx}
-                  className="flex items-center justify-between"
+                  className="flex flex-col items-center text-center cursor-pointer hover:bg-white/50 rounded-xl p-4 transition-all duration-200"
                   onClick={item.onClick}
                 >
-                  <div className="flex items-center">
-                    <Avatar
-                      className="mr-3"
-                      size="small"
-                      color={item.avatarColor}
-                    >
-                      {item.icon}
-                    </Avatar>
-                    <div>
-                      <div className="text-xs text-gray-500">{item.title}</div>
-                      <div className="text-lg font-semibold">
-                        <Skeleton
-                          loading={loading}
+                  <Avatar
+                    className="mb-3"
+                    size="large"
+                    color={item.avatarColor}
+                  >
+                    {item.icon}
+                  </Avatar>
+                  <div className="text-sm text-gray-500 mb-1">{item.title}</div>
+                  <div className="text-2xl font-bold mb-3">
+                    <Skeleton
+                      loading={loading}
+                      active
+                      placeholder={
+                        <Skeleton.Paragraph
                           active
-                          placeholder={
-                            <Skeleton.Paragraph
-                              active
-                              rows={1}
-                              style={{
-                                width: '65px',
-                                height: '24px',
-                                marginTop: '4px',
-                              }}
-                            />
-                          }
-                        >
-                          {item.value}
-                        </Skeleton>
-                      </div>
-                    </div>
+                          rows={1}
+                          style={{
+                            width: '80px',
+                            height: '32px',
+                            marginTop: '4px',
+                          }}
+                        />
+                      }
+                    >
+                      {item.value}
+                    </Skeleton>
                   </div>
                   {item.title === t('当前余额') ? (
-                    <Tag
-                      color="white"
-                      shape="circle"
+                    <Button
+                      theme="solid"
+                      type="primary"
                       size="large"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -304,11 +300,11 @@ const StatsCards = ({
                       }}
                     >
                       {t('充值')}
-                    </Tag>
+                    </Button>
                   ) : (
                     (loading ||
                       (item.trendData && item.trendData.length > 0)) && (
-                      <div className="w-24 h-10">
+                      <div className="w-32 h-12 mt-2">
                         <VChart
                           spec={getTrendSpec(item.trendData, item.trendColor)}
                           option={CHART_CONFIG}
@@ -322,54 +318,6 @@ const StatsCards = ({
           </Card>
         )}
       </div>
-
-      {/* Second Row: Compact Horizontal Metrics */}
-      {allMetrics.length > 0 && (
-        <Card
-          {...CARD_PROPS}
-          className="border-0 !rounded-2xl w-full bg-white hover:shadow-lg transition-all duration-200"
-        >
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 divide-x-0 lg:divide-x divide-gray-100">
-            {allMetrics.map((item, idx) => (
-              <div
-                key={idx}
-                className="flex items-center gap-3 px-2 lg:px-4 py-2 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer"
-                onClick={item.onClick}
-              >
-                <Avatar
-                  size="small"
-                  color={item.avatarColor}
-                  className="flex-shrink-0"
-                >
-                  {item.icon}
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs text-gray-500 truncate">{item.title}</div>
-                  <div className="text-base font-semibold text-gray-900 truncate">
-                    <Skeleton
-                      loading={loading}
-                      active
-                      placeholder={
-                        <Skeleton.Paragraph
-                          active
-                          rows={1}
-                          style={{
-                            width: '50px',
-                            height: '20px',
-                            marginTop: '2px',
-                          }}
-                        />
-                      }
-                    >
-                      {item.value}
-                    </Skeleton>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
     </div>
   );
 };
