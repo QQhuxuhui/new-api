@@ -77,6 +77,7 @@ const Dashboard = () => {
     dashboardData.consumeTokens,
     dashboardData.times,
     dashboardData.trendData,
+    dashboardData.performanceMetrics,
     dashboardData.navigate,
     dashboardData.t,
   );
