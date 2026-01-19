@@ -154,20 +154,20 @@ const StatsCards = ({
           {...CARD_PROPS}
           className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
         >
-          <div className="flex flex-col items-center justify-center py-8 px-4">
-            <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mb-4">
-              <TrendingUp size={32} className="text-blue-600" />
+          <div className="flex flex-col items-center justify-center py-6 px-4">
+            <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3">
+              <TrendingUp size={24} className="text-blue-600" />
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            <h3 className="text-base font-semibold text-gray-900 mb-1">
               {t('暂无订阅套餐')}
             </h3>
-            <p className="text-sm text-gray-500 mb-4 text-center">
+            <p className="text-xs text-gray-500 mb-3 text-center">
               {t('选择适合您的套餐方案')}
             </p>
             <Button
               theme="solid"
               type="primary"
-              size="large"
+              size="default"
               onClick={() => navigate('/plans')}
             >
               {t('获取订阅')}
