@@ -48,7 +48,7 @@
 
 /* Hero */
 .bento-hero {
-  padding: 5rem 0 4rem;
+  padding: 5rem 0 2rem;
   text-align: center;
 }
 
@@ -155,7 +155,7 @@
 
 /* Bento Grid */
 .bento-section {
-  padding: 4rem 0;
+  padding: 2rem 0 4rem;
 }
 
 .bento-section-title {
