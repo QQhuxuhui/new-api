@@ -80,7 +80,7 @@ const StatsCards = ({
     return (
       <Card
         {...CARD_PROPS}
-        className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full col-span-full lg:col-span-2"
+        className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full"
         title={
           <div className="flex items-center gap-2">
             <TrendingUp size={16} className="text-blue-600" />
@@ -100,7 +100,7 @@ const StatsCards = ({
             <Button
               theme="solid"
               type="primary"
-              onClick={() => navigate('/console/plans')}
+              onClick={() => navigate('/plans')}
             >
               {t('续费')}
             </Button>
@@ -165,22 +165,28 @@ const StatsCards = ({
     );
   };
 
+  // Separate account data from other stats (defensive guards)
+  const safeGroupedStatsData = Array.isArray(groupedStatsData) ? groupedStatsData : [];
+  const accountData = safeGroupedStatsData[0]; // 账户数据
+  const otherStats = safeGroupedStatsData.slice(1); // 使用统计、资源消耗、性能指标
+  const hasAccountData = Boolean(accountData);
+
   return (
-    <div className="mb-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Subscription Card - Full width on mobile, 2 cols on large screens */}
+    <div className="mb-4 space-y-4">
+      {/* First Row: Subscription + Account Data */}
+      <div className={`grid gap-4 ${subscriptionData?.current_plan && hasAccountData ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+        {/* Subscription Card */}
         {renderSubscriptionCard()}
 
-        {/* Other Stats Cards */}
-        {groupedStatsData.map((group, idx) => (
+        {/* Account Data Card */}
+        {accountData && (
           <Card
-            key={idx}
             {...CARD_PROPS}
-            className={`${group.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200 cursor-pointer`}
-            title={group.title}
+            className={`${accountData.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200 ${!subscriptionData?.current_plan ? 'lg:max-w-2xl lg:mx-auto' : ''}`}
+            title={accountData.title}
           >
             <div className="space-y-4">
-              {group.items.map((item, itemIdx) => (
+              {accountData.items.map((item, itemIdx) => (
                 <div
                   key={itemIdx}
                   className="flex items-center justify-between"
@@ -244,8 +250,75 @@ const StatsCards = ({
               ))}
             </div>
           </Card>
-        ))}
+        )}
       </div>
+
+      {/* Second Row: Compact Stats Grid */}
+      {otherStats.length > 0 && (
+        <Card
+          {...CARD_PROPS}
+          className="border-0 !rounded-2xl w-full bg-white"
+        >
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 divide-y md:divide-y-0 md:divide-x divide-gray-100">
+            {otherStats.map((group, groupIdx) => (
+              <div key={groupIdx} className="pt-6 md:pt-0 md:px-6 first:md:pl-0 last:md:pr-0">
+                <div className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-700">
+                  {group.title}
+                </div>
+                <div className="space-y-3">
+                  {group.items.map((item, itemIdx) => (
+                    <div
+                      key={itemIdx}
+                      className="flex items-center justify-between hover:bg-gray-50 -mx-2 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
+                      onClick={item.onClick}
+                    >
+                      <div className="flex items-center flex-1 min-w-0">
+                        <Avatar
+                          className="mr-2 flex-shrink-0"
+                          size="extra-small"
+                          color={item.avatarColor}
+                        >
+                          {item.icon}
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs text-gray-500 truncate">{item.title}</div>
+                          <div className="text-base font-semibold text-gray-900 truncate">
+                            <Skeleton
+                              loading={loading}
+                              active
+                              placeholder={
+                                <Skeleton.Paragraph
+                                  active
+                                  rows={1}
+                                  style={{
+                                    width: '50px',
+                                    height: '20px',
+                                    marginTop: '2px',
+                                  }}
+                                />
+                              }
+                            >
+                              {item.value}
+                            </Skeleton>
+                          </div>
+                        </div>
+                      </div>
+                      {(loading || (item.trendData && item.trendData.length > 0)) && (
+                        <div className="w-16 h-8 ml-2 flex-shrink-0">
+                          <VChart
+                            spec={getTrendSpec(item.trendData, item.trendColor)}
+                            option={CHART_CONFIG}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   );
 };
