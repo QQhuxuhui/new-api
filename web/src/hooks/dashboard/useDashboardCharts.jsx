@@ -490,6 +490,42 @@ export const useDashboardCharts = (
       });
       modelLineData.sort((a, b) => a.Time.localeCompare(b.Time));
 
+      // ===== Token用量趋势折线图 =====
+      let tokenLineData = [];
+      chartTimePoints.forEach((time) => {
+        const timeData = Array.from(uniqueModels).map((model) => {
+          const key = `${time}-${model}`;
+          const aggregated = aggregatedData.get(key);
+          return {
+            Time: time,
+            Model: model,
+            TokenUsed: aggregated?.token_used || 0,
+          };
+        });
+        tokenLineData.push(...timeData);
+      });
+      tokenLineData.sort((a, b) => a.Time.localeCompare(b.Time));
+
+      // ===== Token用量分布堆叠柱状图 =====
+      let tokenBarData = [];
+      chartTimePoints.forEach((time) => {
+        let timeData = Array.from(uniqueModels).map((model) => {
+          const key = `${time}-${model}`;
+          const aggregated = aggregatedData.get(key);
+          return {
+            Time: time,
+            Model: model,
+            TokenUsed: aggregated?.token_used || 0,
+          };
+        });
+
+        const timeSum = timeData.reduce((sum, item) => sum + item.TokenUsed, 0);
+        timeData.sort((a, b) => b.TokenUsed - a.TokenUsed);
+        timeData = timeData.map((item) => ({ ...item, TimeSum: timeSum }));
+        tokenBarData.push(...timeData);
+      });
+      tokenBarData.sort((a, b) => a.Time.localeCompare(b.Time));
+
       // ===== 模型调用次数排行柱状图 =====
       const rankData = Array.from(modelTotals)
         .map(([model, count]) => ({
@@ -512,6 +548,22 @@ export const useDashboardCharts = (
         `${t('总计')}：${renderNumber(totalTimes)}`,
         newModelColors,
         'rankData',
+      );
+
+      updateChartSpec(
+        setSpecTokenLine,
+        tokenLineData,
+        `${t('总Token用量')}：${renderNumber(totalTokens)}`,
+        newModelColors,
+        'tokenLineData',
+      );
+
+      updateChartSpec(
+        setSpecTokenBar,
+        tokenBarData,
+        `${t('总Token用量')}：${renderNumber(totalTokens)}`,
+        newModelColors,
+        'tokenBarData',
       );
 
       setPieData(newPieData);
