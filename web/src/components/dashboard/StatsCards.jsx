@@ -18,11 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Card, Avatar, Skeleton, Tag, Progress, Button } from '@douyinfe/semi-ui';
+import { Card, Avatar, Skeleton, Tag, Progress, Button, Banner } from '@douyinfe/semi-ui';
 import { VChart } from '@visactor/react-vchart';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Calendar, TrendingUp } from 'lucide-react';
+import { TrendingUp } from 'lucide-react';
 
 const StatsCards = ({
   groupedStatsData,
@@ -31,6 +31,8 @@ const StatsCards = ({
   CARD_PROPS,
   CHART_CONFIG,
   subscriptionData,
+  subscriptionLoading,
+  subscriptionError,
   quotaStatus,
 }) => {
   const navigate = useNavigate();
@@ -56,10 +58,126 @@ const StatsCards = ({
     return days;
   };
 
-  // Render subscription card
-  const renderSubscriptionCard = () => {
-    if (!subscriptionData || !subscriptionData.current_plan) return null;
+  // Helper function to convert quota to USD (using same logic as renderQuota)
+  const formatQuotaAsUSD = (quota) => {
+    if (!quota || quota === 0) return '$0.00';
 
+    let quotaPerUnit = localStorage.getItem('quota_per_unit');
+    const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';
+    quotaPerUnit = parseFloat(quotaPerUnit);
+
+    // If quotaPerUnit is invalid, show loading indicator
+    if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) {
+      return '$ ...';
+    }
+
+    // Calculate USD amount using the same formula as renderQuota
+    const resultUSD = quota / quotaPerUnit;
+
+    // Apply currency conversion if needed
+    let symbol = '$';
+    let value = resultUSD;
+
+    if (quotaDisplayType === 'CNY') {
+      const statusStr = localStorage.getItem('status');
+      let usdRate = 1;
+      try {
+        if (statusStr) {
+          const s = JSON.parse(statusStr);
+          usdRate = s?.usd_exchange_rate || 1;
+        }
+      } catch (e) {}
+      value = resultUSD * usdRate;
+      symbol = '¥';
+    } else if (quotaDisplayType === 'CUSTOM') {
+      const statusStr = localStorage.getItem('status');
+      let symbolCustom = '¤';
+      let rate = 1;
+      try {
+        if (statusStr) {
+          const s = JSON.parse(statusStr);
+          symbolCustom = s?.custom_currency_symbol || symbolCustom;
+          rate = s?.custom_currency_exchange_rate || rate;
+        }
+      } catch (e) {}
+      value = resultUSD * rate;
+      symbol = symbolCustom;
+    }
+
+    const fixedResult = value.toFixed(2);
+    if (parseFloat(fixedResult) === 0 && quota > 0 && value > 0) {
+      const minValue = Math.pow(10, -2);
+      return symbol + minValue.toFixed(2);
+    }
+
+    return symbol + fixedResult;
+  };
+
+  // Render subscription card or empty state
+  const renderSubscriptionCard = () => {
+    if (subscriptionLoading) {
+      return (
+        <Card
+          {...CARD_PROPS}
+          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
+        >
+          <div className="space-y-4">
+            <Skeleton.Title style={{ width: 120, height: 16 }} />
+            <Skeleton.Title style={{ width: '60%', height: 24 }} />
+            <Skeleton.Paragraph rows={2} />
+            <Skeleton.Paragraph rows={2} />
+          </div>
+        </Card>
+      );
+    }
+
+    if (subscriptionError) {
+      return (
+        <Card
+          {...CARD_PROPS}
+          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
+        >
+          <Banner
+            type="danger"
+            closeIcon={null}
+            title={t('订阅信息加载失败')}
+            description={subscriptionError || t('请稍后重试')}
+          />
+        </Card>
+      );
+    }
+
+    // Empty state when no subscription
+    if (!subscriptionData || !subscriptionData.current_plan) {
+      return (
+        <Card
+          {...CARD_PROPS}
+          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
+        >
+          <div className="flex flex-col items-center justify-center py-6 px-4">
+            <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3">
+              <TrendingUp size={24} className="text-blue-600" />
+            </div>
+            <h3 className="text-base font-semibold text-gray-900 mb-1">
+              {t('暂无订阅套餐')}
+            </h3>
+            <p className="text-xs text-gray-500 mb-3 text-center">
+              {t('选择适合您的套餐方案')}
+            </p>
+            <Button
+              theme="solid"
+              type="primary"
+              size="default"
+              onClick={() => navigate('/plans')}
+            >
+              {t('获取订阅')}
+            </Button>
+          </div>
+        </Card>
+      );
+    }
+
+    // Existing subscription card
     const currentPlan = subscriptionData.current_plan;
     const usedQuota = currentPlan.used_quota || 0;
     const remainingQuota = currentPlan.quota || 0;
@@ -80,59 +198,69 @@ const StatsCards = ({
     return (
       <Card
         {...CARD_PROPS}
-        className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full col-span-full lg:col-span-2"
+        className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
         title={
-          <div className="flex items-center gap-2">
-            <TrendingUp size={16} className="text-blue-600" />
-            <span>{t('订阅套餐')}</span>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          {/* Plan Name and Status */}
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm text-gray-500">{t('当前套餐')}</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {currentPlan.plan_display_name || currentPlan.plan_name}
-              </div>
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={16} className="text-blue-600" />
+              <span>{t('订阅套餐')}</span>
             </div>
             <Button
               theme="solid"
               type="primary"
-              onClick={() => navigate('/console/plans')}
+              onClick={() => navigate('/plans')}
             >
-              {t('续费')}
+              {t('获取订阅')}
             </Button>
           </div>
+        }
+      >
+        <div className="space-y-3">
+          {/* Plan Name & Expiry - Compact Header */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs text-gray-500">{t('当前套餐')}</div>
+              <div className="text-lg font-bold text-gray-900 mt-0.5">
+                {currentPlan.plan_display_name || currentPlan.plan_name}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="text-right">
+                <div className="text-xs text-gray-500">{t('到期')}</div>
+                <div className={`text-xs font-medium mt-0.5 ${isExpiringSoon ? 'text-red-600' : 'text-gray-900'}`}>
+                  {formatDate(currentPlan.expires_at)}
+                </div>
+              </div>
+              {daysRemaining !== null && (
+                <Tag color={isExpiringSoon ? 'red' : 'blue'} size="small">
+                  {daysRemaining > 0 ? `${daysRemaining}${t('天')}` : t('已过期')}
+                </Tag>
+              )}
+            </div>
+          </div>
 
-          {/* Quota Progress */}
+          {/* Quota Progress - Inline Label */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-600">{t('套餐额度使用')}</span>
-              <span className="text-sm font-semibold text-gray-900">
-                {quotaPercent}%
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs text-gray-600">{t('套餐额度')}</span>
+              <span className="text-xs font-medium text-gray-900">
+                {t('已用')} {formatQuotaAsUSD(usedQuota)} / {t('剩余')} {formatQuotaAsUSD(remainingQuota)}
               </span>
             </div>
             <Progress
               percent={quotaPercent}
               stroke={quotaPercent > 80 ? '#f5222d' : '#1890ff'}
               showInfo={false}
-              size="large"
             />
-            <div className="flex items-center justify-between mt-1 text-xs text-gray-500">
-              <span>{t('已使用')}: {usedQuota.toLocaleString()}</span>
-              <span>{t('剩余')}: {remainingQuota.toLocaleString()}</span>
-            </div>
           </div>
 
-          {/* Daily Quota Progress (if exists) */}
+          {/* Daily Quota Progress - Inline Label (if exists) */}
           {dailyLimit > 0 && (
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-600">{t('今日额度使用')}</span>
-                <span className="text-sm font-semibold text-gray-900">
-                  {dailyUsed.toLocaleString()} / {dailyLimit.toLocaleString()}
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs text-gray-600">{t('今日额度')}</span>
+                <span className="text-xs font-medium text-gray-900">
+                  {formatQuotaAsUSD(dailyUsed)} / {formatQuotaAsUSD(dailyLimit)}
                 </span>
               </div>
               <Progress
@@ -142,109 +270,89 @@ const StatsCards = ({
               />
             </div>
           )}
-
-          {/* Expiry Date */}
-          <div className="flex items-center justify-between pt-2 border-t border-gray-200">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <Calendar size={14} />
-              <span>{t('到期时间')}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-sm font-medium ${isExpiringSoon ? 'text-red-600' : 'text-gray-900'}`}>
-                {formatDate(currentPlan.expires_at)}
-              </span>
-              {daysRemaining !== null && (
-                <Tag color={isExpiringSoon ? 'red' : 'blue'} size="small">
-                  {daysRemaining > 0 ? `${daysRemaining}${t('天')}` : t('已过期')}
-                </Tag>
-              )}
-            </div>
-          </div>
         </div>
       </Card>
     );
   };
 
+  // Separate account data from other stats (defensive guards)
+  const safeGroupedStatsData = Array.isArray(groupedStatsData) ? groupedStatsData : [];
+  const accountData = safeGroupedStatsData[0]; // 账户数据
+  const otherStats = safeGroupedStatsData.slice(1); // 使用统计、资源消耗、性能指标
+
+  // Flatten all metrics into a single array for horizontal display
+  const allMetrics = otherStats.flatMap(group =>
+    group.items.map(item => ({
+      ...item,
+      groupTitle: group.title
+    }))
+  );
+
   return (
-    <div className="mb-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Subscription Card - Full width on mobile, 2 cols on large screens */}
+    <div className="mb-4 space-y-4">
+      {/* First Row: Subscription + Account Data */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+        {/* Subscription Card */}
         {renderSubscriptionCard()}
 
-        {/* Other Stats Cards */}
-        {groupedStatsData.map((group, idx) => (
+        {/* Account Data Card */}
+        {accountData && (
           <Card
-            key={idx}
             {...CARD_PROPS}
-            className={`${group.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200 cursor-pointer`}
-            title={group.title}
+            className={`${accountData.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200`}
+            title={
+              <div className="flex items-center justify-between w-full">
+                {accountData.title}
+                <Button
+                  theme="solid"
+                  type="primary"
+                  onClick={() => navigate('/console/topup')}
+                >
+                  {t('充值')}
+                </Button>
+              </div>
+            }
           >
-            <div className="space-y-4">
-              {group.items.map((item, itemIdx) => (
+            <div className="grid grid-cols-2 gap-4">
+              {accountData.items.map((item, itemIdx) => (
                 <div
                   key={itemIdx}
-                  className="flex items-center justify-between"
+                  className="flex items-center gap-3 cursor-pointer hover:bg-white/50 rounded-xl p-3 transition-all duration-200"
                   onClick={item.onClick}
                 >
-                  <div className="flex items-center">
-                    <Avatar
-                      className="mr-3"
-                      size="small"
-                      color={item.avatarColor}
-                    >
-                      {item.icon}
-                    </Avatar>
-                    <div>
-                      <div className="text-xs text-gray-500">{item.title}</div>
-                      <div className="text-lg font-semibold">
-                        <Skeleton
-                          loading={loading}
-                          active
-                          placeholder={
-                            <Skeleton.Paragraph
-                              active
-                              rows={1}
-                              style={{
-                                width: '65px',
-                                height: '24px',
-                                marginTop: '4px',
-                              }}
-                            />
-                          }
-                        >
-                          {item.value}
-                        </Skeleton>
-                      </div>
+                  <Avatar
+                    size="default"
+                    color={item.avatarColor}
+                  >
+                    {item.icon}
+                  </Avatar>
+                  <div className="flex-1">
+                    <div className="text-xs text-gray-500">{item.title}</div>
+                    <div className="text-xl font-bold">
+                      <Skeleton
+                        loading={loading}
+                        active
+                        placeholder={
+                          <Skeleton.Paragraph
+                            active
+                            rows={1}
+                            style={{
+                              width: '80px',
+                              height: '28px',
+                              marginTop: '4px',
+                            }}
+                          />
+                        }
+                      >
+                        {item.value}
+                      </Skeleton>
                     </div>
                   </div>
-                  {item.title === t('当前余额') ? (
-                    <Tag
-                      color="white"
-                      shape="circle"
-                      size="large"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate('/console/topup');
-                      }}
-                    >
-                      {t('充值')}
-                    </Tag>
-                  ) : (
-                    (loading ||
-                      (item.trendData && item.trendData.length > 0)) && (
-                      <div className="w-24 h-10">
-                        <VChart
-                          spec={getTrendSpec(item.trendData, item.trendColor)}
-                          option={CHART_CONFIG}
-                        />
-                      </div>
-                    )
-                  )}
                 </div>
               ))}
             </div>
           </Card>
-        ))}
+        )}
       </div>
     </div>
   );

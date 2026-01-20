@@ -52,7 +52,7 @@ export const useDashboardStats = (
   const groupedStatsData = useMemo(
     () => [
       {
-        title: createSectionTitle(Wallet, t('账户数据')),
+        title: createSectionTitle(Wallet, t('按量付费账户')),
         color: 'bg-blue-50',
         items: [
           {

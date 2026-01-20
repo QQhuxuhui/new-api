@@ -33,3 +33,5 @@ concurrency_translations.txt
 
 .claude*
 .gomod*
+
+.worktrees/

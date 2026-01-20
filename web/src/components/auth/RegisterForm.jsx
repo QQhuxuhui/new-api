@@ -59,6 +59,7 @@ import WeChatIcon from '../common/logo/WeChatIcon';
 import TelegramLoginButton from 'react-telegram-login/src';
 import { UserContext } from '../../context/User';
 import { useTranslation } from 'react-i18next';
+import CaptchaModal from '../common/CaptchaModal';
 
 const RegisterForm = () => {
   let navigate = useNavigate();
@@ -93,6 +94,9 @@ const RegisterForm = () => {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [hasUserAgreement, setHasUserAgreement] = useState(false);
   const [hasPrivacyPolicy, setHasPrivacyPolicy] = useState(false);
+  const [captchaEnabled, setCaptchaEnabled] = useState(false);
+  const [showCaptcha, setShowCaptcha] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState('');
 
   const logo = getLogo();
   const systemName = getSystemName();
@@ -116,6 +120,9 @@ const RegisterForm = () => {
     if (status.turnstile_check) {
       setTurnstileEnabled(true);
       setTurnstileSiteKey(status.turnstile_site_key);
+    }
+    if (status.captcha_enabled) {
+      setCaptchaEnabled(true);
     }
 
     // 从 status 获取用户协议和隐私政策的启用状态
@@ -213,6 +220,53 @@ const RegisterForm = () => {
       }
     }
   }
+
+  const handleGetVerificationCode = () => {
+    if (!inputs.email) {
+      showError('请先输入邮箱地址');
+      return;
+    }
+    if (captchaEnabled) {
+      // 显示 CAPTCHA 弹窗
+      setShowCaptcha(true);
+      return;
+    }
+    sendVerificationCode();
+  };
+
+  const handleCaptchaSuccess = async (token) => {
+    setShowCaptcha(false);
+    setCaptchaToken(token);
+    setVerificationCodeLoading(true);
+
+    try {
+      const res = await API.get(
+        `/api/verification?email=${inputs.email}&captcha_token=${token}`,
+      );
+
+      if (res.data.success) {
+        showSuccess('验证码发送成功，请查收邮件');
+        setDisableButton(true);
+        // 开始倒计时
+        let countdownInterval = setInterval(() => {
+          setCountdown((prevCountdown) => {
+            if (prevCountdown === 1) {
+              clearInterval(countdownInterval);
+              setDisableButton(false);
+              return 30;
+            }
+            return prevCountdown - 1;
+          });
+        }, 1000);
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError('发送验证码失败');
+    } finally {
+      setVerificationCodeLoading(false);
+    }
+  };
 
   const sendVerificationCode = async () => {
     if (inputs.email === '') return;
@@ -497,7 +551,7 @@ const RegisterForm = () => {
                       prefix={<IconMail />}
                       suffix={
                         <Button
-                          onClick={sendVerificationCode}
+                          onClick={handleGetVerificationCode}
                           loading={verificationCodeLoading}
                           disabled={disableButton || verificationCodeLoading}
                         >
@@ -679,6 +733,11 @@ const RegisterForm = () => {
           ? renderEmailRegisterForm()
           : renderOAuthOptions()}
         {renderWeChatLoginModal()}
+        <CaptchaModal
+          visible={showCaptcha}
+          onSuccess={handleCaptchaSuccess}
+          onCancel={() => setShowCaptcha(false)}
+        />
 
         {turnstileEnabled && (
           <div className='flex justify-center mt-6'>

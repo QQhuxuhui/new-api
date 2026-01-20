@@ -259,6 +259,114 @@ export const useDashboardCharts = (
     },
   });
 
+  // Token用量趋势折线图
+  const [spec_token_line, setSpecTokenLine] = useState({
+    type: 'line',
+    data: [
+      {
+        id: 'tokenLineData',
+        values: [],
+      },
+    ],
+    xField: 'Time',
+    yField: 'TokenUsed',
+    seriesField: 'Model',
+    legends: {
+      visible: true,
+      selectMode: 'single',
+    },
+    title: {
+      visible: true,
+      text: t('Token用量趋势'),
+      subtext: '',
+    },
+    tooltip: {
+      mark: {
+        content: [
+          {
+            key: (datum) => datum['Model'],
+            value: (datum) => renderNumber(datum['TokenUsed']),
+          },
+        ],
+      },
+    },
+    color: {
+      specified: modelColorMap,
+    },
+  });
+
+  // Token用量分布堆叠柱状图
+  const [spec_token_bar, setSpecTokenBar] = useState({
+    type: 'bar',
+    data: [
+      {
+        id: 'tokenBarData',
+        values: [],
+      },
+    ],
+    xField: 'Time',
+    yField: 'TokenUsed',
+    seriesField: 'Model',
+    stack: true,
+    legends: {
+      visible: true,
+      selectMode: 'single',
+    },
+    title: {
+      visible: true,
+      text: t('Token用量分布'),
+      subtext: '',
+    },
+    bar: {
+      state: {
+        hover: {
+          stroke: '#000',
+          lineWidth: 1,
+        },
+      },
+    },
+    tooltip: {
+      mark: {
+        content: [
+          {
+            key: (datum) => datum['Model'],
+            value: (datum) => renderNumber(datum['TokenUsed']),
+          },
+        ],
+      },
+      dimension: {
+        content: [
+          {
+            key: (datum) => datum['Model'],
+            value: (datum) => datum['TokenUsed'] || 0,
+          },
+        ],
+        updateContent: (array) => {
+          array.sort((a, b) => b.value - a.value);
+          let sum = 0;
+          for (let i = 0; i < array.length; i++) {
+            let value = parseFloat(array[i].value);
+            if (isNaN(value)) {
+              value = 0;
+            }
+            if (array[i].datum && array[i].datum.TimeSum) {
+              sum = array[i].datum.TimeSum;
+            }
+            array[i].value = renderNumber(value);
+          }
+          array.unshift({
+            key: t('总计'),
+            value: renderNumber(sum),
+          });
+          return array;
+        },
+      },
+    },
+    color: {
+      specified: modelColorMap,
+    },
+  });
+
   // ========== 数据处理函数 ==========
   const generateModelColors = useCallback((uniqueModels, modelColors) => {
     const newModelColors = {};
@@ -382,6 +490,42 @@ export const useDashboardCharts = (
       });
       modelLineData.sort((a, b) => a.Time.localeCompare(b.Time));
 
+      // ===== Token用量趋势折线图 =====
+      let tokenLineData = [];
+      chartTimePoints.forEach((time) => {
+        const timeData = Array.from(uniqueModels).map((model) => {
+          const key = `${time}-${model}`;
+          const aggregated = aggregatedData.get(key);
+          return {
+            Time: time,
+            Model: model,
+            TokenUsed: aggregated?.token_used || 0,
+          };
+        });
+        tokenLineData.push(...timeData);
+      });
+      tokenLineData.sort((a, b) => a.Time.localeCompare(b.Time));
+
+      // ===== Token用量分布堆叠柱状图 =====
+      let tokenBarData = [];
+      chartTimePoints.forEach((time) => {
+        let timeData = Array.from(uniqueModels).map((model) => {
+          const key = `${time}-${model}`;
+          const aggregated = aggregatedData.get(key);
+          return {
+            Time: time,
+            Model: model,
+            TokenUsed: aggregated?.token_used || 0,
+          };
+        });
+
+        const timeSum = timeData.reduce((sum, item) => sum + item.TokenUsed, 0);
+        timeData.sort((a, b) => b.TokenUsed - a.TokenUsed);
+        timeData = timeData.map((item) => ({ ...item, TimeSum: timeSum }));
+        tokenBarData.push(...timeData);
+      });
+      tokenBarData.sort((a, b) => a.Time.localeCompare(b.Time));
+
       // ===== 模型调用次数排行柱状图 =====
       const rankData = Array.from(modelTotals)
         .map(([model, count]) => ({
@@ -404,6 +548,22 @@ export const useDashboardCharts = (
         `${t('总计')}：${renderNumber(totalTimes)}`,
         newModelColors,
         'rankData',
+      );
+
+      updateChartSpec(
+        setSpecTokenLine,
+        tokenLineData,
+        `${t('总Token用量')}：${renderNumber(totalTokens)}`,
+        newModelColors,
+        'tokenLineData',
+      );
+
+      updateChartSpec(
+        setSpecTokenBar,
+        tokenBarData,
+        `${t('总Token用量')}：${renderNumber(totalTokens)}`,
+        newModelColors,
+        'tokenBarData',
       );
 
       setPieData(newPieData);
@@ -439,6 +599,8 @@ export const useDashboardCharts = (
     spec_line,
     spec_model_line,
     spec_rank_bar,
+    spec_token_line,
+    spec_token_bar,
 
     // 函数
     updateChartData,

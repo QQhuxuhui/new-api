@@ -54,6 +54,7 @@ func main() {
 	}
 
 	defer func() {
+		common.StopBackgroundCleanup()
 		err := model.CloseDB()
 		if err != nil {
 			common.FatalLog("failed to close database: " + err.Error())
@@ -264,5 +265,15 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
+
+	// 初始化 CAPTCHA
+	if common.CaptchaEnabled {
+		err = common.InitCaptcha()
+		if err != nil {
+			common.FatalLog(fmt.Sprintf("failed to initialize captcha: %v", err))
+			return err
+		}
+	}
+
 	return nil
 }

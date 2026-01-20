@@ -77,6 +77,7 @@ const Dashboard = () => {
     dashboardData.consumeTokens,
     dashboardData.times,
     dashboardData.trendData,
+    dashboardData.performanceMetrics,
     dashboardData.navigate,
     dashboardData.t,
   );
@@ -165,6 +166,8 @@ const Dashboard = () => {
         CARD_PROPS={CARD_PROPS}
         CHART_CONFIG={CHART_CONFIG}
         subscriptionData={dashboardData.subscriptionData}
+        subscriptionLoading={dashboardData.subscriptionLoading}
+        subscriptionError={dashboardData.subscriptionError}
         quotaStatus={dashboardData.quotaStatus}
       />
 
@@ -180,6 +183,8 @@ const Dashboard = () => {
             spec_model_line={dashboardCharts.spec_model_line}
             spec_pie={dashboardCharts.spec_pie}
             spec_rank_bar={dashboardCharts.spec_rank_bar}
+            spec_token_line={dashboardCharts.spec_token_line}
+            spec_token_bar={dashboardCharts.spec_token_bar}
             CARD_PROPS={CARD_PROPS}
             CHART_CONFIG={CHART_CONFIG}
             FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}

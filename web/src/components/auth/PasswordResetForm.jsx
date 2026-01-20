@@ -31,6 +31,7 @@ import { Button, Card, Form, Typography } from '@douyinfe/semi-ui';
 import { IconMail } from '@douyinfe/semi-icons';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import CaptchaModal from '../common/CaptchaModal';
 
 const { Text, Title } = Typography;
 
@@ -47,6 +48,8 @@ const PasswordResetForm = () => {
   const [turnstileToken, setTurnstileToken] = useState('');
   const [disableButton, setDisableButton] = useState(false);
   const [countdown, setCountdown] = useState(30);
+  const [captchaEnabled, setCaptchaEnabled] = useState(false);
+  const [showCaptcha, setShowCaptcha] = useState(false);
 
   const logo = getLogo();
   const systemName = getSystemName();
@@ -58,6 +61,9 @@ const PasswordResetForm = () => {
       if (status.turnstile_check) {
         setTurnstileEnabled(true);
         setTurnstileSiteKey(status.turnstile_site_key);
+      }
+      if (status.captcha_enabled) {
+        setCaptchaEnabled(true);
       }
     }
   }, []);
@@ -88,19 +94,41 @@ const PasswordResetForm = () => {
       showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
       return;
     }
+
+    // 如果启用了 CAPTCHA，显示验证码弹窗
+    if (captchaEnabled) {
+      setShowCaptcha(true);
+      return;
+    }
+
+    // 如果没有启用 CAPTCHA，直接发送
+    await sendResetEmail('');
+  }
+
+  const handleCaptchaSuccess = async (token) => {
+    setShowCaptcha(false);
+    await sendResetEmail(token);
+  };
+
+  async function sendResetEmail(captchaToken) {
     setDisableButton(true);
     setLoading(true);
-    const res = await API.get(
-      `/api/reset_password?email=${email}&turnstile=${turnstileToken}`,
-    );
-    const { success, message } = res.data;
-    if (success) {
-      showSuccess(t('重置邮件发送成功，请检查邮箱！'));
-      setInputs({ ...inputs, email: '' });
-    } else {
-      showError(message);
+    try {
+      const res = await API.get(
+        `/api/reset_password?email=${email}&turnstile=${turnstileToken}&captcha_token=${captchaToken}`,
+      );
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('重置邮件发送成功，请检查邮箱！'));
+        setInputs({ ...inputs, email: '' });
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      showError(t('发送失败，请重试'));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (
@@ -186,6 +214,11 @@ const PasswordResetForm = () => {
           </div>
         </div>
       </div>
+      <CaptchaModal
+        visible={showCaptcha}
+        onSuccess={handleCaptchaSuccess}
+        onCancel={() => setShowCaptcha(false)}
+      />
     </div>
   );
 };
