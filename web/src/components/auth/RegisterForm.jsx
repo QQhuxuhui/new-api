@@ -94,6 +94,7 @@ const RegisterForm = () => {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [hasUserAgreement, setHasUserAgreement] = useState(false);
   const [hasPrivacyPolicy, setHasPrivacyPolicy] = useState(false);
+  const [captchaEnabled, setCaptchaEnabled] = useState(false);
   const [showCaptcha, setShowCaptcha] = useState(false);
   const [captchaToken, setCaptchaToken] = useState('');
 
@@ -119,6 +120,9 @@ const RegisterForm = () => {
     if (status.turnstile_check) {
       setTurnstileEnabled(true);
       setTurnstileSiteKey(status.turnstile_site_key);
+    }
+    if (status.captcha_enabled) {
+      setCaptchaEnabled(true);
     }
 
     // 从 status 获取用户协议和隐私政策的启用状态
@@ -222,8 +226,12 @@ const RegisterForm = () => {
       showError('请先输入邮箱地址');
       return;
     }
-    // 显示 CAPTCHA 弹窗
-    setShowCaptcha(true);
+    if (captchaEnabled) {
+      // 显示 CAPTCHA 弹窗
+      setShowCaptcha(true);
+      return;
+    }
+    sendVerificationCode();
   };
 
   const handleCaptchaSuccess = async (token) => {
