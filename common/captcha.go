@@ -99,8 +99,8 @@ func GenerateCaptcha() (*CaptchaResponse, error) {
 
 	return &CaptchaResponse{
 		CaptchaID:       captchaID,
-		BackgroundImage: "data:image/jpeg;base64," + bgBase64,
-		SliderImage:     "data:image/png;base64," + sliderBase64,
+		BackgroundImage: bgBase64,
+		SliderImage:     sliderBase64,
 		SliderY:         blockData.Y,
 	}, nil
 }
