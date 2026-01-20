@@ -1,9 +1,13 @@
 package common
 
 import (
+	"context"
+	"errors"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 )
 
@@ -36,6 +40,32 @@ const (
 	CleanupInterval        = 1 * time.Minute
 )
 
+const (
+	captchaAnswerKeyPrefix = "captcha:answer:"
+	captchaTokenKeyPrefix  = "captcha:token:"
+)
+
+var captchaTokenConsumeScript = redis.NewScript(`
+local val = redis.call('GET', KEYS[1])
+if not val then
+  return 0
+end
+redis.call('DEL', KEYS[1])
+return 1
+`)
+
+func captchaAnswerKey(captchaID string) string {
+	return captchaAnswerKeyPrefix + captchaID
+}
+
+func captchaTokenKey(token string) string {
+	return captchaTokenKeyPrefix + token
+}
+
+func redisAvailable() bool {
+	return RedisEnabled && RDB != nil
+}
+
 func init() {
 	go backgroundCleanup()
 }
@@ -59,21 +89,45 @@ func backgroundCleanup() {
 // StoreCaptchaAnswer 存储验证码答案
 func StoreCaptchaAnswer(captchaID string, correctX int) {
 	captchaMutex.Lock()
-	defer captchaMutex.Unlock()
-
 	captchaMap[captchaID] = CaptchaData{
 		CorrectX:  correctX,
 		CreatedAt: time.Now(),
 	}
-
 	// Only clean up if map is getting large
 	if len(captchaMap) >= CaptchaMapMaxSize*9/10 {
 		cleanExpiredCaptchaData()
+	}
+	captchaMutex.Unlock()
+
+	if redisAvailable() {
+		ctx := context.Background()
+		if err := RDB.Set(ctx, captchaAnswerKey(captchaID), correctX, CaptchaExpiration).Err(); err != nil {
+			SysLog("failed to store captcha answer in redis: " + err.Error())
+		}
 	}
 }
 
 // GetCaptchaAnswer 获取验证码答案
 func GetCaptchaAnswer(captchaID string) (int, bool) {
+	if redisAvailable() {
+		ctx := context.Background()
+		val, err := RDB.Get(ctx, captchaAnswerKey(captchaID)).Result()
+		if err == nil {
+			parsed, parseErr := strconv.Atoi(val)
+			if parseErr != nil {
+				return 0, false
+			}
+			return parsed, true
+		}
+		if !errors.Is(err, redis.Nil) {
+			SysLog("failed to get captcha answer from redis: " + err.Error())
+			// Redis error -> fallback to memory
+		} else {
+			// Redis says not found -> treat as invalid without fallback
+			return 0, false
+		}
+	}
+
 	captchaMutex.RLock()
 	defer captchaMutex.RUnlock()
 
@@ -93,30 +147,60 @@ func GetCaptchaAnswer(captchaID string) (int, bool) {
 // DeleteCaptchaAnswer 删除验证码答案
 func DeleteCaptchaAnswer(captchaID string) {
 	captchaMutex.Lock()
-	defer captchaMutex.Unlock()
-
 	delete(captchaMap, captchaID)
+	captchaMutex.Unlock()
+
+	if redisAvailable() {
+		if err := RDB.Del(context.Background(), captchaAnswerKey(captchaID)).Err(); err != nil && !errors.Is(err, redis.Nil) {
+			SysLog("failed to delete captcha answer from redis: " + err.Error())
+		}
+	}
 }
 
 // StoreCaptchaToken 存储验证 token
 func StoreCaptchaToken(token string) {
 	captchaMutex.Lock()
-	defer captchaMutex.Unlock()
-
 	captchaTokenMap[token] = CaptchaToken{
 		Verified: true,
 		Used:     false,
 		ExpireAt: time.Now().Add(CaptchaTokenExpiration),
 	}
-
 	// Only clean up if map is getting large
 	if len(captchaTokenMap) >= TokenMapMaxSize*9/10 {
 		cleanExpiredTokens()
+	}
+	captchaMutex.Unlock()
+
+	if redisAvailable() {
+		ctx := context.Background()
+		if err := RDB.Set(ctx, captchaTokenKey(token), "1", CaptchaTokenExpiration).Err(); err != nil {
+			SysLog("failed to store captcha token in redis: " + err.Error())
+		}
 	}
 }
 
 // VerifyAndUseCaptchaToken 验证并使用 token（一次性）
 func VerifyAndUseCaptchaToken(token string) bool {
+	if redisAvailable() {
+		ctx := context.Background()
+		res, err := captchaTokenConsumeScript.Run(ctx, RDB, []string{captchaTokenKey(token)}).Int()
+		if err == nil {
+			if res == 1 {
+				captchaMutex.Lock()
+				delete(captchaTokenMap, token)
+				captchaMutex.Unlock()
+				return true
+			}
+			return false
+		}
+		if !errors.Is(err, redis.Nil) {
+			SysLog("failed to verify captcha token in redis: " + err.Error())
+			// Redis error -> fallback to memory
+		} else {
+			return false
+		}
+	}
+
 	captchaMutex.Lock()
 	defer captchaMutex.Unlock()
 
