@@ -65,6 +65,7 @@ func GetStatus(c *gin.Context) {
 		"server_address":              system_setting.ServerAddress,
 		"turnstile_check":             common.TurnstileCheckEnabled,
 		"turnstile_site_key":          common.TurnstileSiteKey,
+		"captcha_enabled":             common.CaptchaEnabled,
 		"top_up_link":                 common.TopUpLink,
 		"xianyu_shop_link":            common.XianyuShopLink,
 		"CustomerServiceQRCode":       common.CustomerServiceQRCode,
@@ -204,12 +205,33 @@ func GetHomePageContent(c *gin.Context) {
 
 func SendEmailVerification(c *gin.Context) {
 	email := c.Query("email")
+	captchaToken := c.Query("captcha_token")
+
 	if err := common.Validate.Var(email, "required,email"); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无效的参数",
 		})
 		return
+	}
+
+	// 验证 captcha token（如果启用了 captcha）
+	if common.CaptchaEnabled {
+		if captchaToken == "" {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "请先完成验证码验证",
+			})
+			return
+		}
+
+		if !common.VerifyAndUseCaptchaToken(captchaToken) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "验证码token无效或已过期",
+			})
+			return
+		}
 	}
 	parts := strings.Split(email, "@")
 	if len(parts) != 2 {

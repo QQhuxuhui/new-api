@@ -55,6 +55,20 @@ func VerifyCodeWithKey(key string, code string, purpose string) bool {
 	return code == value.code
 }
 
+// VerifyAndDeleteCode 验证验证码并删除（一次性使用）
+func VerifyAndDeleteCode(key string, code string, purpose string) bool {
+	verificationMutex.Lock()
+	defer verificationMutex.Unlock()
+	value, okay := verificationMap[purpose+key]
+	now := time.Now()
+	if !okay || int(now.Sub(value.time).Seconds()) >= VerificationValidMinutes*60 {
+		return false
+	}
+	// 验证成功后立即删除
+	delete(verificationMap, purpose+key)
+	return code == value.code
+}
+
 func DeleteKey(key string, purpose string) {
 	verificationMutex.Lock()
 	defer verificationMutex.Unlock()
