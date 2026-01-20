@@ -238,12 +238,12 @@ func updateOptionMap(key string, value string) (err error) {
 			common.TelegramOAuthEnabled = boolValue
 		case "TurnstileCheckEnabled":
 			common.TurnstileCheckEnabled = boolValue
-	case "RegisterEnabled":
-		common.RegisterEnabled = boolValue
-	case "CaptchaEnabled":
-		common.CaptchaEnabled = boolValue
-	case "EmailDomainRestrictionEnabled":
-		common.EmailDomainRestrictionEnabled = boolValue
+		case "RegisterEnabled":
+			common.RegisterEnabled = boolValue
+		case "CaptchaEnabled":
+			common.CaptchaEnabled = boolValue
+		case "EmailDomainRestrictionEnabled":
+			common.EmailDomainRestrictionEnabled = boolValue
 		case "EmailAliasRestrictionEnabled":
 			common.EmailAliasRestrictionEnabled = boolValue
 		case "AutomaticDisableChannelEnabled":
