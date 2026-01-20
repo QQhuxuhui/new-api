@@ -27,6 +27,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
 		apiRouter.GET("/pricing", middleware.TryUserAuth(), controller.GetPricing)
 		apiRouter.GET("/plan/enabled", controller.GetEnabledPlans) // Public access for plan pricing page
+		apiRouter.GET("/captcha/get", controller.GetCaptcha)
+		apiRouter.POST("/captcha/verify", middleware.CriticalRateLimit(), controller.VerifyCaptcha)
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)
 		apiRouter.GET("/reset_password", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SendPasswordResetEmail)
 		apiRouter.POST("/user/reset", middleware.CriticalRateLimit(), controller.ResetPassword)
