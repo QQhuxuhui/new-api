@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/admpub/go-captcha-assets/resources/images"
 	"github.com/admpub/go-captcha-assets/resources/tiles"
@@ -10,6 +11,7 @@ import (
 )
 
 var captchaBuilder slide.Captcha
+var captchaInitMu sync.Mutex
 
 // InitCaptcha 初始化验证码生成器
 func InitCaptcha() error {
@@ -57,6 +59,12 @@ type CaptchaResponse struct {
 
 // GenerateCaptcha 生成滑动验证码
 func GenerateCaptcha() (*CaptchaResponse, error) {
+	if !CaptchaEnabled {
+		return nil, fmt.Errorf("captcha is disabled")
+	}
+	if err := ensureCaptchaInitialized(); err != nil {
+		return nil, err
+	}
 	// 生成验证码
 	captchaData, err := captchaBuilder.Generate()
 	if err != nil {
@@ -95,6 +103,18 @@ func GenerateCaptcha() (*CaptchaResponse, error) {
 		SliderImage:     "data:image/png;base64," + sliderBase64,
 		SliderY:         blockData.Y,
 	}, nil
+}
+
+func ensureCaptchaInitialized() error {
+	if captchaBuilder != nil {
+		return nil
+	}
+	captchaInitMu.Lock()
+	defer captchaInitMu.Unlock()
+	if captchaBuilder != nil {
+		return nil
+	}
+	return InitCaptcha()
 }
 
 // VerifyCaptcha 验证滑动验证码

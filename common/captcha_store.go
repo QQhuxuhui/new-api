@@ -15,6 +15,8 @@ import (
 type CaptchaData struct {
 	CorrectX  int
 	CreatedAt time.Time
+	// StoredInRedis indicates whether the answer was written to Redis successfully.
+	StoredInRedis bool
 }
 
 // CaptchaToken 存储验证 token
@@ -22,6 +24,8 @@ type CaptchaToken struct {
 	Verified bool
 	Used     bool
 	ExpireAt time.Time
+	// StoredInRedis indicates whether the token was written to Redis successfully.
+	StoredInRedis bool
 }
 
 var (
@@ -88,23 +92,27 @@ func backgroundCleanup() {
 
 // StoreCaptchaAnswer 存储验证码答案
 func StoreCaptchaAnswer(captchaID string, correctX int) {
+	storedInRedis := false
+	if redisAvailable() {
+		ctx := context.Background()
+		if err := RDB.Set(ctx, captchaAnswerKey(captchaID), correctX, CaptchaExpiration).Err(); err != nil {
+			SysLog("failed to store captcha answer in redis: " + err.Error())
+		} else {
+			storedInRedis = true
+		}
+	}
+
 	captchaMutex.Lock()
 	captchaMap[captchaID] = CaptchaData{
-		CorrectX:  correctX,
-		CreatedAt: time.Now(),
+		CorrectX:      correctX,
+		CreatedAt:     time.Now(),
+		StoredInRedis: storedInRedis,
 	}
 	// Only clean up if map is getting large
 	if len(captchaMap) >= CaptchaMapMaxSize*9/10 {
 		cleanExpiredCaptchaData()
 	}
 	captchaMutex.Unlock()
-
-	if redisAvailable() {
-		ctx := context.Background()
-		if err := RDB.Set(ctx, captchaAnswerKey(captchaID), correctX, CaptchaExpiration).Err(); err != nil {
-			SysLog("failed to store captcha answer in redis: " + err.Error())
-		}
-	}
 }
 
 // GetCaptchaAnswer 获取验证码答案
@@ -122,17 +130,24 @@ func GetCaptchaAnswer(captchaID string) (int, bool) {
 		if !errors.Is(err, redis.Nil) {
 			SysLog("failed to get captcha answer from redis: " + err.Error())
 			// Redis error -> fallback to memory
-		} else {
-			// Redis says not found -> treat as invalid without fallback
-			return 0, false
+			return getCaptchaAnswerFromMemory(captchaID, false)
 		}
+		// Redis says not found -> allow fallback only if stored in memory without Redis
+		return getCaptchaAnswerFromMemory(captchaID, true)
 	}
 
+	return getCaptchaAnswerFromMemory(captchaID, false)
+}
+
+func getCaptchaAnswerFromMemory(captchaID string, requireMemoryOnly bool) (int, bool) {
 	captchaMutex.RLock()
 	defer captchaMutex.RUnlock()
 
 	data, exists := captchaMap[captchaID]
 	if !exists {
+		return 0, false
+	}
+	if requireMemoryOnly && data.StoredInRedis {
 		return 0, false
 	}
 
@@ -159,24 +174,28 @@ func DeleteCaptchaAnswer(captchaID string) {
 
 // StoreCaptchaToken 存储验证 token
 func StoreCaptchaToken(token string) {
+	storedInRedis := false
+	if redisAvailable() {
+		ctx := context.Background()
+		if err := RDB.Set(ctx, captchaTokenKey(token), "1", CaptchaTokenExpiration).Err(); err != nil {
+			SysLog("failed to store captcha token in redis: " + err.Error())
+		} else {
+			storedInRedis = true
+		}
+	}
+
 	captchaMutex.Lock()
 	captchaTokenMap[token] = CaptchaToken{
-		Verified: true,
-		Used:     false,
-		ExpireAt: time.Now().Add(CaptchaTokenExpiration),
+		Verified:      true,
+		Used:          false,
+		ExpireAt:      time.Now().Add(CaptchaTokenExpiration),
+		StoredInRedis: storedInRedis,
 	}
 	// Only clean up if map is getting large
 	if len(captchaTokenMap) >= TokenMapMaxSize*9/10 {
 		cleanExpiredTokens()
 	}
 	captchaMutex.Unlock()
-
-	if redisAvailable() {
-		ctx := context.Background()
-		if err := RDB.Set(ctx, captchaTokenKey(token), "1", CaptchaTokenExpiration).Err(); err != nil {
-			SysLog("failed to store captcha token in redis: " + err.Error())
-		}
-	}
 }
 
 // VerifyAndUseCaptchaToken 验证并使用 token（一次性）
@@ -191,21 +210,28 @@ func VerifyAndUseCaptchaToken(token string) bool {
 				captchaMutex.Unlock()
 				return true
 			}
-			return false
+			return verifyAndUseCaptchaTokenFromMemory(token, true)
 		}
 		if !errors.Is(err, redis.Nil) {
 			SysLog("failed to verify captcha token in redis: " + err.Error())
 			// Redis error -> fallback to memory
-		} else {
-			return false
+			return verifyAndUseCaptchaTokenFromMemory(token, false)
 		}
+		return verifyAndUseCaptchaTokenFromMemory(token, true)
 	}
 
+	return verifyAndUseCaptchaTokenFromMemory(token, false)
+}
+
+func verifyAndUseCaptchaTokenFromMemory(token string, requireMemoryOnly bool) bool {
 	captchaMutex.Lock()
 	defer captchaMutex.Unlock()
 
 	tokenData, exists := captchaTokenMap[token]
 	if !exists {
+		return false
+	}
+	if requireMemoryOnly && tokenData.StoredInRedis {
 		return false
 	}
 
