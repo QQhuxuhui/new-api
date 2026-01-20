@@ -7,6 +7,7 @@ import (
 	"github.com/admpub/go-captcha-assets/resources/images"
 	"github.com/admpub/go-captcha-assets/resources/tiles"
 	"github.com/google/uuid"
+	"github.com/wenlng/go-captcha/v2/base/option"
 	"github.com/wenlng/go-captcha/v2/slide"
 )
 
@@ -39,6 +40,16 @@ func InitCaptcha() error {
 
 	// 创建 builder 并设置资源
 	builder := slide.NewBuilder()
+
+	// 设置图片尺寸，与前端配置匹配
+	// 前端配置: width: 320, height: 180
+	builder.SetOptions(
+		slide.WithImageSize(option.Size{
+			Width:  320,
+			Height: 180,
+		}),
+	)
+
 	builder.SetResources(
 		slide.WithBackgrounds(bgImages),
 		slide.WithGraphImages(graphs),
