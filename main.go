@@ -265,5 +265,13 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
+
+	// 初始化 CAPTCHA
+	err = common.InitCaptcha()
+	if err != nil {
+		common.FatalLog(fmt.Sprintf("failed to initialize captcha: %v", err))
+		return err
+	}
+
 	return nil
 }
