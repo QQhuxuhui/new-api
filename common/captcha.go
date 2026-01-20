@@ -1,27 +1,49 @@
 package common
 
 import (
-	"encoding/base64"
 	"fmt"
 
+	"github.com/admpub/go-captcha-assets/resources/images"
+	"github.com/admpub/go-captcha-assets/resources/tiles"
 	"github.com/google/uuid"
-	"github.com/wenlng/go-captcha/v2/base/option"
 	"github.com/wenlng/go-captcha/v2/slide"
 )
 
-var captchaBuilder *slide.Captcha
+var captchaBuilder slide.Captcha
 
 // InitCaptcha 初始化验证码生成器
 func InitCaptcha() error {
-	builder, err := slide.NewBuilder(
-		slide.WithRangeLen(option.RangeVal{Min: 4, Max: 6}),
-		slide.WithRangeVerifyLen(option.RangeVal{Min: 2, Max: 4}),
-	)
+	// 获取背景图片
+	bgImages, err := images.GetImages()
 	if err != nil {
-		return fmt.Errorf("failed to create captcha builder: %w", err)
+		return fmt.Errorf("failed to load background images: %w", err)
 	}
 
-	captchaBuilder = builder
+	// 获取滑块图片
+	tileGraphs, err := tiles.GetTiles()
+	if err != nil {
+		return fmt.Errorf("failed to load tile images: %w", err)
+	}
+
+	// 转换为 slide.GraphImage 格式
+	var graphs []*slide.GraphImage
+	for _, graph := range tileGraphs {
+		graphs = append(graphs, &slide.GraphImage{
+			OverlayImage: graph.OverlayImage,
+			MaskImage:    graph.MaskImage,
+			ShadowImage:  graph.ShadowImage,
+		})
+	}
+
+	// 创建 builder 并设置资源
+	builder := slide.NewBuilder()
+	builder.SetResources(
+		slide.WithBackgrounds(bgImages),
+		slide.WithGraphImages(graphs),
+	)
+
+	// 创建 captcha 实例
+	captchaBuilder = builder.Make()
 	return nil
 }
 
@@ -35,12 +57,8 @@ type CaptchaResponse struct {
 
 // GenerateCaptcha 生成滑动验证码
 func GenerateCaptcha() (*CaptchaResponse, error) {
-	if captchaBuilder == nil {
-		return nil, fmt.Errorf("captcha builder not initialized")
-	}
-
 	// 生成验证码
-	captchaData, err := captchaBuilder.Make()
+	captchaData, err := captchaBuilder.Generate()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate captcha: %w", err)
 	}
@@ -50,23 +68,32 @@ func GenerateCaptcha() (*CaptchaResponse, error) {
 	sliderImage := captchaData.GetTileImage()
 
 	// 转换为 base64
-	bgBase64 := base64.StdEncoding.EncodeToString(bgImage.ToBytes())
-	sliderBase64 := base64.StdEncoding.EncodeToString(sliderImage.ToBytes())
+	bgBase64, err := bgImage.ToBase64()
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode background image: %w", err)
+	}
+	sliderBase64, err := sliderImage.ToBase64()
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode slider image: %w", err)
+	}
 
 	// 生成唯一 ID
 	captchaID := uuid.New().String()
 
-	// 获取正确的 X 坐标
-	correctX := captchaData.GetThumbX()
+	// 获取验证数据
+	blockData := captchaData.GetData()
+	if blockData == nil {
+		return nil, fmt.Errorf("failed to get captcha data")
+	}
 
 	// 存储答案
-	StoreCaptchaAnswer(captchaID, correctX)
+	StoreCaptchaAnswer(captchaID, blockData.X)
 
 	return &CaptchaResponse{
 		CaptchaID:       captchaID,
-		BackgroundImage: "data:image/png;base64," + bgBase64,
+		BackgroundImage: "data:image/jpeg;base64," + bgBase64,
 		SliderImage:     "data:image/png;base64," + sliderBase64,
-		SliderY:         captchaData.GetThumbY(),
+		SliderY:         blockData.Y,
 	}, nil
 }
 

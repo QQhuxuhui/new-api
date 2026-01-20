@@ -55,6 +55,7 @@ require (
 )
 
 require (
+	github.com/admpub/go-captcha-assets v0.0.0-20250122071745-baa7da4bda0d // indirect
 	github.com/anknown/darts v0.0.0-20151216065714-83ff685239e6 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.0 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.2 // indirect
