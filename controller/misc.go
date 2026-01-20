@@ -297,6 +297,8 @@ func SendEmailVerification(c *gin.Context) {
 
 func SendPasswordResetEmail(c *gin.Context) {
 	email := c.Query("email")
+	captchaToken := c.Query("captcha_token")
+
 	if err := common.Validate.Var(email, "required,email"); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -304,6 +306,26 @@ func SendPasswordResetEmail(c *gin.Context) {
 		})
 		return
 	}
+
+	// 验证 captcha token（如果启用了 captcha）
+	if common.CaptchaEnabled {
+		if captchaToken == "" {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "请先完成验证码验证",
+			})
+			return
+		}
+
+		if !common.VerifyAndUseCaptchaToken(captchaToken) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "验证码token无效或已过期",
+			})
+			return
+		}
+	}
+
 	if !model.IsEmailAlreadyTaken(email) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
