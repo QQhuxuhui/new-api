@@ -283,3 +283,42 @@ func ollamaEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	service.IOCopyBytesGracefully(c, resp, out)
 	return usage, nil
 }
+
+// FetchOllamaModels fetches the list of available models from Ollama server
+func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModelInfo, error) {
+	url := fmt.Sprintf("%s/api/tags", baseURL)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %v", err)
+	}
+
+	// Ollama typically doesn't require auth, but set it if provided
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("请求失败，状态码: %d, 响应: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %v", err)
+	}
+
+	var modelsResp OllamaModelsResponse
+	if err := json.Unmarshal(body, &modelsResp); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %v", err)
+	}
+
+	return modelsResp.Models, nil
+}

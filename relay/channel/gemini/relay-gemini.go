@@ -1,13 +1,16 @@
 package gemini
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
@@ -32,6 +35,7 @@ var geminiSupportedMimeTypes = map[string]bool{
 	"audio/wav":       true,
 	"image/png":       true,
 	"image/jpeg":      true,
+	"image/jpg":       true, // support old image/jpeg
 	"image/webp":      true,
 	"text/plain":      true,
 	"video/mov":       true,
@@ -587,6 +591,7 @@ func cleanFunctionParameters(params interface{}) interface{} {
 		delete(cleanedMap, "exclusiveMinimum")
 		delete(cleanedMap, "$schema")
 		delete(cleanedMap, "additionalProperties")
+		delete(cleanedMap, "propertyNames")
 
 		// Check and clean 'format' for string types
 		if propType, typeExists := cleanedMap["type"].(string); typeExists && propType == "string" {
@@ -1297,4 +1302,84 @@ func GeminiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	}
 
 	return usage, nil
+}
+
+type GeminiModelInfo struct {
+	Name                       string   `json:"name"`
+	Version                    string   `json:"version"`
+	DisplayName                string   `json:"displayName"`
+	Description                string   `json:"description"`
+	InputTokenLimit            int      `json:"inputTokenLimit"`
+	OutputTokenLimit           int      `json:"outputTokenLimit"`
+	SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+}
+
+type GeminiModelsResponse struct {
+	Models        []GeminiModelInfo `json:"models"`
+	NextPageToken string            `json:"nextPageToken"`
+}
+
+func FetchGeminiModels(baseURL, apiKey, proxyURL string) ([]string, error) {
+	client, err := service.NewProxyHttpClient(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("创建HTTP客户端失败: %v", err)
+	}
+
+	allModels := make([]string, 0)
+	nextPageToken := ""
+	maxPages := 100 // Safety limit to prevent infinite loops
+
+	for page := 0; page < maxPages; page++ {
+		url := fmt.Sprintf("%s/v1beta/models", baseURL)
+		if nextPageToken != "" {
+			// URL encode the pageToken to handle special characters (+, /, =, etc.)
+			url = fmt.Sprintf("%s?pageToken=%s", url, neturl.QueryEscape(nextPageToken))
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		request, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("创建请求失败: %v", err)
+		}
+
+		request.Header.Set("x-goog-api-key", apiKey)
+
+		response, err := client.Do(request)
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("请求失败: %v", err)
+		}
+
+		if response.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			cancel()
+			return nil, fmt.Errorf("服务器返回错误 %d: %s", response.StatusCode, string(body))
+		}
+
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("读取响应失败: %v", err)
+		}
+
+		var modelsResponse GeminiModelsResponse
+		if err = common.Unmarshal(body, &modelsResponse); err != nil {
+			return nil, fmt.Errorf("解析响应失败: %v", err)
+		}
+
+		for _, model := range modelsResponse.Models {
+			modelName := strings.TrimPrefix(model.Name, "models/")
+			allModels = append(allModels, modelName)
+		}
+
+		nextPageToken = modelsResponse.NextPageToken
+		if nextPageToken == "" {
+			break
+		}
+	}
+
+	return allModels, nil
 }

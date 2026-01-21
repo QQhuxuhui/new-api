@@ -11,16 +11,18 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/channel/gemini"
+	"github.com/QuantumNous/new-api/relay/channel/ollama"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 type OpenAIModel struct {
-	ID         string `json:"id"`
-	Object     string `json:"object"`
-	Created    int64  `json:"created"`
-	OwnedBy    string `json:"owned_by"`
+	ID         string         `json:"id"`
+	Object     string         `json:"object"`
+	Created    int64          `json:"created"`
+	OwnedBy    string         `json:"owned_by"`
 	Permission []struct {
 		ID                 string `json:"id"`
 		Object             string `json:"object"`
@@ -35,8 +37,9 @@ type OpenAIModel struct {
 		Group              string `json:"group"`
 		IsBlocking         bool   `json:"is_blocking"`
 	} `json:"permission"`
-	Root   string `json:"root"`
-	Parent string `json:"parent"`
+	Root     string         `json:"root"`
+	Parent   string         `json:"parent"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type OpenAIModelsResponse struct {
@@ -201,11 +204,88 @@ func FetchUpstreamModels(c *gin.Context) {
 		baseURL = channel.GetBaseURL()
 	}
 
+	// 对于 Ollama 渠道，使用特殊处理
+	if channel.Type == constant.ChannelTypeOllama {
+		key := strings.Split(channel.Key, "\n")[0]
+		models, err := ollama.FetchOllamaModels(baseURL, key)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("获取Ollama模型失败: %s", err.Error()),
+			})
+			return
+		}
+
+		result := OpenAIModelsResponse{
+			Data: make([]OpenAIModel, 0, len(models)),
+		}
+
+		for _, modelInfo := range models {
+			metadata := map[string]any{}
+			if modelInfo.Size > 0 {
+				metadata["size"] = modelInfo.Size
+			}
+			if modelInfo.Digest != "" {
+				metadata["digest"] = modelInfo.Digest
+			}
+			if modelInfo.ModifiedAt != "" {
+				metadata["modified_at"] = modelInfo.ModifiedAt
+			}
+			details := modelInfo.Details
+			if details.ParentModel != "" || details.Format != "" || details.Family != "" || len(details.Families) > 0 || details.ParameterSize != "" || details.QuantizationLevel != "" {
+				metadata["details"] = modelInfo.Details
+			}
+			if len(metadata) == 0 {
+				metadata = nil
+			}
+
+			result.Data = append(result.Data, OpenAIModel{
+				ID:       modelInfo.Name,
+				Object:   "model",
+				Created:  0,
+				OwnedBy:  "ollama",
+				Metadata: metadata,
+			})
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    result.Data,
+		})
+		return
+	}
+
+	// 对于 Gemini 渠道，使用特殊处理
+	if channel.Type == constant.ChannelTypeGemini {
+		// 获取用于请求的可用密钥（多密钥渠道优先使用启用状态的密钥）
+		key, _, apiErr := channel.GetNextEnabledKey()
+		if apiErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("获取渠道密钥失败: %s", apiErr.Error()),
+			})
+			return
+		}
+		key = strings.TrimSpace(key)
+		models, err := gemini.FetchGeminiModels(baseURL, key, channel.GetSetting().Proxy)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("获取Gemini模型失败: %s", err.Error()),
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    models,
+		})
+		return
+	}
+
 	var url string
 	switch channel.Type {
-	case constant.ChannelTypeGemini:
-		// curl https://example.com/v1beta/models?key=$GEMINI_API_KEY
-		url = fmt.Sprintf("%s/v1beta/openai/models", baseURL) // Remove key in url since we need to use AuthHeader
 	case constant.ChannelTypeAli:
 		url = fmt.Sprintf("%s/compatible-mode/v1/models", baseURL)
 	case constant.ChannelTypeZhipu_v4:
@@ -1039,6 +1119,49 @@ func FetchModels(c *gin.Context) {
 		baseURL = constant.ChannelBaseURLs[req.Type]
 	}
 
+	// remove line breaks and extra spaces.
+	key := strings.TrimSpace(req.Key)
+	key = strings.Split(key, "\n")[0]
+
+	if req.Type == constant.ChannelTypeOllama {
+		models, err := ollama.FetchOllamaModels(baseURL, key)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("获取Ollama模型失败: %s", err.Error()),
+			})
+			return
+		}
+
+		names := make([]string, 0, len(models))
+		for _, modelInfo := range models {
+			names = append(names, modelInfo.Name)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    names,
+		})
+		return
+	}
+
+	if req.Type == constant.ChannelTypeGemini {
+		models, err := gemini.FetchGeminiModels(baseURL, key, "")
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("获取Gemini模型失败: %s", err.Error()),
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    models,
+		})
+		return
+	}
+
 	client := &http.Client{}
 	url := fmt.Sprintf("%s/v1/models", baseURL)
 
@@ -1051,10 +1174,7 @@ func FetchModels(c *gin.Context) {
 		return
 	}
 
-	// remove line breaks and extra spaces.
-	key := strings.TrimSpace(req.Key)
-	// If the key contains a line break, only take the first part.
-	key = strings.Split(key, "\n")[0]
+	// Reuse the key variable already declared above
 	request.Header.Set("Authorization", "Bearer "+key)
 
 	response, err := client.Do(request)

@@ -4,6 +4,31 @@ import (
 	"encoding/json"
 )
 
+// OllamaModelInfo represents a model's metadata from Ollama API
+type OllamaModelInfo struct {
+	Name       string                 `json:"name"`
+	Model      string                 `json:"model"`
+	ModifiedAt string                 `json:"modified_at"`
+	Size       int64                  `json:"size"`
+	Digest     string                 `json:"digest"`
+	Details    OllamaModelDetails     `json:"details"`
+}
+
+// OllamaModelDetails contains detailed information about a model
+type OllamaModelDetails struct {
+	ParentModel       string   `json:"parent_model"`
+	Format            string   `json:"format"`
+	Family            string   `json:"family"`
+	Families          []string `json:"families"`
+	ParameterSize     string   `json:"parameter_size"`
+	QuantizationLevel string   `json:"quantization_level"`
+}
+
+// OllamaModelsResponse represents the response from Ollama's /api/tags endpoint
+type OllamaModelsResponse struct {
+	Models []OllamaModelInfo `json:"models"`
+}
+
 type OllamaChatMessage struct {
 	Role      string           `json:"role"`
 	Content   string           `json:"content,omitempty"`
