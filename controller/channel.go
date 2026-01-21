@@ -206,7 +206,8 @@ func FetchUpstreamModels(c *gin.Context) {
 
 	// 对于 Ollama 渠道，使用特殊处理
 	if channel.Type == constant.ChannelTypeOllama {
-		key := strings.Split(channel.Key, "\n")[0]
+		key := strings.TrimSpace(channel.Key)
+		key = strings.Split(key, "\n")[0]
 		models, err := ollama.FetchOllamaModels(baseURL, key)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
@@ -216,41 +217,15 @@ func FetchUpstreamModels(c *gin.Context) {
 			return
 		}
 
-		result := OpenAIModelsResponse{
-			Data: make([]OpenAIModel, 0, len(models)),
-		}
-
+		// 返回字符串数组以匹配前端期望
+		modelNames := make([]string, 0, len(models))
 		for _, modelInfo := range models {
-			metadata := map[string]any{}
-			if modelInfo.Size > 0 {
-				metadata["size"] = modelInfo.Size
-			}
-			if modelInfo.Digest != "" {
-				metadata["digest"] = modelInfo.Digest
-			}
-			if modelInfo.ModifiedAt != "" {
-				metadata["modified_at"] = modelInfo.ModifiedAt
-			}
-			details := modelInfo.Details
-			if details.ParentModel != "" || details.Format != "" || details.Family != "" || len(details.Families) > 0 || details.ParameterSize != "" || details.QuantizationLevel != "" {
-				metadata["details"] = modelInfo.Details
-			}
-			if len(metadata) == 0 {
-				metadata = nil
-			}
-
-			result.Data = append(result.Data, OpenAIModel{
-				ID:       modelInfo.Name,
-				Object:   "model",
-				Created:  0,
-				OwnedBy:  "ollama",
-				Metadata: metadata,
-			})
+			modelNames = append(modelNames, modelInfo.Name)
 		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"data":    result.Data,
+			"data":    modelNames,
 		})
 		return
 	}

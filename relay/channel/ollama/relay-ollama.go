@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -298,7 +299,15 @@ func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModelInfo, error) {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	client := &http.Client{}
+	// 使用带超时和代理支持的客户端
+	client, err := service.NewProxyHttpClient("")
+	if err != nil {
+		// 如果代理创建失败，使用默认超时客户端
+		client = &http.Client{
+			Timeout: 30 * time.Second,
+		}
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %v", err)
