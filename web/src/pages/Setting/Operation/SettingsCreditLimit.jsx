@@ -27,10 +27,26 @@ import {
   showSuccess,
   showWarning,
 } from '../../../helpers';
+import { QUOTA_PER_UNIT } from '../../../utils/currency';
+
+// 将 token 转换为 USD 显示
+const tokenToUSD = (token) => {
+  const num = parseFloat(token);
+  if (!Number.isFinite(num) || num === 0) return '';
+  return num / QUOTA_PER_UNIT;
+};
+
+// 将 USD 转换为 token 存储
+const usdToToken = (usd) => {
+  const num = parseFloat(usd);
+  if (!Number.isFinite(num)) return '0';
+  return String(Math.round(num * QUOTA_PER_UNIT));
+};
 
 export default function SettingsCreditLimit(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
+  // 存储原始 token 值（用于提交）
   const [inputs, setInputs] = useState({
     QuotaForNewUser: '',
     PreConsumedQuota: '',
@@ -38,8 +54,21 @@ export default function SettingsCreditLimit(props) {
     QuotaForInvitee: '',
     'quota_setting.enable_free_model_pre_consume': true,
   });
+  // 存储 USD 显示值（用于表单显示）
+  const [usdInputs, setUsdInputs] = useState({
+    QuotaForNewUser: '',
+    PreConsumedQuota: '',
+    QuotaForInviter: '',
+    QuotaForInvitee: '',
+  });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
+
+  // 更新 USD 输入值，同时同步更新 token 值
+  const handleUsdChange = (field, usdValue) => {
+    setUsdInputs((prev) => ({ ...prev, [field]: usdValue }));
+    setInputs((prev) => ({ ...prev, [field]: usdToToken(usdValue) }));
+  };
 
   function onSubmit() {
     const updateArray = compareObjects(inputs, inputsRow);
@@ -78,14 +107,26 @@ export default function SettingsCreditLimit(props) {
 
   useEffect(() => {
     const currentInputs = {};
+    const currentUsdInputs = {};
+    const quotaFields = ['QuotaForNewUser', 'PreConsumedQuota', 'QuotaForInviter', 'QuotaForInvitee'];
+
     for (let key in props.options) {
       if (Object.keys(inputs).includes(key)) {
         currentInputs[key] = props.options[key];
+        // 对额度字段转换为 USD 显示
+        if (quotaFields.includes(key)) {
+          currentUsdInputs[key] = tokenToUSD(props.options[key]);
+        }
       }
     }
     setInputs(currentInputs);
+    setUsdInputs(currentUsdInputs);
     setInputsRow(structuredClone(currentInputs));
-    refForm.current.setValues(currentInputs);
+    // 设置表单显示 USD 值
+    refForm.current.setValues({
+      ...currentInputs,
+      ...currentUsdInputs,
+    });
   }, [props.options]);
   return (
     <>
@@ -101,50 +142,38 @@ export default function SettingsCreditLimit(props) {
                 <Form.InputNumber
                   label={t('新用户初始额度')}
                   field={'QuotaForNewUser'}
-                  step={1}
+                  step={0.01}
                   min={0}
-                  suffix={'Token'}
-                  placeholder={''}
-                  onChange={(value) =>
-                    setInputs({
-                      ...inputs,
-                      QuotaForNewUser: String(value),
-                    })
-                  }
+                  precision={2}
+                  prefix={'$'}
+                  placeholder={'0.00'}
+                  onChange={(value) => handleUsdChange('QuotaForNewUser', value)}
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
                   label={t('请求预扣费额度')}
                   field={'PreConsumedQuota'}
-                  step={1}
+                  step={0.01}
                   min={0}
-                  suffix={'Token'}
+                  precision={2}
+                  prefix={'$'}
                   extraText={t('请求结束后多退少补')}
-                  placeholder={''}
-                  onChange={(value) =>
-                    setInputs({
-                      ...inputs,
-                      PreConsumedQuota: String(value),
-                    })
-                  }
+                  placeholder={'0.00'}
+                  onChange={(value) => handleUsdChange('PreConsumedQuota', value)}
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
                   label={t('邀请新用户奖励额度')}
                   field={'QuotaForInviter'}
-                  step={1}
+                  step={0.01}
                   min={0}
-                  suffix={'Token'}
+                  precision={2}
+                  prefix={'$'}
                   extraText={''}
-                  placeholder={t('例如：2000')}
-                  onChange={(value) =>
-                    setInputs({
-                      ...inputs,
-                      QuotaForInviter: String(value),
-                    })
-                  }
+                  placeholder={t('例如：0.01')}
+                  onChange={(value) => handleUsdChange('QuotaForInviter', value)}
                 />
               </Col>
             </Row>
@@ -153,17 +182,13 @@ export default function SettingsCreditLimit(props) {
                 <Form.InputNumber
                   label={t('新用户使用邀请码奖励额度')}
                   field={'QuotaForInvitee'}
-                  step={1}
+                  step={0.01}
                   min={0}
-                  suffix={'Token'}
+                  precision={2}
+                  prefix={'$'}
                   extraText={''}
-                  placeholder={t('例如：1000')}
-                  onChange={(value) =>
-                    setInputs({
-                      ...inputs,
-                      QuotaForInvitee: String(value),
-                    })
-                  }
+                  placeholder={t('例如：0.01')}
+                  onChange={(value) => handleUsdChange('QuotaForInvitee', value)}
                 />
               </Col>
             </Row>
