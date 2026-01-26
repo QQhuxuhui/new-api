@@ -202,7 +202,7 @@ func MaskUpstreamSensitiveError(str string) string {
 
 	for _, pattern := range upstreamSensitivePatterns {
 		if strings.Contains(lowerStr, strings.ToLower(pattern)) {
-			return "上游服务暂时不可用，请稍后重试"
+			return "模型负载过高，请稍后重试"
 		}
 	}
 
