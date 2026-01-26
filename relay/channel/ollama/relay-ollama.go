@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +17,11 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	ollamaFetchProxyEnv   = "OLLAMA_FETCH_PROXY"
+	ollamaFetchTimeoutEnv = "OLLAMA_FETCH_TIMEOUT"
 )
 
 func openAIChatToOllamaChat(c *gin.Context, r *dto.GeneralOpenAIRequest) (*OllamaChatRequest, error) {
@@ -286,7 +293,7 @@ func ollamaEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 }
 
 // FetchOllamaModels fetches the list of available models from Ollama server
-func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModelInfo, error) {
+func FetchOllamaModels(baseURL, apiKey string, proxyURL ...string) ([]OllamaModelInfo, error) {
 	url := fmt.Sprintf("%s/api/tags", baseURL)
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -299,14 +306,20 @@ func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModelInfo, error) {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	// 使用带超时和代理支持的客户端
-	client, err := service.NewProxyHttpClient("")
-	if err != nil {
-		// 如果代理创建失败，使用默认超时客户端
-		client = &http.Client{
-			Timeout: 30 * time.Second,
-		}
+	resolvedProxyURL := ""
+	if len(proxyURL) > 0 {
+		resolvedProxyURL = strings.TrimSpace(proxyURL[0])
 	}
+	if resolvedProxyURL == "" {
+		resolvedProxyURL = strings.TrimSpace(os.Getenv(ollamaFetchProxyEnv))
+	}
+
+	// 使用带超时和代理支持的客户端
+	client, err := service.NewProxyHttpClient(resolvedProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("创建HTTP客户端失败: %v", err)
+	}
+	client = ensureClientTimeout(client, resolveOllamaFetchTimeout())
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -330,4 +343,36 @@ func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModelInfo, error) {
 	}
 
 	return modelsResp.Models, nil
+}
+
+func resolveOllamaFetchTimeout() time.Duration {
+	if common.RelayTimeout > 0 {
+		return time.Duration(common.RelayTimeout) * time.Second
+	}
+
+	value := strings.TrimSpace(os.Getenv(ollamaFetchTimeoutEnv))
+	if value != "" {
+		if duration, err := time.ParseDuration(value); err == nil && duration > 0 {
+			return duration
+		}
+		if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+
+	return 30 * time.Second
+}
+
+func ensureClientTimeout(client *http.Client, timeout time.Duration) *http.Client {
+	if client == nil || timeout <= 0 {
+		return client
+	}
+
+	if client.Timeout == 0 {
+		clone := *client
+		clone.Timeout = timeout
+		return &clone
+	}
+
+	return client
 }

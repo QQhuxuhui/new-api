@@ -19,10 +19,10 @@ import (
 )
 
 type OpenAIModel struct {
-	ID         string         `json:"id"`
-	Object     string         `json:"object"`
-	Created    int64          `json:"created"`
-	OwnedBy    string         `json:"owned_by"`
+	ID         string `json:"id"`
+	Object     string `json:"object"`
+	Created    int64  `json:"created"`
+	OwnedBy    string `json:"owned_by"`
 	Permission []struct {
 		ID                 string `json:"id"`
 		Object             string `json:"object"`
@@ -208,7 +208,7 @@ func FetchUpstreamModels(c *gin.Context) {
 	if channel.Type == constant.ChannelTypeOllama {
 		key := strings.TrimSpace(channel.Key)
 		key = strings.Split(key, "\n")[0]
-		models, err := ollama.FetchOllamaModels(baseURL, key)
+		models, err := ollama.FetchOllamaModels(baseURL, key, channel.GetSetting().Proxy)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
