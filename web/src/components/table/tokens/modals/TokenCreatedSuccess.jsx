@@ -22,7 +22,6 @@ import {
   Modal,
   Button,
   Typography,
-  Card,
   Toast,
 } from '@douyinfe/semi-ui';
 import {
@@ -82,66 +81,92 @@ ANTHROPIC_BASE_URL=${baseURL}`;
         </div>
       }
       closeOnEsc
-      width={600}
+      width={680}
       bodyStyle={{ padding: '24px' }}
     >
+      {/* Success Header */}
       <div className='text-center mb-6'>
-        <IconTickCircle
-          size='extra-large'
-          className='text-green-500 mb-3'
-          style={{ fontSize: '48px' }}
-        />
-        <Title heading={3} className='mb-2'>
+        <div className='inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-50 mb-4'>
+          <IconTickCircle
+            size='extra-large'
+            className='text-green-500'
+            style={{ fontSize: '32px' }}
+          />
+        </div>
+        <Title heading={4} className='mb-1'>
           {t('令牌创建成功！')}
         </Title>
+        <Text type='tertiary' size='small'>
+          {t('请妥善保管您的令牌密钥，关闭后将无法再次查看')}
+        </Text>
       </div>
 
-      {/* Token Information */}
-      <Card className='mb-4'>
-        <div className='mb-3'>
-          <Text strong className='block mb-2'>
-            {t('令牌名称')}:
-          </Text>
-          <div className='flex items-center justify-between bg-gray-50 p-3 rounded'>
-            <Text>{tokenData.name}</Text>
-          </div>
+      {/* Token Name */}
+      <div className='mb-4'>
+        <Text strong className='block mb-2 text-sm'>
+          {t('令牌名称')}
+        </Text>
+        <div className='bg-gray-50 dark:bg-gray-800 px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700'>
+          <Text>{tokenData.name}</Text>
         </div>
+      </div>
 
-        <div>
-          <Text strong className='block mb-2'>
-            {t('令牌密钥')}:
-          </Text>
-          <div className='flex items-center justify-between bg-gray-50 p-3 rounded'>
-            <Text
-              code
-              copyable={{
-                onCopy: () => handleCopy(tokenKey, '令牌密钥已复制', true),
-              }}
-              className='flex-1 overflow-hidden'
-              ellipsis={{ showTooltip: true }}
-            >
-              {tokenKey}
-            </Text>
-          </div>
-        </div>
-      </Card>
-
-      {/* Environment Variables */}
-      <Card>
+      {/* Token Key - Full display with word break */}
+      <div className='mb-4'>
         <div className='flex items-center justify-between mb-2'>
-          <Text strong>{t('环境变量配置')}</Text>
+          <Text strong className='text-sm'>
+            {t('令牌密钥')}
+          </Text>
           <Button
             icon={<IconCopy />}
             size='small'
+            theme='borderless'
+            onClick={() => handleCopy(tokenKey, '令牌密钥已复制', true)}
+          >
+            {t('复制')}
+          </Button>
+        </div>
+        <div className='bg-gray-50 dark:bg-gray-800 px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700'>
+          <code
+            className='text-sm font-mono break-all select-all'
+            style={{ wordBreak: 'break-all', lineHeight: '1.6' }}
+          >
+            {tokenKey}
+          </code>
+        </div>
+      </div>
+
+      {/* Environment Variables - Scrollable code block */}
+      <div>
+        <div className='flex items-center justify-between mb-2'>
+          <Text strong className='text-sm'>
+            {t('环境变量配置')}
+          </Text>
+          <Button
+            icon={<IconCopy />}
+            size='small'
+            theme='borderless'
             onClick={() => handleCopy(envConfig, '环境变量配置已复制')}
           >
             {t('复制')}
           </Button>
         </div>
-        <pre className='bg-gray-50 p-3 rounded text-sm overflow-x-auto'>
-          <code>{envConfig}</code>
-        </pre>
-      </Card>
+        <div
+          className='bg-gray-900 dark:bg-gray-950 rounded-lg border border-gray-700 overflow-hidden'
+          style={{ maxHeight: '180px' }}
+        >
+          <pre
+            className='p-4 m-0 text-sm overflow-auto'
+            style={{
+              maxHeight: '180px',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+            }}
+          >
+            <code className='text-green-400 font-mono'>{envConfig}</code>
+          </pre>
+        </div>
+      </div>
     </Modal>
   );
 };

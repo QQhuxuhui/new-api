@@ -233,6 +233,8 @@
     "令牌分组": "Regroupement de jetons",
     "令牌分组，默认为用户的分组": "Groupe de jetons, par défaut le groupe de l'utilisateur",
     "令牌创建成功，请在列表页面点击复制获取令牌！": "Jeton créé avec succès, veuillez cliquer sur copier sur la page de liste pour obtenir le jeton !",
+    "令牌创建成功！": "Jeton créé avec succès !",
+    "请妥善保管您的令牌密钥，关闭后将无法再次查看": "Veuillez conserver votre clé de jeton en sécurité. Elle ne sera plus affichée après la fermeture.",
     "令牌名称": "Nom du jeton",
     "令牌已重置并已复制到剪贴板": "Le jeton a été réinitialisé et copié dans le presse-papiers",
     "令牌更新成功！": "Jeton mis à jour avec succès !",
