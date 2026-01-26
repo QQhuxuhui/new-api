@@ -739,6 +739,8 @@ const TopUp = () => {
               setOpenTransfer={setOpenTransfer}
               affLink={affLink}
               handleAffLinkClick={handleAffLinkClick}
+              quotaForInviter={statusState?.status?.quota_for_inviter}
+              quotaForInvitee={statusState?.status?.quota_for_invitee}
             />
           </div>
         </div>

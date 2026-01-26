@@ -93,6 +93,10 @@ func GetStatus(c *gin.Context) {
 		"price":             operation_setting.Price,
 		"stripe_unit_price": setting.StripeUnitPrice,
 
+		// 邀请奖励配置
+		"quota_for_inviter": common.QuotaForInviter,
+		"quota_for_invitee": common.QuotaForInvitee,
+
 		// 面板启用开关
 		"api_info_enabled":      cs.ApiInfoEnabled,
 		"uptime_kuma_enabled":   cs.UptimeKumaEnabled,

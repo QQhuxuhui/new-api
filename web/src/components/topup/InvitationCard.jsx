@@ -38,6 +38,8 @@ const InvitationCard = ({
   setOpenTransfer,
   affLink,
   handleAffLinkClick,
+  quotaForInviter,
+  quotaForInvitee,
 }) => {
   return (
     <Card className='!rounded-2xl shadow-sm border-0'>
@@ -202,7 +204,14 @@ const InvitationCard = ({
             <div className='flex items-start gap-2'>
               <Badge dot type='success' />
               <Text type='tertiary' className='text-sm'>
-                {t('邀请好友注册，好友充值后您可获得相应奖励')}
+                {t('邀请好友注册，您可获得')} <Text strong>{renderQuota(quotaForInviter || 0)}</Text> {t('奖励')}
+              </Text>
+            </div>
+
+            <div className='flex items-start gap-2'>
+              <Badge dot type='success' />
+              <Text type='tertiary' className='text-sm'>
+                {t('好友使用您的邀请码注册，好友可获得')} <Text strong>{renderQuota(quotaForInvitee || 0)}</Text> {t('奖励')}
               </Text>
             </div>
 
@@ -210,13 +219,6 @@ const InvitationCard = ({
               <Badge dot type='success' />
               <Text type='tertiary' className='text-sm'>
                 {t('通过划转功能将奖励额度转入到您的账户余额中')}
-              </Text>
-            </div>
-
-            <div className='flex items-start gap-2'>
-              <Badge dot type='success' />
-              <Text type='tertiary' className='text-sm'>
-                {t('邀请的好友越多，获得的奖励越多')}
               </Text>
             </div>
           </div>
