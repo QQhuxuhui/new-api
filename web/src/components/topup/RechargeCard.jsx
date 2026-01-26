@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Avatar,
   Typography,
@@ -84,6 +85,7 @@ const RechargeCard = ({
   topupInfo,
   onOpenHistory,
 }) => {
+  const navigate = useNavigate();
   const onlineFormApiRef = useRef(null);
   const redeemFormApiRef = useRef(null);
   const showAmountSkeleton = useMinimumLoadingTime(amountLoading);
@@ -116,6 +118,26 @@ const RechargeCard = ({
           {t('账单')}
         </Button>
       </div>
+
+      {/* 套餐购买引导提示 */}
+      <Banner
+        type='info'
+        icon={null}
+        className='!rounded-xl mb-4'
+        closeIcon={null}
+        description={
+          <div className='flex items-center justify-between flex-wrap gap-2'>
+            <span>{t('需要包月套餐？享受更优惠的价格和更多权益')}</span>
+            <Button
+              size='small'
+              theme='solid'
+              onClick={() => navigate('/plans')}
+            >
+              {t('查看套餐')}
+            </Button>
+          </div>
+        }
+      />
 
       <Space vertical style={{ width: '100%' }}>
         {/* 统计数据 */}
