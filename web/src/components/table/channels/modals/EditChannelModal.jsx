@@ -156,6 +156,9 @@ const EditChannelModal = (props) => {
     max_concurrent_requests_per_key: 0,
     tag: '',
     multi_key_mode: 'random',
+    // 客户端限制
+    enable_client_restriction: false,
+    allowed_clients: [],
     // 渠道额外设置的默认值
     force_format: false,
     thinking_to_content: false,
@@ -586,6 +589,17 @@ const EditChannelModal = (props) => {
           (typeof data.base_url === 'string' && data.base_url.trim() === ''))
       ) {
         data.base_url = 'https://ark.cn-beijing.volces.com';
+      }
+
+      // 处理客户端限制字段
+      if (data.allowed_clients) {
+        try {
+          data.allowed_clients = JSON.parse(data.allowed_clients);
+        } catch (error) {
+          data.allowed_clients = [];
+        }
+      } else {
+        data.allowed_clients = [];
       }
 
       setInputs(data);
@@ -1127,6 +1141,13 @@ const EditChannelModal = (props) => {
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
     localInputs.models = localInputs.models.join(',');
     localInputs.group = (localInputs.groups || []).join(',');
+
+    // 处理客户端限制字段
+    if (Array.isArray(localInputs.allowed_clients) && localInputs.allowed_clients.length > 0) {
+      localInputs.allowed_clients = JSON.stringify(localInputs.allowed_clients);
+    } else {
+      localInputs.allowed_clients = '';
+    }
 
     let mode = 'single';
     if (batch) {
@@ -2777,6 +2798,50 @@ const EditChannelModal = (props) => {
                           </Typography.Text>
                         )}
                       </Card>
+                    )}
+
+                    <Form.Switch
+                      field='enable_client_restriction'
+                      label={t('启用客户端限制')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleInputChange('enable_client_restriction', value)
+                      }
+                      extraText={t(
+                        '开启后，仅允许指定客户端访问此渠道',
+                      )}
+                    />
+
+                    {inputs.enable_client_restriction && (
+                      <Form.Select
+                        field='allowed_clients'
+                        label={t('允许的客户端')}
+                        placeholder={t('选择或输入允许的客户端标识')}
+                        multiple
+                        filter
+                        allowCreate
+                        onChange={(value) =>
+                          handleInputChange('allowed_clients', value)
+                        }
+                        style={{ width: '100%' }}
+                        extraText={t(
+                          '选择预设客户端或输入自定义 User-Agent 标识（包含匹配）',
+                        )}
+                      >
+                        <Form.Select.Option value='claude-cli'>
+                          Claude Code (claude-cli)
+                        </Form.Select.Option>
+                        <Form.Select.Option value='cursor'>
+                          Cursor
+                        </Form.Select.Option>
+                        <Form.Select.Option value='cline'>
+                          Cline
+                        </Form.Select.Option>
+                        <Form.Select.Option value='continue'>
+                          Continue
+                        </Form.Select.Option>
+                      </Form.Select>
                     )}
 
                     <Form.Switch

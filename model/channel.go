@@ -67,6 +67,10 @@ type Channel struct {
 
 	ModelRatio *string `json:"model_ratio" gorm:"type:text"` // 渠道模型倍率，JSON格式：{"model_name": ratio}，用于控制渠道下指定模型的使用倍率
 
+	// 客户端限制
+	EnableClientRestriction *bool   `json:"enable_client_restriction" gorm:"default:false"` // 是否启用客户端限制
+	AllowedClients          *string `json:"allowed_clients" gorm:"type:text"`               // 允许的客户端列表，JSON数组格式
+
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
 }

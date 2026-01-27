@@ -1111,6 +1111,19 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
+	// 检查客户端限制
+	if channel.EnableClientRestriction != nil && *channel.EnableClientRestriction {
+		userAgent := c.GetHeader("User-Agent")
+		if !isClientAllowed(userAgent, channel.AllowedClients) {
+			return types.NewErrorWithStatusCode(
+				errors.New("仅允许在客户端内调用"),
+				types.ErrorCodeAccessDenied,
+				http.StatusForbidden,
+				types.ErrOptionWithSkipRetry(),
+			)
+		}
+	}
+
 	key, index, newAPIError := channel.GetNextEnabledKey()
 	if newAPIError != nil {
 		return newAPIError
