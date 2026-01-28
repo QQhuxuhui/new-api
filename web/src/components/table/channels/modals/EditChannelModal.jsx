@@ -594,8 +594,17 @@ const EditChannelModal = (props) => {
       // 处理客户端限制字段
       if (data.allowed_clients) {
         try {
-          data.allowed_clients = JSON.parse(data.allowed_clients);
+          const parsed = JSON.parse(data.allowed_clients);
+          // 确保是数组且过滤空字符串
+          if (Array.isArray(parsed)) {
+            data.allowed_clients = parsed.filter(item => typeof item === 'string' && item.trim() !== '');
+          } else {
+            console.error('allowed_clients 不是数组格式');
+            data.allowed_clients = [];
+          }
         } catch (error) {
+          console.error('解析 allowed_clients 失败:', error);
+          // 解析失败时清空，但保留 enable_client_restriction 状态让用户知道需要重新配置
           data.allowed_clients = [];
         }
       } else {
@@ -1143,8 +1152,16 @@ const EditChannelModal = (props) => {
     localInputs.group = (localInputs.groups || []).join(',');
 
     // 处理客户端限制字段
-    if (Array.isArray(localInputs.allowed_clients) && localInputs.allowed_clients.length > 0) {
-      localInputs.allowed_clients = JSON.stringify(localInputs.allowed_clients);
+    if (Array.isArray(localInputs.allowed_clients)) {
+      // 过滤空字符串并 trim
+      const validClients = localInputs.allowed_clients
+        .filter(item => typeof item === 'string' && item.trim() !== '')
+        .map(item => item.trim());
+      if (validClients.length > 0) {
+        localInputs.allowed_clients = JSON.stringify(validClients);
+      } else {
+        localInputs.allowed_clients = '';
+      }
     } else {
       localInputs.allowed_clients = '';
     }
