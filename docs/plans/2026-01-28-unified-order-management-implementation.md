@@ -696,10 +696,14 @@ const renderPlanExpandedRow = (record) => (
         <Text strong style={{ display: 'block', marginBottom: '8px' }}>{t('订单信息')}</Text>
         <div>订单类型: {t('套餐订单')}</div>
         <div>套餐名称: {record.plan_name || '-'}</div>
+        <div>套餐额度: {record.plan_quota ? `$${(record.plan_quota / 500000).toFixed(2)}` : '-'}</div>
+        <div>有效期: {record.plan_validity_days ? `${record.plan_validity_days} 天` : '-'}</div>
         <div>原价: ¥{record.original_price?.toFixed(2) || '0.00'}</div>
         <div>支付单号: {record.payment_trade_no || '-'}</div>
         <div>支付时间: {record.paid_at ? timestamp2string(record.paid_at / 1000) : '-'}</div>
+        <div>交付状态: {record.status === 'delivered' ? t('已交付') : (record.status === 'paid' ? t('待交付') : '-')}</div>
         {record.delivered_at && <div>发放时间: {timestamp2string(record.delivered_at / 1000)}</div>}
+        <div>用户套餐ID: {record.user_plan_id || '-'}</div>
       </div>
     </div>
   </div>
@@ -1073,7 +1077,7 @@ const planColumns = [
     fixed: 'right',
     render: (_, record) => {
       const actions = [];
-      // Manual complete button - for paid orders without user_plan
+      // Manual complete button - for paid orders without user_plan (not yet delivered)
       if (record.status === 'paid' && !record.user_plan_id) {
         actions.push(
           <Button
@@ -1085,8 +1089,8 @@ const planColumns = [
           />
         );
       }
-      // Cancel button - for pending orders
-      if (record.status === 'pending') {
+      // Cancel button - for pending or paid (not delivered) orders
+      if (record.status === 'pending' || (record.status === 'paid' && !record.user_plan_id)) {
         actions.push(
           <Popconfirm
             key='cancel'
@@ -1098,8 +1102,8 @@ const planColumns = [
           </Popconfirm>
         );
       }
-      // Delete button - for expired or cancelled orders
-      if (record.status === 'expired' || record.status === 'cancelled') {
+      // Delete button - for delivered, expired or cancelled orders
+      if (record.status === 'delivered' || record.status === 'expired' || record.status === 'cancelled') {
         actions.push(
           <Popconfirm
             key='delete'
