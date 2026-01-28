@@ -22,7 +22,7 @@
 
 #### 新增管理员充值订单 API
 
-**端点：** `GET /api/admin/topup-orders`
+**端点：** `GET /api/user/topup-orders`（管理员权限）
 
 **请求参数：**
 
@@ -142,7 +142,7 @@
 |------|------|----------|
 | 后端模型 | `model/topup_order.go` | 新增 `GetAllTopupOrders` 函数 |
 | 后端控制器 | `controller/admin_topup_order.go` | 新建管理员充值订单控制器 |
-| 后端路由 | `router/api-router.go` | 注册 `/api/admin/topup-orders` |
+| 后端路由 | `router/api-router.go` | 注册 `/api/user/topup-orders`（管理员权限） |
 | 前端页面 | `web/src/pages/AdminOrders/index.jsx` | 增加 Tab、可展开行、筛选 |
 | 前端菜单 | 菜单配置文件 | 重命名为"订单管理" |
 

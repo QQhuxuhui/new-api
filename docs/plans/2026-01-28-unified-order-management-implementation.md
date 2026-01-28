@@ -346,14 +346,14 @@ git commit -m "feat(router): add admin topup order routes"
 
 ---
 
-## Task 4: 前端 - 修改 AdminOrders 页面添加 Tab 切换
+## Task 4: 前端 - 修改 AdminOrders 页面添加 Tab 切换和完整筛选
 
 **Files:**
 - Modify: `web/src/pages/AdminOrders/index.jsx`
 
-**Step 1: 添加 Tab 状态和充值订单相关状态**
+**Step 1: 添加 Tab 状态、充值订单状态和完整筛选状态**
 
-在组件顶部的 state 声明区域添加：
+在组件顶部的 state 声明区域，替换原有的 filters 状态：
 
 ```jsx
 // Order type tab
@@ -370,12 +370,68 @@ const [topupLoading, setTopupLoading] = useState(false);
 
 // Expanded rows
 const [expandedRowKeys, setExpandedRowKeys] = useState([]);
+
+// Complete filters (replace original filters)
+const [filters, setFilters] = useState({
+  status: '',
+  userId: '',
+  username: '',
+  email: '',
+  orderNo: '',
+  paymentMethod: '',
+  minAmount: '',
+  maxAmount: '',
+  startTime: null,
+  endTime: null,
+});
 ```
 
-**Step 2: 添加加载充值订单的函数**
+**Step 2: 更新加载套餐订单的函数，支持完整筛选**
 
 ```jsx
-// Load topup orders
+// Load orders with complete filters
+const loadOrders = async (page = 1) => {
+  setLoading(true);
+  try {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pagination.pageSize.toString(),
+    });
+
+    if (filters.status) params.append('status', filters.status);
+    if (filters.userId) params.append('user_id', filters.userId);
+    if (filters.username) params.append('username', filters.username);
+    if (filters.email) params.append('email', filters.email);
+    if (filters.orderNo) params.append('order_no', filters.orderNo);
+    if (filters.paymentMethod) params.append('payment_method', filters.paymentMethod);
+    if (filters.minAmount) params.append('min_amount', filters.minAmount);
+    if (filters.maxAmount) params.append('max_amount', filters.maxAmount);
+    if (filters.startTime) params.append('start_time', filters.startTime.valueOf().toString());
+    if (filters.endTime) params.append('end_time', filters.endTime.valueOf().toString());
+
+    const res = await API.get(`/api/user/plan-orders?${params.toString()}`);
+    const { success, message, data } = res.data;
+    if (success && data) {
+      setOrders(data.orders || []);
+      setPagination({
+        ...pagination,
+        currentPage: data.page || page,
+        total: data.total || 0,
+      });
+    } else {
+      showError(message || t('加载失败'));
+    }
+  } catch (e) {
+    showError(e.message || t('网络错误'));
+  }
+  setLoading(false);
+};
+```
+
+**Step 3: 添加加载充值订单的函数，支持完整筛选**
+
+```jsx
+// Load topup orders with complete filters
 const loadTopupOrders = async (page = 1) => {
   setTopupLoading(true);
   try {
@@ -386,7 +442,14 @@ const loadTopupOrders = async (page = 1) => {
 
     if (filters.status) params.append('status', filters.status);
     if (filters.userId) params.append('user_id', filters.userId);
+    if (filters.username) params.append('username', filters.username);
+    if (filters.email) params.append('email', filters.email);
     if (filters.orderNo) params.append('order_no', filters.orderNo);
+    if (filters.paymentMethod) params.append('payment_method', filters.paymentMethod);
+    if (filters.minAmount) params.append('min_amount', filters.minAmount);
+    if (filters.maxAmount) params.append('max_amount', filters.maxAmount);
+    if (filters.startTime) params.append('start_time', filters.startTime.valueOf().toString());
+    if (filters.endTime) params.append('end_time', filters.endTime.valueOf().toString());
 
     const res = await API.get(`/api/user/topup-orders?${params.toString()}`);
     const { success, message, data } = res.data;
@@ -407,7 +470,7 @@ const loadTopupOrders = async (page = 1) => {
 };
 ```
 
-**Step 3: 添加 Tab 切换处理**
+**Step 4: 添加 Tab 切换处理和搜索处理**
 
 ```jsx
 // Handle tab change
@@ -418,18 +481,201 @@ const handleTabChange = (key) => {
     loadTopupOrders(1);
   }
 };
+
+// Handle search - search current tab
+const handleSearch = () => {
+  if (orderType === 'plan') {
+    loadOrders(1);
+  } else {
+    loadTopupOrders(1);
+  }
+};
+
+// Handle reset filters
+const handleResetFilters = () => {
+  setFilters({
+    status: '',
+    userId: '',
+    username: '',
+    email: '',
+    orderNo: '',
+    paymentMethod: '',
+    minAmount: '',
+    maxAmount: '',
+    startTime: null,
+    endTime: null,
+  });
+  setTimeout(() => {
+    if (orderType === 'plan') {
+      loadOrders(1);
+    } else {
+      loadTopupOrders(1);
+    }
+  }, 100);
+};
 ```
 
-**Step 4: 提交**
+**Step 5: 提交**
 
 ```bash
 git add web/src/pages/AdminOrders/index.jsx
-git commit -m "feat(frontend): add tab state and topup orders loading"
+git commit -m "feat(frontend): add tab state and complete filter support"
 ```
 
 ---
 
-## Task 5: 前端 - 添加可展开行配置
+## Task 5: 前端 - 添加完整筛选 UI 组件
+
+**Files:**
+- Modify: `web/src/pages/AdminOrders/index.jsx`
+
+**Step 1: 导入 DatePicker 组件**
+
+在文件顶部的 import 中添加 `DatePicker`：
+
+```jsx
+import {
+  Card,
+  Table,
+  Tag,
+  Button,
+  Typography,
+  Input,
+  Select,
+  Space,
+  Modal,
+  Toast,
+  Spin,
+  Empty,
+  Descriptions,
+  Popconfirm,
+  Tabs,
+  DatePicker,  // 添加这行
+} from '@douyinfe/semi-ui';
+```
+
+**Step 2: 替换筛选区域 UI**
+
+将原有的筛选区域替换为完整的筛选 UI：
+
+```jsx
+{/* Filters */}
+<div className='mb-6'>
+  <Space spacing='medium' wrap>
+    {/* 第一行：基础筛选 */}
+    <Select
+      placeholder={t('全部状态')}
+      style={{ width: 120 }}
+      value={filters.status}
+      onChange={(value) => setFilters({ ...filters, status: value })}
+      showClear
+    >
+      <Select.Option value='pending'>{t('待支付')}</Select.Option>
+      <Select.Option value='paid'>{t('已支付')}</Select.Option>
+      {orderType === 'plan' && <Select.Option value='delivered'>{t('已完成')}</Select.Option>}
+      <Select.Option value='expired'>{t('已过期')}</Select.Option>
+      <Select.Option value='cancelled'>{t('已取消')}</Select.Option>
+    </Select>
+
+    <Select
+      placeholder={t('支付方式')}
+      style={{ width: 120 }}
+      value={filters.paymentMethod}
+      onChange={(value) => setFilters({ ...filters, paymentMethod: value })}
+      showClear
+    >
+      <Select.Option value='epay'>{t('易支付')}</Select.Option>
+      <Select.Option value='stripe'>{t('Stripe')}</Select.Option>
+      <Select.Option value='creem'>{t('Creem')}</Select.Option>
+    </Select>
+
+    <DatePicker
+      type='dateRange'
+      placeholder={[t('开始日期'), t('结束日期')]}
+      style={{ width: 260 }}
+      value={filters.startTime && filters.endTime ? [filters.startTime, filters.endTime] : null}
+      onChange={(dates) => {
+        if (dates && dates.length === 2) {
+          setFilters({ ...filters, startTime: dates[0], endTime: dates[1] });
+        } else {
+          setFilters({ ...filters, startTime: null, endTime: null });
+        }
+      }}
+    />
+  </Space>
+
+  <Space spacing='medium' wrap style={{ marginTop: 12 }}>
+    {/* 第二行：金额和用户搜索 */}
+    <Input
+      placeholder={t('最小金额')}
+      style={{ width: 100 }}
+      type='number'
+      value={filters.minAmount}
+      onChange={(value) => setFilters({ ...filters, minAmount: value })}
+    />
+    <span>-</span>
+    <Input
+      placeholder={t('最大金额')}
+      style={{ width: 100 }}
+      type='number'
+      value={filters.maxAmount}
+      onChange={(value) => setFilters({ ...filters, maxAmount: value })}
+    />
+
+    <Input
+      placeholder={t('用户ID')}
+      style={{ width: 100 }}
+      value={filters.userId}
+      onChange={(value) => setFilters({ ...filters, userId: value })}
+    />
+
+    <Input
+      placeholder={t('用户名')}
+      style={{ width: 120 }}
+      value={filters.username}
+      onChange={(value) => setFilters({ ...filters, username: value })}
+    />
+
+    <Input
+      placeholder={t('邮箱')}
+      style={{ width: 150 }}
+      value={filters.email}
+      onChange={(value) => setFilters({ ...filters, email: value })}
+    />
+
+    <Input
+      placeholder={t('订单号')}
+      style={{ width: 180 }}
+      value={filters.orderNo}
+      onChange={(value) => setFilters({ ...filters, orderNo: value })}
+    />
+
+    <Button
+      theme='solid'
+      type='primary'
+      icon={<IconSearch />}
+      onClick={handleSearch}
+    >
+      {t('搜索')}
+    </Button>
+
+    <Button onClick={handleResetFilters}>
+      {t('重置')}
+    </Button>
+  </Space>
+</div>
+```
+
+**Step 3: 提交**
+
+```bash
+git add web/src/pages/AdminOrders/index.jsx
+git commit -m "feat(frontend): add complete filter UI components"
+```
+
+---
+
+## Task 6: 前端 - 添加可展开行配置
 
 **Files:**
 - Modify: `web/src/pages/AdminOrders/index.jsx`
@@ -501,7 +747,7 @@ git commit -m "feat(frontend): add expandable row for order details"
 
 ---
 
-## Task 6: 前端 - 添加充值订单表格列配置
+## Task 7: 前端 - 添加充值订单表格列配置
 
 **Files:**
 - Modify: `web/src/pages/AdminOrders/index.jsx`
@@ -645,7 +891,7 @@ git commit -m "feat(frontend): add topup order columns and actions"
 
 ---
 
-## Task 7: 前端 - 更新页面布局添加 Tabs
+## Task 8: 前端 - 更新页面布局添加 Tabs
 
 **Files:**
 - Modify: `web/src/pages/AdminOrders/index.jsx`
@@ -757,7 +1003,7 @@ git commit -m "feat(frontend): add Tabs layout for order types"
 
 ---
 
-## Task 8: 前端 - 简化套餐订单表格列（移除详情按钮）
+## Task 9: 前端 - 简化套餐订单表格列（移除详情按钮）
 
 **Files:**
 - Modify: `web/src/pages/AdminOrders/index.jsx`
@@ -888,7 +1134,7 @@ git commit -m "refactor(frontend): simplify plan order columns, remove detail bu
 
 ---
 
-## Task 9: 前端 - 更新菜单名称
+## Task 10: 前端 - 更新菜单名称
 
 **Files:**
 - Modify: `web/src/components/layout/SiderBar.jsx:190`
@@ -913,7 +1159,7 @@ git commit -m "feat(frontend): rename menu from '套餐订单' to '订单管理'
 
 ---
 
-## Task 10: 测试验证
+## Task 11: 测试验证
 
 **Step 1: 启动后端服务**
 
@@ -950,6 +1196,19 @@ git commit -m "feat: unified order management page complete"
 |------|------|------|
 | `model/topup_order.go` | 修改 | 添加 GetAllTopupOrders 函数 |
 | `controller/admin_topup_order.go` | 新建 | 管理员充值订单控制器 |
-| `router/api-router.go` | 修改 | 注册充值订单管理路由 |
-| `web/src/pages/AdminOrders/index.jsx` | 修改 | 添加 Tab、可展开行、充值订单支持 |
+| `router/api-router.go` | 修改 | 注册充值订单管理路由 `/api/user/topup-orders` |
+| `web/src/pages/AdminOrders/index.jsx` | 修改 | 添加 Tab、可展开行、完整筛选功能（状态、支付方式、时间范围、金额范围、用户搜索） |
 | `web/src/components/layout/SiderBar.jsx` | 修改 | 菜单名称改为"订单管理" |
+
+## 筛选功能清单
+
+| 筛选项 | 套餐订单 | 充值订单 |
+|--------|----------|----------|
+| 订单状态 | ✅ | ✅ |
+| 支付方式 | ✅ | ✅ |
+| 时间范围 | ✅ | ✅ |
+| 金额范围 | ✅ | ✅ |
+| 用户ID | ✅ | ✅ |
+| 用户名 | ✅ | ✅ |
+| 邮箱 | ✅ | ✅ |
+| 订单号 | ✅ | ✅ |
