@@ -633,6 +633,27 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		}
 	}
 
+	// 校验客户端限制配置
+	if channel.EnableClientRestriction != nil && *channel.EnableClientRestriction {
+		if channel.AllowedClients == nil || *channel.AllowedClients == "" {
+			return fmt.Errorf("启用客户端限制时，必须配置允许的客户端列表")
+		}
+		var allowedClients []string
+		if err := json.Unmarshal([]byte(*channel.AllowedClients), &allowedClients); err != nil {
+			return fmt.Errorf("允许的客户端列表格式错误，必须是 JSON 数组")
+		}
+		// 过滤空字符串后检查是否有有效配置
+		validCount := 0
+		for _, client := range allowedClients {
+			if strings.TrimSpace(client) != "" {
+				validCount++
+			}
+		}
+		if validCount == 0 {
+			return fmt.Errorf("启用客户端限制时，必须至少配置一个有效的客户端标识")
+		}
+	}
+
 	return nil
 }
 
