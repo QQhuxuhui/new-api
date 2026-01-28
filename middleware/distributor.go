@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -1121,6 +1123,38 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 				http.StatusForbidden,
 				types.ErrOptionWithSkipRetry(),
 			)
+		}
+
+		// 对 Claude Code 客户端进行额外的 User ID 格式验证
+		// 仅对 JSON POST 请求进行验证，跳过 GET 和 multipart/form-data 请求
+		if isClaudeCodeClient(userAgent) && c.Request.Method == http.MethodPost {
+			contentType := strings.ToLower(c.GetHeader("Content-Type"))
+			if strings.HasPrefix(contentType, "application/json") {
+				requestBody, err := common.GetRequestBody(c)
+				if err != nil {
+					// fail-closed: 读取请求体失败时拒绝请求
+					return types.NewErrorWithStatusCode(
+						errors.New("读取请求体失败"),
+						types.ErrorCodeReadRequestBodyFailed,
+						http.StatusBadRequest,
+						types.ErrOptionWithSkipRetry(),
+					)
+				}
+				// 恢复请求体，避免后续处理读到空 body
+				c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+
+				userID := extractUserIDFromBody(requestBody)
+				// 仅当 metadata.user_id 存在时才验证格式
+				// 某些请求可能不包含 metadata 字段
+				if userID != "" && !isValidClaudeCodeUserID(userID) {
+					return types.NewErrorWithStatusCode(
+						errors.New("无效的 User ID 格式"),
+						types.ErrorCodeAccessDenied,
+						http.StatusForbidden,
+						types.ErrOptionWithSkipRetry(),
+					)
+				}
+			}
 		}
 	}
 
