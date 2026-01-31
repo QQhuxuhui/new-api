@@ -1344,8 +1344,13 @@ func GetEstimatedActivationTime(userPlanId int) (int64, error) {
 
 	// Add estimated duration for each plan in front
 	for _, plan := range queuePlans {
-		if plan.Plan != nil && plan.Plan.ValidityDays > 0 {
-			estimatedTime = estimatedTime.Add(time.Duration(plan.Plan.ValidityDays) * 24 * time.Hour)
+		// Prefer snapshot field (works even when Plan is deleted), fallback to Plan association.
+		validityDays := plan.PlanValidityDays
+		if validityDays == 0 && plan.Plan != nil {
+			validityDays = plan.Plan.ValidityDays
+		}
+		if validityDays > 0 {
+			estimatedTime = estimatedTime.Add(time.Duration(validityDays) * 24 * time.Hour)
 		} else {
 			// Default estimate for plans without validity
 			estimatedTime = estimatedTime.Add(30 * 24 * time.Hour)

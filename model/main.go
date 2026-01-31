@@ -313,7 +313,7 @@ func migrateUserPlanSnapshots() error {
 	// 1. Records never migrated (plan_name empty)
 	// 2. Records from Phase 1 missing Phase 2 routing fields (plan_type empty)
 	result := DB.Preload("Plan").
-		Where("plan_name = ? OR plan_name IS NULL OR plan_type = ? OR plan_type IS NULL OR plan_channel_groups = ? OR plan_channel_groups IS NULL",
+		Where("plan_name = ? OR plan_name IS NULL OR plan_type = ? OR plan_type IS NULL OR plan_channel_groups = ? OR plan_channel_groups IS NULL OR (plan_validity_days = 0 AND plan_id IS NOT NULL)",
 			"", "", "").
 		FindInBatches(&[]UserPlan{}, batchSize, func(tx *gorm.DB, batch int) error {
 			var userPlans []UserPlan
@@ -334,6 +334,9 @@ func migrateUserPlanSnapshots() error {
 					up.PlanChannelGroups = up.Plan.ChannelGroups // Already JSON string
 					up.PlanRateLimitRules = up.Plan.RateLimitRules
 					up.PlanDailyQuotaLimit = up.Plan.DailyQuotaLimit
+					if up.PlanValidityDays == 0 {
+						up.PlanValidityDays = up.Plan.ValidityDays
+					}
 
 					// Update all snapshot fields
 					if err := DB.Model(up).Select(
@@ -346,6 +349,7 @@ func migrateUserPlanSnapshots() error {
 						"plan_channel_groups",
 						"plan_rate_limit_rules",
 						"plan_daily_quota_limit",
+						"plan_validity_days",
 					).Updates(up).Error; err != nil {
 						common.SysLog("failed to migrate user plan " + fmt.Sprint(up.Id) + ": " + err.Error())
 						continue
