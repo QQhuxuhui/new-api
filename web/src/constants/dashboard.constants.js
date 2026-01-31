@@ -43,6 +43,16 @@ export const TIME_OPTIONS = [
   { label: '周', value: 'week' },
 ];
 
+// ========== 快捷日期预设 ==========
+export const QUICK_DATE_PRESETS = [
+  { key: 'today', label: '今天', days: 0, defaultGranularity: 'hour' },
+  { key: 'yesterday', label: '昨天', days: -1, defaultGranularity: 'hour' },
+  { key: 'last3days', label: '近3天', days: -2, defaultGranularity: 'day' },
+  { key: 'last7days', label: '近7天', days: -6, defaultGranularity: 'day' },
+  { key: 'last30days', label: '近30天', days: -29, defaultGranularity: 'day' },
+  { key: 'thisMonth', label: '本月', type: 'month', defaultGranularity: 'day' },
+];
+
 export const DEFAULT_TIME_INTERVALS = {
   hour: { seconds: 3600, minutes: 60 },
   day: { seconds: 86400, minutes: 1440 },

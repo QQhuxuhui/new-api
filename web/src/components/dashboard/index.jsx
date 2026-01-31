@@ -24,6 +24,7 @@ import { StatusContext } from '../../context/Status';
 
 import DashboardHeader from './DashboardHeader';
 import StatsCards from './StatsCards';
+import QuickFilterBar from './QuickFilterBar';
 import ChartsPanel from './ChartsPanel';
 import ApiInfoPanel from './ApiInfoPanel';
 import AnnouncementsPanel from './AnnouncementsPanel';
@@ -169,6 +170,21 @@ const Dashboard = () => {
         subscriptionLoading={dashboardData.subscriptionLoading}
         subscriptionError={dashboardData.subscriptionError}
         quotaStatus={dashboardData.quotaStatus}
+      />
+
+      <QuickFilterBar
+        activePreset={dashboardData.activePreset}
+        inputs={dashboardData.inputs}
+        dataExportDefaultTime={dashboardData.dataExportDefaultTime}
+        isAdminUser={dashboardData.isAdminUser}
+        isMobile={dashboardData.isMobile}
+        onPresetChange={dashboardData.handlePresetChange}
+        onDateRangeChange={dashboardData.handleDateRangeChange}
+        onGranularityChange={dashboardData.handleGranularityChange}
+        onUsernameChange={dashboardData.handleUsernameChange}
+        onSearch={handleSearchConfirm}
+        loading={dashboardData.loading}
+        t={dashboardData.t}
       />
 
       {/* API信息和图表面板 */}

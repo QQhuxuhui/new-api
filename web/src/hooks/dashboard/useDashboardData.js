@@ -22,7 +22,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { API, isAdmin, showError, timestamp2string } from '../../helpers';
 import { getDefaultTime, getInitialTimestamp } from '../../helpers/dashboard';
-import { TIME_OPTIONS } from '../../constants/dashboard.constants';
+import { TIME_OPTIONS, QUICK_DATE_PRESETS } from '../../constants/dashboard.constants';
 import { useIsMobile } from '../common/useIsMobile';
 import { useMinimumLoadingTime } from '../common/useMinimumLoadingTime';
 
@@ -36,6 +36,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [loading, setLoading] = useState(false);
   const [greetingVisible, setGreetingVisible] = useState(false);
   const [searchModalVisible, setSearchModalVisible] = useState(false);
+  const [activePreset, setActivePreset] = useState(null);
   const showLoading = useMinimumLoadingTime(loading);
 
   // ========== 输入状态 ==========
@@ -157,6 +158,69 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   const handleCloseModal = useCallback(() => {
     setSearchModalVisible(false);
+  }, []);
+
+  // ========== 快捷筛选处理函数 ==========
+  const handlePresetChange = useCallback((presetKey) => {
+    const preset = QUICK_DATE_PRESETS.find((p) => p.key === presetKey);
+    if (!preset) return;
+
+    const now = new Date();
+    let startDate, endDate;
+
+    if (preset.type === 'month') {
+      // 本月: 从本月1号到现在
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date(now.getTime() + 3600 * 1000); // 当前时间 + 1小时
+    } else if (preset.days === 0) {
+      // 今天: 从今天0点到现在
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      endDate = new Date(now.getTime() + 3600 * 1000);
+    } else if (preset.days === -1) {
+      // 昨天: 从昨天0点到昨天23:59:59
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    } else {
+      // 近N天: 从N天前0点到现在
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + preset.days);
+      endDate = new Date(now.getTime() + 3600 * 1000);
+    }
+
+    setActivePreset(presetKey);
+    setInputs((prev) => ({
+      ...prev,
+      start_timestamp: timestamp2string(startDate.getTime() / 1000),
+      end_timestamp: timestamp2string(endDate.getTime() / 1000),
+    }));
+    setDataExportDefaultTime(preset.defaultGranularity);
+    localStorage.setItem('data_export_default_time', preset.defaultGranularity);
+  }, []);
+
+  const handleDateRangeChange = useCallback((startValue, endValue) => {
+    setActivePreset(null); // 清除预设选中状态
+    setInputs((prev) => ({
+      ...prev,
+      start_timestamp: startValue,
+      end_timestamp: endValue,
+    }));
+
+    // 自动调整时间粒度
+    if (startValue && endValue) {
+      const diffMs = Date.parse(endValue) - Date.parse(startValue);
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+      const newGranularity = diffDays <= 2 ? 'hour' : 'day';
+      setDataExportDefaultTime(newGranularity);
+      localStorage.setItem('data_export_default_time', newGranularity);
+    }
+  }, []);
+
+  const handleGranularityChange = useCallback((value) => {
+    setDataExportDefaultTime(value);
+    localStorage.setItem('data_export_default_time', value);
+  }, []);
+
+  const handleUsernameChange = useCallback((value) => {
+    setInputs((prev) => ({ ...prev, username: value }));
   }, []);
 
   // ========== API 调用函数 ==========
@@ -298,6 +362,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     loading: showLoading,
     greetingVisible,
     searchModalVisible,
+    activePreset,
 
     // 输入状态
     inputs,
@@ -352,6 +417,10 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     handleInputChange,
     showSearchModal,
     handleCloseModal,
+    handlePresetChange,
+    handleDateRangeChange,
+    handleGranularityChange,
+    handleUsernameChange,
     loadQuotaData,
     loadUptimeData,
     getUserData,
