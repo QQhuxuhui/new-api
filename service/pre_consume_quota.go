@@ -18,6 +18,28 @@ func ReturnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
 	if relayInfo.FinalPreConsumedQuota != 0 {
 		logger.LogInfo(c, fmt.Sprintf("用户 %d 请求失败, 返还预扣费额度 %s (计费来源: %s)", relayInfo.UserId, logger.FormatQuota(relayInfo.FinalPreConsumedQuota), relayInfo.BillingSource))
 
+		// Mixed billing: return user-balance remainder (if deducted) and token quota (if deducted).
+		if relayInfo.BillingSource == BillingSourcePlanAndUserBalance {
+			// Return wallet part.
+			if relayInfo.UserBalancePreConsumedQuota > 0 {
+				gopool.Go(func() {
+					if err := model.IncreaseUserQuota(relayInfo.UserId, relayInfo.UserBalancePreConsumedQuota, false); err != nil {
+						common.SysLog("error return pre-consumed user quota (mixed): " + err.Error())
+					}
+				})
+			}
+
+			// Return token part (token was pre-consumed for the whole request in plan/mixed billing).
+			if !relayInfo.IsPlayground && relayInfo.FinalPreConsumedQuota > 0 {
+				gopool.Go(func() {
+					if err := model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, relayInfo.FinalPreConsumedQuota); err != nil {
+						common.SysLog("error return pre-consumed token quota (mixed): " + err.Error())
+					}
+				})
+			}
+			return
+		}
+
 		// For plan billing: Only return token quota, NOT plan/user balance
 		// Because in plan billing path, we only pre-consumed token quota, not plan or user balance
 		if relayInfo.BillingSource == BillingSourcePlan {
@@ -67,6 +89,9 @@ func ReturnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
 // Sets relayInfo.BillingSource to indicate the quota source.
 func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
 	requiredQuota := int64(preConsumedQuota)
+	// Reset per-request mixed-billing fields (relayInfo can be reused during retries/failover).
+	relayInfo.UserBalancePreConsumedQuota = 0
+	relayInfo.PlanPreConsumeQuota = 0
 
 	// Priority 1: Check Daily Pool
 	dailyPoolRemaining, err := model.GetDailyPoolRemaining(relayInfo.UserId)
@@ -90,39 +115,93 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 
 	// Priority 2: Check Plan Quota
 	if relayInfo.UserPlanId > 0 {
-		// Check plan quota sufficiency
-		planQuotaOK, planErr := checkPlanQuotaSufficient(relayInfo.UserPlanId, requiredQuota)
-		if planErr == nil && planQuotaOK {
-			// Also check daily quota limit before using plan
-			dailyQuotaErr := CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, requiredQuota)
-			if dailyQuotaErr != nil {
-				// Daily quota exceeded - fall back to user balance or return error
-				logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 每日额度不足: %v, 回退到用户余额", relayInfo.UserId, relayInfo.UserPlanId, dailyQuotaErr))
-				// Continue to user balance fallback
-			} else {
-				// Plan quota sufficient - use plan billing
-				relayInfo.BillingSource = BillingSourcePlan
-				logger.LogInfo(c, fmt.Sprintf("用户 %d 使用套餐 %d 额度, 需要: %s", relayInfo.UserId, relayInfo.UserPlanId, logger.FormatQuota(preConsumedQuota)))
+		userPlan, planErr := model.GetUserPlanById(relayInfo.UserPlanId)
+		if planErr != nil {
+			logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐额度检查失败: %v, 回退到用户余额", relayInfo.UserId, planErr))
+		} else if userPlan == nil || !userPlan.IsValid() {
+			logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 不可用, 回退到用户余额", relayInfo.UserId, relayInfo.UserPlanId))
+		} else {
+			// Plan is valid; decide whether to use it fully or split with wallet.
+			planAvailable := userPlan.Quota
+			if planAvailable >= requiredQuota {
+				// Also check daily quota limit before using plan
+				dailyQuotaErr := CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, requiredQuota)
+				if dailyQuotaErr != nil {
+					logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 每日额度不足: %v, 回退到用户余额", relayInfo.UserId, relayInfo.UserPlanId, dailyQuotaErr))
+					// Continue to user balance fallback
+				} else {
+					// Plan quota sufficient - use plan billing
+					relayInfo.BillingSource = BillingSourcePlan
+					logger.LogInfo(c, fmt.Sprintf("用户 %d 使用套餐 %d 额度, 需要: %s", relayInfo.UserId, relayInfo.UserPlanId, logger.FormatQuota(preConsumedQuota)))
 
-				// For plan billing, SKIP user balance check and deduction entirely
-				// Only pre-consume from token quota (if not unlimited/playground)
-				if !relayInfo.IsPlayground && !relayInfo.TokenUnlimited {
-					err := PreConsumeTokenQuota(relayInfo, preConsumedQuota)
-					if err != nil {
-						return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+					// For plan billing, SKIP user balance check and deduction entirely
+					// Only pre-consume from token quota (if not unlimited/playground)
+					if !relayInfo.IsPlayground && !relayInfo.TokenUnlimited {
+						err := PreConsumeTokenQuota(relayInfo, preConsumedQuota)
+						if err != nil {
+							return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+						}
+					}
+
+					relayInfo.FinalPreConsumedQuota = preConsumedQuota
+					logger.LogInfo(c, fmt.Sprintf("用户 %d 使用套餐计费, 预记录 %s (不扣除用户余额)", relayInfo.UserId, logger.FormatQuota(preConsumedQuota)))
+					return nil
+				}
+			} else if planAvailable > 0 {
+				// Split billing: plan (up to remaining) + wallet (remainder).
+				planMax := planAvailable
+
+				// Respect daily quota limit: only the remaining daily quota can be charged to the plan.
+				dailyLimit, hasLimit := userPlan.GetEffectiveDailyQuotaLimit()
+				if hasLimit {
+					canProceed, remaining, err := CheckDailyQuotaWithLimit(userPlan.Id, dailyLimit, 0)
+					if err == nil {
+						if !canProceed || remaining <= 0 {
+							planMax = 0
+						} else if remaining < planMax {
+							planMax = remaining
+						}
 					}
 				}
 
-				// Record pre-consumed quota for plan tracking
-				// Note: User balance is NOT deducted here - only plan quota will be deducted in PostConsumeQuota
-				relayInfo.FinalPreConsumedQuota = preConsumedQuota
-				logger.LogInfo(c, fmt.Sprintf("用户 %d 使用套餐计费, 预记录 %s (不扣除用户余额)", relayInfo.UserId, logger.FormatQuota(preConsumedQuota)))
-				return nil
-			}
-		} else {
-			// Plan quota insufficient or error - fall back to user balance
-			if planErr != nil {
-				logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐额度检查失败: %v, 回退到用户余额", relayInfo.UserId, planErr))
+				if planMax > 0 {
+					remainder := requiredQuota - planMax
+
+					userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
+					if err != nil {
+						return types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+					}
+					if userQuota <= 0 || int64(userQuota) < remainder {
+						// Not enough wallet to cover the remainder; fall back to wallet-only error path.
+						logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 余额不足以覆盖预扣费, 且钱包余额不足, 回退到用户余额校验失败", relayInfo.UserId, relayInfo.UserPlanId))
+					} else {
+						relayInfo.BillingSource = BillingSourcePlanAndUserBalance
+						relayInfo.PlanPreConsumeQuota = int(planMax)
+						relayInfo.UserBalancePreConsumedQuota = int(remainder)
+
+						// Pre-consume token quota for the whole request (if not unlimited/playground).
+						if !relayInfo.IsPlayground && !relayInfo.TokenUnlimited {
+							if err := PreConsumeTokenQuota(relayInfo, preConsumedQuota); err != nil {
+								return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+							}
+						}
+
+						// Deduct the wallet remainder now (plan part is deducted after completion).
+						if remainder > 0 {
+							if err := model.DecreaseUserQuota(relayInfo.UserId, int(remainder)); err != nil {
+								return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+							}
+						}
+
+						relayInfo.UserQuota = userQuota
+						relayInfo.FinalPreConsumedQuota = preConsumedQuota
+						logger.LogInfo(c, fmt.Sprintf("用户 %d 使用套餐+余额混合计费, 套餐预占 %s, 钱包预扣 %s",
+							relayInfo.UserId, logger.FormatQuota(int(planMax)), logger.FormatQuota(int(remainder))))
+						return nil
+					}
+				}
+
+				logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 额度不足, 回退到用户余额", relayInfo.UserId, relayInfo.UserPlanId))
 			} else {
 				logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 额度不足, 回退到用户余额", relayInfo.UserId, relayInfo.UserPlanId))
 			}

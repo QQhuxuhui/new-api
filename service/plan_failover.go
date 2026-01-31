@@ -446,11 +446,34 @@ func UpdateRelayInfoForCrossplanFailover(c *gin.Context, relayInfo *relaycommon.
 						oldPreConsumed))
 				}
 			}
+		} else if oldBillingSource == BillingSourcePlanAndUserBalance {
+			// Mixed billing: return wallet remainder (if deducted) and token quota (if deducted).
+			if relayInfo.UserBalancePreConsumedQuota > 0 {
+				if err := model.IncreaseUserQuota(relayInfo.UserId, relayInfo.UserBalancePreConsumedQuota, false); err != nil {
+					logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failed to return pre-consumed user quota %d (mixed): %v",
+						relayInfo.UserBalancePreConsumedQuota, err))
+				} else {
+					logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] returned pre-consumed user quota %d (mixed)",
+						relayInfo.UserBalancePreConsumedQuota))
+				}
+			}
+
+			if !relayInfo.IsPlayground {
+				if err := model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, oldPreConsumed); err != nil {
+					logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failed to return pre-consumed token quota %d (mixed): %v",
+						oldPreConsumed, err))
+				} else {
+					logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] returned pre-consumed token quota %d (mixed)",
+						oldPreConsumed))
+				}
+			}
 		}
 
 		// Reset pre-consumed quota since we returned it
 		// New PreConsumeQuota will be called for the new plan
 		relayInfo.FinalPreConsumedQuota = 0
+		relayInfo.UserBalancePreConsumedQuota = 0
+		relayInfo.PlanPreConsumeQuota = 0
 	}
 
 	// Update plan-related fields in relayInfo

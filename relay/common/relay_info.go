@@ -116,6 +116,12 @@ type RelayInfo struct {
 	UserPlanId    int    // User's current plan assignment ID for quota tracking
 	PlanId        int    // Plan ID for logging
 	BillingSource string // "plan" or "user_balance" - indicates where quota was deducted from
+	// Mixed billing (plan + wallet) support:
+	// - FinalPreConsumedQuota stays as the total pre-consume estimate (used for quotaDelta).
+	// - UserBalancePreConsumedQuota is the part actually deducted from user balance at pre-consume time.
+	// - PlanPreConsumeQuota is the max part intended to be charged to the plan for this request.
+	UserBalancePreConsumedQuota int
+	PlanPreConsumeQuota         int
 
 	PriceData types.PriceData
 

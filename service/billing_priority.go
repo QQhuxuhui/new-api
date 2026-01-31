@@ -13,6 +13,7 @@ import (
 const (
 	BillingSourceDailyPool   = "daily_pool"
 	BillingSourcePlan        = "plan"
+	BillingSourcePlanAndUserBalance = "plan_and_user_balance"
 	BillingSourceUserBalance = "user_balance"
 )
 

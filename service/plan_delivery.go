@@ -101,7 +101,8 @@ func DeliverPlan(orderId int, tx *gorm.DB) error {
 		if err != nil {
 			return err
 		}
-		queuePosition = nextPos + 1
+		// GetNextQueuePosition already returns (max(queue_position)+1).
+		queuePosition = nextPos
 		startedAt = 0 // Will be set when activated
 		expiresAt = 0 // Will be set when activated
 		originalExpiresAt = 0
@@ -141,6 +142,7 @@ func DeliverPlan(orderId int, tx *gorm.DB) error {
 		PlanChannelGroups:   plan.ChannelGroups,
 		PlanRateLimitRules:  plan.RateLimitRules,
 		PlanDailyQuotaLimit: plan.DailyQuotaLimit,
+		PlanValidityDays:    plan.ValidityDays,
 	}
 
 	// Insert UserPlan

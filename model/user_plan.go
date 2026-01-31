@@ -1459,3 +1459,51 @@ func CompleteCurrentPlan(userId int, completionStatus int) (*UserPlan, error) {
 	// Activate next plan
 	return ActivateNextQueuedPlan(userId)
 }
+
+// CompleteUserPlanIfDepleted marks the specified user plan as completed (quota exhausted)
+// ONLY if it is still the current active plan and quota <= 0, then activates the next queued plan.
+// This is safer than CompleteCurrentPlan(userId, ...) in concurrent environments because it targets by ID.
+func CompleteUserPlanIfDepleted(userId int, userPlanId int) (*UserPlan, error) {
+	if userId <= 0 || userPlanId <= 0 {
+		return nil, nil
+	}
+
+	var next *UserPlan
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UnixMilli()
+
+		// Only complete if:
+		// - this is still the current plan
+		// - still active
+		// - already depleted (quota <= 0)
+		result := tx.Model(&UserPlan{}).
+			Where("id = ? AND user_id = ? AND is_current = 1 AND status = ? AND quota <= 0",
+				userPlanId, userId, UserPlanStatusActive).
+			Updates(map[string]interface{}{
+				"is_current": 0,
+				"status":     UserPlanStatusCompleted,
+				"updated_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			// Not current anymore or not depleted; no-op.
+			return nil
+		}
+
+		p, err := activateNextQueuedPlanWithTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		next = p
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Invalidate cache after transaction (even if no next plan).
+	InvalidateUserPlanCache(userId)
+	return next, nil
+}
