@@ -18,9 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Button, DatePicker, Select, Input } from '@douyinfe/semi-ui';
-import { IconSearch } from '@douyinfe/semi-icons';
+import { Button, DatePicker, Select } from '@douyinfe/semi-ui';
 import { QUICK_DATE_PRESETS, TIME_OPTIONS } from '../../constants/dashboard.constants';
+import { selectFilter } from '../../helpers';
 
 const QuickFilterBar = ({
   activePreset,
@@ -32,8 +32,9 @@ const QuickFilterBar = ({
   onDateRangeChange,
   onGranularityChange,
   onUsernameChange,
-  onSearch,
-  loading,
+  onUsernameSearch,
+  usernameOptions,
+  usernameSearchLoading,
   t,
 }) => {
   const { start_timestamp, end_timestamp, username } = inputs;
@@ -104,27 +105,26 @@ const QuickFilterBar = ({
           />
         </div>
 
-        {/* 第三行: 用户名输入框和查询按钮 */}
-        <div className="flex gap-2 mt-3">
-          {isAdminUser && (
-            <Input
-              value={username}
-              onChange={onUsernameChange}
+        {/* 第三行: 用户名输入框 (仅管理员) */}
+        {isAdminUser && (
+          <div className="flex gap-2 mt-3">
+            <Select
+              value={username || undefined}
+              onChange={(value) => onUsernameChange(value || '')}
               placeholder={t('用户名')}
+              optionList={usernameOptions}
+              filter={selectFilter}
+              onSearch={onUsernameSearch}
+              remote
+              autoClearSearchValue={false}
+              searchPosition='dropdown'
+              loading={usernameSearchLoading}
+              showClear
               className="flex-1"
               size="small"
             />
-          )}
-          <Button
-            type="primary"
-            icon={<IconSearch />}
-            onClick={onSearch}
-            loading={loading}
-            size="small"
-          >
-            {t('查询')}
-          </Button>
-        </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -191,25 +191,23 @@ const QuickFilterBar = ({
 
         {/* 用户名输入框 (仅管理员) */}
         {isAdminUser && (
-          <Input
-            value={username}
-            onChange={onUsernameChange}
+          <Select
+            value={username || undefined}
+            onChange={(value) => onUsernameChange(value || '')}
             placeholder={t('用户名')}
-            className="w-32"
+            optionList={usernameOptions}
+            filter={selectFilter}
+            onSearch={onUsernameSearch}
+            remote
+            autoClearSearchValue={false}
+            searchPosition='dropdown'
+            loading={usernameSearchLoading}
+            showClear
+            className="w-40"
             size="small"
           />
         )}
 
-        {/* 查询按钮 */}
-        <Button
-          type="primary"
-          icon={<IconSearch />}
-          onClick={onSearch}
-          loading={loading}
-          size="small"
-        >
-          {t('查询')}
-        </Button>
       </div>
     </div>
   );

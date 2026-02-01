@@ -25,6 +25,7 @@ import { getDefaultTime, getInitialTimestamp } from '../../helpers/dashboard';
 import { TIME_OPTIONS, QUICK_DATE_PRESETS } from '../../constants/dashboard.constants';
 import { useIsMobile } from '../common/useIsMobile';
 import { useMinimumLoadingTime } from '../common/useMinimumLoadingTime';
+import { useDebouncedCallback } from 'use-debounce';
 
 export const useDashboardData = (userState, userDispatch, statusState) => {
   const { t } = useTranslation();
@@ -49,6 +50,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     channel: '',
     data_export_default_time: '',
   });
+  const [usernameOptions, setUsernameOptions] = useState([]);
+  const [usernameSearchLoading, setUsernameSearchLoading] = useState(false);
 
   const [dataExportDefaultTime, setDataExportDefaultTime] =
     useState(getDefaultTime());
@@ -222,6 +225,41 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const handleUsernameChange = useCallback((value) => {
     setInputs((prev) => ({ ...prev, username: value }));
   }, []);
+
+  const fetchUsernameOptions = useDebouncedCallback(
+    async (keyword) => {
+      if (!isAdminUser) return;
+      setUsernameSearchLoading(true);
+      try {
+        const res = await API.get(
+          `/api/user/search?keyword=${encodeURIComponent(keyword ?? '')}&p=1&page_size=20`,
+        );
+        const { success, message, data } = res.data;
+        if (success) {
+          const options = (data?.items || []).map((u) => ({
+            label: u?.username || '',
+            value: u?.username || '',
+          }));
+          setUsernameOptions(options.filter((o) => o.value));
+        } else {
+          showError(message);
+        }
+      } catch (err) {
+        showError(err?.message || t('操作失败，请重试'));
+      } finally {
+        setUsernameSearchLoading(false);
+      }
+    },
+    300,
+    { leading: false, trailing: true },
+  );
+
+  const handleUsernameSearch = useCallback(
+    (value) => {
+      fetchUsernameOptions(value);
+    },
+    [fetchUsernameOptions],
+  );
 
   // ========== API 调用函数 ==========
   const loadQuotaData = useCallback(async () => {
@@ -421,11 +459,14 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     handleDateRangeChange,
     handleGranularityChange,
     handleUsernameChange,
+    handleUsernameSearch,
     loadQuotaData,
     loadUptimeData,
     getUserData,
     refresh,
     handleSearchConfirm,
+    usernameOptions,
+    usernameSearchLoading,
 
     // 导航和翻译
     navigate,

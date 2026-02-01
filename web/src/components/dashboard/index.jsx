@@ -17,12 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect } from 'react';
-import { getRelativeTime } from '../../helpers';
+import React, { useCallback, useContext, useEffect, useRef } from 'react';
+import { getRelativeTime, showError } from '../../helpers';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
+import { useDebouncedCallback } from 'use-debounce';
 
-import DashboardHeader from './DashboardHeader';
 import StatsCards from './StatsCards';
 import QuickFilterBar from './QuickFilterBar';
 import ChartsPanel from './ChartsPanel';
@@ -30,7 +30,6 @@ import ApiInfoPanel from './ApiInfoPanel';
 import AnnouncementsPanel from './AnnouncementsPanel';
 import FaqPanel from './FaqPanel';
 import UptimePanel from './UptimePanel';
-import SearchModal from './modals/SearchModal';
 
 import { useDashboardData } from '../../hooks/dashboard/useDashboardData';
 import { useDashboardStats } from '../../hooks/dashboard/useDashboardStats';
@@ -53,7 +52,9 @@ import {
 const Dashboard = () => {
   // ========== Context ==========
   const [userState, userDispatch] = useContext(UserContext);
-  const [statusState, statusDispatch] = useContext(StatusContext);
+  const [statusState] = useContext(StatusContext);
+  const didMountRef = useRef(false);
+  const rangeErrorShownRef = useRef(false);
 
   // ========== 主要数据管理 ==========
   const dashboardData = useDashboardData(userState, userDispatch, statusState);
@@ -70,6 +71,7 @@ const Dashboard = () => {
     dashboardData.setModelColors,
     dashboardData.t,
   );
+  const updateChartData = dashboardCharts.updateChartData;
 
   // ========== 统计数据 ==========
   const { groupedStatsData } = useDashboardStats(
@@ -93,16 +95,13 @@ const Dashboard = () => {
     await dashboardData.loadUptimeData();
   };
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     const data = await dashboardData.refresh();
     if (data && data.length > 0) {
-      dashboardCharts.updateChartData(data);
+      updateChartData(data);
     }
-  };
-
-  const handleSearchConfirm = async () => {
-    await dashboardData.handleSearchConfirm(dashboardCharts.updateChartData);
-  };
+  }, [dashboardData.refresh, updateChartData]);
+  const debouncedRefresh = useDebouncedCallback(handleRefresh, 500);
 
   // ========== 数据准备 ==========
   const apiInfoData = statusState?.status?.api_info || [];
@@ -136,30 +135,52 @@ const Dashboard = () => {
     initChart();
   }, []);
 
+  // 筛选项变更后自动刷新（普通用户：时间/粒度；管理员：时间/粒度 + 用户名选择）
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+
+    const { start_timestamp, end_timestamp } = dashboardData.inputs;
+    if (!start_timestamp || !end_timestamp) {
+      debouncedRefresh.cancel();
+      return;
+    }
+
+    const startMs = Date.parse(start_timestamp);
+    const endMs = Date.parse(end_timestamp);
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
+      debouncedRefresh.cancel();
+      return;
+    }
+
+    if (!dashboardData.isAdminUser) {
+      const maxRangeSeconds = 31 * 24 * 60 * 60;
+      const diffSeconds = (endMs - startMs) / 1000;
+      if (diffSeconds > maxRangeSeconds) {
+        debouncedRefresh.cancel();
+        if (!rangeErrorShownRef.current) {
+          showError(dashboardData.t('时间跨度不能超过 31 天'));
+          rangeErrorShownRef.current = true;
+        }
+        return;
+      }
+    }
+
+    rangeErrorShownRef.current = false;
+    debouncedRefresh();
+  }, [
+    dashboardData.inputs.start_timestamp,
+    dashboardData.inputs.end_timestamp,
+    dashboardData.inputs.username,
+    dashboardData.dataExportDefaultTime,
+    dashboardData.isAdminUser,
+    debouncedRefresh,
+  ]);
+
   return (
     <div className='h-full'>
-      <DashboardHeader
-        getGreeting={dashboardData.getGreeting}
-        greetingVisible={dashboardData.greetingVisible}
-        showSearchModal={dashboardData.showSearchModal}
-        refresh={handleRefresh}
-        loading={dashboardData.loading}
-        t={dashboardData.t}
-      />
-
-      <SearchModal
-        searchModalVisible={dashboardData.searchModalVisible}
-        handleSearchConfirm={handleSearchConfirm}
-        handleCloseModal={dashboardData.handleCloseModal}
-        isMobile={dashboardData.isMobile}
-        isAdminUser={dashboardData.isAdminUser}
-        inputs={dashboardData.inputs}
-        dataExportDefaultTime={dashboardData.dataExportDefaultTime}
-        timeOptions={dashboardData.timeOptions}
-        handleInputChange={dashboardData.handleInputChange}
-        t={dashboardData.t}
-      />
-
       <StatsCards
         groupedStatsData={groupedStatsData}
         loading={dashboardData.loading}
@@ -182,8 +203,9 @@ const Dashboard = () => {
         onDateRangeChange={dashboardData.handleDateRangeChange}
         onGranularityChange={dashboardData.handleGranularityChange}
         onUsernameChange={dashboardData.handleUsernameChange}
-        onSearch={handleSearchConfirm}
-        loading={dashboardData.loading}
+        onUsernameSearch={dashboardData.handleUsernameSearch}
+        usernameOptions={dashboardData.usernameOptions}
+        usernameSearchLoading={dashboardData.usernameSearchLoading}
         t={dashboardData.t}
       />
 
