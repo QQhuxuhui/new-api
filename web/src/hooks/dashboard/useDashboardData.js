@@ -229,10 +229,16 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const fetchUsernameOptions = useDebouncedCallback(
     async (keyword) => {
       if (!isAdminUser) return;
+      const trimmedKeyword = (keyword ?? '').toString().trim();
+      if (!trimmedKeyword) {
+        setUsernameOptions([]);
+        setUsernameSearchLoading(false);
+        return;
+      }
       setUsernameSearchLoading(true);
       try {
         const res = await API.get(
-          `/api/user/search?keyword=${encodeURIComponent(keyword ?? '')}&p=1&page_size=20`,
+          `/api/user/search?keyword=${encodeURIComponent(trimmedKeyword)}&p=1&page_size=20`,
         );
         const { success, message, data } = res.data;
         if (success) {
