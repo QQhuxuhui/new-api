@@ -174,7 +174,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     if (preset.type === 'month') {
       // 本月: 从本月1号到现在
       startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      endDate = new Date(now.getTime() + 3600 * 1000); // 当前时间 + 1小时
+      endDate = new Date(now.getTime());
     } else if (preset.days === 0) {
       // 今天: 从今天0点到现在
       startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
