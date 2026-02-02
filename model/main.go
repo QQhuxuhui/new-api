@@ -312,8 +312,11 @@ func migrateUserPlanSnapshots() error {
 	// Check for ANY missing snapshot field to catch both:
 	// 1. Records never migrated (plan_name empty)
 	// 2. Records from Phase 1 missing Phase 2 routing fields (plan_type empty)
+	// Additionally: migrate plan_validity_days snapshot ONLY when the associated Plan has validity_days > 0.
+	// (plan_validity_days = 0 is a valid value meaning "permanent" and should not trigger repeated migrations.)
 	result := DB.Preload("Plan").
-		Where("plan_name = ? OR plan_name IS NULL OR plan_type = ? OR plan_type IS NULL OR plan_channel_groups = ? OR plan_channel_groups IS NULL OR (plan_validity_days = 0 AND plan_id IS NOT NULL)",
+		Joins("LEFT JOIN plans ON plans.id = user_plans.plan_id").
+		Where("user_plans.plan_name = ? OR user_plans.plan_name IS NULL OR user_plans.plan_type = ? OR user_plans.plan_type IS NULL OR user_plans.plan_channel_groups = ? OR user_plans.plan_channel_groups IS NULL OR (user_plans.plan_validity_days = 0 AND user_plans.plan_id IS NOT NULL AND plans.validity_days > 0)",
 			"", "", "").
 		FindInBatches(&[]UserPlan{}, batchSize, func(tx *gorm.DB, batch int) error {
 			var userPlans []UserPlan
@@ -334,7 +337,7 @@ func migrateUserPlanSnapshots() error {
 					up.PlanChannelGroups = up.Plan.ChannelGroups // Already JSON string
 					up.PlanRateLimitRules = up.Plan.RateLimitRules
 					up.PlanDailyQuotaLimit = up.Plan.DailyQuotaLimit
-					if up.PlanValidityDays == 0 {
+					if up.PlanValidityDays == 0 && up.Plan.ValidityDays > 0 {
 						up.PlanValidityDays = up.Plan.ValidityDays
 					}
 
