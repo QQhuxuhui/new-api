@@ -291,6 +291,14 @@ func SetApiRouter(router *gin.Engine) {
 			analyticsRoute.GET("/plan-usage/user-daily", controller.GetUserDailyUsage)
 		}
 
+		// Masquerade trace routes (admin only)
+		masqueradeRoute := apiRouter.Group("/masquerade")
+		masqueradeRoute.Use(middleware.AdminAuth())
+		{
+			masqueradeRoute.GET("/traces", controller.GetMasqueradeTraces)
+			masqueradeRoute.POST("/clear", controller.ClearMasqueradeTraces)
+		}
+
 		logRoute.Use(middleware.CORS())
 		{
 			logRoute.GET("/token", controller.GetLogByKey)

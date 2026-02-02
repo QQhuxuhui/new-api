@@ -17,7 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
+import { Tabs, TabPane } from '@douyinfe/semi-ui';
 import { getRelativeTime } from '../../helpers';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -30,6 +31,7 @@ import ApiInfoPanel from './ApiInfoPanel';
 import AnnouncementsPanel from './AnnouncementsPanel';
 import FaqPanel from './FaqPanel';
 import UptimePanel from './UptimePanel';
+import MasqueradeTracePanel from './MasqueradeTracePanel';
 import SearchModal from './modals/SearchModal';
 
 import { useDashboardData } from '../../hooks/dashboard/useDashboardData';
@@ -54,6 +56,8 @@ const Dashboard = () => {
   // ========== Context ==========
   const [userState, userDispatch] = useContext(UserContext);
   const [statusState, statusDispatch] = useContext(StatusContext);
+
+  const [activeMainTab, setActiveMainTab] = useState('overview');
 
   // ========== 主要数据管理 ==========
   const dashboardData = useDashboardData(userState, userDispatch, statusState);
@@ -160,115 +164,134 @@ const Dashboard = () => {
         t={dashboardData.t}
       />
 
-      <StatsCards
-        groupedStatsData={groupedStatsData}
-        loading={dashboardData.loading}
-        getTrendSpec={getTrendSpec}
-        CARD_PROPS={CARD_PROPS}
-        CHART_CONFIG={CHART_CONFIG}
-        subscriptionData={dashboardData.subscriptionData}
-        subscriptionLoading={dashboardData.subscriptionLoading}
-        subscriptionError={dashboardData.subscriptionError}
-        quotaStatus={dashboardData.quotaStatus}
-      />
+      {dashboardData.isAdminUser && (
+        <div className='mb-4'>
+          <Tabs
+            activeKey={activeMainTab}
+            onChange={setActiveMainTab}
+            type='button'
+          >
+            <TabPane tab={dashboardData.t('数据概览')} itemKey='overview' />
+            <TabPane tab={dashboardData.t('伪装追踪')} itemKey='masquerade' />
+          </Tabs>
+        </div>
+      )}
 
-      <QuickFilterBar
-        activePreset={dashboardData.activePreset}
-        inputs={dashboardData.inputs}
-        dataExportDefaultTime={dashboardData.dataExportDefaultTime}
-        isAdminUser={dashboardData.isAdminUser}
-        isMobile={dashboardData.isMobile}
-        onPresetChange={dashboardData.handlePresetChange}
-        onDateRangeChange={dashboardData.handleDateRangeChange}
-        onGranularityChange={dashboardData.handleGranularityChange}
-        onUsernameChange={dashboardData.handleUsernameChange}
-        onSearch={handleSearchConfirm}
-        loading={dashboardData.loading}
-        t={dashboardData.t}
-      />
-
-      {/* API信息和图表面板 */}
-      <div className='mb-4'>
-        <div
-          className={`grid grid-cols-1 gap-4 ${dashboardData.hasApiInfoPanel ? 'lg:grid-cols-4' : ''}`}
-        >
-          <ChartsPanel
-            activeChartTab={dashboardData.activeChartTab}
-            setActiveChartTab={dashboardData.setActiveChartTab}
-            spec_line={dashboardCharts.spec_line}
-            spec_model_line={dashboardCharts.spec_model_line}
-            spec_pie={dashboardCharts.spec_pie}
-            spec_rank_bar={dashboardCharts.spec_rank_bar}
-            spec_token_line={dashboardCharts.spec_token_line}
-            spec_token_bar={dashboardCharts.spec_token_bar}
+      {dashboardData.isAdminUser && activeMainTab === 'masquerade' ? (
+        <MasqueradeTracePanel t={dashboardData.t} />
+      ) : (
+        <>
+          <StatsCards
+            groupedStatsData={groupedStatsData}
+            loading={dashboardData.loading}
+            getTrendSpec={getTrendSpec}
             CARD_PROPS={CARD_PROPS}
             CHART_CONFIG={CHART_CONFIG}
-            FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
-            hasApiInfoPanel={dashboardData.hasApiInfoPanel}
+            subscriptionData={dashboardData.subscriptionData}
+            subscriptionLoading={dashboardData.subscriptionLoading}
+            subscriptionError={dashboardData.subscriptionError}
+            quotaStatus={dashboardData.quotaStatus}
+          />
+
+          <QuickFilterBar
+            activePreset={dashboardData.activePreset}
+            inputs={dashboardData.inputs}
+            dataExportDefaultTime={dashboardData.dataExportDefaultTime}
+            isAdminUser={dashboardData.isAdminUser}
+            isMobile={dashboardData.isMobile}
+            onPresetChange={dashboardData.handlePresetChange}
+            onDateRangeChange={dashboardData.handleDateRangeChange}
+            onGranularityChange={dashboardData.handleGranularityChange}
+            onUsernameChange={dashboardData.handleUsernameChange}
+            onSearch={handleSearchConfirm}
+            loading={dashboardData.loading}
             t={dashboardData.t}
           />
 
-          {dashboardData.hasApiInfoPanel && (
-            <ApiInfoPanel
-              apiInfoData={apiInfoData}
-              handleCopyUrl={(url) => handleCopyUrl(url, dashboardData.t)}
-              handleSpeedTest={handleSpeedTest}
-              CARD_PROPS={CARD_PROPS}
-              FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
-              ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}
-              t={dashboardData.t}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* 系统公告和常见问答卡片 */}
-      {dashboardData.hasInfoPanels && (
-        <div className='mb-4'>
-          <div className='grid grid-cols-1 lg:grid-cols-4 gap-4'>
-            {/* 公告卡片 */}
-            {dashboardData.announcementsEnabled && (
-              <AnnouncementsPanel
-                announcementData={announcementData}
-                announcementLegendData={ANNOUNCEMENT_LEGEND_DATA.map(
-                  (item) => ({
-                    ...item,
-                    label: dashboardData.t(item.label),
-                  }),
-                )}
+          {/* API信息和图表面板 */}
+          <div className='mb-4'>
+            <div
+              className={`grid grid-cols-1 gap-4 ${dashboardData.hasApiInfoPanel ? 'lg:grid-cols-4' : ''}`}
+            >
+              <ChartsPanel
+                activeChartTab={dashboardData.activeChartTab}
+                setActiveChartTab={dashboardData.setActiveChartTab}
+                spec_line={dashboardCharts.spec_line}
+                spec_model_line={dashboardCharts.spec_model_line}
+                spec_pie={dashboardCharts.spec_pie}
+                spec_rank_bar={dashboardCharts.spec_rank_bar}
+                spec_token_line={dashboardCharts.spec_token_line}
+                spec_token_bar={dashboardCharts.spec_token_bar}
                 CARD_PROPS={CARD_PROPS}
-                ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}
-                t={dashboardData.t}
-              />
-            )}
-
-            {/* 常见问答卡片 */}
-            {dashboardData.faqEnabled && (
-              <FaqPanel
-                faqData={faqData}
-                CARD_PROPS={CARD_PROPS}
+                CHART_CONFIG={CHART_CONFIG}
                 FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
-                ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}
+                hasApiInfoPanel={dashboardData.hasApiInfoPanel}
                 t={dashboardData.t}
               />
-            )}
 
-            {/* 服务可用性卡片 */}
-            {dashboardData.uptimeEnabled && (
-              <UptimePanel
-                uptimeData={dashboardData.uptimeData}
-                uptimeLoading={dashboardData.uptimeLoading}
-                activeUptimeTab={dashboardData.activeUptimeTab}
-                setActiveUptimeTab={dashboardData.setActiveUptimeTab}
-                loadUptimeData={dashboardData.loadUptimeData}
-                uptimeLegendData={uptimeLegendData}
-                CARD_PROPS={CARD_PROPS}
-                ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}
-                t={dashboardData.t}
-              />
-            )}
+              {dashboardData.hasApiInfoPanel && (
+                <ApiInfoPanel
+                  apiInfoData={apiInfoData}
+                  handleCopyUrl={(url) => handleCopyUrl(url, dashboardData.t)}
+                  handleSpeedTest={handleSpeedTest}
+                  CARD_PROPS={CARD_PROPS}
+                  FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
+                  ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}
+                  t={dashboardData.t}
+                />
+              )}
+            </div>
           </div>
-        </div>
+
+          {/* 系统公告和常见问答卡片 */}
+          {dashboardData.hasInfoPanels && (
+            <div className='mb-4'>
+              <div className='grid grid-cols-1 lg:grid-cols-4 gap-4'>
+                {/* 公告卡片 */}
+                {dashboardData.announcementsEnabled && (
+                  <AnnouncementsPanel
+                    announcementData={announcementData}
+                    announcementLegendData={ANNOUNCEMENT_LEGEND_DATA.map(
+                      (item) => ({
+                        ...item,
+                        label: dashboardData.t(item.label),
+                      }),
+                    )}
+                    CARD_PROPS={CARD_PROPS}
+                    ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}
+                    t={dashboardData.t}
+                  />
+                )}
+
+                {/* 常见问答卡片 */}
+                {dashboardData.faqEnabled && (
+                  <FaqPanel
+                    faqData={faqData}
+                    CARD_PROPS={CARD_PROPS}
+                    FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
+                    ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}
+                    t={dashboardData.t}
+                  />
+                )}
+
+                {/* 服务可用性卡片 */}
+                {dashboardData.uptimeEnabled && (
+                  <UptimePanel
+                    uptimeData={dashboardData.uptimeData}
+                    uptimeLoading={dashboardData.uptimeLoading}
+                    activeUptimeTab={dashboardData.activeUptimeTab}
+                    setActiveUptimeTab={dashboardData.setActiveUptimeTab}
+                    loadUptimeData={dashboardData.loadUptimeData}
+                    uptimeLegendData={uptimeLegendData}
+                    CARD_PROPS={CARD_PROPS}
+                    ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}
+                    t={dashboardData.t}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
