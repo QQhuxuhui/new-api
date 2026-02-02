@@ -435,6 +435,19 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, te
 	masked, originalUserID, maskedUserID := masqueradeMetadata(claudeRequest.Metadata, channelID, channelHash, maxSessions, apiKey)
 	claudeRequest.Metadata = masked
 
+	// 记录追踪数据（headers 在 SetupRequestHeader 中采集）
+	if c != nil {
+		if originalBody, err := json.Marshal(textRequest); err == nil {
+			c.Set("masquerade_trace_original_body", string(originalBody))
+		}
+		if maskedBody, err := json.Marshal(claudeRequest); err == nil {
+			c.Set("masquerade_trace_masked_body", string(maskedBody))
+		}
+		c.Set("masquerade_trace_model", textRequest.Model)
+		c.Set("masquerade_trace_original_user_id", originalUserID)
+		c.Set("masquerade_trace_masked_user_id", maskedUserID)
+	}
+
 	// 打印日志（OpenAI 格式请求通常不携带 metadata，原始为空）
 	logger.LogInfo(c, fmt.Sprintf("[OpenAI->Claude] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, maskedUserID))
 
