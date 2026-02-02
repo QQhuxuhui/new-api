@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -39,6 +40,13 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 	// 避免上游检测多用户转售，同时保留其他 metadata 字段
 	// ========================================
 
+	// 保存原始请求体用于追踪（headers 在 SetupRequestHeader 中采集）
+	if c != nil {
+		if originalBody, err := json.Marshal(request); err == nil {
+			c.Set("masquerade_trace_original_body", string(originalBody))
+		}
+	}
+
 	channelID := 0
 	channelHash := ""
 	maxSessions := 0
@@ -56,6 +64,16 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 
 	masked, originalUserID, maskedUserID := masqueradeMetadata(request.Metadata, channelID, channelHash, maxSessions, apiKey)
 	request.Metadata = masked
+
+	// 保存伪装后请求体用于追踪
+	if c != nil {
+		if maskedBody, err := json.Marshal(request); err == nil {
+			c.Set("masquerade_trace_masked_body", string(maskedBody))
+		}
+		c.Set("masquerade_trace_model", request.Model)
+		c.Set("masquerade_trace_original_user_id", originalUserID)
+		c.Set("masquerade_trace_masked_user_id", maskedUserID)
+	}
 
 	logger.LogInfo(c, fmt.Sprintf("[Claude Native] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, maskedUserID))
 
@@ -101,6 +119,15 @@ func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relayc
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
+	// 采集原始请求头（客户端 -> 本系统）
+	originalHeaders := make(map[string]string, len(c.Request.Header))
+	for key, values := range c.Request.Header {
+		if len(values) > 0 {
+			originalHeaders[key] = values[0]
+		}
+	}
+	c.Set("masquerade_original_headers", originalHeaders)
+
 	channel.SetupApiRequestHeader(info, c, req)
 	req.Set("x-api-key", info.ApiKey)
 	anthropicVersion := c.Request.Header.Get("anthropic-version")
@@ -136,6 +163,51 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	req.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
 
 	CommonClaudeHeadersOperation(c, req, info)
+
+	// 采集伪装后的请求头（本系统 -> 上游）
+	maskedHeaders := make(map[string]string, len(*req))
+	for key, values := range *req {
+		if len(values) > 0 {
+			maskedHeaders[key] = values[0]
+		}
+	}
+	c.Set("masquerade_masked_headers", maskedHeaders)
+
+	// 若本次请求已在转换阶段写入 body/user_id 等信息，则在此处补全并写入追踪记录
+	if _, recorded := c.Get("masquerade_trace_recorded"); !recorded {
+		originalBodyVal, okOriginalBody := c.Get("masquerade_trace_original_body")
+		maskedBodyVal, okMaskedBody := c.Get("masquerade_trace_masked_body")
+		modelVal, okModel := c.Get("masquerade_trace_model")
+		originalUserIDVal, okOriginalUserID := c.Get("masquerade_trace_original_user_id")
+		maskedUserIDVal, okMaskedUserID := c.Get("masquerade_trace_masked_user_id")
+
+		originalBody, okOriginalBodyStr := originalBodyVal.(string)
+		maskedBody, okMaskedBodyStr := maskedBodyVal.(string)
+		model, okModelStr := modelVal.(string)
+		originalUserID, okOriginalUserIDStr := originalUserIDVal.(string)
+		maskedUserID, okMaskedUserIDStr := maskedUserIDVal.(string)
+
+		if okOriginalBody && okMaskedBody && okModel && okOriginalUserID && okMaskedUserID &&
+			okOriginalBodyStr && okMaskedBodyStr && okModelStr && okOriginalUserIDStr && okMaskedUserIDStr &&
+			info != nil && info.Channel != nil {
+
+			record := &MasqueradeTraceRecord{
+				Model:           model,
+				ChannelID:       info.Channel.Id,
+				ChannelName:     info.Channel.Name,
+				OriginalHeaders: originalHeaders,
+				OriginalBody:    originalBody,
+				MaskedHeaders:   maskedHeaders,
+				MaskedBody:      maskedBody,
+				OriginalUserID:  originalUserID,
+				MaskedUserID:    maskedUserID,
+				OriginalSession: extractSessionFromUserID(originalUserID),
+				MaskedSession:   extractSessionFromUserID(maskedUserID),
+			}
+			GetMasqueradeTraceStore().Add(record)
+			c.Set("masquerade_trace_recorded", true)
+		}
+	}
 	return nil
 }
 
