@@ -13,7 +13,7 @@ const (
 	MaxTraceRecords = 100
 )
 
-// MasqueradeTraceRecord 伪装追踪记录
+// MasqueradeTraceRecord 伪装追踪记录（完整记录）
 type MasqueradeTraceRecord struct {
 	ID          string `json:"id"`           // 唯一标识 (UUID)
 	Timestamp   int64  `json:"timestamp"`    // 请求时间戳
@@ -30,6 +30,19 @@ type MasqueradeTraceRecord struct {
 	MaskedBody    string            `json:"masked_body"`
 
 	// 伪装元信息对比
+	OriginalUserID  string `json:"original_user_id"` // 原始用户ID
+	MaskedUserID    string `json:"masked_user_id"`   // 伪装后用户ID
+	OriginalSession string `json:"original_session"` // 原始会话ID
+	MaskedSession   string `json:"masked_session"`   // 伪装后会话ID
+}
+
+// MasqueradeTraceSummary 伪装追踪轻量记录（用于列表展示，不含body/headers）
+type MasqueradeTraceSummary struct {
+	ID              string `json:"id"`               // 唯一标识 (UUID)
+	Timestamp       int64  `json:"timestamp"`        // 请求时间戳
+	Model           string `json:"model"`            // 请求的模型名
+	ChannelID       int    `json:"channel_id"`       // 渠道ID
+	ChannelName     string `json:"channel_name"`     // 渠道名称
 	OriginalUserID  string `json:"original_user_id"` // 原始用户ID
 	MaskedUserID    string `json:"masked_user_id"`   // 伪装后用户ID
 	OriginalSession string `json:"original_session"` // 原始会话ID
@@ -85,7 +98,7 @@ func (s *MasqueradeTraceStore) Add(record *MasqueradeTraceRecord) {
 	}
 }
 
-// GetAll 获取所有追踪记录（按时间倒序）
+// GetAll 获取所有追踪记录（按时间倒序）- 完整记录
 func (s *MasqueradeTraceStore) GetAll() []*MasqueradeTraceRecord {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
@@ -102,6 +115,50 @@ func (s *MasqueradeTraceStore) GetAll() []*MasqueradeTraceRecord {
 	}
 
 	return result
+}
+
+// GetSummaryList 获取轻量追踪记录列表（按时间倒序）- 不含body/headers
+func (s *MasqueradeTraceStore) GetSummaryList() []*MasqueradeTraceSummary {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	result := make([]*MasqueradeTraceSummary, 0, s.count)
+
+	// 从最新到最旧遍历
+	for i := 0; i < s.count; i++ {
+		idx := (s.index - 1 - i + MaxTraceRecords) % MaxTraceRecords
+		if s.records[idx] != nil {
+			r := s.records[idx]
+			result = append(result, &MasqueradeTraceSummary{
+				ID:              r.ID,
+				Timestamp:       r.Timestamp,
+				Model:           r.Model,
+				ChannelID:       r.ChannelID,
+				ChannelName:     r.ChannelName,
+				OriginalUserID:  r.OriginalUserID,
+				MaskedUserID:    r.MaskedUserID,
+				OriginalSession: r.OriginalSession,
+				MaskedSession:   r.MaskedSession,
+			})
+		}
+	}
+
+	return result
+}
+
+// GetByID 按ID获取完整追踪记录
+func (s *MasqueradeTraceStore) GetByID(id string) *MasqueradeTraceRecord {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	for i := 0; i < s.count; i++ {
+		idx := (s.index - 1 - i + MaxTraceRecords) % MaxTraceRecords
+		if s.records[idx] != nil && s.records[idx].ID == id {
+			return s.records[idx]
+		}
+	}
+
+	return nil
 }
 
 // Clear 清空所有记录

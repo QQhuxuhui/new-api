@@ -44,6 +44,7 @@ import {
   IconAlertTriangle,
   IconCoinMoneyStroked,
   IconBox,
+  IconSearch,
 } from '@douyinfe/semi-icons';
 import { useAnalyticsData } from '../../hooks/analytics/useAnalyticsData';
 import BalanceAnalysisTab from './components/BalanceAnalysisTab';
@@ -51,7 +52,9 @@ import CostEfficiencyTab from './components/CostEfficiencyTab';
 import PlanUsageTab from './components/PlanUsageTab';
 import ChannelCostTab from './components/ChannelCostTab';
 import UserConsumptionTab from './components/UserConsumptionTab';
+import MasqueradeTraceTab from './components/MasqueradeTraceTab';
 import MoneyWithDetails from '../../components/analytics/MoneyWithDetails';
+import { useTranslation } from 'react-i18next';
 
 const { Title, Text } = Typography;
 
@@ -72,6 +75,7 @@ const Statistic = ({ title, value, prefix, suffix }) => (
 );
 
 const Analytics = () => {
+  const { t } = useTranslation();
   const {
     timeRange,
     loading,
@@ -502,6 +506,13 @@ const Analytics = () => {
             itemKey="risks"
           >
             {renderRiskIndicators()}
+          </TabPane>
+
+          <TabPane
+            tab={<span><IconSearch className="mr-1" />{t('伪装追踪')}</span>}
+            itemKey="masquerade"
+          >
+            <MasqueradeTraceTab t={t} />
           </TabPane>
         </Tabs>
       </Spin>

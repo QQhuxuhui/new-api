@@ -295,7 +295,9 @@ func SetApiRouter(router *gin.Engine) {
 		masqueradeRoute := apiRouter.Group("/masquerade")
 		masqueradeRoute.Use(middleware.AdminAuth())
 		{
-			masqueradeRoute.GET("/traces", controller.GetMasqueradeTraces)
+			masqueradeRoute.GET("/traces", controller.GetMasqueradeTracesSummary)      // 轻量列表（不含body/headers）
+			masqueradeRoute.GET("/traces/full", controller.GetMasqueradeTraces)        // 完整列表（向后兼容）
+			masqueradeRoute.GET("/traces/:id", controller.GetMasqueradeTraceByID)      // 按ID获取完整记录
 			masqueradeRoute.POST("/clear", controller.ClearMasqueradeTraces)
 		}
 
