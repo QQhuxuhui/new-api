@@ -8,8 +8,10 @@ import (
 	tls "github.com/refraction-networking/utls"
 )
 
-func TestJA3(t *testing.T) {
-	spec := CloneNodeJS22ClientHelloSpec("example.com")
+// TestNodeJSClientHelloSpec tests the Node.js TLS fingerprint specification.
+// This fingerprint is compatible with Node.js v22+ and v24+ (OpenSSL 3.x based).
+func TestNodeJSClientHelloSpec(t *testing.T) {
+	spec := CloneNodeJSClientHelloSpec("example.com")
 
 	// TLSVersMax should be TLS 1.3 for proper negotiation
 	if spec.TLSVersMax != tls.VersionTLS13 {
@@ -20,10 +22,10 @@ func TestJA3(t *testing.T) {
 		t.Fatalf("unexpected TLSVersMin: got %d want %d", spec.TLSVersMin, tls.VersionTLS12)
 	}
 
-	if got, want := len(spec.CipherSuites), len(nodeJS22CipherSuites); got != want {
+	if got, want := len(spec.CipherSuites), len(nodeJSCipherSuites); got != want {
 		t.Fatalf("cipher suite count mismatch: got %d want %d", got, want)
 	}
-	if !reflect.DeepEqual(spec.CipherSuites, nodeJS22CipherSuites) {
+	if !reflect.DeepEqual(spec.CipherSuites, nodeJSCipherSuites) {
 		t.Fatalf("cipher suites do not match expected order")
 	}
 
@@ -33,8 +35,8 @@ func TestJA3(t *testing.T) {
 		t.Fatalf("extension order mismatch: got %v want %v", extIDs, expectedExts)
 	}
 
-	expectedCurves := make([]string, len(nodeJS22SupportedGroups))
-	for i, c := range nodeJS22SupportedGroups {
+	expectedCurves := make([]string, len(nodeJSSupportedGroups))
+	for i, c := range nodeJSSupportedGroups {
 		expectedCurves[i] = strconv.Itoa(int(c))
 	}
 	if !reflect.DeepEqual(curves, expectedCurves) {
@@ -71,6 +73,35 @@ func TestJA3(t *testing.T) {
 	}
 	if !foundSNI {
 		t.Fatalf("SNI extension missing in spec")
+	}
+}
+
+// TestJA3 is the legacy test name for backward compatibility.
+// It tests the deprecated CloneNodeJS22ClientHelloSpec function.
+func TestJA3(t *testing.T) {
+	// Verify backward compatibility: the deprecated function should return
+	// the same spec as the new function.
+	oldSpec := CloneNodeJS22ClientHelloSpec("example.com")
+	newSpec := CloneNodeJSClientHelloSpec("example.com")
+
+	if !reflect.DeepEqual(oldSpec.CipherSuites, newSpec.CipherSuites) {
+		t.Fatalf("backward compatibility broken: cipher suites differ")
+	}
+
+	oldJA3, oldHash, err := ComputeJA3(oldSpec)
+	if err != nil {
+		t.Fatalf("ComputeJA3 error on old spec: %v", err)
+	}
+	newJA3, newHash, err := ComputeJA3(newSpec)
+	if err != nil {
+		t.Fatalf("ComputeJA3 error on new spec: %v", err)
+	}
+
+	if oldJA3 != newJA3 {
+		t.Fatalf("backward compatibility broken: JA3 text differs")
+	}
+	if oldHash != newHash {
+		t.Fatalf("backward compatibility broken: JA3 hash differs")
 	}
 }
 

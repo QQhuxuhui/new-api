@@ -111,33 +111,33 @@ func verifyJA3Components(t *testing.T, hello *stdtls.ClientHelloInfo) {
 	t.Helper()
 
 	// Verify cipher suites match
-	if len(hello.CipherSuites) != len(nodeJS22CipherSuites) {
-		t.Fatalf("cipher suite count mismatch: got %d, want %d", len(hello.CipherSuites), len(nodeJS22CipherSuites))
+	if len(hello.CipherSuites) != len(nodeJSCipherSuites) {
+		t.Fatalf("cipher suite count mismatch: got %d, want %d", len(hello.CipherSuites), len(nodeJSCipherSuites))
 	}
 	for i, cs := range hello.CipherSuites {
-		if cs != nodeJS22CipherSuites[i] {
-			t.Fatalf("cipher suite %d mismatch: got %d, want %d", i, cs, nodeJS22CipherSuites[i])
+		if cs != nodeJSCipherSuites[i] {
+			t.Fatalf("cipher suite %d mismatch: got %d, want %d", i, cs, nodeJSCipherSuites[i])
 		}
 	}
 
 	// Verify supported curves match
-	if len(hello.SupportedCurves) != len(nodeJS22SupportedGroups) {
-		t.Fatalf("curve count mismatch: got %d, want %d", len(hello.SupportedCurves), len(nodeJS22SupportedGroups))
+	if len(hello.SupportedCurves) != len(nodeJSSupportedGroups) {
+		t.Fatalf("curve count mismatch: got %d, want %d", len(hello.SupportedCurves), len(nodeJSSupportedGroups))
 	}
 	for i, curve := range hello.SupportedCurves {
-		expected := stdtls.CurveID(nodeJS22SupportedGroups[i])
+		expected := stdtls.CurveID(nodeJSSupportedGroups[i])
 		if curve != expected {
 			t.Fatalf("curve %d mismatch: got %d, want %d", i, curve, expected)
 		}
 	}
 
 	// Verify point formats match
-	if len(hello.SupportedPoints) != len(nodeJS22PointFormats) {
-		t.Fatalf("point format count mismatch: got %d, want %d", len(hello.SupportedPoints), len(nodeJS22PointFormats))
+	if len(hello.SupportedPoints) != len(nodeJSPointFormats) {
+		t.Fatalf("point format count mismatch: got %d, want %d", len(hello.SupportedPoints), len(nodeJSPointFormats))
 	}
 	for i, pf := range hello.SupportedPoints {
-		if pf != nodeJS22PointFormats[i] {
-			t.Fatalf("point format %d mismatch: got %d, want %d", i, pf, nodeJS22PointFormats[i])
+		if pf != nodeJSPointFormats[i] {
+			t.Fatalf("point format %d mismatch: got %d, want %d", i, pf, nodeJSPointFormats[i])
 		}
 	}
 }
