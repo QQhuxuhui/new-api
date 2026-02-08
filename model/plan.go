@@ -30,7 +30,7 @@ type Plan struct {
 	ValidityDays       int    `json:"validity_days" gorm:"default:0"`                     // 0 = permanent
 	DailyQuotaLimit    int64  `json:"daily_quota_limit" gorm:"default:0"`                 // Daily quota limit for subscription plans (0 = no limit)
 	RateLimitRules     string `json:"rate_limit_rules" gorm:"type:text"`                  // JSON array of rate limit rules
-	DefaultAllowSwitch int    `json:"default_allow_switch" gorm:"default:0"`              // Default permission for user to switch
+	DefaultAllowSwitch int    `json:"default_allow_switch" gorm:"default:1"`              // Default permission for user to switch
 	DefaultAllowToggle int    `json:"default_allow_toggle" gorm:"default:1"`              // Default permission for user to toggle auto-switch
 	Settings           string `json:"settings" gorm:"type:text"`                          // JSON for extensibility
 	Status             int    `json:"status" gorm:"default:1"`                            // 1=enabled, 2=disabled
@@ -419,7 +419,7 @@ func SeedDefaultPlans() error {
 			ChannelGroup:       "monthly",
 			DefaultQuota:       500000,
 			ValidityDays:       30,
-			DefaultAllowSwitch: 0,
+			DefaultAllowSwitch: 1,
 			DefaultAllowToggle: 1,
 			Status:             PlanStatusEnabled,
 			Purchasable:        0, // Not purchasable by default - admin must set price first
