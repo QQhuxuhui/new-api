@@ -13,15 +13,15 @@ import (
 
 // PlanSelectionResult contains the result of plan selection
 type PlanSelectionResult struct {
-	UserPlan       *model.UserPlan
-	Plan           *model.Plan
-	PlanId         int      // Plan ID for context
-	UserPlanId     int      // UserPlan ID for context
-	PlanName       string   // Plan name for logging
-	ChannelGroup   string   // Deprecated: use ChannelGroups
-	ChannelGroups  []string // List of allowed channel groups
-	Switched       bool     // True if auto-switched to a higher priority plan
-	AutoSwitched   bool     // Alias for Switched, for clearer context key
+	UserPlan      *model.UserPlan
+	Plan          *model.Plan
+	PlanId        int      // Plan ID for context
+	UserPlanId    int      // UserPlan ID for context
+	PlanName      string   // Plan name for logging
+	ChannelGroup  string   // Deprecated: use ChannelGroups
+	ChannelGroups []string // List of allowed channel groups
+	Switched      bool     // True if auto-switched to a higher priority plan
+	AutoSwitched  bool     // Alias for Switched, for clearer context key
 }
 
 // ErrNoPlanAvailable indicates no valid plan is available
@@ -63,8 +63,8 @@ func newPlanSelectionResult(up *model.UserPlan, switched bool) *PlanSelectionRes
 
 	// Use UserPlan snapshot fields (decoupled from Plan template)
 	// This allows routing to work even if Plan is deleted/disabled
-	result.PlanName = up.GetDisplayName() // Use display name for logging
-	result.ChannelGroup = up.GetChannelGroup() // Deprecated, keep for compatibility
+	result.PlanName = up.GetDisplayName()        // Use display name for logging
+	result.ChannelGroup = up.GetChannelGroup()   // Deprecated, keep for compatibility
 	result.ChannelGroups = up.GetChannelGroups() // Use snapshot
 
 	return result
@@ -120,26 +120,32 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			// First try higher priority plans
 			higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
 			if higherPlan != nil {
-				// Use SwitchToUserPlan (works with NULL plan_id)
-				if err := model.SwitchToUserPlan(userId, higherPlan.Id); err != nil {
-					common.SysLog(fmt.Sprintf("failed to auto-switch to higher priority plan: %v", err))
-				} else {
-					common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to higher priority plan %d",
-						userId, currentPlan.Id, higherPlan.Id))
-					return newPlanSelectionResult(higherPlan, true), nil
+				// DB verification: confirm the candidate actually has quota (cache may be stale)
+				freshPlan, freshErr := model.GetUserPlanById(higherPlan.Id)
+				if freshErr == nil && freshPlan != nil && freshPlan.IsValid() && freshPlan.Quota > 0 {
+					if err := model.SwitchToUserPlan(userId, freshPlan.Id); err != nil {
+						common.SysLog(fmt.Sprintf("failed to auto-switch to higher priority plan: %v", err))
+					} else {
+						common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to higher priority plan %d",
+							userId, currentPlan.Id, freshPlan.Id))
+						return newPlanSelectionResult(freshPlan, true), nil
+					}
 				}
 			}
 
 			// If no higher priority, try any plan with quota (including lower priority)
 			anyPlanWithQuota := selectHighestPriorityWithQuota(validPlans)
 			if anyPlanWithQuota != nil && anyPlanWithQuota.Id != currentPlan.Id {
-				// Use SwitchToUserPlan (works with NULL plan_id)
-				if err := model.SwitchToUserPlan(userId, anyPlanWithQuota.Id); err != nil {
-					common.SysLog(fmt.Sprintf("failed to auto-switch to available plan: %v", err))
-				} else {
-					common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to available plan %d",
-						userId, currentPlan.Id, anyPlanWithQuota.Id))
-					return newPlanSelectionResult(anyPlanWithQuota, true), nil
+				// DB verification: confirm the candidate actually has quota (cache may be stale)
+				freshPlan, freshErr := model.GetUserPlanById(anyPlanWithQuota.Id)
+				if freshErr == nil && freshPlan != nil && freshPlan.IsValid() && freshPlan.Quota > 0 {
+					if err := model.SwitchToUserPlan(userId, freshPlan.Id); err != nil {
+						common.SysLog(fmt.Sprintf("failed to auto-switch to available plan: %v", err))
+					} else {
+						common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to available plan %d",
+							userId, currentPlan.Id, freshPlan.Id))
+						return newPlanSelectionResult(freshPlan, true), nil
+					}
 				}
 			}
 		}
@@ -156,15 +162,17 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 	if currentPlan.AutoSwitch == 1 {
 		higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
 		if higherPlan != nil {
-			// Auto-switch to higher priority plan using user_plan.id (not plan_id)
-			// This works even when plan_id is NULL after snapshot migration
-			if err := model.SwitchToUserPlan(userId, higherPlan.Id); err != nil {
-				common.SysLog(fmt.Sprintf("failed to auto-switch plan: %v", err))
-				// Continue with current plan on error
-			} else {
-				common.SysLog(fmt.Sprintf("user %d auto-switched from user_plan %d to user_plan %d",
-					userId, currentPlan.Id, higherPlan.Id))
-				return newPlanSelectionResult(higherPlan, true), nil
+			// DB verification: confirm the candidate actually has quota (cache may be stale)
+			freshPlan, freshErr := model.GetUserPlanById(higherPlan.Id)
+			if freshErr == nil && freshPlan != nil && freshPlan.IsValid() && freshPlan.Quota > 0 {
+				if err := model.SwitchToUserPlan(userId, freshPlan.Id); err != nil {
+					common.SysLog(fmt.Sprintf("failed to auto-switch plan: %v", err))
+					// Continue with current plan on error
+				} else {
+					common.SysLog(fmt.Sprintf("user %d auto-switched from user_plan %d to user_plan %d",
+						userId, currentPlan.Id, freshPlan.Id))
+					return newPlanSelectionResult(freshPlan, true), nil
+				}
 			}
 		}
 	}
@@ -414,7 +422,9 @@ func RefundToUserPlan(userPlanId int, amount int64) error {
 //   - quota: amount of quota to consume
 //
 // Returns error if consumption fails
-func PostConsumePlanQuota(ctx interface{ Get(key string) (value interface{}, exists bool) }, quota int) error {
+func PostConsumePlanQuota(ctx interface {
+	Get(key string) (value interface{}, exists bool)
+}, quota int) error {
 	// Get user_plan_id from context
 	userPlanIdVal, exists := ctx.Get(string(constant.ContextKeyUserPlanId))
 	if !exists || userPlanIdVal == nil {
@@ -435,7 +445,9 @@ func PostConsumePlanQuota(ctx interface{ Get(key string) (value interface{}, exi
 // Parameters:
 //   - ctx: gin context containing plan_id and user_plan_id
 //   - quota: amount of quota to refund
-func RefundPlanQuota(ctx interface{ Get(key string) (value interface{}, exists bool) }, quota int) error {
+func RefundPlanQuota(ctx interface {
+	Get(key string) (value interface{}, exists bool)
+}, quota int) error {
 	// Get user_plan_id from context
 	userPlanIdVal, exists := ctx.Get(string(constant.ContextKeyUserPlanId))
 	if !exists || userPlanIdVal == nil {
@@ -453,7 +465,9 @@ func RefundPlanQuota(ctx interface{ Get(key string) (value interface{}, exists b
 
 // PreConsumePlanQuota pre-validates and optionally pre-consumes plan quota
 // Returns error if the plan doesn't have enough quota
-func PreConsumePlanQuota(ctx interface{ Get(key string) (value interface{}, exists bool) }, quota int) error {
+func PreConsumePlanQuota(ctx interface {
+	Get(key string) (value interface{}, exists bool)
+}, quota int) error {
 	// Get user_plan_id from context
 	userPlanIdVal, exists := ctx.Get(string(constant.ContextKeyUserPlanId))
 	if !exists || userPlanIdVal == nil {
@@ -488,37 +502,37 @@ func PreConsumePlanQuota(ctx interface{ Get(key string) (value interface{}, exis
 type PlanSelectionEventType string
 
 const (
-	PlanEventSelected      PlanSelectionEventType = "selected"       // Normal selection
-	PlanEventAutoSwitch    PlanSelectionEventType = "auto_switch"    // Auto-switched to higher priority
-	PlanEventInitialSet    PlanSelectionEventType = "initial_set"    // First plan set as current
-	PlanEventManualSwitch  PlanSelectionEventType = "manual_switch"  // User manually switched
-	PlanEventQuotaExhaust  PlanSelectionEventType = "quota_exhaust"  // Plan quota exhausted
-	PlanEventLocked        PlanSelectionEventType = "locked"         // Plan locked by admin
-	PlanEventNoPlan        PlanSelectionEventType = "no_plan"        // No plan available
-	PlanEventError         PlanSelectionEventType = "error"          // Error during selection
-	PlanEventQuotaConsume  PlanSelectionEventType = "quota_consume"  // Quota consumed
-	PlanEventQuotaRefund   PlanSelectionEventType = "quota_refund"   // Quota refunded
+	PlanEventSelected     PlanSelectionEventType = "selected"      // Normal selection
+	PlanEventAutoSwitch   PlanSelectionEventType = "auto_switch"   // Auto-switched to higher priority
+	PlanEventInitialSet   PlanSelectionEventType = "initial_set"   // First plan set as current
+	PlanEventManualSwitch PlanSelectionEventType = "manual_switch" // User manually switched
+	PlanEventQuotaExhaust PlanSelectionEventType = "quota_exhaust" // Plan quota exhausted
+	PlanEventLocked       PlanSelectionEventType = "locked"        // Plan locked by admin
+	PlanEventNoPlan       PlanSelectionEventType = "no_plan"       // No plan available
+	PlanEventError        PlanSelectionEventType = "error"         // Error during selection
+	PlanEventQuotaConsume PlanSelectionEventType = "quota_consume" // Quota consumed
+	PlanEventQuotaRefund  PlanSelectionEventType = "quota_refund"  // Quota refunded
 )
 
 // PlanSelectionEvent represents a plan selection event for logging
 type PlanSelectionEvent struct {
-	Timestamp     time.Time              `json:"timestamp"`
-	EventType     PlanSelectionEventType `json:"event_type"`
-	UserId        int                    `json:"user_id"`
-	PlanId        int                    `json:"plan_id,omitempty"`
-	UserPlanId    int                    `json:"user_plan_id,omitempty"`
-	PlanName      string                 `json:"plan_name,omitempty"`
-	FromPlanId    int                    `json:"from_plan_id,omitempty"`
-	FromPlanName  string                 `json:"from_plan_name,omitempty"`
-	ToPlanId      int                    `json:"to_plan_id,omitempty"`
-	ToPlanName    string                 `json:"to_plan_name,omitempty"`
-	ChannelGroup  string                 `json:"channel_group,omitempty"`
-	Model         string                 `json:"model,omitempty"`
-	QuotaAmount   int64                  `json:"quota_amount,omitempty"`
-	QuotaBefore   int64                  `json:"quota_before,omitempty"`
-	QuotaAfter    int64                  `json:"quota_after,omitempty"`
-	ErrorMessage  string                 `json:"error,omitempty"`
-	DurationMs    int64                  `json:"duration_ms,omitempty"`
+	Timestamp    time.Time              `json:"timestamp"`
+	EventType    PlanSelectionEventType `json:"event_type"`
+	UserId       int                    `json:"user_id"`
+	PlanId       int                    `json:"plan_id,omitempty"`
+	UserPlanId   int                    `json:"user_plan_id,omitempty"`
+	PlanName     string                 `json:"plan_name,omitempty"`
+	FromPlanId   int                    `json:"from_plan_id,omitempty"`
+	FromPlanName string                 `json:"from_plan_name,omitempty"`
+	ToPlanId     int                    `json:"to_plan_id,omitempty"`
+	ToPlanName   string                 `json:"to_plan_name,omitempty"`
+	ChannelGroup string                 `json:"channel_group,omitempty"`
+	Model        string                 `json:"model,omitempty"`
+	QuotaAmount  int64                  `json:"quota_amount,omitempty"`
+	QuotaBefore  int64                  `json:"quota_before,omitempty"`
+	QuotaAfter   int64                  `json:"quota_after,omitempty"`
+	ErrorMessage string                 `json:"error,omitempty"`
+	DurationMs   int64                  `json:"duration_ms,omitempty"`
 }
 
 // LogPlanSelectionEvent logs a plan selection event

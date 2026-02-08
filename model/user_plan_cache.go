@@ -31,12 +31,12 @@ type UserPlanCacheEntry struct {
 
 	// Embedded plan info for routing and display
 	PlanName            string `json:"plan_name"`
-	PlanDisplayName     string `json:"plan_display_name"`     // Display name snapshot
-	PlanCategory        string `json:"plan_category"`         // Category snapshot (daily, monthly, etc.)
+	PlanDisplayName     string `json:"plan_display_name"` // Display name snapshot
+	PlanCategory        string `json:"plan_category"`     // Category snapshot (daily, monthly, etc.)
 	PlanType            string `json:"plan_type"`
 	PlanPriority        int    `json:"plan_priority"`
-	PlanChannelGroup    string `json:"plan_channel_group"`    // Deprecated: use PlanChannelGroups
-	PlanChannelGroups   string `json:"plan_channel_groups"`   // JSON array of channel groups
+	PlanChannelGroup    string `json:"plan_channel_group"`  // Deprecated: use PlanChannelGroups
+	PlanChannelGroups   string `json:"plan_channel_groups"` // JSON array of channel groups
 	PlanDailyQuotaLimit int64  `json:"plan_daily_quota_limit"`
 	PlanRateLimitRules  string `json:"plan_rate_limit_rules"` // JSON array of rate limit rules
 	PlanStatus          int    `json:"plan_status"`
@@ -150,9 +150,9 @@ func FromUserPlan(up *UserPlan) *UserPlanCacheEntry {
 
 // Cache key formats
 const (
-	userValidPlansKeyFmt   = "user_valid_plans:%d"
-	userCurrentPlanKeyFmt  = "user_current_plan:%d"
-	userPlanCacheTTLSec    = 300 // 5 minutes cache TTL (optimized from 60s)
+	userValidPlansKeyFmt    = "user_valid_plans:%d"
+	userCurrentPlanKeyFmt   = "user_current_plan:%d"
+	userPlanCacheTTLSec     = 300                  // 5 minutes cache TTL (optimized from 60s)
 	userPlanCacheLockKeyFmt = "lock:user_plans:%d" // distributed lock key format
 )
 
@@ -361,11 +361,11 @@ func cacheDecrUserPlanQuota(userId int, userPlanId int, amount int64) {
 		return
 	}
 
-	// Invalidate cache to force refresh on next read
-	// This is simpler and safer than trying to update cached JSON
-	gopool.Go(func() {
-		InvalidateUserPlanCache(userId)
-	})
+	// Invalidate cache synchronously to prevent stale reads.
+	// Redis DEL is sub-millisecond; async invalidation caused a race condition
+	// where concurrent requests could read stale quota values and switch back
+	// to depleted plans.
+	InvalidateUserPlanCache(userId)
 }
 
 // cacheIncrUserPlanQuota increments quota in cache
@@ -374,10 +374,7 @@ func cacheIncrUserPlanQuota(userId int, userPlanId int, amount int64) {
 		return
 	}
 
-	// Invalidate cache to force refresh on next read
-	gopool.Go(func() {
-		InvalidateUserPlanCache(userId)
-	})
+	InvalidateUserPlanCache(userId)
 }
 
 // InvalidateUserPlanCacheByPlanId invalidates cache for all users who have a specific plan

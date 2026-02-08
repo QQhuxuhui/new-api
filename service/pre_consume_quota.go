@@ -5,9 +5,11 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -116,10 +118,89 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 	// Priority 2: Check Plan Quota
 	if relayInfo.UserPlanId > 0 {
 		userPlan, planErr := model.GetUserPlanById(relayInfo.UserPlanId)
+
+		// If the plan selected by middleware is invalid (stale cache), try to re-select
+		if planErr != nil || userPlan == nil || !userPlan.IsValid() || userPlan.Quota <= 0 {
+			if planErr != nil {
+				logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 查询失败: %v, 尝试重新选择套餐", relayInfo.UserId, relayInfo.UserPlanId, planErr))
+			} else {
+				logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 不可用或额度耗尽, 尝试重新选择套餐", relayInfo.UserId, relayInfo.UserPlanId))
+			}
+
+			// Invalidate stale cache before re-selecting.
+			model.InvalidateUserPlanCache(relayInfo.UserId)
+
+			// IMPORTANT: We must not switch to a plan that doesn't include the current UsingGroup,
+			// otherwise the already-selected channel/group may become unauthorized and pricing ratios
+			// (group/channel) may become inconsistent for this request.
+			usingGroup := relayInfo.UsingGroup
+
+			validPlans, selectErr := model.GetUserValidPlans(relayInfo.UserId) // DB read (avoid cache)
+			if selectErr != nil {
+				userPlan = nil
+				planErr = selectErr
+			} else {
+				var selected *model.UserPlan
+				for _, candidate := range validPlans {
+					if candidate == nil || candidate.Id == relayInfo.UserPlanId {
+						continue
+					}
+					if !candidate.IsValid() || candidate.Quota <= 0 {
+						continue
+					}
+					if usingGroup != "" && !userPlanAllowsGroup(candidate, usingGroup) {
+						continue
+					}
+					if !hasPlanAvailableQuota(candidate) {
+						continue
+					}
+					if err := model.SwitchToUserPlan(relayInfo.UserId, candidate.Id); err != nil {
+						// Candidate became unavailable (or was stale); try next.
+						common.SysLog(fmt.Sprintf("failed to switch to re-selected plan user=%d user_plan=%d err=%v", relayInfo.UserId, candidate.Id, err))
+						continue
+					}
+					selected = candidate
+					break
+				}
+
+				if selected != nil {
+					relayInfo.UserPlanId = selected.Id
+					relayInfo.PlanId = 0
+					if selected.PlanId != nil {
+						relayInfo.PlanId = *selected.PlanId
+					}
+
+					// Update context for downstream (retry / cross-plan failover) logic.
+					common.SetContextKey(c, constant.ContextKeyPlanId, relayInfo.PlanId)
+					common.SetContextKey(c, constant.ContextKeyUserPlanId, relayInfo.UserPlanId)
+					common.SetContextKey(c, constant.ContextKeyPlanName, selected.GetDisplayName())
+					common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
+
+					// Update plan groups to ensure subsequent retries stay within the new plan's allowed groups.
+					tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+					planGroupSet := expandChannelGroupsToSet(selected.GetChannelGroups())
+					effectiveGroups := applyTokenGroupConstraint(planGroupSet, tokenGroup)
+					if len(effectiveGroups) > 0 {
+						common.SetContextKey(c, constant.ContextKeyPlanGroups, effectiveGroups)
+						// Keep single plan group for compatibility; do not change UsingGroup.
+						common.SetContextKey(c, constant.ContextKeyPlanGroup, usingGroup)
+					}
+
+					userPlan = selected
+					planErr = nil
+					logger.LogInfo(c, fmt.Sprintf("用户 %d 重新选择到套餐 %d (%s)", relayInfo.UserId, selected.Id, selected.GetDisplayName()))
+				} else {
+					// No valid plan found, will fall through to user balance
+					userPlan = nil
+					planErr = fmt.Errorf("no valid plan available after re-selection")
+				}
+			}
+		}
+
 		if planErr != nil {
-			logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐额度检查失败: %v, 回退到用户余额", relayInfo.UserId, planErr))
+			logger.LogInfo(c, fmt.Sprintf("用户 %d 无可用套餐, 回退到用户余额", relayInfo.UserId))
 		} else if userPlan == nil || !userPlan.IsValid() {
-			logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 不可用, 回退到用户余额", relayInfo.UserId, relayInfo.UserPlanId))
+			logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐不可用, 回退到用户余额", relayInfo.UserId))
 		} else {
 			// Plan is valid; decide whether to use it fully or split with wallet.
 			planAvailable := userPlan.Quota
@@ -277,4 +358,71 @@ func preConsumeFromUserAndToken(c *gin.Context, preConsumedQuota int, relayInfo 
 	}
 	relayInfo.FinalPreConsumedQuota = preConsumedQuota
 	return nil
+}
+
+func expandChannelGroupsToSet(groups []string) map[string]bool {
+	expandedSet := make(map[string]bool)
+	for _, pg := range groups {
+		for _, g := range ratio_setting.ExpandGroup(pg) {
+			expandedSet[g] = true
+		}
+	}
+	return expandedSet
+}
+
+func applyTokenGroupConstraint(planGroupSet map[string]bool, tokenGroup string) []string {
+	if len(planGroupSet) == 0 {
+		return []string{}
+	}
+
+	// No token group constraint: allow all plan groups.
+	if tokenGroup == "" || tokenGroup == "auto" {
+		return setToSlice(planGroupSet)
+	}
+
+	// Token group is a parent group: use the intersection with its children.
+	if ratio_setting.IsParentGroup(tokenGroup) {
+		children := ratio_setting.GetChildGroups(tokenGroup)
+		effective := make([]string, 0, len(children))
+		for _, child := range children {
+			if planGroupSet[child] {
+				effective = append(effective, child)
+			}
+		}
+		return effective
+	}
+
+	// Token group is a child/independent group.
+	if planGroupSet[tokenGroup] {
+		return []string{tokenGroup}
+	}
+	return []string{}
+}
+
+func setToSlice(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for g := range set {
+		out = append(out, g)
+	}
+	return out
+}
+
+func userPlanAllowsGroup(plan *model.UserPlan, group string) bool {
+	if plan == nil || group == "" {
+		return true
+	}
+
+	allowedSet := expandChannelGroupsToSet(plan.GetChannelGroups())
+	if allowedSet[group] {
+		return true
+	}
+
+	// If group is a parent group, consider it allowed if any child is allowed.
+	for _, child := range ratio_setting.ExpandGroup(group) {
+		if allowedSet[child] {
+			return true
+		}
+	}
+
+	return false
 }

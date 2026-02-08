@@ -560,7 +560,7 @@ func SwitchToUserPlan(userId int, userPlanId int) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		// First verify the target user plan is valid
 		var targetPlan UserPlan
-		err := tx.Where("id = ? AND user_id = ? AND status = ?",
+		err := tx.Where("id = ? AND user_id = ? AND status = ? AND quota > 0",
 			userPlanId, userId, UserPlanStatusActive).
 			First(&targetPlan).Error
 		if err != nil {

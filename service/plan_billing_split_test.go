@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
@@ -70,14 +71,14 @@ func TestDeliverPlan_SetsPlanValidityDaysSnapshot(t *testing.T) {
 	planId := plan.Id
 	now := time.Now().UnixMilli()
 	order := &model.PlanOrder{
-		OrderNo:           "PO1",
-		UserId:            user.Id,
-		PlanId:            &planId,
-		PlanPrice:         10,
-		FinalPrice:        10,
-		Status:            model.OrderStatusPaid,
-		CreatedAt:         now,
-		PaidAt:            now,
+		OrderNo:            "PO1",
+		UserId:             user.Id,
+		PlanId:             &planId,
+		PlanPrice:          10,
+		FinalPrice:         10,
+		Status:             model.OrderStatusPaid,
+		CreatedAt:          now,
+		PaidAt:             now,
 		DeliveryRetryCount: 0,
 	}
 	if err := db.Create(order).Error; err != nil {
@@ -149,14 +150,14 @@ func TestPreConsumeQuota_SplitsPlanAndWallet_WhenPlanInsufficient(t *testing.T) 
 	}
 
 	nextPlan := &model.UserPlan{
-		UserId:          user.Id,
-		PlanId:          &planId,
-		Quota:           1000,
-		UsedQuota:       0,
-		OriginalQuota:   1000,
-		IsCurrent:       0,
-		Status:          model.UserPlanStatusActive,
-		QueuePosition:   1,
+		UserId:           user.Id,
+		PlanId:           &planId,
+		Quota:            1000,
+		UsedQuota:        0,
+		OriginalQuota:    1000,
+		IsCurrent:        0,
+		Status:           model.UserPlanStatusActive,
+		QueuePosition:    1,
 		PlanValidityDays: 30,
 	}
 	if err := db.Create(nextPlan).Error; err != nil {
@@ -167,11 +168,11 @@ func TestPreConsumeQuota_SplitsPlanAndWallet_WhenPlanInsufficient(t *testing.T) 
 	c, _ := gin.CreateTestContext(w)
 
 	relayInfo := &relaycommon.RelayInfo{
-		UserId:       user.Id,
-		UserPlanId:   currentPlan.Id,
-		PlanId:       planId,
+		UserId:        user.Id,
+		UserPlanId:    currentPlan.Id,
+		PlanId:        planId,
 		BillingSource: BillingSourcePlan,
-		IsPlayground: true, // skip token quota operations in tests
+		IsPlayground:  true, // skip token quota operations in tests
 	}
 
 	const preConsume = 150
@@ -232,5 +233,161 @@ func TestPreConsumeQuota_SplitsPlanAndWallet_WhenPlanInsufficient(t *testing.T) 
 	}
 	if userQuotaAfter != 950 {
 		t.Fatalf("expected user quota=950 after post-consume, got %d", userQuotaAfter)
+	}
+}
+
+func TestPreConsumeQuota_ReSelectsValidPlanForCurrentGroup_WhenMiddlewarePlanStale(t *testing.T) {
+	db := setupTestDB(t)
+
+	user := &model.User{
+		Username: "u1",
+		Password: "12345678",
+		Status:   1,
+		Quota:    0, // wallet should NOT be used when a valid plan exists
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	planG1 := &model.Plan{
+		Name:         "plan-g1",
+		DisplayName:  "Plan G1",
+		Type:         model.PlanTypeSubscription,
+		Category:     model.PlanCategoryMonthly,
+		Status:       model.PlanStatusEnabled,
+		DefaultQuota: 1000,
+		ChannelGroup: "g1",
+	}
+	if err := db.Create(planG1).Error; err != nil {
+		t.Fatalf("create plan g1: %v", err)
+	}
+	planIdG1 := planG1.Id
+
+	planG2 := &model.Plan{
+		Name:         "plan-g2",
+		DisplayName:  "Plan G2",
+		Type:         model.PlanTypeSubscription,
+		Category:     model.PlanCategoryMonthly,
+		Status:       model.PlanStatusEnabled,
+		DefaultQuota: 1000,
+		ChannelGroup: "g2",
+	}
+	if err := db.Create(planG2).Error; err != nil {
+		t.Fatalf("create plan g2: %v", err)
+	}
+	planIdG2 := planG2.Id
+
+	// Simulate the middleware selecting a stale/depleted plan (quota=0).
+	depleted := &model.UserPlan{
+		UserId:        user.Id,
+		PlanId:        &planIdG1,
+		Quota:         0,
+		UsedQuota:     0,
+		OriginalQuota: 0,
+		IsCurrent:     1,
+		Status:        model.UserPlanStatusActive,
+		PlanPriority:  5,
+	}
+	if err := db.Create(depleted).Error; err != nil {
+		t.Fatalf("create depleted user_plan: %v", err)
+	}
+
+	// A higher-priority plan exists but does NOT include the current group.
+	otherGroupHigh := &model.UserPlan{
+		UserId:        user.Id,
+		PlanId:        &planIdG2,
+		Quota:         1000,
+		UsedQuota:     0,
+		OriginalQuota: 1000,
+		IsCurrent:     0,
+		Status:        model.UserPlanStatusActive,
+		PlanPriority:  10,
+	}
+	if err := db.Create(otherGroupHigh).Error; err != nil {
+		t.Fatalf("create other-group user_plan: %v", err)
+	}
+
+	// A valid plan for the current group exists; it should be selected.
+	sameGroupAvailable := &model.UserPlan{
+		UserId:        user.Id,
+		PlanId:        &planIdG1,
+		Quota:         1000,
+		UsedQuota:     0,
+		OriginalQuota: 1000,
+		IsCurrent:     0,
+		Status:        model.UserPlanStatusActive,
+		PlanPriority:  0,
+	}
+	if err := db.Create(sameGroupAvailable).Error; err != nil {
+		t.Fatalf("create same-group user_plan: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, "g1")
+	common.SetContextKey(c, constant.ContextKeyUserPlanId, depleted.Id)
+	common.SetContextKey(c, constant.ContextKeyPlanId, planIdG1)
+	common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{"g1"})
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          user.Id,
+		UsingGroup:      "g1",
+		UserPlanId:      depleted.Id,
+		PlanId:          planIdG1,
+		BillingSource:   BillingSourcePlan,
+		IsPlayground:    true, // skip token quota operations in tests
+		OriginModelName: "gpt-3.5-turbo",
+	}
+
+	const preConsume = 100
+	if apiErr := PreConsumeQuota(c, preConsume, relayInfo); apiErr != nil {
+		t.Fatalf("pre-consume returned error: %v", apiErr)
+	}
+
+	if relayInfo.BillingSource != BillingSourcePlan {
+		t.Fatalf("expected BillingSource=%q, got %q", BillingSourcePlan, relayInfo.BillingSource)
+	}
+	if relayInfo.UserPlanId != sameGroupAvailable.Id {
+		t.Fatalf("expected relayInfo.UserPlanId switched to %d, got %d", sameGroupAvailable.Id, relayInfo.UserPlanId)
+	}
+	if relayInfo.UserPlanId == otherGroupHigh.Id {
+		t.Fatalf("unexpected switch to other group plan %d", otherGroupHigh.Id)
+	}
+
+	// Context should be updated for downstream retry/failover logic.
+	if got := common.GetContextKeyInt(c, constant.ContextKeyUserPlanId); got != sameGroupAvailable.Id {
+		t.Fatalf("expected context user_plan_id=%d, got %d", sameGroupAvailable.Id, got)
+	}
+	if got := common.GetContextKeyInt(c, constant.ContextKeyPlanId); got != planIdG1 {
+		t.Fatalf("expected context plan_id=%d, got %d", planIdG1, got)
+	}
+	groups := common.GetContextKeyStringSlice(c, constant.ContextKeyPlanGroups)
+	hasG1 := false
+	for _, g := range groups {
+		if g == "g1" {
+			hasG1 = true
+			break
+		}
+	}
+	if !hasG1 {
+		t.Fatalf("expected plan_groups contains g1, got %v", groups)
+	}
+
+	// Wallet should not be touched.
+	userQuota, err := model.GetUserQuota(user.Id, true)
+	if err != nil {
+		t.Fatalf("get user quota: %v", err)
+	}
+	if userQuota != 0 {
+		t.Fatalf("expected user quota stays 0, got %d", userQuota)
+	}
+
+	// DB current plan should be switched.
+	var reloaded model.UserPlan
+	if err := db.First(&reloaded, sameGroupAvailable.Id).Error; err != nil {
+		t.Fatalf("reload selected plan: %v", err)
+	}
+	if reloaded.IsCurrent != 1 {
+		t.Fatalf("expected selected plan is_current=1, got %d", reloaded.IsCurrent)
 	}
 }
