@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	stdtls "crypto/tls"
 	"encoding/base64"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/andybalholm/brotli"
 	utls "github.com/refraction-networking/utls"
 
 	"golang.org/x/net/proxy"
@@ -29,6 +31,18 @@ var (
 
 type utlsRoundTripper struct {
 	transport *http.Transport
+}
+
+type readCloser struct {
+	io.Reader
+	close func() error
+}
+
+func (r *readCloser) Close() error {
+	if r.close == nil {
+		return nil
+	}
+	return r.close()
 }
 
 func newUTLSRoundTripper() *utlsRoundTripper {
@@ -309,7 +323,15 @@ func performUTLSHandshake(ctx context.Context, rawConn net.Conn, host string, ba
 }
 
 func (r *utlsRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	return r.transport.RoundTrip(req)
+	resp, err := r.transport.RoundTrip(req)
+	if err != nil || resp == nil {
+		return resp, err
+	}
+	if err := decompressResponseBody(resp); err != nil {
+		_ = resp.Body.Close()
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (r *utlsRoundTripper) CloseIdleConnections() {
@@ -317,11 +339,80 @@ func (r *utlsRoundTripper) CloseIdleConnections() {
 }
 
 func (r *proxyUTLSRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	return r.transport.RoundTrip(req)
+	resp, err := r.transport.RoundTrip(req)
+	if err != nil || resp == nil {
+		return resp, err
+	}
+	if err := decompressResponseBody(resp); err != nil {
+		_ = resp.Body.Close()
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (r *proxyUTLSRoundTripper) CloseIdleConnections() {
 	r.transport.CloseIdleConnections()
+}
+
+func decompressResponseBody(resp *http.Response) error {
+	if resp == nil || resp.Body == nil {
+		return nil
+	}
+
+	encoding := strings.TrimSpace(strings.ToLower(resp.Header.Get("Content-Encoding")))
+	if encoding == "" {
+		return nil
+	}
+
+	encodings := make([]string, 0, 2)
+	for _, enc := range strings.Split(encoding, ",") {
+		enc = strings.TrimSpace(enc)
+		if enc == "" || enc == "identity" {
+			continue
+		}
+		switch enc {
+		case "gzip", "br":
+			encodings = append(encodings, enc)
+		default:
+			// Unknown content encoding. Leave the response untouched so callers that
+			// directly proxy bytes (without parsing) can still behave correctly.
+			return nil
+		}
+	}
+	if len(encodings) == 0 {
+		return nil
+	}
+
+	body := resp.Body
+	for i := len(encodings) - 1; i >= 0; i-- {
+		prev := body
+		switch encodings[i] {
+		case "gzip":
+			reader, err := gzip.NewReader(prev)
+			if err != nil {
+				return err
+			}
+			body = &readCloser{
+				Reader: reader,
+				close: func() error {
+					_ = reader.Close()
+					return prev.Close()
+				},
+			}
+		case "br":
+			body = &readCloser{
+				Reader: brotli.NewReader(prev),
+				close:  prev.Close,
+			}
+		}
+	}
+
+	resp.Body = body
+	resp.Uncompressed = true
+	resp.Header.Del("Content-Encoding")
+	resp.Header.Del("Content-Length")
+	resp.ContentLength = -1
+	return nil
 }
 
 func checkRedirect(req *http.Request, via []*http.Request) error {

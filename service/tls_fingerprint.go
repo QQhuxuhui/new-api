@@ -16,11 +16,28 @@ const (
 	nodeJSJA3Version = tls.VersionTLS12
 )
 
+// Node.js TLS Fingerprint Configuration
+//
+// This fingerprint is designed to mimic Node.js runtime TLS behavior.
+// Node.js v22+ and v24+ both use OpenSSL 3.x with similar TLS defaults,
+// so the same fingerprint works across these versions.
+//
+// The request headers should set X-Stainless-Runtime-Version to match
+// the target Node.js version (e.g., "v24.13.0" for Claude CLI 2.1.29).
+//
+// Reference: docs/CLIProxyAPI与new-api伪装实现对比分析.md
 var (
-	// NodeJS22ClientHelloSpec defines the Node.js v22 TLS fingerprint.
-	NodeJS22ClientHelloSpec = newNodeJS22ClientHelloSpec()
+	// NodeJSClientHelloSpec defines the Node.js TLS fingerprint.
+	// Compatible with Node.js v22.x and v24.x (OpenSSL 3.x based).
+	NodeJSClientHelloSpec = newNodeJSClientHelloSpec()
 
-	nodeJS22CipherSuites = []uint16{
+	// Deprecated: Use NodeJSClientHelloSpec instead.
+	// Kept for backward compatibility.
+	NodeJS22ClientHelloSpec = NodeJSClientHelloSpec
+
+	// nodeJSCipherSuites defines the cipher suites used by Node.js with OpenSSL 3.x.
+	// These are stable across Node.js v22+ and v24+ versions.
+	nodeJSCipherSuites = []uint16{
 		4866, 4867, 4865, 49199, 49195, 49200, 49196, 158, 49191, 103,
 		49192, 107, 163, 159, 52393, 52392, 52394, 49327, 49325, 49315,
 		49311, 49245, 49249, 49239, 49235, 162, 49326, 49324, 49314, 49310,
@@ -29,24 +46,28 @@ var (
 		156, 49312, 49308, 49232, 61, 60, 53, 47, 255,
 	}
 
-	nodeJS22SupportedGroups = []tls.CurveID{
+	// nodeJSSupportedGroups defines the elliptic curves supported by Node.js.
+	nodeJSSupportedGroups = []tls.CurveID{
 		tls.X25519, tls.CurveP256, tls.CurveID(30), tls.CurveP521, tls.CurveP384, // 30 = X448
 		tls.CurveID(256), tls.CurveID(257), tls.CurveID(258), tls.CurveID(259), tls.CurveID(260),
 	}
 
-	nodeJS22PointFormats = []byte{0, 1, 2}
+	// nodeJSPointFormats defines the EC point formats supported by Node.js.
+	nodeJSPointFormats = []byte{0, 1, 2}
 )
 
-func newNodeJS22ClientHelloSpec() *tls.ClientHelloSpec {
+// newNodeJSClientHelloSpec creates a new Node.js compatible ClientHello specification.
+// This fingerprint is designed for Node.js v22+ and v24+ (OpenSSL 3.x based).
+func newNodeJSClientHelloSpec() *tls.ClientHelloSpec {
 	return &tls.ClientHelloSpec{
 		TLSVersMin:         tls.VersionTLS12,
 		TLSVersMax:         tls.VersionTLS13,
-		CipherSuites:       append([]uint16(nil), nodeJS22CipherSuites...),
+		CipherSuites:       append([]uint16(nil), nodeJSCipherSuites...),
 		CompressionMethods: []byte{0},
 		Extensions: []tls.TLSExtension{
 			&tls.SNIExtension{},
-			&tls.SupportedPointsExtension{SupportedPoints: append([]byte(nil), nodeJS22PointFormats...)},
-			&tls.SupportedCurvesExtension{Curves: append([]tls.CurveID(nil), nodeJS22SupportedGroups...)},
+			&tls.SupportedPointsExtension{SupportedPoints: append([]byte(nil), nodeJSPointFormats...)},
+			&tls.SupportedCurvesExtension{Curves: append([]tls.CurveID(nil), nodeJSSupportedGroups...)},
 			&tls.SessionTicketExtension{},
 			&tls.GenericExtension{Id: 22}, // encrypt_then_mac
 			&tls.ExtendedMasterSecretExtension{},
@@ -74,9 +95,10 @@ func defaultSignatureSchemes() []tls.SignatureScheme {
 	}
 }
 
-// CloneNodeJS22ClientHelloSpec returns an isolated copy so callers can safely mutate SNI or session settings.
-func CloneNodeJS22ClientHelloSpec(serverName string) *tls.ClientHelloSpec {
-	spec := newNodeJS22ClientHelloSpec()
+// CloneNodeJSClientHelloSpec returns an isolated copy so callers can safely mutate SNI or session settings.
+// This is the preferred function for creating Node.js TLS fingerprints.
+func CloneNodeJSClientHelloSpec(serverName string) *tls.ClientHelloSpec {
+	spec := newNodeJSClientHelloSpec()
 	if serverName == "" {
 		return spec
 	}
@@ -88,6 +110,12 @@ func CloneNodeJS22ClientHelloSpec(serverName string) *tls.ClientHelloSpec {
 		}
 	}
 	return spec
+}
+
+// CloneNodeJS22ClientHelloSpec is deprecated. Use CloneNodeJSClientHelloSpec instead.
+// Kept for backward compatibility.
+func CloneNodeJS22ClientHelloSpec(serverName string) *tls.ClientHelloSpec {
+	return CloneNodeJSClientHelloSpec(serverName)
 }
 
 // ComputeJA3 derives the JA3 text and hash for the provided ClientHello spec.

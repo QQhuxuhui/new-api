@@ -18,13 +18,19 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, Table, Button, Popconfirm, Tag, Empty } from '@douyinfe/semi-ui';
+import { Card, Table, Button, Popconfirm, Tag, Empty, Typography } from '@douyinfe/semi-ui';
 import { IconRefresh, IconDelete } from '@douyinfe/semi-icons';
-import { MasqueradeAPI } from '../../services/masqueradeApi';
-import { timestamp2string } from '../../helpers';
-import MasqueradeDetailModal from './MasqueradeDetailModal';
+import { MasqueradeAPI } from '../../../services/masqueradeApi';
+import { timestamp2string } from '../../../helpers';
+import MasqueradeDetailModal from '../../../components/dashboard/MasqueradeDetailModal';
 
-const MasqueradeTracePanel = ({ t }) => {
+const { Text } = Typography;
+
+/**
+ * MasqueradeTraceTab - Masquerade trace panel for Analytics page
+ * Uses lightweight list API for better performance
+ */
+const MasqueradeTraceTab = ({ t }) => {
   const [loading, setLoading] = useState(false);
   const [traces, setTraces] = useState([]);
   const [selectedRecordId, setSelectedRecordId] = useState(null);
@@ -52,7 +58,7 @@ const MasqueradeTracePanel = ({ t }) => {
     }
   }, []);
 
-  // Open modal with record ID (lazy loading)
+  // Open detail modal with record ID (lazy loading)
   const handleViewDetail = useCallback((record) => {
     setSelectedRecordId(record.id);
     setModalVisible(true);
@@ -185,5 +191,4 @@ const MasqueradeTracePanel = ({ t }) => {
   );
 };
 
-export default MasqueradeTracePanel;
-
+export default MasqueradeTraceTab;

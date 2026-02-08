@@ -36,7 +36,21 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
 	// ========================================
-	// 伪装固定的 metadata.user_id
+	// 1. 注入 Claude Code 系统提示词
+	// 伪装成官方 Claude Code CLI 客户端
+	// ========================================
+	InjectClaudeCodeSystemPrompt(request, SystemPromptInjectModePrepend)
+
+	// ========================================
+	// 2. 敏感词混淆
+	// 使用零宽空格混淆敏感词，绕过简单的关键词检测
+	// ========================================
+	if SensitiveWordObfuscationEnabled() {
+		ObfuscateSensitiveWordsInRequest(request, GetSensitiveWords(nil))
+	}
+
+	// ========================================
+	// 3. 伪装固定的 metadata.user_id
 	// 避免上游检测多用户转售，同时保留其他 metadata 字段
 	// ========================================
 
@@ -138,31 +152,41 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 
 	// ========================================
 	// 伪装成固定的 Claude Code 客户端
-	// 使用固定值而非透传，避免暴露多用户特征
+	// 基于真实 claude-cli/2.1.29 请求头抓包分析
+	// 更新时间: 2026-02-04
+	// 参考文档: docs/CLIProxyAPI与new-api伪装实现对比分析.md
 	// ========================================
 
-	// Stainless SDK 特征头（9个）- 关键伪装特征
+	// 1. User-Agent - 关键伪装特征
+	req.Set("User-Agent", "claude-cli/2.1.29 (external, cli)")
+
+	// 2. Stainless SDK 特征头（8个）
+	// 注意：真实客户端不发送 X-Stainless-Helper-Method，已删除
 	req.Set("X-Stainless-Lang", "js")
 	req.Set("X-Stainless-Runtime", "node")
-	req.Set("X-Stainless-Runtime-Version", "v22.18.0") // 固定 Node 版本
-	req.Set("X-Stainless-Os", "Linux")                 // 固定操作系统
-	req.Set("X-Stainless-Arch", "x64")                 // 固定 CPU 架构
-	req.Set("X-Stainless-Package-Version", "0.70.0")   // SDK 版本
-	req.Set("X-Stainless-Helper-Method", "stream")
+	req.Set("X-Stainless-Runtime-Version", "v24.13.0") // 与真实客户端一致
+	req.Set("X-Stainless-Os", "Linux")                 // 服务器环境
+	req.Set("X-Stainless-Arch", "x64")
+	req.Set("X-Stainless-Package-Version", "0.70.0")
 	req.Set("X-Stainless-Retry-Count", "0")
-	req.Set("X-Stainless-Timeout", "60")
+	req.Set("X-Stainless-Timeout", "600") // 真实客户端是 600 秒
 
-	// 标准 HTTP 头（2个）
-	// 注意：不设置 Accept-Encoding，让 Go 自动处理 gzip 以避免解压问题
+	// 3. 标准 HTTP 头
+	req.Set("Accept-Encoding", "gzip, br") // 与真实客户端一致
 	req.Set("Accept-Language", "*")
 	req.Set("Sec-Fetch-Mode", "cors")
 
-	// Claude/Anthropic 特定头（3个）
+	// 4. Claude/Anthropic 特定头
 	req.Set("X-App", "cli")
 	req.Set("X-Accel-Buffering", "no")
 	req.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
 
+	// 调用通用头处理（包括模型特定设置）
 	CommonClaudeHeadersOperation(c, req, info)
+
+	// 5. Anthropic-Beta - 固定值，启用所有必要的 beta 功能
+	// 注意：必须在 CommonClaudeHeadersOperation 之后设置，以覆盖客户端传入的值
+	req.Set("Anthropic-Beta", "claude-code-20250219,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05")
 
 	// 采集伪装后的请求头（本系统 -> 上游）
 	maskedHeaders := make(map[string]string, len(*req))

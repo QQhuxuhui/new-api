@@ -22,9 +22,38 @@ import { API, showError } from '../helpers';
 const BASE_URL = '/api/masquerade';
 
 export const MasqueradeAPI = {
-  async fetchTraces() {
+  // 获取轻量追踪列表（不含body/headers，用于表格展示）
+  async fetchTraceList() {
     try {
       const response = await API.get(`${BASE_URL}/traces`);
+      if (response.data.success) {
+        return response.data.data || [];
+      }
+      throw new Error(response.data.message || 'Failed to fetch masquerade traces');
+    } catch (error) {
+      showError(error.message || 'Failed to fetch masquerade traces');
+      throw error;
+    }
+  },
+
+  // 按ID获取完整追踪记录（含body/headers，用于详情弹窗）
+  async fetchTraceDetail(id) {
+    try {
+      const response = await API.get(`${BASE_URL}/traces/${id}`);
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data.message || 'Failed to fetch trace detail');
+    } catch (error) {
+      showError(error.message || 'Failed to fetch trace detail');
+      throw error;
+    }
+  },
+
+  // 获取完整追踪列表（向后兼容）
+  async fetchTraces() {
+    try {
+      const response = await API.get(`${BASE_URL}/traces/full`);
       if (response.data.success) {
         return response.data.data || [];
       }

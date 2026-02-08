@@ -31,21 +31,24 @@ func TestSetupRequestHeader(t *testing.T) {
 				// Existing headers
 				"x-api-key":         "test-api-key",
 				"anthropic-version": "2023-06-01",
-				"anthropic-beta":    "interleaved-thinking",
-				// Stainless SDK headers (9)
+				// Note: anthropic-beta is overridden to fixed value
+				"anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05",
+				// User-Agent - Claude CLI identity
+				"User-Agent": "claude-cli/2.1.29 (external, cli)",
+				// Stainless SDK headers (8) - X-Stainless-Helper-Method removed per real client
 				"X-Stainless-Lang":            "js",
 				"X-Stainless-Runtime":         "node",
-				"X-Stainless-Runtime-Version": "v22.18.0",
+				"X-Stainless-Runtime-Version": "v24.13.0", // Matches real client
 				"X-Stainless-Os":              "Linux",
 				"X-Stainless-Arch":            "x64",
 				"X-Stainless-Package-Version": "0.70.0",
-				"X-Stainless-Helper-Method":   "stream",
 				"X-Stainless-Retry-Count":     "0",
-				"X-Stainless-Timeout":         "60",
-				// Standard HTTP headers (2) - Accept-Encoding removed to avoid decompression issues
+				"X-Stainless-Timeout":         "600", // Real client uses 600 seconds
+				// Standard HTTP headers
+				"Accept-Encoding": "gzip, br", // Matches real client
 				"Accept-Language": "*",
 				"Sec-Fetch-Mode":  "cors",
-				// Claude/Anthropic specific headers (3)
+				// Claude/Anthropic specific headers
 				"X-App":             "cli",
 				"X-Accel-Buffering": "no",
 				"Anthropic-Dangerous-Direct-Browser-Access": "true",
@@ -62,14 +65,15 @@ func TestSetupRequestHeader(t *testing.T) {
 			},
 		},
 		{
-			name:                "Anthropic-beta preserved when provided",
+			name:                "Anthropic-beta overridden with fixed value",
 			anthropicVersion:    "2024-01-01",
 			anthropicBeta:       "custom-beta",
 			checkDefaultVersion: false,
 			expectedHeaders: map[string]string{
 				"x-api-key":         "test-api-key",
 				"anthropic-version": "2024-01-01",
-				"anthropic-beta":    "custom-beta",
+				// Client's anthropic-beta is overridden with fixed value for masquerading
+				"anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05",
 			},
 		},
 	}
@@ -115,20 +119,24 @@ func TestSetupRequestHeader(t *testing.T) {
 				}
 			}
 
-			// For comprehensive coverage test, verify all 14 fixed headers
+			// For comprehensive coverage test, verify all fixed headers
 			if tt.name == "Normal case with all fixed headers" {
-				// Count fixed headers (14 total: 9 Stainless + 2 standard + 3 Claude)
-				// Note: Accept-Encoding removed to avoid decompression issues
+				// Fixed headers based on real claude-cli/2.1.29 packet capture:
+				// - 8 Stainless SDK headers (X-Stainless-Helper-Method removed)
+				// - 3 standard HTTP headers
+				// - 3 Claude/Anthropic specific headers
+				// - 1 User-Agent
 				fixedHeaders := []string{
+					"User-Agent",
 					"X-Stainless-Lang",
 					"X-Stainless-Runtime",
 					"X-Stainless-Runtime-Version",
 					"X-Stainless-Os",
 					"X-Stainless-Arch",
 					"X-Stainless-Package-Version",
-					"X-Stainless-Helper-Method",
 					"X-Stainless-Retry-Count",
 					"X-Stainless-Timeout",
+					"Accept-Encoding",
 					"Accept-Language",
 					"Sec-Fetch-Mode",
 					"X-App",

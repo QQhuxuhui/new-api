@@ -414,6 +414,20 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, te
 	claudeRequest.Messages = claudeMessages
 
 	// ========================================
+	// 注入 Claude Code 系统提示词
+	// 伪装成官方 Claude Code CLI 客户端
+	// ========================================
+	InjectClaudeCodeSystemPrompt(&claudeRequest, SystemPromptInjectModePrepend)
+
+	// ========================================
+	// 敏感词混淆
+	// 使用零宽空格混淆敏感词，绕过简单的关键词检测
+	// ========================================
+	if SensitiveWordObfuscationEnabled() {
+		ObfuscateSensitiveWordsInRequest(&claudeRequest, GetSensitiveWords(nil))
+	}
+
+	// ========================================
 	// 伪装固定的 metadata.user_id（保留其他字段）
 	// 避免上游检测多用户转售
 	// ========================================
