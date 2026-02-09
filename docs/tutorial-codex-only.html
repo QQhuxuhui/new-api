@@ -1,0 +1,624 @@
+<div class="tutorial-container">
+  <div class="tutorial-header">
+    <div class="logo-icon">🤖</div>
+    <h3>OpenAI Codex CLI 使用教程</h3>
+    <p class="subtitle">跟着这个教程，轻松在你的电脑上安装并使用 Codex CLI</p>
+  </div>
+
+  <!-- 前置要求 -->
+  <div class="tutorial-card">
+    <div class="card-header">
+      <span class="step-badge">0</span>
+      <h4>前置要求</h4>
+    </div>
+    <div class="card-content">
+      <p><strong>支持平台：</strong></p>
+      <ul>
+        <li>macOS 10.15+</li>
+        <li>Linux（Ubuntu、Debian、Fedora 等）</li>
+        <li>Windows（仅通过 WSL 支持）</li>
+      </ul>
+
+      <p><strong>环境依赖：</strong></p>
+      <div class="code-wrapper">
+        <pre><code>node --version</code></pre>
+      </div>
+
+      <div class="alert alert-info">
+        <strong>💡 提示：</strong> Codex CLI 依赖 Node.js 环境，请确保已安装最新 LTS 版本。
+      </div>
+    </div>
+  </div>
+
+  <!-- 第一步：安装 Node.js -->
+  <div class="tutorial-card">
+    <div class="card-header">
+      <span class="step-badge">1</span>
+      <h4>安装 Node.js 环境</h4>
+    </div>
+    <div class="card-content">
+      <p>Codex CLI 需要 Node.js 环境才能运行。请根据你的操作系统选择安装方式：</p>
+
+      <div class="tab-group">
+        <div class="platform-section">
+          <h5>🪟 Windows</h5>
+          <p>Codex CLI 在 Windows 上仅通过 WSL（Windows Subsystem for Linux）支持。请先安装 WSL，然后在 WSL 环境中按照 Linux 步骤操作。</p>
+          <p><strong>安装 WSL：</strong></p>
+          <div class="code-wrapper">
+            <pre><code># 在 PowerShell（管理员）中运行
+wsl --install</code></pre>
+          </div>
+          <p class="small-text">安装完成后重启电脑，然后在 WSL 终端中按照下方 Linux 步骤继续操作。</p>
+        </div>
+
+        <div class="platform-section">
+          <h5>🍎 macOS</h5>
+          <p><strong>方法一：使用 Homebrew（推荐）</strong></p>
+          <div class="code-wrapper">
+            <pre><code># 更新 Homebrew
+brew update
+
+# 安装 Node.js
+brew install node</code></pre>
+          </div>
+          <p><strong>方法二：官网下载</strong></p>
+          <ol>
+            <li>访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a></li>
+            <li>下载适合 macOS 的 LTS 版本</li>
+            <li>打开下载的 <code>.pkg</code> 文件，按照安装程序指引完成安装</li>
+          </ol>
+          <div class="alert alert-info">
+            <strong>💡 macOS 注意事项：</strong>
+            <ul style="margin-bottom:0">
+              <li>如果遇到权限问题，可能需要使用 <code>sudo</code></li>
+              <li>首次运行可能需要在系统偏好设置中允许</li>
+              <li>建议使用 Terminal 或 iTerm2</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="platform-section">
+          <h5>🐧 Linux / WSL</h5>
+          <p><strong>方法一：使用 NodeSource 仓库（推荐）</strong></p>
+          <div class="code-wrapper">
+            <pre><code># Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt-get install -y nodejs</code></pre>
+          </div>
+          <p><strong>方法二：使用系统包管理器</strong></p>
+          <div class="code-wrapper">
+            <pre><code># Ubuntu/Debian
+sudo apt update
+sudo apt install nodejs npm
+
+# CentOS/RHEL/Fedora
+sudo dnf install nodejs npm</code></pre>
+          </div>
+          <div class="alert alert-info">
+            <strong>💡 Linux 注意事项：</strong>
+            <ul style="margin-bottom:0">
+              <li>某些发行版可能需要安装额外的依赖</li>
+              <li>如果遇到权限问题，使用 <code>sudo</code></li>
+              <li>确保你的用户在 npm 的全局目录有写权限</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div style="height: 1px; background: #e5e7eb; margin: 25px 0;"></div>
+
+      <p><strong>验证安装：</strong></p>
+      <div class="code-wrapper">
+        <pre><code>node --version
+npm --version</code></pre>
+      </div>
+      <p class="small-text">如果显示版本号，说明安装成功了！</p>
+    </div>
+  </div>
+
+  <!-- 第二步：安装 Codex CLI -->
+  <div class="tutorial-card">
+    <div class="card-header">
+      <span class="step-badge">2</span>
+      <h4>安装 Codex CLI</h4>
+    </div>
+    <div class="card-content">
+      <p><strong>根据平台选择安装方式：</strong></p>
+
+      <div class="tab-group">
+        <div class="platform-section">
+          <h5>🍎 macOS（Homebrew 推荐）</h5>
+          <div class="code-wrapper">
+            <pre><code>brew install --cask codex</code></pre>
+          </div>
+        </div>
+
+        <div class="platform-section">
+          <h5>🐧 Linux / WSL（npm）</h5>
+          <div class="code-wrapper">
+            <pre><code>npm install -g @openai/codex</code></pre>
+          </div>
+          <p class="small-text">如果遇到权限问题，请尝试 <code>sudo npm install -g @openai/codex</code></p>
+        </div>
+      </div>
+
+      <div class="alert alert-warning">
+        <strong>⚠️ Windows 用户注意：</strong> Codex CLI 不直接支持 Windows，请在 WSL 环境中使用 npm 方式安装。
+      </div>
+
+      <p style="margin-top: 15px;"><strong>验证安装：</strong></p>
+      <div class="code-wrapper">
+        <pre><code>codex --version</code></pre>
+      </div>
+      <p class="small-text">如果显示版本号，说明 Codex CLI 已经成功安装了。</p>
+    </div>
+  </div>
+
+  <!-- 第三步：配置中转 API -->
+  <div class="tutorial-card">
+    <div class="card-header">
+      <span class="step-badge">3</span>
+      <h4>配置中转 API</h4>
+    </div>
+    <div class="card-content">
+      <p>Codex CLI 的配置分为两部分：配置文件和环境变量。</p>
+
+      <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
+
+      <p><strong>1. 编辑配置文件</strong></p>
+      <p>编辑 <code>~/.codex/config.toml</code>，在文件开头添加以下配置：</p>
+      <div class="code-wrapper">
+        <pre><code>model_provider = "crs"
+model = "gpt-5-codex"
+model_reasoning_effort = "high"
+disable_response_storage = true
+preferred_auth_method = "apikey"
+
+[model_providers.crs]
+name = "crs"
+base_url = "{{OPENAI_API_URL}}"
+wire_api = "responses"
+requires_openai_auth = true
+env_key = "CRS_OAI_KEY"</code></pre>
+      </div>
+
+      <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
+
+      <p><strong>2. 编辑认证文件</strong></p>
+      <p>编辑 <code>~/.codex/auth.json</code>，将 OPENAI_API_KEY 设置为 null：</p>
+      <div class="code-wrapper">
+        <pre><code>{
+  "OPENAI_API_KEY": null
+}</code></pre>
+      </div>
+
+      <div class="alert alert-info">
+        <strong>📝 说明：</strong> 将 OPENAI_API_KEY 设置为 null，是为了让 Codex 使用我们在 config.toml 中配置的 <code>env_key</code>（即 CRS_OAI_KEY）来读取 API 密钥。
+      </div>
+
+      <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
+
+      <p><strong>3. 设置环境变量 CRS_OAI_KEY</strong></p>
+      <p>请选择你的操作系统设置环境变量：</p>
+
+      <div class="tab-group">
+        <div class="platform-section">
+          <h5>🪟 Windows (WSL)</h5>
+          <p><strong>临时设置（当前会话）：</strong></p>
+          <div class="code-wrapper">
+            <pre><code>export CRS_OAI_KEY="你的API密钥"</code></pre>
+          </div>
+          <p><strong>永久设置：</strong></p>
+          <div class="code-wrapper">
+            <pre><code># WSL 中默认使用 bash
+echo 'export CRS_OAI_KEY="你的API密钥"' >> ~/.bashrc
+source ~/.bashrc</code></pre>
+          </div>
+          <p class="small-text">💡 WSL 环境中的操作与 Linux 相同。</p>
+        </div>
+
+        <div class="platform-section">
+          <h5>🍎 macOS</h5>
+          <p><strong>临时设置（当前会话）：</strong></p>
+          <div class="code-wrapper">
+            <pre><code>export CRS_OAI_KEY="你的API密钥"</code></pre>
+          </div>
+          <p><strong>永久设置：</strong></p>
+          <div class="code-wrapper">
+            <pre><code># 对于 zsh（macOS 默认）
+echo 'export CRS_OAI_KEY="你的API密钥"' >> ~/.zshrc
+source ~/.zshrc
+
+# 对于 bash
+echo 'export CRS_OAI_KEY="你的API密钥"' >> ~/.bash_profile
+source ~/.bash_profile</code></pre>
+          </div>
+          <p class="small-text">💡 验证：<code>echo $CRS_OAI_KEY</code></p>
+        </div>
+
+        <div class="platform-section">
+          <h5>🐧 Linux</h5>
+          <p><strong>临时设置（当前会话）：</strong></p>
+          <div class="code-wrapper">
+            <pre><code>export CRS_OAI_KEY="你的API密钥"</code></pre>
+          </div>
+          <p><strong>永久设置：</strong></p>
+          <div class="code-wrapper">
+            <pre><code># 对于 bash（Linux 默认）
+echo 'export CRS_OAI_KEY="你的API密钥"' >> ~/.bashrc
+source ~/.bashrc
+
+# 对于 zsh
+echo 'export CRS_OAI_KEY="你的API密钥"' >> ~/.zshrc
+source ~/.zshrc</code></pre>
+          </div>
+          <p class="small-text">💡 验证：<code>echo $CRS_OAI_KEY</code></p>
+        </div>
+      </div>
+
+      <div class="alert alert-info">
+        <strong>📝 配置要点：</strong>
+        <ul>
+          <li><strong>API Base URL：</strong><code>{{OPENAI_API_URL}}</code></li>
+          <li><strong>API Key：</strong>将 <code>你的API密钥</code> 替换为你的实际密钥（格式如 cr_xxxxxxxxxx）</li>
+          <li><strong>环境变量名：</strong><code>CRS_OAI_KEY</code>，与 config.toml 中的 env_key 对应</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 第四步：开始使用 -->
+  <div class="tutorial-card">
+    <div class="card-header">
+      <span class="step-badge">4</span>
+      <h4>开始使用 Codex CLI</h4>
+    </div>
+    <div class="card-content">
+      <p><strong>基本命令模式：</strong></p>
+      <div class="code-wrapper">
+        <pre><code>codex "list all files in current directory"</code></pre>
+      </div>
+      <p class="small-text">Codex 会将你的自然语言描述转换为对应的 Shell 命令。</p>
+
+      <p style="margin-top: 20px;"><strong>在特定项目中使用：</strong></p>
+      <div class="code-wrapper">
+        <pre><code># 进入你的项目目录
+cd /path/to/your/project
+
+# 使用 Codex
+codex "explain the main function in this project"</code></pre>
+      </div>
+
+      <p style="margin-top: 20px;"><strong>常用功能：</strong></p>
+      <div class="command-grid">
+        <div class="cmd-item">
+          <code>codex "描述任务"</code>
+          <span>自然语言转命令</span>
+        </div>
+        <div class="cmd-item">
+          <code>codex --explain</code>
+          <span>解释命令含义</span>
+        </div>
+        <div class="cmd-item">
+          <code>codex --version</code>
+          <span>查看版本</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 常见问题 -->
+  <div class="tutorial-card">
+    <div class="card-header">
+      <span class="step-badge">?</span>
+      <h4>常见问题解决</h4>
+    </div>
+    <div class="card-content">
+      <div class="faq-item">
+        <p><strong>安装时提示 "permission denied" 错误</strong></p>
+        <ul>
+          <li><strong>macOS/Linux/WSL：</strong>使用 <code>sudo npm install -g @openai/codex</code>，或配置 npm 使用用户目录：<code>npm config set prefix ~/.npm-global</code> 并添加到 PATH</li>
+        </ul>
+      </div>
+
+      <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
+
+      <div class="faq-item">
+        <p><strong>Windows 无法直接运行 Codex</strong></p>
+        <p>Codex CLI 仅支持 macOS 和 Linux。Windows 用户请先安装 WSL：</p>
+        <div class="code-wrapper">
+          <pre><code>wsl --install</code></pre>
+        </div>
+        <p class="small-text">安装完成后在 WSL 终端中操作即可。</p>
+      </div>
+
+      <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
+
+      <div class="faq-item">
+        <p><strong>环境变量设置后不生效</strong></p>
+        <ul>
+          <li>确认修改了正确的文件（<code>.bashrc</code> 或 <code>.zshrc</code>）</li>
+          <li>执行 <code>source</code> 命令或重启终端</li>
+          <li>验证设置：<code>echo $CRS_OAI_KEY</code></li>
+        </ul>
+      </div>
+
+      <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
+
+      <div class="faq-item">
+        <p><strong>配置文件不存在</strong></p>
+        <p>首次使用时 <code>~/.codex/</code> 目录可能不存在，手动创建即可：</p>
+        <div class="code-wrapper">
+          <pre><code>mkdir -p ~/.codex
+touch ~/.codex/config.toml
+touch ~/.codex/auth.json</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 结尾 -->
+  <div class="resource-section">
+    <h4>🎉 恭喜你！</h4>
+    <p>你已经成功安装并配置了 Codex CLI，现在可以开始使用 AI 编程助手了。</p>
+    <p class="small-text">如果在使用过程中遇到任何问题，可以查看官方文档或社区讨论获取帮助。</p>
+    <div class="resource-links">
+      <a href="https://github.com/openai/codex" target="_blank">GitHub 仓库</a>
+      <a href="https://developers.openai.com/codex/cli/" target="_blank">开发者文档</a>
+      <a href="https://help.openai.com/en/articles/11096431-openai-codex-cli-getting-started" target="_blank">入门指南</a>
+    </div>
+  </div>
+</div>
+
+<style>
+/* 核心容器与排版 */
+.tutorial-container {
+  max-width: 900px;
+  margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #374151;
+  line-height: 1.6;
+  padding: 20px;
+}
+
+/* 头部样式 - OpenAI Green Theme */
+.tutorial-header {
+  text-align: center;
+  margin-bottom: 50px;
+  padding: 40px 20px;
+  background: linear-gradient(135deg, #10a37f 0%, #0d8c6c 100%);
+  border-radius: 16px;
+  color: white;
+  box-shadow: 0 10px 25px rgba(16, 163, 127, 0.2);
+}
+.tutorial-header h3 {
+  font-size: 2.5em;
+  margin: 10px 0;
+  font-weight: 700;
+  color: white;
+}
+.tutorial-header .subtitle {
+  font-size: 1.1em;
+  opacity: 0.9;
+  margin: 0;
+}
+.logo-icon {
+  font-size: 3em;
+  margin-bottom: 10px;
+}
+
+/* 卡片样式 */
+.tutorial-card {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  margin-bottom: 30px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.tutorial-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+.card-header {
+  background: #f9fafb;
+  padding: 15px 25px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+}
+.card-header h4 {
+  margin: 0;
+  font-size: 1.25em;
+  color: #111827;
+  font-weight: 600;
+}
+.step-badge {
+  background: #10a37f;
+  color: white;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 15px;
+  font-weight: bold;
+  font-size: 0.9em;
+  flex-shrink: 0;
+}
+
+.card-content {
+  padding: 25px;
+}
+
+/* 平台区块 */
+.platform-section {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 15px;
+}
+.platform-section h5 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 1.1em;
+  color: #1e293b;
+}
+
+/* 代码块样式 */
+.code-wrapper {
+  background: #1f2937;
+  border-radius: 8px;
+  padding: 15px;
+  margin: 15px 0;
+  position: relative;
+}
+.tutorial-container pre {
+  margin: 0;
+  overflow-x: auto;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9em;
+  color: #e5e7eb;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.tutorial-container pre code {
+  font-family: inherit;
+  background: none;
+  padding: 0;
+  border: none;
+  color: inherit;
+  font-size: inherit;
+}
+.tutorial-container p > code,
+.tutorial-container li > code {
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #059669;
+  font-size: 0.9em;
+  border: 1px solid #e5e7eb;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+}
+
+/* 提示框 */
+.alert {
+  padding: 15px;
+  border-radius: 8px;
+  margin: 15px 0;
+  font-size: 0.95em;
+  border-left: 4px solid;
+}
+.alert-info {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #10a37f;
+}
+.alert-warning {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #f59e0b;
+}
+
+/* 列表与排版细节 */
+.tutorial-container ol,
+.tutorial-container ul {
+  padding-left: 20px;
+}
+.tutorial-container li {
+  margin-bottom: 8px;
+}
+.small-text {
+  font-size: 0.85em;
+  color: #6b7280;
+  margin-top: 5px;
+}
+.tutorial-container a {
+  color: #10a37f;
+  text-decoration: none;
+  font-weight: 500;
+}
+.tutorial-container a:hover {
+  text-decoration: underline;
+}
+
+/* FAQ */
+.faq-item {
+  margin-bottom: 5px;
+}
+.faq-item > p:first-child {
+  margin-bottom: 8px;
+}
+
+/* 常用命令网格 */
+.command-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 15px;
+  margin-top: 20px;
+}
+.cmd-item {
+  background: #f9fafb;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  text-align: center;
+}
+.cmd-item code {
+  display: block;
+  margin-bottom: 5px;
+  background: none;
+  border: none;
+  color: #111827;
+  font-weight: 600;
+}
+.cmd-item span {
+  font-size: 0.85em;
+  color: #6b7280;
+}
+
+/* 底部资源链接 */
+.resource-section {
+  text-align: center;
+  margin-top: 40px;
+  padding: 30px;
+  background: linear-gradient(135deg, #10a37f 0%, #0d8c6c 100%);
+  border-radius: 12px;
+  color: white;
+}
+.resource-section h4 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: white;
+  font-size: 1.4em;
+}
+.resource-section p {
+  color: rgba(255,255,255,0.9);
+}
+.resource-section .small-text {
+  color: rgba(255,255,255,0.7);
+}
+.resource-links {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+.resource-links a {
+  background: rgba(255,255,255,0.2);
+  padding: 10px 20px;
+  border-radius: 20px;
+  color: white;
+  transition: all 0.2s;
+}
+.resource-links a:hover {
+  background: rgba(255,255,255,0.35);
+  text-decoration: none;
+  transform: translateY(-2px);
+}
+</style>
