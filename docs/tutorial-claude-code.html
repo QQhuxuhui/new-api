@@ -16,13 +16,15 @@
       <ul class="feature-list">
         <li>Node.js 18.0.0 或更高版本</li>
         <li>npm 9.0.0 或更高版本</li>
+        <li>Git（版本控制工具）</li>
         <li>支持 Windows 10+、macOS 10.15+、Ubuntu 20.04+/Debian 10+</li>
       </ul>
 
       <p><strong>检查版本：</strong></p>
       <div class="code-wrapper">
         <pre><code>node --version
-npm --version</code></pre>
+npm --version
+git --version</code></pre>
       </div>
 
       <div class="alert alert-info">
@@ -35,7 +37,7 @@ npm --version</code></pre>
   <div class="tutorial-card">
     <div class="card-header">
       <span class="step-badge">1</span>
-      <h4>安装 Node.js</h4>
+      <h4>安装 Node.js & Git</h4>
     </div>
     <div class="card-content">
       <div class="tab-group">
@@ -63,6 +65,39 @@ sudo apt-get install -y nodejs
 # 验证安装
 node --version
 npm --version</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <div style="height: 1px; background: #e5e7eb; margin: 25px 0;"></div>
+
+      <p><strong>安装 Git：</strong></p>
+      <p class="small-text">Claude Code 依赖 Git 进行版本控制操作，请确保已安装。</p>
+      <div class="tab-group">
+        <div class="platform-section">
+          <h5>🪟 Windows</h5>
+          <p>访问 <a href="https://git-scm.com/download/win" target="_blank">git-scm.com</a> 下载安装包，按默认选项安装。</p>
+          <p>或使用 winget 安装：</p>
+          <div class="code-wrapper">
+            <pre><code>winget install --id Git.Git -e --source winget</code></pre>
+          </div>
+        </div>
+
+        <div class="platform-section">
+          <h5>🍎 macOS</h5>
+          <div class="code-wrapper">
+            <pre><code>brew install git</code></pre>
+          </div>
+        </div>
+
+        <div class="platform-section">
+          <h5>🐧 Linux</h5>
+          <div class="code-wrapper">
+            <pre><code># Ubuntu/Debian
+sudo apt-get install -y git
+
+# 验证安装
+git --version</code></pre>
           </div>
         </div>
       </div>
@@ -124,6 +159,22 @@ if (!(Test-Path $configDir)) {
   }
 }
 "@ | Out-File -FilePath "$configDir\settings.json" -Encoding utf8</code></pre>
+          </div>
+        </div>
+
+        <div class="os-config" style="margin-top: 20px;">
+          <h5>🪟 Windows (CMD)</h5>
+          <div class="code-wrapper">
+            <pre><code>mkdir "%USERPROFILE%\.claude"
+
+(
+echo {
+echo   "env": {
+echo     "ANTHROPIC_BASE_URL": "{{CLAUDE_API_URL}}",
+echo     "ANTHROPIC_AUTH_TOKEN": "YOUR_API_KEY"
+echo   }
+echo }
+) > "%USERPROFILE%\.claude\settings.json"</code></pre>
           </div>
         </div>
 
