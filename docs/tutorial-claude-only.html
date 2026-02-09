@@ -251,36 +251,6 @@ source ~/.zshrc</code></pre>
     </div>
   </div>
 
-  <!-- VSCode 插件配置 -->
-  <div class="tutorial-card tutorial-card-vscode">
-    <div class="card-header">
-      <span class="step-badge">+</span>
-      <h4>VSCode Claude 插件配置（可选）</h4>
-    </div>
-    <div class="card-content">
-      <p>如果你使用 VSCode 的 Claude 插件，还需要在配置文件中进行额外设置：</p>
-
-      <p><strong>配置文件位置：</strong></p>
-      <div class="win-only">
-        <p><code>C:\Users\你的用户名\.claude\config.json</code></p>
-      </div>
-      <div class="mac-only">
-        <p><code>~/.claude/config.json</code></p>
-      </div>
-      <div class="linux-only">
-        <p><code>~/.claude/config.json</code></p>
-      </div>
-      <p class="small-text">💡 如果该文件不存在，请手动创建。</p>
-
-      <p><strong>配置内容：</strong></p>
-      <div class="code-wrapper">
-        <pre><code>{
-  "primaryApiKey": "crs"
-}</code></pre>
-      </div>
-    </div>
-  </div>
-
   <!-- 第四步：开始使用 -->
   <div class="tutorial-card">
     <div class="card-header">
@@ -386,12 +356,9 @@ claude</code></pre>
 .win-only, .mac-only, .linux-only { display: none; }
 
 /* Show content based on checked radio */
-#claude-tab-win:checked ~ .tutorial-card .win-only,
-#claude-tab-win:checked ~ .tutorial-card-vscode .win-only { display: block; }
-#claude-tab-mac:checked ~ .tutorial-card .mac-only,
-#claude-tab-mac:checked ~ .tutorial-card-vscode .mac-only { display: block; }
-#claude-tab-linux:checked ~ .tutorial-card .linux-only,
-#claude-tab-linux:checked ~ .tutorial-card-vscode .linux-only { display: block; }
+#claude-tab-win:checked ~ .tutorial-card .win-only { display: block; }
+#claude-tab-mac:checked ~ .tutorial-card .mac-only { display: block; }
+#claude-tab-linux:checked ~ .tutorial-card .linux-only { display: block; }
 
 /* Tab bar styling */
 .os-tab-bar {
