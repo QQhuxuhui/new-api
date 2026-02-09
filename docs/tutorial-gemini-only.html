@@ -5,6 +5,18 @@
     <p class="subtitle">跟着这个教程，轻松在你的电脑上安装并使用 Gemini CLI</p>
   </div>
 
+  <!-- OS radio inputs – direct children of .tutorial-container -->
+  <input type="radio" id="gemini-tab-win" name="gemini-os" class="os-radio" checked>
+  <input type="radio" id="gemini-tab-mac" name="gemini-os" class="os-radio">
+  <input type="radio" id="gemini-tab-linux" name="gemini-os" class="os-radio">
+
+  <!-- Tab bar -->
+  <div class="os-tab-bar">
+    <label for="gemini-tab-win">Windows</label>
+    <label for="gemini-tab-mac">macOS</label>
+    <label for="gemini-tab-linux">Linux</label>
+  </div>
+
   <!-- 前置要求 -->
   <div class="tutorial-card">
     <div class="card-header">
@@ -38,84 +50,85 @@
     <div class="card-content">
       <p>Gemini CLI 需要 Node.js 环境才能运行。请根据你的操作系统选择安装方式：</p>
 
-      <div class="tab-group">
-        <div class="platform-section">
-          <h5>🪟 Windows</h5>
-          <p><strong>方法一：官网下载（推荐）</strong></p>
-          <ol>
-            <li>打开浏览器访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a></li>
-            <li>点击 "LTS" 版本进行下载（推荐长期支持版本）</li>
-            <li>下载完成后双击 <code>.msi</code> 文件</li>
-            <li>按照安装向导完成安装，保持默认设置即可</li>
-          </ol>
-          <p><strong>方法二：使用包管理器</strong></p>
-          <div class="code-wrapper">
-            <pre><code># 使用 Chocolatey
+      <!-- Windows -->
+      <div class="platform-section win-only">
+        <h5>🪟 Windows</h5>
+        <p><strong>方法一：官网下载（推荐）</strong></p>
+        <ol>
+          <li>打开浏览器访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a></li>
+          <li>点击 "LTS" 版本进行下载（推荐长期支持版本）</li>
+          <li>下载完成后双击 <code>.msi</code> 文件</li>
+          <li>按照安装向导完成安装，保持默认设置即可</li>
+        </ol>
+        <p><strong>方法二：使用包管理器</strong></p>
+        <div class="code-wrapper">
+          <pre><code># 使用 Chocolatey
 choco install nodejs
 
 # 或使用 Scoop
 scoop install nodejs</code></pre>
-          </div>
-          <div class="alert alert-info">
-            <strong>💡 Windows 注意事项：</strong>
-            <ul style="margin-bottom:0">
-              <li>建议使用 PowerShell 而不是 CMD</li>
-              <li>如果遇到权限问题，尝试以管理员身份运行</li>
-            </ul>
-          </div>
         </div>
+        <div class="alert alert-info">
+          <strong>💡 Windows 注意事项：</strong>
+          <ul style="margin-bottom:0">
+            <li>建议使用 PowerShell 而不是 CMD</li>
+            <li>如果遇到权限问题，尝试以管理员身份运行</li>
+          </ul>
+        </div>
+      </div>
 
-        <div class="platform-section">
-          <h5>🍎 macOS</h5>
-          <p><strong>方法一：使用 Homebrew（推荐）</strong></p>
-          <div class="code-wrapper">
-            <pre><code># 更新 Homebrew
+      <!-- macOS -->
+      <div class="platform-section mac-only">
+        <h5>🍎 macOS</h5>
+        <p><strong>方法一：使用 Homebrew（推荐）</strong></p>
+        <div class="code-wrapper">
+          <pre><code># 更新 Homebrew
 brew update
 
 # 安装 Node.js
 brew install node</code></pre>
-          </div>
-          <p><strong>方法二：官网下载</strong></p>
-          <ol>
-            <li>访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a></li>
-            <li>下载适合 macOS 的 LTS 版本</li>
-            <li>打开下载的 <code>.pkg</code> 文件，按照安装程序指引完成安装</li>
-          </ol>
-          <div class="alert alert-info">
-            <strong>💡 macOS 注意事项：</strong>
-            <ul style="margin-bottom:0">
-              <li>如果遇到权限问题，可能需要使用 <code>sudo</code></li>
-              <li>首次运行可能需要在系统偏好设置中允许</li>
-              <li>建议使用 Terminal 或 iTerm2</li>
-            </ul>
-          </div>
         </div>
+        <p><strong>方法二：官网下载</strong></p>
+        <ol>
+          <li>访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a></li>
+          <li>下载适合 macOS 的 LTS 版本</li>
+          <li>打开下载的 <code>.pkg</code> 文件，按照安装程序指引完成安装</li>
+        </ol>
+        <div class="alert alert-info">
+          <strong>💡 macOS 注意事项：</strong>
+          <ul style="margin-bottom:0">
+            <li>如果遇到权限问题，可能需要使用 <code>sudo</code></li>
+            <li>首次运行可能需要在系统偏好设置中允许</li>
+            <li>建议使用 Terminal 或 iTerm2</li>
+          </ul>
+        </div>
+      </div>
 
-        <div class="platform-section">
-          <h5>🐧 Linux / WSL2</h5>
-          <p><strong>方法一：使用 NodeSource 仓库（推荐）</strong></p>
-          <div class="code-wrapper">
-            <pre><code># Ubuntu/Debian
+      <!-- Linux -->
+      <div class="platform-section linux-only">
+        <h5>🐧 Linux / WSL2</h5>
+        <p><strong>方法一：使用 NodeSource 仓库（推荐）</strong></p>
+        <div class="code-wrapper">
+          <pre><code># Ubuntu/Debian
 curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
 sudo apt-get install -y nodejs</code></pre>
-          </div>
-          <p><strong>方法二：使用系统包管理器</strong></p>
-          <div class="code-wrapper">
-            <pre><code># Ubuntu/Debian
+        </div>
+        <p><strong>方法二：使用系统包管理器</strong></p>
+        <div class="code-wrapper">
+          <pre><code># Ubuntu/Debian
 sudo apt update
 sudo apt install nodejs npm
 
 # CentOS/RHEL/Fedora
 sudo dnf install nodejs npm</code></pre>
-          </div>
-          <div class="alert alert-info">
-            <strong>💡 Linux 注意事项：</strong>
-            <ul style="margin-bottom:0">
-              <li>某些发行版可能需要安装额外的依赖</li>
-              <li>如果遇到权限问题，使用 <code>sudo</code></li>
-              <li>确保你的用户在 npm 的全局目录有写权限</li>
-            </ul>
-          </div>
+        </div>
+        <div class="alert alert-info">
+          <strong>💡 Linux 注意事项：</strong>
+          <ul style="margin-bottom:0">
+            <li>某些发行版可能需要安装额外的依赖</li>
+            <li>如果遇到权限问题，使用 <code>sudo</code></li>
+            <li>确保你的用户在 npm 的全局目录有写权限</li>
+          </ul>
         </div>
       </div>
 
@@ -166,46 +179,47 @@ npm install -g @google/gemini-cli</code></pre>
       <h4>配置中转 API 环境变量</h4>
     </div>
     <div class="card-content">
-      <p>为了让 Gemini CLI 连接到你的中转服务，需要设置环境变量。请选择你的操作系统：</p>
+      <p>为了让 Gemini CLI 连接到你的中转服务，需要设置环境变量：</p>
 
-      <div class="tab-group">
-        <div class="platform-section">
-          <h5>🪟 Windows (PowerShell)</h5>
-          <p><strong>临时设置（当前会话）：</strong></p>
-          <div class="code-wrapper">
-            <pre><code>$env:GOOGLE_GEMINI_BASE_URL = "{{BASE_URL}}"
+      <!-- Windows -->
+      <div class="platform-section win-only">
+        <h5>🪟 Windows (PowerShell)</h5>
+        <p><strong>临时设置（当前会话）：</strong></p>
+        <div class="code-wrapper">
+          <pre><code>$env:GOOGLE_GEMINI_BASE_URL = "{{BASE_URL}}"
 $env:GEMINI_API_KEY = "你的API密钥"
 $env:GEMINI_MODEL = "gemini-2.5-pro"</code></pre>
-          </div>
-          <p><strong>永久设置（用户级）：</strong></p>
-          <div class="code-wrapper">
-            <pre><code># 设置用户级环境变量（永久生效）
+        </div>
+        <p><strong>永久设置（用户级）：</strong></p>
+        <div class="code-wrapper">
+          <pre><code># 设置用户级环境变量（永久生效）
 [System.Environment]::SetEnvironmentVariable("GOOGLE_GEMINI_BASE_URL", "{{BASE_URL}}", [System.EnvironmentVariableTarget]::User)
 [System.Environment]::SetEnvironmentVariable("GEMINI_API_KEY", "你的API密钥", [System.EnvironmentVariableTarget]::User)
 [System.Environment]::SetEnvironmentVariable("GEMINI_MODEL", "gemini-2.5-pro", [System.EnvironmentVariableTarget]::User)</code></pre>
-          </div>
-          <p class="small-text">💡 设置后需要重新打开 PowerShell 窗口才能生效。</p>
+        </div>
+        <p class="small-text">💡 设置后需要重新打开 PowerShell 窗口才能生效。</p>
 
-          <p style="margin-top: 15px;"><strong>验证设置：</strong></p>
-          <div class="code-wrapper">
-            <pre><code># PowerShell
+        <p style="margin-top: 15px;"><strong>验证设置：</strong></p>
+        <div class="code-wrapper">
+          <pre><code># PowerShell
 echo $env:GOOGLE_GEMINI_BASE_URL
 echo $env:GEMINI_API_KEY
 echo $env:GEMINI_MODEL</code></pre>
-          </div>
         </div>
+      </div>
 
-        <div class="platform-section">
-          <h5>🍎 macOS</h5>
-          <p><strong>临时设置（当前会话）：</strong></p>
-          <div class="code-wrapper">
-            <pre><code>export GOOGLE_GEMINI_BASE_URL="{{BASE_URL}}"
+      <!-- macOS -->
+      <div class="platform-section mac-only">
+        <h5>🍎 macOS</h5>
+        <p><strong>临时设置（当前会话）：</strong></p>
+        <div class="code-wrapper">
+          <pre><code>export GOOGLE_GEMINI_BASE_URL="{{BASE_URL}}"
 export GEMINI_API_KEY="你的API密钥"
 export GEMINI_MODEL="gemini-2.5-pro"</code></pre>
-          </div>
-          <p><strong>永久设置：</strong></p>
-          <div class="code-wrapper">
-            <pre><code># 对于 zsh（macOS 默认）
+        </div>
+        <p><strong>永久设置：</strong></p>
+        <div class="code-wrapper">
+          <pre><code># 对于 zsh（macOS 默认）
 echo 'export GOOGLE_GEMINI_BASE_URL="{{BASE_URL}}"' >> ~/.zshrc
 echo 'export GEMINI_API_KEY="你的API密钥"' >> ~/.zshrc
 echo 'export GEMINI_MODEL="gemini-2.5-pro"' >> ~/.zshrc
@@ -216,21 +230,22 @@ echo 'export GOOGLE_GEMINI_BASE_URL="{{BASE_URL}}"' >> ~/.bash_profile
 echo 'export GEMINI_API_KEY="你的API密钥"' >> ~/.bash_profile
 echo 'export GEMINI_MODEL="gemini-2.5-pro"' >> ~/.bash_profile
 source ~/.bash_profile</code></pre>
-          </div>
-          <p class="small-text">💡 验证：<code>echo $GOOGLE_GEMINI_BASE_URL</code></p>
         </div>
+        <p class="small-text">💡 验证：<code>echo $GOOGLE_GEMINI_BASE_URL</code></p>
+      </div>
 
-        <div class="platform-section">
-          <h5>🐧 Linux / WSL2</h5>
-          <p><strong>临时设置（当前会话）：</strong></p>
-          <div class="code-wrapper">
-            <pre><code>export GOOGLE_GEMINI_BASE_URL="{{BASE_URL}}"
+      <!-- Linux -->
+      <div class="platform-section linux-only">
+        <h5>🐧 Linux / WSL2</h5>
+        <p><strong>临时设置（当前会话）：</strong></p>
+        <div class="code-wrapper">
+          <pre><code>export GOOGLE_GEMINI_BASE_URL="{{BASE_URL}}"
 export GEMINI_API_KEY="你的API密钥"
 export GEMINI_MODEL="gemini-2.5-pro"</code></pre>
-          </div>
-          <p><strong>永久设置：</strong></p>
-          <div class="code-wrapper">
-            <pre><code># 对于 bash（Linux 默认）
+        </div>
+        <p><strong>永久设置：</strong></p>
+        <div class="code-wrapper">
+          <pre><code># 对于 bash（Linux 默认）
 echo 'export GOOGLE_GEMINI_BASE_URL="{{BASE_URL}}"' >> ~/.bashrc
 echo 'export GEMINI_API_KEY="你的API密钥"' >> ~/.bashrc
 echo 'export GEMINI_MODEL="gemini-2.5-pro"' >> ~/.bashrc
@@ -241,9 +256,8 @@ echo 'export GOOGLE_GEMINI_BASE_URL="{{BASE_URL}}"' >> ~/.zshrc
 echo 'export GEMINI_API_KEY="你的API密钥"' >> ~/.zshrc
 echo 'export GEMINI_MODEL="gemini-2.5-pro"' >> ~/.zshrc
 source ~/.zshrc</code></pre>
-          </div>
-          <p class="small-text">💡 验证：<code>echo $GOOGLE_GEMINI_BASE_URL</code></p>
         </div>
+        <p class="small-text">💡 验证：<code>echo $GOOGLE_GEMINI_BASE_URL</code></p>
       </div>
 
       <div class="alert alert-info">
@@ -324,14 +338,15 @@ gemini</code></pre>
 
       <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
 
-      <div class="faq-item">
+      <!-- Windows-only FAQ -->
+      <div class="faq-item win-only">
         <p><strong>PowerShell 执行策略错误（Windows）</strong></p>
         <div class="code-wrapper">
           <pre><code>Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser</code></pre>
         </div>
       </div>
 
-      <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
+      <div class="win-only" style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
 
       <div class="faq-item">
         <p><strong>环境变量设置后不生效</strong></p>
@@ -374,7 +389,50 @@ sudo apt-get install -y nodejs</code></pre>
 </div>
 
 <style>
-/* 核心容器与排版 */
+/* === OS Radio Tab Mechanism === */
+.os-radio { display: none; }
+.win-only, .mac-only, .linux-only { display: none; }
+
+/* Show platform content based on checked radio */
+#gemini-tab-win:checked ~ .tutorial-card .win-only { display: block; }
+#gemini-tab-mac:checked ~ .tutorial-card .mac-only { display: block; }
+#gemini-tab-linux:checked ~ .tutorial-card .linux-only { display: block; }
+
+/* Tab bar styling */
+.os-tab-bar {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 30px;
+  background: #f1f5f9;
+  border-radius: 10px;
+  padding: 5px;
+}
+.os-tab-bar label {
+  padding: 10px 28px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95em;
+  color: #64748b;
+  transition: all 0.2s;
+  user-select: none;
+}
+.os-tab-bar label:hover {
+  color: #334155;
+  background: rgba(255,255,255,0.5);
+}
+
+/* Active tab highlight */
+#gemini-tab-win:checked ~ .os-tab-bar label[for="gemini-tab-win"],
+#gemini-tab-mac:checked ~ .os-tab-bar label[for="gemini-tab-mac"],
+#gemini-tab-linux:checked ~ .os-tab-bar label[for="gemini-tab-linux"] {
+  background: white;
+  color: #4285f4;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* === Core Container & Typography === */
 .tutorial-container {
   max-width: 900px;
   margin: 0 auto;
@@ -384,10 +442,10 @@ sudo apt-get install -y nodejs</code></pre>
   padding: 20px;
 }
 
-/* 头部样式 - Gemini Blue Theme */
+/* Header - Gemini Blue Theme */
 .tutorial-header {
   text-align: center;
-  margin-bottom: 50px;
+  margin-bottom: 30px;
   padding: 40px 20px;
   background: linear-gradient(135deg, #4285f4 0%, #1967d2 100%);
   border-radius: 16px;
@@ -410,7 +468,7 @@ sudo apt-get install -y nodejs</code></pre>
   margin-bottom: 10px;
 }
 
-/* 卡片样式 */
+/* Card Styles */
 .tutorial-card {
   background: #ffffff;
   border-radius: 12px;
@@ -457,7 +515,7 @@ sudo apt-get install -y nodejs</code></pre>
   padding: 25px;
 }
 
-/* 平台区块 */
+/* Platform Section (visual styling) */
 .platform-section {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
@@ -472,7 +530,7 @@ sudo apt-get install -y nodejs</code></pre>
   color: #1e293b;
 }
 
-/* 代码块样式 */
+/* Code Block Styles */
 .code-wrapper {
   background: #1f2937;
   border-radius: 8px;
@@ -508,7 +566,7 @@ sudo apt-get install -y nodejs</code></pre>
   font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
 }
 
-/* 提示框 */
+/* Alert Boxes */
 .alert {
   padding: 15px;
   border-radius: 8px;
@@ -527,7 +585,7 @@ sudo apt-get install -y nodejs</code></pre>
   border-color: #f59e0b;
 }
 
-/* 列表与排版细节 */
+/* Lists & Typography */
 .tutorial-container ol,
 .tutorial-container ul {
   padding-left: 20px;
@@ -557,7 +615,7 @@ sudo apt-get install -y nodejs</code></pre>
   margin-bottom: 8px;
 }
 
-/* 常用功能网格 */
+/* Feature Grid */
 .command-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -584,7 +642,7 @@ sudo apt-get install -y nodejs</code></pre>
   color: #6b7280;
 }
 
-/* 底部资源链接 */
+/* Resource Section */
 .resource-section {
   text-align: center;
   margin-top: 40px;

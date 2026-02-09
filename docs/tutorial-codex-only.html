@@ -5,7 +5,19 @@
     <p class="subtitle">跟着这个教程，轻松在你的电脑上安装并使用 Codex CLI</p>
   </div>
 
-  <!-- 前置要求 -->
+  <!-- OS radio inputs – direct children of .tutorial-container so ~ reaches .tutorial-card descendants -->
+  <input type="radio" id="codex-tab-win" name="codex-os" class="os-radio" checked>
+  <input type="radio" id="codex-tab-mac" name="codex-os" class="os-radio">
+  <input type="radio" id="codex-tab-linux" name="codex-os" class="os-radio">
+
+  <!-- Tab bar -->
+  <div class="os-tab-bar">
+    <label for="codex-tab-win">Windows</label>
+    <label for="codex-tab-mac">macOS</label>
+    <label for="codex-tab-linux">Linux</label>
+  </div>
+
+  <!-- Step 0 - 前置要求 (all shared) -->
   <div class="tutorial-card">
     <div class="card-header">
       <span class="step-badge">0</span>
@@ -30,7 +42,7 @@
     </div>
   </div>
 
-  <!-- 第一步：安装 Node.js -->
+  <!-- Step 1 - 安装 Node.js -->
   <div class="tutorial-card">
     <div class="card-header">
       <span class="step-badge">1</span>
@@ -39,69 +51,76 @@
     <div class="card-content">
       <p>Codex CLI 需要 Node.js 环境才能运行。请根据你的操作系统选择安装方式：</p>
 
-      <div class="tab-group">
-        <div class="platform-section">
-          <h5>🪟 Windows</h5>
-          <p>Codex CLI 在 Windows 上仅通过 WSL（Windows Subsystem for Linux）支持。请先安装 WSL，然后在 WSL 环境中按照 Linux 步骤操作。</p>
-          <p><strong>安装 WSL：</strong></p>
-          <div class="code-wrapper">
-            <pre><code># 在 PowerShell（管理员）中运行
+      <!-- Windows -->
+      <div class="platform-section win-only">
+        <h5>🪟 Windows</h5>
+        <p>Codex CLI 在 Windows 上仅通过 WSL（Windows Subsystem for Linux）支持。请先安装 WSL，然后在 WSL 环境中按照 Linux 步骤操作。</p>
+        <p><strong>安装 WSL：</strong></p>
+        <div class="code-wrapper">
+          <pre><code># 在 PowerShell（管理员）中运行
 wsl --install</code></pre>
-          </div>
-          <p class="small-text">安装完成后重启电脑，然后在 WSL 终端中按照下方 Linux 步骤继续操作。</p>
         </div>
+        <p class="small-text">安装完成后重启电脑，然后在 WSL 终端中继续操作。</p>
+        <p><strong>在 WSL 中安装 Node.js：</strong></p>
+        <div class="code-wrapper">
+          <pre><code># Ubuntu/Debian (WSL 默认)
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt-get install -y nodejs</code></pre>
+        </div>
+      </div>
 
-        <div class="platform-section">
-          <h5>🍎 macOS</h5>
-          <p><strong>方法一：使用 Homebrew（推荐）</strong></p>
-          <div class="code-wrapper">
-            <pre><code># 更新 Homebrew
+      <!-- macOS -->
+      <div class="platform-section mac-only">
+        <h5>🍎 macOS</h5>
+        <p><strong>方法一：使用 Homebrew（推荐）</strong></p>
+        <div class="code-wrapper">
+          <pre><code># 更新 Homebrew
 brew update
 
 # 安装 Node.js
 brew install node</code></pre>
-          </div>
-          <p><strong>方法二：官网下载</strong></p>
-          <ol>
-            <li>访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a></li>
-            <li>下载适合 macOS 的 LTS 版本</li>
-            <li>打开下载的 <code>.pkg</code> 文件，按照安装程序指引完成安装</li>
-          </ol>
-          <div class="alert alert-info">
-            <strong>💡 macOS 注意事项：</strong>
-            <ul style="margin-bottom:0">
-              <li>如果遇到权限问题，可能需要使用 <code>sudo</code></li>
-              <li>首次运行可能需要在系统偏好设置中允许</li>
-              <li>建议使用 Terminal 或 iTerm2</li>
-            </ul>
-          </div>
         </div>
+        <p><strong>方法二：官网下载</strong></p>
+        <ol>
+          <li>访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a></li>
+          <li>下载适合 macOS 的 LTS 版本</li>
+          <li>打开下载的 <code>.pkg</code> 文件，按照安装程序指引完成安装</li>
+        </ol>
+        <div class="alert alert-info">
+          <strong>💡 macOS 注意事项：</strong>
+          <ul style="margin-bottom:0">
+            <li>如果遇到权限问题，可能需要使用 <code>sudo</code></li>
+            <li>首次运行可能需要在系统偏好设置中允许</li>
+            <li>建议使用 Terminal 或 iTerm2</li>
+          </ul>
+        </div>
+      </div>
 
-        <div class="platform-section">
-          <h5>🐧 Linux / WSL</h5>
-          <p><strong>方法一：使用 NodeSource 仓库（推荐）</strong></p>
-          <div class="code-wrapper">
-            <pre><code># Ubuntu/Debian
+      <!-- Linux -->
+      <div class="platform-section linux-only">
+        <h5>🐧 Linux</h5>
+        <p><strong>方法一：使用 NodeSource 仓库（推荐）</strong></p>
+        <div class="code-wrapper">
+          <pre><code># Ubuntu/Debian
 curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
 sudo apt-get install -y nodejs</code></pre>
-          </div>
-          <p><strong>方法二：使用系统包管理器</strong></p>
-          <div class="code-wrapper">
-            <pre><code># Ubuntu/Debian
+        </div>
+        <p><strong>方法二：使用系统包管理器</strong></p>
+        <div class="code-wrapper">
+          <pre><code># Ubuntu/Debian
 sudo apt update
 sudo apt install nodejs npm
 
 # CentOS/RHEL/Fedora
 sudo dnf install nodejs npm</code></pre>
-          </div>
-          <div class="alert alert-info">
-            <strong>💡 Linux 注意事项：</strong>
-            <ul style="margin-bottom:0">
-              <li>某些发行版可能需要安装额外的依赖</li>
-              <li>如果遇到权限问题，使用 <code>sudo</code></li>
-              <li>确保你的用户在 npm 的全局目录有写权限</li>
-            </ul>
-          </div>
+        </div>
+        <div class="alert alert-info">
+          <strong>💡 Linux 注意事项：</strong>
+          <ul style="margin-bottom:0">
+            <li>某些发行版可能需要安装额外的依赖</li>
+            <li>如果遇到权限问题，使用 <code>sudo</code></li>
+            <li>确保你的用户在 npm 的全局目录有写权限</li>
+          </ul>
         </div>
       </div>
 
@@ -116,7 +135,7 @@ npm --version</code></pre>
     </div>
   </div>
 
-  <!-- 第二步：安装 Codex CLI -->
+  <!-- Step 2 - 安装 Codex CLI -->
   <div class="tutorial-card">
     <div class="card-header">
       <span class="step-badge">2</span>
@@ -125,28 +144,40 @@ npm --version</code></pre>
     <div class="card-content">
       <p><strong>根据平台选择安装方式：</strong></p>
 
-      <div class="tab-group">
-        <div class="platform-section">
-          <h5>🍎 macOS（Homebrew 推荐）</h5>
-          <div class="code-wrapper">
-            <pre><code>brew install --cask codex</code></pre>
-          </div>
+      <!-- Windows -->
+      <div class="platform-section win-only">
+        <h5>🪟 Windows (WSL)</h5>
+        <p>在 WSL 终端中使用 npm 安装：</p>
+        <div class="code-wrapper">
+          <pre><code>npm install -g @openai/codex</code></pre>
         </div>
-
-        <div class="platform-section">
-          <h5>🐧 Linux / WSL（npm）</h5>
-          <div class="code-wrapper">
-            <pre><code>npm install -g @openai/codex</code></pre>
-          </div>
-          <p class="small-text">如果遇到权限问题，请尝试 <code>sudo npm install -g @openai/codex</code></p>
+        <p class="small-text">如果遇到权限问题，请尝试 <code>sudo npm install -g @openai/codex</code></p>
+        <div class="alert alert-warning">
+          <strong>⚠️ 注意：</strong> Codex CLI 不直接支持 Windows，请确保在 WSL 环境中操作。
         </div>
       </div>
 
-      <div class="alert alert-warning">
-        <strong>⚠️ Windows 用户注意：</strong> Codex CLI 不直接支持 Windows，请在 WSL 环境中使用 npm 方式安装。
+      <!-- macOS -->
+      <div class="platform-section mac-only">
+        <h5>🍎 macOS（Homebrew 推荐）</h5>
+        <div class="code-wrapper">
+          <pre><code>brew install --cask codex</code></pre>
+        </div>
+        <p class="small-text">也可以使用 npm：<code>npm install -g @openai/codex</code></p>
       </div>
 
-      <p style="margin-top: 15px;"><strong>验证安装：</strong></p>
+      <!-- Linux -->
+      <div class="platform-section linux-only">
+        <h5>🐧 Linux（npm）</h5>
+        <div class="code-wrapper">
+          <pre><code>npm install -g @openai/codex</code></pre>
+        </div>
+        <p class="small-text">如果遇到权限问题，请尝试 <code>sudo npm install -g @openai/codex</code></p>
+      </div>
+
+      <div style="height: 1px; background: #e5e7eb; margin: 25px 0;"></div>
+
+      <p><strong>验证安装：</strong></p>
       <div class="code-wrapper">
         <pre><code>codex --version</code></pre>
       </div>
@@ -154,7 +185,7 @@ npm --version</code></pre>
     </div>
   </div>
 
-  <!-- 第三步：配置中转 API -->
+  <!-- Step 3 - 配置中转 API -->
   <div class="tutorial-card">
     <div class="card-header">
       <span class="step-badge">3</span>
@@ -199,61 +230,62 @@ env_key = "CRS_OAI_KEY"</code></pre>
       <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
 
       <p><strong>3. 设置环境变量 CRS_OAI_KEY</strong></p>
-      <p>请选择你的操作系统设置环境变量：</p>
+      <p>请根据你的操作系统设置环境变量：</p>
 
-      <div class="tab-group">
-        <div class="platform-section">
-          <h5>🪟 Windows (WSL)</h5>
-          <p><strong>临时设置（当前会话）：</strong></p>
-          <div class="code-wrapper">
-            <pre><code>export CRS_OAI_KEY="你的API密钥"</code></pre>
-          </div>
-          <p><strong>永久设置：</strong></p>
-          <div class="code-wrapper">
-            <pre><code># WSL 中默认使用 bash
+      <!-- Windows -->
+      <div class="platform-section win-only">
+        <h5>🪟 Windows (WSL)</h5>
+        <p><strong>临时设置（当前会话）：</strong></p>
+        <div class="code-wrapper">
+          <pre><code>export CRS_OAI_KEY="你的API密钥"</code></pre>
+        </div>
+        <p><strong>永久设置：</strong></p>
+        <div class="code-wrapper">
+          <pre><code># WSL 中默认使用 bash
 echo 'export CRS_OAI_KEY="你的API密钥"' >> ~/.bashrc
 source ~/.bashrc</code></pre>
-          </div>
-          <p class="small-text">💡 WSL 环境中的操作与 Linux 相同。</p>
         </div>
+        <p class="small-text">💡 WSL 环境中的操作与 Linux 相同。</p>
+      </div>
 
-        <div class="platform-section">
-          <h5>🍎 macOS</h5>
-          <p><strong>临时设置（当前会话）：</strong></p>
-          <div class="code-wrapper">
-            <pre><code>export CRS_OAI_KEY="你的API密钥"</code></pre>
-          </div>
-          <p><strong>永久设置：</strong></p>
-          <div class="code-wrapper">
-            <pre><code># 对于 zsh（macOS 默认）
+      <!-- macOS -->
+      <div class="platform-section mac-only">
+        <h5>🍎 macOS</h5>
+        <p><strong>临时设置（当前会话）：</strong></p>
+        <div class="code-wrapper">
+          <pre><code>export CRS_OAI_KEY="你的API密钥"</code></pre>
+        </div>
+        <p><strong>永久设置：</strong></p>
+        <div class="code-wrapper">
+          <pre><code># 对于 zsh（macOS 默认）
 echo 'export CRS_OAI_KEY="你的API密钥"' >> ~/.zshrc
 source ~/.zshrc
 
 # 对于 bash
 echo 'export CRS_OAI_KEY="你的API密钥"' >> ~/.bash_profile
 source ~/.bash_profile</code></pre>
-          </div>
-          <p class="small-text">💡 验证：<code>echo $CRS_OAI_KEY</code></p>
         </div>
+        <p class="small-text">💡 验证：<code>echo $CRS_OAI_KEY</code></p>
+      </div>
 
-        <div class="platform-section">
-          <h5>🐧 Linux</h5>
-          <p><strong>临时设置（当前会话）：</strong></p>
-          <div class="code-wrapper">
-            <pre><code>export CRS_OAI_KEY="你的API密钥"</code></pre>
-          </div>
-          <p><strong>永久设置：</strong></p>
-          <div class="code-wrapper">
-            <pre><code># 对于 bash（Linux 默认）
+      <!-- Linux -->
+      <div class="platform-section linux-only">
+        <h5>🐧 Linux</h5>
+        <p><strong>临时设置（当前会话）：</strong></p>
+        <div class="code-wrapper">
+          <pre><code>export CRS_OAI_KEY="你的API密钥"</code></pre>
+        </div>
+        <p><strong>永久设置：</strong></p>
+        <div class="code-wrapper">
+          <pre><code># 对于 bash（Linux 默认）
 echo 'export CRS_OAI_KEY="你的API密钥"' >> ~/.bashrc
 source ~/.bashrc
 
 # 对于 zsh
 echo 'export CRS_OAI_KEY="你的API密钥"' >> ~/.zshrc
 source ~/.zshrc</code></pre>
-          </div>
-          <p class="small-text">💡 验证：<code>echo $CRS_OAI_KEY</code></p>
         </div>
+        <p class="small-text">💡 验证：<code>echo $CRS_OAI_KEY</code></p>
       </div>
 
       <div class="alert alert-info">
@@ -267,7 +299,7 @@ source ~/.zshrc</code></pre>
     </div>
   </div>
 
-  <!-- 第四步：开始使用 -->
+  <!-- Step 4 - 开始使用 (all shared) -->
   <div class="tutorial-card">
     <div class="card-header">
       <span class="step-badge">4</span>
@@ -314,6 +346,7 @@ codex "explain the main function in this project"</code></pre>
       <h4>常见问题解决</h4>
     </div>
     <div class="card-content">
+      <!-- Shared FAQ -->
       <div class="faq-item">
         <p><strong>安装时提示 "permission denied" 错误</strong></p>
         <ul>
@@ -323,7 +356,8 @@ codex "explain the main function in this project"</code></pre>
 
       <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
 
-      <div class="faq-item">
+      <!-- Windows-only FAQ -->
+      <div class="faq-item win-only">
         <p><strong>Windows 无法直接运行 Codex</strong></p>
         <p>Codex CLI 仅支持 macOS 和 Linux。Windows 用户请先安装 WSL：</p>
         <div class="code-wrapper">
@@ -332,8 +366,9 @@ codex "explain the main function in this project"</code></pre>
         <p class="small-text">安装完成后在 WSL 终端中操作即可。</p>
       </div>
 
-      <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
+      <div class="win-only" style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
 
+      <!-- Shared FAQ -->
       <div class="faq-item">
         <p><strong>环境变量设置后不生效</strong></p>
         <ul>
@@ -371,7 +406,51 @@ touch ~/.codex/auth.json</code></pre>
 </div>
 
 <style>
-/* 核心容器与排版 */
+/* ===== OS Tab Switching (pure CSS, no JS) ===== */
+.os-radio { display: none; }
+.win-only, .mac-only, .linux-only { display: none; }
+#codex-tab-win:checked ~ .tutorial-card .win-only { display: block; }
+#codex-tab-mac:checked ~ .tutorial-card .mac-only { display: block; }
+#codex-tab-linux:checked ~ .tutorial-card .linux-only { display: block; }
+
+/* Tab bar */
+.os-tab-bar {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 30px;
+  background: #f1f5f9;
+  border-radius: 10px;
+  padding: 4px;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.os-tab-bar label {
+  flex: 1;
+  text-align: center;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95em;
+  font-weight: 500;
+  color: #64748b;
+  transition: all 0.2s;
+  user-select: none;
+}
+.os-tab-bar label:hover {
+  color: #10a37f;
+  background: rgba(255,255,255,0.5);
+}
+#codex-tab-win:checked ~ .os-tab-bar label[for="codex-tab-win"],
+#codex-tab-mac:checked ~ .os-tab-bar label[for="codex-tab-mac"],
+#codex-tab-linux:checked ~ .os-tab-bar label[for="codex-tab-linux"] {
+  background: white;
+  color: #10a37f;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* ===== 核心容器与排版 ===== */
 .tutorial-container {
   max-width: 900px;
   margin: 0 auto;
@@ -384,7 +463,7 @@ touch ~/.codex/auth.json</code></pre>
 /* 头部样式 - OpenAI Green Theme */
 .tutorial-header {
   text-align: center;
-  margin-bottom: 50px;
+  margin-bottom: 30px;
   padding: 40px 20px;
   background: linear-gradient(135deg, #10a37f 0%, #0d8c6c 100%);
   border-radius: 16px;

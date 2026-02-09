@@ -1,8 +1,20 @@
 <div class="tutorial-container">
+  <!-- Hidden radio inputs for CSS tab switching (must be direct children of .tutorial-container) -->
+  <input type="radio" name="claude-os" id="claude-tab-win" checked class="os-radio">
+  <input type="radio" name="claude-os" id="claude-tab-mac" class="os-radio">
+  <input type="radio" name="claude-os" id="claude-tab-linux" class="os-radio">
+
   <div class="tutorial-header">
     <div class="logo-icon">🤖</div>
     <h3>Claude Code 使用教程</h3>
     <p class="subtitle">跟着这个教程，轻松在你的电脑上安装并使用 Claude Code</p>
+  </div>
+
+  <!-- OS Tab Bar -->
+  <div class="os-tab-bar">
+    <label for="claude-tab-win">🪟 Windows</label>
+    <label for="claude-tab-mac">🍎 macOS</label>
+    <label for="claude-tab-linux">🐧 Linux / WSL2</label>
   </div>
 
   <!-- 第一步：安装 Node.js -->
@@ -14,9 +26,9 @@
     <div class="card-content">
       <p>Claude Code 需要 Node.js 环境才能运行。请根据你的操作系统选择安装方式：</p>
 
-      <div class="tab-group">
+      <!-- Windows -->
+      <div class="win-only">
         <div class="platform-section">
-          <h5>🪟 Windows</h5>
           <p><strong>方法一：官网下载（推荐）</strong></p>
           <ol>
             <li>打开浏览器访问 <a href="https://nodejs.org/" target="_blank">nodejs.org</a></li>
@@ -41,9 +53,11 @@ scoop install nodejs</code></pre>
             </ul>
           </div>
         </div>
+      </div>
 
+      <!-- macOS -->
+      <div class="mac-only">
         <div class="platform-section">
-          <h5>🍎 macOS</h5>
           <p><strong>方法一：使用 Homebrew（推荐）</strong></p>
           <div class="code-wrapper">
             <pre><code># 更新 Homebrew
@@ -67,9 +81,11 @@ brew install node</code></pre>
             </ul>
           </div>
         </div>
+      </div>
 
+      <!-- Linux -->
+      <div class="linux-only">
         <div class="platform-section">
-          <h5>🐧 Linux / WSL2</h5>
           <p><strong>方法一：使用官方仓库（推荐）</strong></p>
           <div class="code-wrapper">
             <pre><code># 添加 NodeSource 仓库
@@ -147,9 +163,9 @@ npm install -g @anthropic-ai/claude-code</code></pre>
     <div class="card-content">
       <p>为了让 Claude Code 连接到你的中转服务，需要设置两个环境变量。请选择你的操作系统：</p>
 
-      <div class="tab-group">
+      <!-- Windows -->
+      <div class="win-only">
         <div class="platform-section">
-          <h5>🪟 Windows (PowerShell)</h5>
           <p><strong>临时设置（当前会话）：</strong></p>
           <div class="code-wrapper">
             <pre><code>$env:ANTHROPIC_BASE_URL = "{{CLAUDE_API_URL}}"
@@ -174,9 +190,11 @@ echo %ANTHROPIC_BASE_URL%
 echo %ANTHROPIC_AUTH_TOKEN%</code></pre>
           </div>
         </div>
+      </div>
 
+      <!-- macOS -->
+      <div class="mac-only">
         <div class="platform-section">
-          <h5>🍎 macOS</h5>
           <p><strong>临时设置（当前会话）：</strong></p>
           <div class="code-wrapper">
             <pre><code>export ANTHROPIC_BASE_URL="{{CLAUDE_API_URL}}"
@@ -196,9 +214,11 @@ source ~/.bash_profile</code></pre>
           </div>
           <p class="small-text">💡 验证：<code>echo $ANTHROPIC_BASE_URL</code></p>
         </div>
+      </div>
 
+      <!-- Linux -->
+      <div class="linux-only">
         <div class="platform-section">
-          <h5>🐧 Linux / WSL2</h5>
           <p><strong>临时设置（当前会话）：</strong></p>
           <div class="code-wrapper">
             <pre><code>export ANTHROPIC_BASE_URL="{{CLAUDE_API_URL}}"
@@ -232,7 +252,7 @@ source ~/.zshrc</code></pre>
   </div>
 
   <!-- VSCode 插件配置 -->
-  <div class="tutorial-card">
+  <div class="tutorial-card tutorial-card-vscode">
     <div class="card-header">
       <span class="step-badge">+</span>
       <h4>VSCode Claude 插件配置（可选）</h4>
@@ -241,10 +261,15 @@ source ~/.zshrc</code></pre>
       <p>如果你使用 VSCode 的 Claude 插件，还需要在配置文件中进行额外设置：</p>
 
       <p><strong>配置文件位置：</strong></p>
-      <ul>
-        <li><strong>Windows：</strong><code>C:\Users\你的用户名\.claude\config.json</code></li>
-        <li><strong>macOS/Linux：</strong><code>~/.claude/config.json</code></li>
-      </ul>
+      <div class="win-only">
+        <p><code>C:\Users\你的用户名\.claude\config.json</code></p>
+      </div>
+      <div class="mac-only">
+        <p><code>~/.claude/config.json</code></p>
+      </div>
+      <div class="linux-only">
+        <p><code>~/.claude/config.json</code></p>
+      </div>
       <p class="small-text">💡 如果该文件不存在，请手动创建。</p>
 
       <p><strong>配置内容：</strong></p>
@@ -311,14 +336,15 @@ claude</code></pre>
 
       <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
 
-      <div class="faq-item">
-        <p><strong>PowerShell 执行策略错误（Windows）</strong></p>
-        <div class="code-wrapper">
-          <pre><code>Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser</code></pre>
+      <div class="win-only">
+        <div class="faq-item">
+          <p><strong>PowerShell 执行策略错误（Windows）</strong></p>
+          <div class="code-wrapper">
+            <pre><code>Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser</code></pre>
+          </div>
         </div>
+        <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
       </div>
-
-      <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
 
       <div class="faq-item">
         <p><strong>环境变量设置后不生效</strong></p>
@@ -331,9 +357,11 @@ claude</code></pre>
 
       <div style="height: 1px; background: #e5e7eb; margin: 20px 0;"></div>
 
-      <div class="faq-item">
-        <p><strong>macOS 安全设置阻止运行</strong></p>
-        <p>打开"系统偏好设置" → "安全性与隐私"，点击"仍要打开"或"允许"。</p>
+      <div class="mac-only">
+        <div class="faq-item">
+          <p><strong>macOS 安全设置阻止运行</strong></p>
+          <p>打开"系统偏好设置" → "安全性与隐私"，点击"仍要打开"或"允许"。</p>
+        </div>
       </div>
     </div>
   </div>
@@ -351,6 +379,53 @@ claude</code></pre>
 </div>
 
 <style>
+/* Hide radio inputs */
+.os-radio { display: none; }
+
+/* Hide all platform content by default */
+.win-only, .mac-only, .linux-only { display: none; }
+
+/* Show content based on checked radio */
+#claude-tab-win:checked ~ .tutorial-card .win-only,
+#claude-tab-win:checked ~ .tutorial-card-vscode .win-only { display: block; }
+#claude-tab-mac:checked ~ .tutorial-card .mac-only,
+#claude-tab-mac:checked ~ .tutorial-card-vscode .mac-only { display: block; }
+#claude-tab-linux:checked ~ .tutorial-card .linux-only,
+#claude-tab-linux:checked ~ .tutorial-card-vscode .linux-only { display: block; }
+
+/* Tab bar styling */
+.os-tab-bar {
+  display: flex;
+  gap: 0;
+  background: #f3f4f6;
+  border-radius: 12px;
+  padding: 4px;
+  margin-bottom: 30px;
+}
+.os-tab-bar label {
+  flex: 1;
+  text-align: center;
+  padding: 10px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95em;
+  color: #6b7280;
+  transition: all 0.2s;
+}
+.os-tab-bar label:hover {
+  color: #374151;
+  background: rgba(255,255,255,0.5);
+}
+/* Active tab */
+#claude-tab-win:checked ~ .os-tab-bar label[for="claude-tab-win"],
+#claude-tab-mac:checked ~ .os-tab-bar label[for="claude-tab-mac"],
+#claude-tab-linux:checked ~ .os-tab-bar label[for="claude-tab-linux"] {
+  background: white;
+  color: #6366f1;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
 /* 核心容器与排版 */
 .tutorial-container {
   max-width: 900px;
