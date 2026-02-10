@@ -670,6 +670,17 @@ func FormatClaudeResponseInfo(requestMode int, claudeResponse *dto.ClaudeRespons
 				}
 				claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
 				claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
+
+				// 从 message_delta 中更新缓存 token 数据
+				// 某些上游代理（如 Kiro）在 message_start 时还没有缓存数据，
+				// 最终的缓存统计在 message_delta 中才可用。
+				// 使用 > 0 判断避免覆盖 message_start 中已有的有效值。
+				if claudeResponse.Usage.CacheReadInputTokens > 0 {
+					claudeInfo.Usage.PromptTokensDetails.CachedTokens = claudeResponse.Usage.CacheReadInputTokens
+				}
+				if claudeResponse.Usage.CacheCreationInputTokens > 0 {
+					claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens = claudeResponse.Usage.CacheCreationInputTokens
+				}
 			}
 
 			// 判断是否完整
