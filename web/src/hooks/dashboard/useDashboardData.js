@@ -84,6 +84,12 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     tpm: [],
   });
 
+  // ========== 今日数据 ==========
+  const [todayConsumeQuota, setTodayConsumeQuota] = useState(0);
+  const [todayConsumeTokens, setTodayConsumeTokens] = useState(0);
+  const [todayTimes, setTodayTimes] = useState(0);
+  const [todayLoading, setTodayLoading] = useState(false);
+
   // ========== Uptime 数据 ==========
   const [uptimeData, setUptimeData] = useState([]);
   const [uptimeLoading, setUptimeLoading] = useState(false);
@@ -101,7 +107,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const uptimeEnabled = statusState?.status?.uptime_kuma_enabled ?? true;
 
   const hasApiInfoPanel = apiInfoEnabled;
-  const hasInfoPanels = announcementsEnabled || faqEnabled || uptimeEnabled;
+  const hasInfoPanels = announcementsEnabled || apiInfoEnabled || uptimeEnabled;
 
   // ========== Memoized Values ==========
   const timeOptions = useMemo(
@@ -365,13 +371,57 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, []);
 
+  const loadTodayData = useCallback(async () => {
+    setTodayLoading(true);
+    try {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
+      const startTs = Math.floor(todayStart.getTime() / 1000);
+      const endTs = Math.floor(todayEnd.getTime() / 1000);
+
+      let url = '';
+      if (isAdminUser) {
+        url = `/api/data/?username=${inputs.username}&start_timestamp=${startTs}&end_timestamp=${endTs}&default_time=hour`;
+      } else {
+        url = `/api/data/self/?start_timestamp=${startTs}&end_timestamp=${endTs}&default_time=hour`;
+      }
+
+      const res = await API.get(url);
+      const { success, data } = res.data;
+      if (success && data && data.length > 0) {
+        let totalQuota = 0;
+        let totalTokens = 0;
+        let totalTimes = 0;
+        for (const item of data) {
+          totalQuota += item.quota || 0;
+          totalTokens += item.token_used || 0;
+          totalTimes += item.count || 0;
+        }
+        setTodayConsumeQuota(totalQuota);
+        setTodayConsumeTokens(totalTokens);
+        setTodayTimes(totalTimes);
+      } else {
+        setTodayConsumeQuota(0);
+        setTodayConsumeTokens(0);
+        setTodayTimes(0);
+      }
+    } catch (err) {
+      console.error('Error loading today data:', err);
+    } finally {
+      setTodayLoading(false);
+    }
+  }, [isAdminUser, inputs.username]);
+
   const refresh = useCallback(async () => {
     const data = await loadQuotaData();
     await loadUptimeData();
     await loadSubscriptionData();
     await loadQuotaStatus();
+    await loadTodayData();
     return data;
-  }, [loadQuotaData, loadUptimeData, loadSubscriptionData, loadQuotaStatus]);
+  }, [loadQuotaData, loadUptimeData, loadSubscriptionData, loadQuotaStatus, loadTodayData]);
 
   const handleSearchConfirm = useCallback(
     async (updateChartDataCallback) => {
@@ -397,9 +447,10 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       getUserData();
       loadSubscriptionData();
       loadQuotaStatus();
+      loadTodayData();
       initialized.current = true;
     }
-  }, [getUserData, loadSubscriptionData, loadQuotaStatus]);
+  }, [getUserData, loadSubscriptionData, loadQuotaStatus, loadTodayData]);
 
   return {
     // 基础状态
@@ -444,6 +495,12 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     uptimeLoading,
     activeUptimeTab,
     setActiveUptimeTab,
+
+    // 今日数据
+    todayConsumeQuota,
+    todayConsumeTokens,
+    todayTimes,
+    todayLoading,
 
     // 计算值
     timeOptions,
