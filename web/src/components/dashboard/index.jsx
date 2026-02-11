@@ -26,9 +26,9 @@ import { useDebouncedCallback } from 'use-debounce';
 import StatsCards from './StatsCards';
 import QuickFilterBar from './QuickFilterBar';
 import ChartsPanel from './ChartsPanel';
+import DataOverviewPanel from './DataOverviewPanel';
 import ApiInfoPanel from './ApiInfoPanel';
 import AnnouncementsPanel from './AnnouncementsPanel';
-import FaqPanel from './FaqPanel';
 import UptimePanel from './UptimePanel';
 
 import { useDashboardData } from '../../hooks/dashboard/useDashboardData';
@@ -209,11 +209,9 @@ const Dashboard = () => {
         t={dashboardData.t}
       />
 
-      {/* API信息和图表面板 */}
+      {/* 图表面板和数据概览 */}
       <div className='mb-4'>
-        <div
-          className={`grid grid-cols-1 gap-4 ${dashboardData.hasApiInfoPanel ? 'lg:grid-cols-4' : ''}`}
-        >
+        <div className='grid grid-cols-1 gap-4 lg:grid-cols-4'>
           <ChartsPanel
             activeChartTab={dashboardData.activeChartTab}
             setActiveChartTab={dashboardData.setActiveChartTab}
@@ -226,25 +224,27 @@ const Dashboard = () => {
             CARD_PROPS={CARD_PROPS}
             CHART_CONFIG={CHART_CONFIG}
             FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
-            hasApiInfoPanel={dashboardData.hasApiInfoPanel}
+            hasApiInfoPanel={true}
             t={dashboardData.t}
           />
 
-          {dashboardData.hasApiInfoPanel && (
-            <ApiInfoPanel
-              apiInfoData={apiInfoData}
-              handleCopyUrl={(url) => handleCopyUrl(url, dashboardData.t)}
-              handleSpeedTest={handleSpeedTest}
-              CARD_PROPS={CARD_PROPS}
-              FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
-              ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}
-              t={dashboardData.t}
-            />
-          )}
+          <DataOverviewPanel
+            consumeQuota={dashboardData.consumeQuota}
+            consumeTokens={dashboardData.consumeTokens}
+            times={dashboardData.times}
+            todayConsumeQuota={dashboardData.todayConsumeQuota}
+            todayConsumeTokens={dashboardData.todayConsumeTokens}
+            todayTimes={dashboardData.todayTimes}
+            loading={dashboardData.loading}
+            todayLoading={dashboardData.todayLoading}
+            CARD_PROPS={CARD_PROPS}
+            FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
+            t={dashboardData.t}
+          />
         </div>
       </div>
 
-      {/* 系统公告和常见问答卡片 */}
+      {/* 系统公告、API信息和服务可用性 */}
       {dashboardData.hasInfoPanels && (
         <div className='mb-4'>
           <div className='grid grid-cols-1 lg:grid-cols-4 gap-4'>
@@ -264,10 +264,12 @@ const Dashboard = () => {
               />
             )}
 
-            {/* 常见问答卡片 */}
-            {dashboardData.faqEnabled && (
-              <FaqPanel
-                faqData={faqData}
+            {/* API信息卡片（从图表旁移入此处） */}
+            {dashboardData.apiInfoEnabled && (
+              <ApiInfoPanel
+                apiInfoData={apiInfoData}
+                handleCopyUrl={(url) => handleCopyUrl(url, dashboardData.t)}
+                handleSpeedTest={handleSpeedTest}
                 CARD_PROPS={CARD_PROPS}
                 FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
                 ILLUSTRATION_SIZE={ILLUSTRATION_SIZE}

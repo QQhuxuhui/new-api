@@ -149,6 +149,15 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 // 支持的变量：{api_key}
 func processHeaderOverride(info *common.RelayInfo) (map[string]string, error) {
 	headerOverride := make(map[string]string)
+
+	// [DEBUG] 打印 HeadersOverride 配置
+	if common2.DebugEnabled {
+		println(fmt.Sprintf("[DEBUG] HeadersOverride count: %d", len(info.HeadersOverride)))
+		for k, v := range info.HeadersOverride {
+			println(fmt.Sprintf("[DEBUG] HeadersOverride[%s] = %v (type: %T)", k, v, v))
+		}
+	}
+
 	for k, v := range info.HeadersOverride {
 		str, ok := v.(string)
 		if !ok {
@@ -161,6 +170,22 @@ func processHeaderOverride(info *common.RelayInfo) (map[string]string, error) {
 		}
 
 		headerOverride[k] = str
+
+		// [DEBUG] 打印应用的头覆盖
+		if common2.DebugEnabled {
+			displayValue := str
+			lowerKey := strings.ToLower(k)
+			if strings.Contains(lowerKey, "key") || strings.Contains(lowerKey, "authorization") || strings.Contains(lowerKey, "secret") || strings.Contains(lowerKey, "token") {
+				if len(str) > 12 {
+					displayValue = str[:6] + "****" + str[len(str)-4:]
+				} else if len(str) > 4 {
+					displayValue = str[:2] + "****"
+				} else {
+					displayValue = "****"
+				}
+			}
+			println(fmt.Sprintf("[DEBUG] Applying header override: %s = %s", k, displayValue))
+		}
 	}
 	return headerOverride, nil
 }
@@ -178,8 +203,9 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 
 	// 读取请求体用于调试（需要重新包装）
+	// 注意：仅在 DEBUG 模式下读取，避免无谓的内存拷贝/GC 压力
 	var bodyBytes []byte
-	if requestBody != nil {
+	if common2.DebugEnabled && requestBody != nil {
 		bodyBytes, err = io.ReadAll(requestBody)
 		if err != nil {
 			return nil, fmt.Errorf("read request body failed: %w", err)
@@ -419,6 +445,23 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	} else {
 		client = service.GetHttpClient()
+	}
+
+	// Bind upstream request lifecycle to downstream request context:
+	// - client disconnect / reverse proxy timeout should cancel upstream ASAP
+	// This is critical to avoid goroutine/connection buildup when upstream is slow.
+	if c != nil && c.Request != nil {
+		// 如果下游 context 已经取消（客户端断开），直接返回不可重试的错误，
+		// 避免重试循环中所有请求因复用已取消的 context 而瞬间失败。
+		if err := c.Request.Context().Err(); err != nil {
+			return nil, types.NewError(
+				fmt.Errorf("downstream context already canceled: %w", err),
+				types.ErrorCodeContextCanceled,
+				types.ErrOptionWithSkipRetry(),
+				types.ErrOptionWithHideErrMsg("client disconnected"),
+			)
+		}
+		req = req.WithContext(c.Request.Context())
 	}
 
 	var stopPinger context.CancelFunc

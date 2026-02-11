@@ -215,6 +215,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	const maxPriorityLevels = 1000
 	attempts := 0
 	for priorityIndex := basePriorityIndex; priorityIndex < basePriorityIndex+maxPriorityLevels; priorityIndex++ {
+		// 客户端已断开，不再重试，避免无意义的上游请求和错误的渠道健康记录
+		if c.Request.Context().Err() != nil {
+			logger.LogWarn(c, "client disconnected, stopping retry loop")
+			break
+		}
 		channel, err := getChannel(c, group, originalModel, attempts, priorityIndex)
 		if err != nil {
 			logger.LogError(c, err.Error())
@@ -298,7 +303,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	// 2. Plan system is enabled
 	// 3. User has AutoSwitch enabled on their current plan
 	// 4. There are alternative plans with available channels
-	if newAPIError != nil {
+	if newAPIError != nil && c.Request.Context().Err() == nil {
 		failoverChannel, failoverPlan, failoverGroup, success := service.AttemptCrossplanFailoverAfterRetry(c, originalModel)
 		if success && failoverChannel != nil {
 			// Setup context for the failover channel
@@ -385,7 +390,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	// Wallet fallback: if plan failover failed and用户仍有钱包余额/授权，尝试钱包计费的子分组
-	if newAPIError != nil && (common.GetContextKeyInt(c, constant.ContextKeyUserQuota) > 0) {
+	if newAPIError != nil && c.Request.Context().Err() == nil && (common.GetContextKeyInt(c, constant.ContextKeyUserQuota) > 0) {
 		walletChannel, walletGroup, walletErr := service.AttemptWalletFallbackAfterRetry(c, originalModel)
 		if walletErr != nil {
 			logger.LogWarn(c, fmt.Sprintf("[WalletFallback] failed: %v", walletErr))
@@ -431,12 +436,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				// 从 retryCount=1 开始，避免 getChannel 返回初始上下文渠道
 				attemptsWallet := 1
 				for priorityIndex := 0; priorityIndex < maxPriorityLevelsWallet; priorityIndex++ {
+					if !shouldContinueWalletRetry(c, nil) {
+						break
+					}
 					// 获取渠道（避免重复使用已尝试渠道）
 					channel, chErr := getChannel(c, walletGroup, originalModel, attemptsWallet, priorityIndex)
 					if chErr != nil {
 						logger.LogError(c, chErr.Error())
 						newAPIError = chErr
-						if types.IsSkipRetryError(chErr) {
+						if !shouldContinueWalletRetry(c, chErr) {
 							break
 						}
 						continue
@@ -469,6 +477,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					}
 
 					newAPIError = err
+					if !shouldContinueWalletRetry(c, err) {
+						break
+					}
 					if service.ShouldTriggerChannelFailover(err.StatusCode, err.Error()) ||
 						err.StatusCode == 504 || err.StatusCode == 524 {
 						service.RecordChannelFailure(channel.Id, err.StatusCode, err.Error())
@@ -604,6 +615,19 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr.StatusCode/100 == 2 {
 		return false
 	}
+	return true
+}
+
+func shouldContinueWalletRetry(c *gin.Context, err *types.NewAPIError) bool {
+	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+		logger.LogWarn(c, "client disconnected, stopping wallet retry loop")
+		return false
+	}
+
+	if types.IsSkipRetryError(err) {
+		return false
+	}
+
 	return true
 }
 

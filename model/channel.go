@@ -1134,9 +1134,19 @@ func (channel *Channel) GetParamOverride() map[string]interface{} {
 func (channel *Channel) GetHeaderOverride() map[string]interface{} {
 	headerOverride := make(map[string]interface{})
 	if channel.HeaderOverride != nil && *channel.HeaderOverride != "" {
+		if common.DebugEnabled {
+			common.SysLog(fmt.Sprintf("[DEBUG] GetHeaderOverride: channel_id=%d, raw_value=%q", channel.Id, *channel.HeaderOverride))
+		}
 		err := common.Unmarshal([]byte(*channel.HeaderOverride), &headerOverride)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("failed to unmarshal header override: channel_id=%d, error=%v", channel.Id, err))
+		}
+		if common.DebugEnabled {
+			common.SysLog(fmt.Sprintf("[DEBUG] GetHeaderOverride: channel_id=%d, parsed_count=%d", channel.Id, len(headerOverride)))
+		}
+	} else {
+		if common.DebugEnabled {
+			common.SysLog(fmt.Sprintf("[DEBUG] GetHeaderOverride: channel_id=%d, no header_override configured", channel.Id))
 		}
 	}
 	return headerOverride
