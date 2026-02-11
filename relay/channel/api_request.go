@@ -451,6 +451,16 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	// - client disconnect / reverse proxy timeout should cancel upstream ASAP
 	// This is critical to avoid goroutine/connection buildup when upstream is slow.
 	if c != nil && c.Request != nil {
+		// 如果下游 context 已经取消（客户端断开），直接返回不可重试的错误，
+		// 避免重试循环中所有请求因复用已取消的 context 而瞬间失败。
+		if err := c.Request.Context().Err(); err != nil {
+			return nil, types.NewError(
+				fmt.Errorf("downstream context already canceled: %w", err),
+				types.ErrorCodeContextCanceled,
+				types.ErrOptionWithSkipRetry(),
+				types.ErrOptionWithHideErrMsg("client disconnected"),
+			)
+		}
 		req = req.WithContext(c.Request.Context())
 	}
 

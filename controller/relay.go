@@ -215,6 +215,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	const maxPriorityLevels = 1000
 	attempts := 0
 	for priorityIndex := basePriorityIndex; priorityIndex < basePriorityIndex+maxPriorityLevels; priorityIndex++ {
+		// 客户端已断开，不再重试，避免无意义的上游请求和错误的渠道健康记录
+		if c.Request.Context().Err() != nil {
+			logger.LogWarn(c, "client disconnected, stopping retry loop")
+			break
+		}
 		channel, err := getChannel(c, group, originalModel, attempts, priorityIndex)
 		if err != nil {
 			logger.LogError(c, err.Error())
@@ -298,7 +303,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	// 2. Plan system is enabled
 	// 3. User has AutoSwitch enabled on their current plan
 	// 4. There are alternative plans with available channels
-	if newAPIError != nil {
+	if newAPIError != nil && c.Request.Context().Err() == nil {
 		failoverChannel, failoverPlan, failoverGroup, success := service.AttemptCrossplanFailoverAfterRetry(c, originalModel)
 		if success && failoverChannel != nil {
 			// Setup context for the failover channel
@@ -385,7 +390,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	// Wallet fallback: if plan failover failed and用户仍有钱包余额/授权，尝试钱包计费的子分组
-	if newAPIError != nil && (common.GetContextKeyInt(c, constant.ContextKeyUserQuota) > 0) {
+	if newAPIError != nil && c.Request.Context().Err() == nil && (common.GetContextKeyInt(c, constant.ContextKeyUserQuota) > 0) {
 		walletChannel, walletGroup, walletErr := service.AttemptWalletFallbackAfterRetry(c, originalModel)
 		if walletErr != nil {
 			logger.LogWarn(c, fmt.Sprintf("[WalletFallback] failed: %v", walletErr))
