@@ -177,6 +177,12 @@ func (up *UserPlan) IsLocked() bool {
 
 // IsExpired checks if the user plan has expired
 func (up *UserPlan) IsExpired() bool {
+	// Queued plans that have not been activated yet may have a precomputed
+	// expires_at for display only; they are not considered expired until started.
+	if up.QueuePosition > 0 && up.StartedAt == 0 {
+		return false
+	}
+
 	if up.ExpiresAt == 0 {
 		return false // Never expires
 	}
@@ -474,7 +480,9 @@ func GetUserValidPlans(userId int) ([]*UserPlan, error) {
 	now := time.Now().UnixMilli()
 
 	err := DB.Preload("Plan").
-		Where("user_id = ? AND status = ? AND locked != 1 AND (expires_at = 0 OR expires_at > ?)",
+		// queued unactivated plans (queue_position > 0 AND started_at = 0)
+		// use expires_at as display estimate only and must remain valid here
+		Where("user_id = ? AND status = ? AND locked != 1 AND ((queue_position > 0 AND started_at = 0) OR expires_at = 0 OR expires_at > ?)",
 			userId, UserPlanStatusActive, now).
 		Order("plan_priority DESC, id ASC").
 		Find(&userPlans).Error
@@ -523,7 +531,7 @@ func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 		// Deprecated path by plan_id can be ambiguous when user has multiple active instances
 		// of the same plan template. We must reject ambiguity to avoid switching the wrong plan.
 		var targetPlans []UserPlan
-		err := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND quota > 0 AND (expires_at = 0 OR expires_at > ?)",
+		err := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND quota > 0 AND ((queue_position > 0 AND started_at = 0) OR expires_at = 0 OR expires_at > ?)",
 			userId, newPlanId, UserPlanStatusActive, nowMs).
 			Order("queue_position ASC, purchase_order ASC, id ASC").
 			Limit(2).
@@ -850,7 +858,8 @@ func GetUserPlansByPlanId(planId int, pageInfo *common.PageInfo) ([]*UserPlan, i
 func ExpireUserPlans() (int64, error) {
 	now := time.Now().UnixMilli()
 	result := DB.Model(&UserPlan{}).
-		Where("status = ? AND expires_at > 0 AND expires_at < ?", UserPlanStatusActive, now).
+		// Do not expire queued unactivated plans: their expires_at may be a display precompute value.
+		Where("status = ? AND expires_at > 0 AND expires_at < ? AND NOT (queue_position > 0 AND started_at = 0)", UserPlanStatusActive, now).
 		Update("status", UserPlanStatusExpired)
 	return result.RowsAffected, result.Error
 }
@@ -926,9 +935,12 @@ func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPl
 		}
 		userPlan.ExpiresAt = expiresAt
 		userPlan.OriginalExpiresAt = expiresAt
+	} else {
+		// Has current plan - precompute expires_at for display (will be recalculated on activation)
+		precomputedExpiry := PrecomputeQueueExpiresAt(userId, plan.ValidityDays)
+		userPlan.ExpiresAt = precomputedExpiry
 	}
-	// If user has current plan, the new plan goes to queue with expires_at = 0
-	// (expiration will be calculated when ActivateNextQueuedPlan is called)
+	// (expiration will be recalculated when ActivateNextQueuedPlan or SwitchToUserPlan is called)
 
 	if err := userPlan.Insert(); err != nil {
 		return nil, err
@@ -1165,6 +1177,44 @@ func GetNextQueuePosition(userId int) (int, error) {
 	return maxPos + 1, nil
 }
 
+// GetQueueTailExpiresAt returns the expires_at of the last plan in the user's queue.
+// If queue is empty, returns the current plan's expires_at.
+// Returns 0 if no reference plan found or if the reference plan is permanent.
+func GetQueueTailExpiresAt(userId int) int64 {
+	// First check the last queued plan
+	var lastQueued UserPlan
+	err := DB.Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0", userId, UserPlanStatusActive).
+		Order("queue_position DESC").
+		First(&lastQueued).Error
+	if err == nil {
+		return lastQueued.ExpiresAt
+	}
+
+	// No queued plans, use current plan's expires_at
+	var current UserPlan
+	err = DB.Where("user_id = ? AND is_current = 1 AND status = ?", userId, UserPlanStatusActive).
+		First(&current).Error
+	if err == nil {
+		return current.ExpiresAt
+	}
+
+	return 0
+}
+
+// PrecomputeQueueExpiresAt calculates the expected expires_at for a new queued plan
+// based on the last plan in queue (or current plan) plus the new plan's validity days.
+// Returns 0 if the base expires_at is 0 (permanent) or validity_days is 0.
+func PrecomputeQueueExpiresAt(userId int, validityDays int) int64 {
+	if validityDays <= 0 {
+		return 0
+	}
+	baseExpiresAt := GetQueueTailExpiresAt(userId)
+	if baseExpiresAt <= 0 {
+		return 0
+	}
+	return baseExpiresAt + int64(validityDays)*24*3600*1000
+}
+
 // AddPlanToQueue adds a plan to the user's queue
 // If this is the user's first plan, it will be activated immediately
 func AddPlanToQueue(userId int, planId int, quota int64, source string, sourceOrderId string, assignedBy int) (*UserPlan, error) {
@@ -1250,6 +1300,9 @@ func AddPlanToQueue(userId int, planId int, quota int64, source string, sourceOr
 			userPlan.ExpiresAt = now.Add(time.Duration(plan.ValidityDays) * 24 * time.Hour).UnixMilli()
 			userPlan.OriginalExpiresAt = userPlan.ExpiresAt
 		}
+	} else {
+		// Has current plan - precompute expires_at for display (will be recalculated on activation)
+		userPlan.ExpiresAt = PrecomputeQueueExpiresAt(userId, plan.ValidityDays)
 	}
 
 	if err := DB.Create(userPlan).Error; err != nil {
