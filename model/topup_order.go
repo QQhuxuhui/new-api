@@ -298,3 +298,42 @@ func UpdateTopupOrderTradeNo(orderId int, tradeNo string) error {
 		Where("id = ?", orderId).
 		Update("payment_trade_no", tradeNo).Error
 }
+
+// GetAllTopupOrders retrieves all topup orders with pagination and filters (admin)
+func GetAllTopupOrders(page int, pageSize int, status string, userId int, orderNo string) ([]*TopupOrder, int64, error) {
+	var orders []*TopupOrder
+	var total int64
+
+	query := DB.Model(&TopupOrder{})
+
+	// Apply filters
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	if userId > 0 {
+		query = query.Where("user_id = ?", userId)
+	}
+	if orderNo != "" {
+		query = query.Where("order_no LIKE ?", "%"+orderNo+"%")
+	}
+
+	// Get total count
+	err := query.Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Get paginated orders with user association
+	offset := (page - 1) * pageSize
+	err = query.Preload("User").
+		Order("created_at DESC").
+		Limit(pageSize).
+		Offset(offset).
+		Find(&orders).Error
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return orders, total, nil
+}

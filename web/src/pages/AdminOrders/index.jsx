@@ -58,6 +58,11 @@ const AdminOrders = () => {
     total: 0,
   });
 
+  // Order type filter
+  const [orderType, setOrderType] = useState('all');
+  const [planTotal, setPlanTotal] = useState(0);
+  const [topupTotal, setTopupTotal] = useState(0);
+
   // Filters
   const [filters, setFilters] = useState({
     status: '',
@@ -70,6 +75,11 @@ const AdminOrders = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [orderDetail, setOrderDetail] = useState(null);
 
+  // Helper function to get API base path based on order type
+  const getOrderApiBase = (record) => {
+    return record.order_type === 'topup' ? '/api/user/topup-orders' : '/api/user/plan-orders';
+  };
+
   // Load orders
   const loadOrders = async (page = 1) => {
     setLoading(true);
@@ -79,6 +89,7 @@ const AdminOrders = () => {
         page_size: pagination.pageSize.toString(),
       });
 
+      if (orderType !== 'all') params.append('order_type', orderType);
       if (filters.status) params.append('status', filters.status);
       if (filters.userId) params.append('user_id', filters.userId);
       if (filters.orderNo) params.append('order_no', filters.orderNo);
@@ -92,6 +103,8 @@ const AdminOrders = () => {
           currentPage: data.page || page,
           total: data.total || 0,
         });
+        setPlanTotal(data.plan_total || 0);
+        setTopupTotal(data.topup_total || 0);
       } else {
         showError(message || t('加载失败'));
       }
@@ -103,7 +116,7 @@ const AdminOrders = () => {
 
   useEffect(() => {
     loadOrders(1);
-  }, []);
+  }, [orderType]);
 
   // Handle search
   const handleSearch = () => {
@@ -112,22 +125,32 @@ const AdminOrders = () => {
 
   // Handle reset filters
   const handleResetFilters = () => {
+    const shouldTriggerByOrderTypeChange = orderType !== 'all';
+    if (shouldTriggerByOrderTypeChange) {
+      setOrderType('all');
+    }
     setFilters({
       status: '',
       userId: '',
       orderNo: '',
     });
-    setTimeout(() => loadOrders(1), 100);
+
+    if (!shouldTriggerByOrderTypeChange) {
+      setTimeout(() => loadOrders(1), 100);
+    }
   };
 
   // Handle manual completion
-  const handleManualComplete = async (orderId) => {
+  const handleManualComplete = async (record) => {
+    const apiBase = getOrderApiBase(record);
     Modal.confirm({
       title: t('确认手动完成订单'),
-      content: t('确认要手动完成该订单并发放套餐吗？此操作不可撤销。'),
+      content: record.order_type === 'topup' 
+        ? t('确认要手动完成该充值订单吗？此操作不可撤销。')
+        : t('确认要手动完成该订单并发放套餐吗？此操作不可撤销。'),
       onOk: async () => {
         try {
-          const res = await API.post(`/api/user/plan-orders/${orderId}/complete`);
+          const res = await API.post(`${apiBase}/${record.order_id}/complete`);
           const { success, message } = res.data;
           if (success) {
             showSuccess(t('操作成功'));
@@ -143,11 +166,12 @@ const AdminOrders = () => {
   };
 
   // Handle view detail
-  const handleViewDetail = async (orderId) => {
+  const handleViewDetail = async (record) => {
+    const apiBase = getOrderApiBase(record);
     setDetailLoading(true);
     setDetailVisible(true);
     try {
-      const res = await API.get(`/api/user/plan-orders/${orderId}`);
+      const res = await API.get(`${apiBase}/${record.order_id}`);
       const { success, message, data } = res.data;
       if (success && data) {
         setOrderDetail(data);
@@ -163,9 +187,10 @@ const AdminOrders = () => {
   };
 
   // Handle cancel order
-  const handleCancelOrder = async (orderId) => {
+  const handleCancelOrder = async (record) => {
+    const apiBase = getOrderApiBase(record);
     try {
-      const res = await API.post(`/api/user/plan-orders/${orderId}/cancel`);
+      const res = await API.post(`${apiBase}/${record.order_id}/cancel`);
       const { success, message } = res.data;
       if (success) {
         showSuccess(t('订单已取消'));
@@ -179,9 +204,10 @@ const AdminOrders = () => {
   };
 
   // Handle delete order
-  const handleDeleteOrder = async (orderId) => {
+  const handleDeleteOrder = async (record) => {
+    const apiBase = getOrderApiBase(record);
     try {
-      const res = await API.delete(`/api/user/plan-orders/${orderId}`);
+      const res = await API.delete(`${apiBase}/${record.order_id}`);
       const { success, message } = res.data;
       if (success) {
         showSuccess(t('订单已删除'));
@@ -217,6 +243,15 @@ const AdminOrders = () => {
       render: (text) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{text}</span>,
     },
     {
+      title: t('类型'),
+      dataIndex: 'order_type',
+      key: 'order_type',
+      width: 80,
+      render: (type) => type === 'topup' 
+        ? <Tag color='cyan'>{t('充值')}</Tag> 
+        : <Tag color='violet'>{t('套餐')}</Tag>,
+    },
+    {
       title: t('用户'),
       key: 'user',
       width: 150,
@@ -230,10 +265,11 @@ const AdminOrders = () => {
       ),
     },
     {
-      title: t('套餐'),
+      title: t('名称'),
       dataIndex: 'plan_name',
       key: 'plan_name',
       width: 120,
+      render: (text) => text || '-',
     },
     {
       title: t('金额'),
@@ -302,19 +338,25 @@ const AdminOrders = () => {
             key='view'
             size='small'
             icon={<IconEyeOpened />}
-            onClick={() => handleViewDetail(record.order_id)}
+            onClick={() => handleViewDetail(record)}
           />
         );
 
-        // Manual complete button - for paid orders without user_plan
-        if (record.status === 'paid' && !record.user_plan_id) {
+        // Manual complete button
+        // For plan orders: show when status === 'paid' && !record.user_plan_id
+        // For topup orders: show when status === 'pending'
+        const showManualComplete = record.order_type === 'topup'
+          ? record.status === 'pending'
+          : (record.status === 'paid' && !record.user_plan_id);
+
+        if (showManualComplete) {
           actions.push(
             <Button
               key='complete'
               size='small'
               type='warning'
               icon={<IconTickCircle />}
-              onClick={() => handleManualComplete(record.order_id)}
+              onClick={() => handleManualComplete(record)}
             />
           );
         }
@@ -326,7 +368,7 @@ const AdminOrders = () => {
               key='cancel'
               title={t('确认取消订单')}
               content={t('确认要取消该订单吗？')}
-              onConfirm={() => handleCancelOrder(record.order_id)}
+              onConfirm={() => handleCancelOrder(record)}
             >
               <Button
                 size='small'
@@ -344,7 +386,7 @@ const AdminOrders = () => {
               key='delete'
               title={t('确认删除订单')}
               content={t('确认要删除该订单吗？此操作不可撤销。')}
-              onConfirm={() => handleDeleteOrder(record.order_id)}
+              onConfirm={() => handleDeleteOrder(record)}
             >
               <Button
                 size='small'
@@ -385,6 +427,22 @@ const AdminOrders = () => {
         {/* Filters */}
         <div className='mb-6'>
           <Space spacing='medium' wrap>
+            <Select
+              value={orderType}
+              onChange={(value) => setOrderType(value)}
+              style={{ width: 160 }}
+            >
+              <Select.Option value='all'>
+                {t('全部类型')} ({planTotal + topupTotal})
+              </Select.Option>
+              <Select.Option value='plan'>
+                {t('套餐')} ({planTotal})
+              </Select.Option>
+              <Select.Option value='topup'>
+                {t('充值')} ({topupTotal})
+              </Select.Option>
+            </Select>
+
             <Select
               placeholder={t('全部状态')}
               style={{ width: 150 }}
@@ -476,6 +534,11 @@ const AdminOrders = () => {
             <Descriptions.Item itemKey={t('订单号')}>
               <span style={{ fontFamily: 'monospace' }}>{orderDetail.order_no}</span>
             </Descriptions.Item>
+            <Descriptions.Item itemKey={t('类型')}>
+              {orderDetail.order_type === 'topup' 
+                ? <Tag color='cyan'>{t('充值')}</Tag> 
+                : <Tag color='violet'>{t('套餐')}</Tag>}
+            </Descriptions.Item>
             <Descriptions.Item itemKey={t('状态')}>
               {getStatusTag(orderDetail.status)}
             </Descriptions.Item>
@@ -483,23 +546,55 @@ const AdminOrders = () => {
               {orderDetail.username || `ID: ${orderDetail.user_id}`}
               {orderDetail.user_email && ` (${orderDetail.user_email})`}
             </Descriptions.Item>
-            <Descriptions.Item itemKey={t('套餐名称')}>
-              {orderDetail.plan_display_name || orderDetail.plan_name || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item itemKey={t('套餐类型')}>
-              {orderDetail.plan_type || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item itemKey={t('套餐分类')}>
-              {orderDetail.plan_category || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item itemKey={t('套餐额度')}>
-              {orderDetail.plan_quota ? `$${(orderDetail.plan_quota / 500000).toFixed(2)}` : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item itemKey={t('有效期')}>
-              {orderDetail.plan_validity_days ? `${orderDetail.plan_validity_days} 天` : '-'}
-            </Descriptions.Item>
+
+            {/* Plan order specific fields */}
+            {orderDetail.order_type === 'plan' && (
+              <>
+                <Descriptions.Item itemKey={t('套餐名称')}>
+                  {orderDetail.plan_display_name || orderDetail.plan_name || '-'}
+                </Descriptions.Item>
+                <Descriptions.Item itemKey={t('套餐类型')}>
+                  {orderDetail.plan_type || '-'}
+                </Descriptions.Item>
+                <Descriptions.Item itemKey={t('套餐分类')}>
+                  {orderDetail.plan_category || '-'}
+                </Descriptions.Item>
+                <Descriptions.Item itemKey={t('套餐额度')}>
+                  {orderDetail.plan_quota ? `$${(orderDetail.plan_quota / 500000).toFixed(2)}` : '-'}
+                </Descriptions.Item>
+                <Descriptions.Item itemKey={t('有效期')}>
+                  {orderDetail.plan_validity_days ? `${orderDetail.plan_validity_days} 天` : '-'}
+                </Descriptions.Item>
+                <Descriptions.Item itemKey={t('用户套餐ID')}>
+                  {orderDetail.user_plan_id || '-'}
+                </Descriptions.Item>
+                <Descriptions.Item itemKey={t('发放重试次数')}>
+                  {orderDetail.delivery_retry_count || 0}
+                </Descriptions.Item>
+                <Descriptions.Item itemKey={t('发放时间')}>
+                  {orderDetail.delivered_at ? timestamp2string(orderDetail.delivered_at / 1000) : '-'}
+                </Descriptions.Item>
+              </>
+            )}
+
+            {/* Topup order specific fields */}
+            {orderDetail.order_type === 'topup' && (
+              <>
+                <Descriptions.Item itemKey={t('充值金额')}>
+                  ¥{orderDetail.amount?.toFixed(2) || '0.00'}
+                </Descriptions.Item>
+                <Descriptions.Item itemKey={t('获得额度')}>
+                  {orderDetail.quota ? `$${(orderDetail.quota / 500000).toFixed(2)}` : '-'}
+                </Descriptions.Item>
+                <Descriptions.Item itemKey={t('折扣率')}>
+                  {orderDetail.discount_rate ? `${(orderDetail.discount_rate * 100).toFixed(0)}%` : '-'}
+                </Descriptions.Item>
+              </>
+            )}
+
+            {/* Common fields */}
             <Descriptions.Item itemKey={t('原价')}>
-              ¥{orderDetail.plan_original_price?.toFixed(2) || '0.00'}
+              ¥{orderDetail.plan_original_price?.toFixed(2) || orderDetail.original_price?.toFixed(2) || '0.00'}
             </Descriptions.Item>
             <Descriptions.Item itemKey={t('实付金额')}>
               <span style={{ fontWeight: 600, color: '#f5222d' }}>
@@ -521,17 +616,8 @@ const AdminOrders = () => {
             <Descriptions.Item itemKey={t('支付时间')}>
               {orderDetail.paid_at ? timestamp2string(orderDetail.paid_at / 1000) : '-'}
             </Descriptions.Item>
-            <Descriptions.Item itemKey={t('发放时间')}>
-              {orderDetail.delivered_at ? timestamp2string(orderDetail.delivered_at / 1000) : '-'}
-            </Descriptions.Item>
             <Descriptions.Item itemKey={t('取消时间')}>
               {orderDetail.cancelled_at ? timestamp2string(orderDetail.cancelled_at / 1000) : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item itemKey={t('用户套餐ID')}>
-              {orderDetail.user_plan_id || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item itemKey={t('发放重试次数')}>
-              {orderDetail.delivery_retry_count || 0}
             </Descriptions.Item>
           </Descriptions>
         ) : null}

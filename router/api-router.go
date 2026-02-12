@@ -137,6 +137,12 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.POST("/plan-orders/:id/cancel", controller.AdminCancelPlanOrder)
 				adminRoute.DELETE("/plan-orders/:id", controller.DeletePlanOrder)
 
+				// Topup order management (admin)
+				adminRoute.GET("/topup-orders/:id", controller.GetAdminTopupOrderDetail)
+				adminRoute.POST("/topup-orders/:id/complete", controller.ManualCompleteTopupOrder)
+				adminRoute.POST("/topup-orders/:id/cancel", controller.AdminCancelTopupOrder)
+				adminRoute.DELETE("/topup-orders/:id", controller.DeleteTopupOrder)
+
 				adminRoute.GET("/search", controller.SearchUsers)
 				adminRoute.GET("/:id", controller.GetUser)
 				adminRoute.POST("/", controller.CreateUser)
