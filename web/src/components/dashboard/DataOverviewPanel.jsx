@@ -136,14 +136,14 @@ const DataOverviewPanel = ({
   ];
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 h-full">
       {/* 标题 */}
-      <div className={FLEX_CENTER_GAP2 + ' px-1'}>
+      <div className={FLEX_CENTER_GAP2 + ' px-1 shrink-0'}>
         <Wallet size={16} className="text-gray-500" />
         <span className="text-sm font-semibold text-gray-500">{t('数据概览')}</span>
       </div>
 
-      <ScrollableContainer maxHeight="24rem">
+      <ScrollableContainer maxHeight="none" className="flex-1 min-h-0">
         <div className="flex flex-col gap-3">
           {sections.map((section, idx) => {
             const colors = colorMap[section.color];

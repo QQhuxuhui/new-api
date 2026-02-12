@@ -201,10 +201,14 @@ const ScrollableContainer = forwardRef(
     }, []);
 
     const containerStyle = useMemo(
-      () => ({
-        maxHeight,
-      }),
+      () => (maxHeight === 'none' ? {} : { maxHeight }),
       [maxHeight],
+    );
+
+    const scrollClassName = useMemo(
+      () =>
+        `overflow-y-auto card-content-scroll ${maxHeight === 'none' ? 'h-full' : ''} ${contentClassName}`,
+      [maxHeight, contentClassName],
     );
 
     const fadeIndicatorStyle = useMemo(
@@ -222,7 +226,7 @@ const ScrollableContainer = forwardRef(
       >
         <div
           ref={scrollRef}
-          className={`overflow-y-auto card-content-scroll ${contentClassName}`}
+          className={scrollClassName}
           style={containerStyle}
           onScroll={handleScroll}
         >
