@@ -1015,9 +1015,9 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 			}
 			for _, part := range candidate.Content.Parts {
 				if part.InlineData != nil && part.InlineData.MimeType != "" {
-					imageCount++
-					// 检测图片分辨率，4K 图片单独计数
 					if service.IsImageMimeType(part.InlineData.MimeType) {
+						imageCount++
+						// 检测图片分辨率，4K 图片单独计数
 						tier := service.DetectImageResolutionTier(part.InlineData.Data, part.InlineData.MimeType)
 						if tier == service.ResolutionTierHigh {
 							highResImageCount++

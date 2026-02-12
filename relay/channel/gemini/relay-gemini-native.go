@@ -137,8 +137,8 @@ func GeminiTextGenerationStreamHandler(c *gin.Context, info *relaycommon.RelayIn
 		for _, candidate := range geminiResponse.Candidates {
 			for _, part := range candidate.Content.Parts {
 				if part.InlineData != nil && part.InlineData.MimeType != "" {
-					imageCount++
 					if service.IsImageMimeType(part.InlineData.MimeType) {
+						imageCount++
 						tier := service.DetectImageResolutionTier(part.InlineData.Data, part.InlineData.MimeType)
 						if tier == service.ResolutionTierHigh {
 							highResImageCount++
