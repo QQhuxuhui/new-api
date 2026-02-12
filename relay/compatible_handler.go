@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/shopspring/decimal"
@@ -348,13 +349,26 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	} else {
 		quotaCalculateDecimal = dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio).Mul(dChannelRatio)
 	}
-	// 添加 responses tools call 调用的配额
-	quotaCalculateDecimal = quotaCalculateDecimal.Add(dWebSearchQuota)
-	quotaCalculateDecimal = quotaCalculateDecimal.Add(dFileSearchQuota)
-	// 添加 audio input 独立计费
-	quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
-	// 添加 image generation call 计费
-	quotaCalculateDecimal = quotaCalculateDecimal.Add(dImageGenerationCallQuota)
+	extraQuota := sumExtraQuota(dWebSearchQuota, dClaudeWebSearchQuota, dFileSearchQuota, audioInputQuota, dImageGenerationCallQuota)
+	gemini4kCount := ctx.GetInt("gemini_image_4k_count")
+	quotaCalculateDecimal, modelName, modelPrice, fourKApplied := applyGemini4KPriceOverride(
+		quotaCalculateDecimal,
+		extraQuota,
+		relayInfo.PriceData.UsePrice,
+		gemini4kCount,
+		modelName,
+		modelPrice,
+		dQuotaPerUnit,
+		dGroupRatio,
+		dChannelRatio,
+	)
+	if gemini4kCount > 0 && relayInfo.PriceData.UsePrice {
+		if fourKApplied {
+			extraContent += fmt.Sprintf("检测到 4K 图片，使用模型 %s 价格 %.4f 计费", modelName, modelPrice)
+		} else {
+			logger.LogWarn(ctx, fmt.Sprintf("检测到 4K 图片但未找到模型 %s 的价格配置，使用原模型价格", modelName+"-4k"))
+		}
+	}
 
 	quota := int(quotaCalculateDecimal.Round(0).IntPart())
 	totalTokens := promptTokens + completionTokens
@@ -474,6 +488,10 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		other["image_generation_call"] = true
 		other["image_generation_call_price"] = imageGenerationCallPrice
 	}
+	if gemini4kCount > 0 {
+		other["gemini_4k"] = true
+		other["gemini_4k_count"] = gemini4kCount
+	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     promptTokens,
@@ -489,6 +507,45 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+}
+
+func applyGemini4KPriceOverride(
+	baseQuota decimal.Decimal,
+	extraQuota decimal.Decimal,
+	usePrice bool,
+	gemini4kCount int,
+	modelName string,
+	modelPrice float64,
+	dQuotaPerUnit decimal.Decimal,
+	dGroupRatio decimal.Decimal,
+	dChannelRatio decimal.Decimal,
+) (decimal.Decimal, string, float64, bool) {
+	if !usePrice || gemini4kCount <= 0 {
+		return baseQuota.Add(extraQuota), modelName, modelPrice, false
+	}
+
+	fourKModelName := modelName + "-4k"
+	fourKPrice, found := ratio_setting.GetModelPrice(fourKModelName, false)
+	if !found || fourKPrice < 0 {
+		return baseQuota.Add(extraQuota), modelName, modelPrice, false
+	}
+
+	fourKBaseQuota := decimal.NewFromFloat(fourKPrice).Mul(dQuotaPerUnit).Mul(dGroupRatio).Mul(dChannelRatio)
+	return fourKBaseQuota.Add(extraQuota), fourKModelName, fourKPrice, true
+}
+
+func sumExtraQuota(
+	dWebSearchQuota decimal.Decimal,
+	dClaudeWebSearchQuota decimal.Decimal,
+	dFileSearchQuota decimal.Decimal,
+	audioInputQuota decimal.Decimal,
+	dImageGenerationCallQuota decimal.Decimal,
+) decimal.Decimal {
+	return dWebSearchQuota.
+		Add(dClaudeWebSearchQuota).
+		Add(dFileSearchQuota).
+		Add(audioInputQuota).
+		Add(dImageGenerationCallQuota)
 }
 
 // maskApiKey 对 API Key 进行脱敏，显示前4位和后4位

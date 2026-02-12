@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -36,6 +37,25 @@ func GeminiTextGenerationHandler(c *gin.Context, info *relaycommon.RelayInfo, re
 	err = common.Unmarshal(responseBody, &geminiResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+
+	// 检测图片分辨率
+	var imageCount, highResImageCount int
+	for _, candidate := range geminiResponse.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if part.InlineData != nil && service.IsImageMimeType(part.InlineData.MimeType) {
+				imageCount++
+				tier := service.DetectImageResolutionTier(part.InlineData.Data, part.InlineData.MimeType)
+				if tier == service.ResolutionTierHigh {
+					highResImageCount++
+				}
+			}
+		}
+	}
+	if highResImageCount > 0 {
+		c.Set("gemini_image_4k_count", highResImageCount)
+		c.Set("gemini_image_total_count", imageCount)
+		logger.LogInfo(c, fmt.Sprintf("Gemini 图片生成(native): 共 %d 张, 其中 4K %d 张", imageCount, highResImageCount))
 	}
 
 	// 计算使用量（基于 UsageMetadata）
@@ -99,6 +119,7 @@ func NativeGeminiEmbeddingHandler(c *gin.Context, resp *http.Response, info *rel
 func GeminiTextGenerationStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	var usage = &dto.Usage{}
 	var imageCount int
+	var highResImageCount int
 
 	helper.SetEventStreamHeaders(c)
 
@@ -112,11 +133,17 @@ func GeminiTextGenerationStreamHandler(c *gin.Context, info *relaycommon.RelayIn
 			return false
 		}
 
-		// 统计图片数量
+		// 统计图片数量并检测分辨率
 		for _, candidate := range geminiResponse.Candidates {
 			for _, part := range candidate.Content.Parts {
 				if part.InlineData != nil && part.InlineData.MimeType != "" {
 					imageCount++
+					if service.IsImageMimeType(part.InlineData.MimeType) {
+						tier := service.DetectImageResolutionTier(part.InlineData.Data, part.InlineData.MimeType)
+						if tier == service.ResolutionTierHigh {
+							highResImageCount++
+						}
+					}
 				}
 				if part.Text != "" {
 					responseText.WriteString(part.Text)
@@ -156,6 +183,12 @@ func GeminiTextGenerationStreamHandler(c *gin.Context, info *relaycommon.RelayIn
 		if usage.CompletionTokens == 0 {
 			usage.CompletionTokens = imageCount * 258
 		}
+	}
+
+	if highResImageCount > 0 {
+		c.Set("gemini_image_4k_count", highResImageCount)
+		c.Set("gemini_image_total_count", imageCount)
+		logger.LogInfo(c, fmt.Sprintf("Gemini 图片生成(native stream): 共 %d 张, 其中 4K %d 张", imageCount, highResImageCount))
 	}
 
 	// 如果usage.CompletionTokens为0，则使用本地统计的completion tokens

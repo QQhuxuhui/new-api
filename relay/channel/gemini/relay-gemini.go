@@ -840,7 +840,7 @@ func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse)
 			for _, part := range candidate.Content.Parts {
 				if part.InlineData != nil {
 					// 媒体内容
-					if strings.HasPrefix(part.InlineData.MimeType, "image") {
+					if service.IsImageMimeType(part.InlineData.MimeType) {
 						imgText := "![image](data:" + part.InlineData.MimeType + ";base64," + part.InlineData.Data + ")"
 						texts = append(texts, imgText)
 					} else {
@@ -923,7 +923,7 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 		}
 		for _, part := range candidate.Content.Parts {
 			if part.InlineData != nil {
-				if strings.HasPrefix(part.InlineData.MimeType, "image") {
+				if service.IsImageMimeType(part.InlineData.MimeType) {
 					imgText := "![image](data:" + part.InlineData.MimeType + ";base64," + part.InlineData.Data + ")"
 					texts = append(texts, imgText)
 				}
@@ -994,6 +994,7 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 	responseText := strings.Builder{}
 	var usage = &dto.Usage{}
 	var imageCount int
+	var highResImageCount int
 	finishReason := constant.FinishReasonStop
 
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
@@ -1015,6 +1016,13 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 			for _, part := range candidate.Content.Parts {
 				if part.InlineData != nil && part.InlineData.MimeType != "" {
 					imageCount++
+					// 检测图片分辨率，4K 图片单独计数
+					if service.IsImageMimeType(part.InlineData.MimeType) {
+						tier := service.DetectImageResolutionTier(part.InlineData.Data, part.InlineData.MimeType)
+						if tier == service.ResolutionTierHigh {
+							highResImageCount++
+						}
+					}
 					hasContent = true
 				}
 				if part.Text != "" {
@@ -1111,6 +1119,13 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 		}
 	}
 
+	// 将 4K 图片数量存入 context，用于计费时加价
+	if highResImageCount > 0 {
+		c.Set("gemini_image_4k_count", highResImageCount)
+		c.Set("gemini_image_total_count", imageCount)
+		logger.LogInfo(c, fmt.Sprintf("Gemini 图片生成: 共 %d 张, 其中 4K %d 张", imageCount, highResImageCount))
+	}
+
 	usage.PromptTokensDetails.TextTokens = usage.PromptTokens
 	usage.CompletionTokens = usage.TotalTokens - usage.PromptTokens
 
@@ -1151,13 +1166,27 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	if len(geminiResponse.Candidates) == 0 {
-		//return nil, types.NewOpenAIError(errors.New("no candidates returned"), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
-		//if geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
-		//	return nil, types.NewOpenAIError(errors.New("request blocked by Gemini API: "+*geminiResponse.PromptFeedback.BlockReason), types.ErrorCodePromptBlocked, http.StatusBadRequest)
-		//} else {
-		//	return nil, types.NewOpenAIError(errors.New("empty response from Gemini API"), types.ErrorCodeEmptyResponse, http.StatusInternalServerError)
-		//}
 	}
+
+	// 检测图片分辨率
+	var imageCount, highResImageCount int
+	for _, candidate := range geminiResponse.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if part.InlineData != nil && service.IsImageMimeType(part.InlineData.MimeType) {
+				imageCount++
+				tier := service.DetectImageResolutionTier(part.InlineData.Data, part.InlineData.MimeType)
+				if tier == service.ResolutionTierHigh {
+					highResImageCount++
+				}
+			}
+		}
+	}
+	if highResImageCount > 0 {
+		c.Set("gemini_image_4k_count", highResImageCount)
+		c.Set("gemini_image_total_count", imageCount)
+		logger.LogInfo(c, fmt.Sprintf("Gemini 图片生成: 共 %d 张, 其中 4K %d 张", imageCount, highResImageCount))
+	}
+
 	fullTextResponse := responseGeminiChat2OpenAI(c, &geminiResponse)
 	fullTextResponse.Model = info.UpstreamModelName
 	usage := dto.Usage{
