@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/shopspring/decimal"
 )
@@ -80,5 +82,43 @@ func TestSumExtraQuota_IncludesClaudeWebSearch(t *testing.T) {
 
 	if !extraQuota.Equal(decimal.NewFromInt(150)) {
 		t.Fatalf("expected extra quota 150, got %s", extraQuota.String())
+	}
+}
+
+func TestCalculatePlanQuotaForDailyCheck_PlanBillingUsesActualQuota(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		UserPlanId:            1,
+		BillingSource:         service.BillingSourcePlan,
+		FinalPreConsumedQuota: 100,
+	}
+
+	planQuotaToCheck := calculatePlanQuotaForDailyCheck(relayInfo, 100)
+	if planQuotaToCheck != 100 {
+		t.Fatalf("expected planQuotaToCheck=100, got %d", planQuotaToCheck)
+	}
+}
+
+func TestCalculatePlanQuotaForDailyCheck_MixedBillingCapsToPlanPart(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		UserPlanId:          1,
+		BillingSource:       service.BillingSourcePlanAndUserBalance,
+		PlanPreConsumeQuota: 60,
+	}
+
+	planQuotaToCheck := calculatePlanQuotaForDailyCheck(relayInfo, 100)
+	if planQuotaToCheck != 60 {
+		t.Fatalf("expected planQuotaToCheck=60, got %d", planQuotaToCheck)
+	}
+}
+
+func TestCalculatePlanQuotaForDailyCheck_NonPlanBillingSkipsCheck(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		UserPlanId:    1,
+		BillingSource: service.BillingSourceUserBalance,
+	}
+
+	planQuotaToCheck := calculatePlanQuotaForDailyCheck(relayInfo, 100)
+	if planQuotaToCheck != 0 {
+		t.Fatalf("expected planQuotaToCheck=0, got %d", planQuotaToCheck)
 	}
 }

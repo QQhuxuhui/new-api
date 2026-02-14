@@ -389,18 +389,15 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		}
 
 		// Check daily quota limit before updating stats (prevents excessive over-quota)
-		// Note: Request has already been served, but we can prevent recording excessive usage
-		// IMPORTANT: Use actualQuota for daily limit check
-		if relayInfo.UserPlanId > 0 {
-			actualQuota := int64(quota + relayInfo.FinalPreConsumedQuota)
-			if actualQuota > 0 {
-				if err := service.CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, actualQuota); err != nil {
-					// Daily quota would be exceeded - skip quota consumption and log error
-					// Request has already succeeded, but we won't charge the user
-					logger.LogError(ctx, fmt.Sprintf("daily quota check failed, skipping quota consumption: %v", err))
-					service.ReturnPreConsumedQuota(ctx, relayInfo)
-					return
-				}
+		// Note: Request has already been served, but we can prevent recording excessive usage.
+		// Only plan-charged portion should be checked against plan daily limit.
+		if planQuotaToCheck := calculatePlanQuotaForDailyCheck(relayInfo, quota); planQuotaToCheck > 0 {
+			if err := service.CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, planQuotaToCheck); err != nil {
+				// Daily quota would be exceeded - skip quota consumption and log error
+				// Request has already succeeded, but we won't charge the user
+				logger.LogError(ctx, fmt.Sprintf("daily quota check failed, skipping quota consumption: %v", err))
+				service.ReturnPreConsumedQuota(ctx, relayInfo)
+				return
 			}
 		}
 
@@ -426,7 +423,15 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		))
 	}
 
-	if quotaDelta != 0 {
+	// Always call PostConsumeQuota when billing source is plan or daily_pool,
+	// even if quotaDelta == 0, because plan/daily_pool quota is only deducted
+	// in PostConsumeQuota (not during pre-consume). This is critical for
+	// fixed-price (per-call) models where quota == FinalPreConsumedQuota => quotaDelta == 0.
+	needsPostConsume := quotaDelta != 0 ||
+		relayInfo.BillingSource == service.BillingSourcePlan ||
+		relayInfo.BillingSource == service.BillingSourceDailyPool ||
+		relayInfo.BillingSource == service.BillingSourcePlanAndUserBalance
+	if needsPostConsume {
 		err := service.PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
 		if err != nil {
 			logger.LogError(ctx, "error consuming token remain quota: "+err.Error())
@@ -546,6 +551,30 @@ func sumExtraQuota(
 		Add(dFileSearchQuota).
 		Add(audioInputQuota).
 		Add(dImageGenerationCallQuota)
+}
+
+func calculatePlanQuotaForDailyCheck(relayInfo *relaycommon.RelayInfo, quota int) int64 {
+	if relayInfo.UserPlanId <= 0 {
+		return 0
+	}
+
+	if relayInfo.BillingSource != service.BillingSourcePlan && relayInfo.BillingSource != service.BillingSourcePlanAndUserBalance {
+		return 0
+	}
+
+	planQuotaToCheck := int64(quota)
+	if relayInfo.BillingSource == service.BillingSourcePlanAndUserBalance && relayInfo.PlanPreConsumeQuota > 0 {
+		planPreConsumeQuota := int64(relayInfo.PlanPreConsumeQuota)
+		if planQuotaToCheck > planPreConsumeQuota {
+			planQuotaToCheck = planPreConsumeQuota
+		}
+	}
+
+	if planQuotaToCheck <= 0 {
+		return 0
+	}
+
+	return planQuotaToCheck
 }
 
 // maskApiKey 对 API Key 进行脱敏，显示前4位和后4位
