@@ -172,6 +172,8 @@ const EditChannelModal = (props) => {
     vertex_key_type: 'json',
     // 仅 AWS: 密钥格式和区域（存入 settings.aws_key_type 和 settings.aws_region）
     aws_key_type: 'ak_sk',
+    // 仅 Claude: 认证模式（存入 settings.claude_auth_mode）
+    claude_auth_mode: 'api_key',
     // 企业账户设置
     is_enterprise_account: false,
     // 字段透传控制默认值
@@ -201,6 +203,10 @@ const EditChannelModal = (props) => {
   const [vertexKeys, setVertexKeys] = useState([]);
   const [vertexFileList, setVertexFileList] = useState([]);
   const vertexErroredNames = useRef(new Set()); // 避免重复报错
+  const [claudeCredentialFileList, setClaudeCredentialFileList] = useState([]);
+  const claudeCredentialErroredNames = useRef(new Set());
+  const [initialClaudeAuthMode, setInitialClaudeAuthMode] =
+    useState('api_key');
   const [isMultiKeyChannel, setIsMultiKeyChannel] = useState(false);
   const [channelSearchValue, setChannelSearchValue] = useState('');
   const [useManualInput, setUseManualInput] = useState(false); // 是否使用手动输入模式
@@ -554,6 +560,8 @@ const EditChannelModal = (props) => {
           data.vertex_key_type = parsedSettings.vertex_key_type || 'json';
           // 读取 AWS 密钥格式和区域
           data.aws_key_type = parsedSettings.aws_key_type || 'ak_sk';
+          // 读取 Claude 认证模式
+          data.claude_auth_mode = parsedSettings.claude_auth_mode || 'api_key';
           // 读取企业账户设置
           data.is_enterprise_account =
             parsedSettings.openrouter_enterprise === true;
@@ -568,6 +576,7 @@ const EditChannelModal = (props) => {
           data.region = '';
           data.vertex_key_type = 'json';
           data.aws_key_type = 'ak_sk';
+          data.claude_auth_mode = 'api_key';
           data.is_enterprise_account = false;
           data.allow_service_tier = false;
           data.disable_store = false;
@@ -577,6 +586,7 @@ const EditChannelModal = (props) => {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
         data.vertex_key_type = 'json';
         data.aws_key_type = 'ak_sk';
+        data.claude_auth_mode = 'api_key';
         data.is_enterprise_account = false;
         data.allow_service_tier = false;
         data.disable_store = false;
@@ -622,6 +632,7 @@ const EditChannelModal = (props) => {
       }
       // 同步企业账户状态
       setIsEnterpriseAccount(data.is_enterprise_account || false);
+      setInitialClaudeAuthMode(data.claude_auth_mode || 'api_key');
       setBasicModels(getChannelModels(data.type));
       // 同步更新channelSettings状态显示
       setChannelSettings({
@@ -857,6 +868,7 @@ const EditChannelModal = (props) => {
       if (isEdit) {
         loadChannel();
       } else {
+        setInitialClaudeAuthMode('api_key');
         formApiRef.current?.setValues(getInitValues());
       }
       fetchModelGroups();
@@ -924,6 +936,10 @@ const EditChannelModal = (props) => {
     }
     // 重置本地输入，避免下次打开残留上一次的 JSON 字段值
     setInputs(getInitValues());
+    setVertexKeys([]);
+    setVertexFileList([]);
+    setClaudeCredentialFileList([]);
+    setInitialClaudeAuthMode('api_key');
     // 重置密钥显示状态
     resetKeyDisplayState();
   };
@@ -972,9 +988,191 @@ const EditChannelModal = (props) => {
     })();
   };
 
+  const normalizeClaudeKiroCredential = (raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error(t('Kiro 凭证必须是 JSON 对象'));
+    }
+
+    const refreshToken = typeof raw.refreshToken === 'string' ? raw.refreshToken.trim() : '';
+    if (!refreshToken) {
+      throw new Error(t('Kiro 凭证缺少 refreshToken'));
+    }
+    if (!refreshToken.startsWith('aor')) {
+      throw new Error(t('Kiro 凭证 refreshToken 格式无效，应以 aor 开头'));
+    }
+
+    const provider = typeof raw.provider === 'string' ? raw.provider.trim() : '';
+    const clientId = typeof raw.clientId === 'string' ? raw.clientId.trim() : '';
+    const clientSecret = typeof raw.clientSecret === 'string' ? raw.clientSecret.trim() : '';
+    const region = typeof raw.region === 'string' ? raw.region.trim() : '';
+
+    const isIdCProvider = ['builderid', 'enterprise'].includes(provider.toLowerCase());
+    if ((isIdCProvider || clientId || clientSecret) && (!clientId || !clientSecret)) {
+      throw new Error(t('IdC 凭证必须同时包含 clientId 与 clientSecret'));
+    }
+
+    const normalized = {
+      refreshToken: refreshToken,
+    };
+    if (provider) {
+      normalized.provider = provider;
+    }
+    if (clientId) {
+      normalized.clientId = clientId;
+    }
+    if (clientSecret) {
+      normalized.clientSecret = clientSecret;
+    }
+    if (region) {
+      normalized.region = region;
+    }
+
+    return normalized;
+  };
+
+  const normalizeClaudeKiroCredentialList = (raw) => {
+    if (Array.isArray(raw)) {
+      if (raw.length === 0) {
+        throw new Error(t('Kiro 凭证数组不能为空'));
+      }
+      return raw.map((item, index) => {
+        try {
+          return normalizeClaudeKiroCredential(item);
+        } catch (error) {
+          throw new Error(t('第 {{index}} 条凭证无效: {{msg}}', {
+            index: index + 1,
+            msg: error.message,
+          }));
+        }
+      });
+    }
+    return [normalizeClaudeKiroCredential(raw)];
+  };
+
+  const handleClaudeCredentialUploadChange = ({ fileList }) => {
+    claudeCredentialErroredNames.current.clear();
+    (async () => {
+      let validFiles = [];
+      let credentials = [];
+      const errorNames = [];
+
+      for (const item of fileList) {
+        const fileObj = item.fileInstance;
+        if (!fileObj) continue;
+        try {
+          const text = await fileObj.text();
+          const parsed = JSON.parse(text);
+          const normalizedList = normalizeClaudeKiroCredentialList(parsed);
+          credentials.push(...normalizedList);
+          validFiles.push(item);
+        } catch (error) {
+          if (!claudeCredentialErroredNames.current.has(item.name)) {
+            errorNames.push(`${item.name}: ${error.message}`);
+            claudeCredentialErroredNames.current.add(item.name);
+          }
+        }
+      }
+
+      if (!batch && validFiles.length > 1) {
+        validFiles = [validFiles[validFiles.length - 1]];
+      }
+      if (!batch && credentials.length > 1) {
+        credentials = [credentials[credentials.length - 1]];
+      }
+
+      setClaudeCredentialFileList(validFiles);
+      if (formApiRef.current) {
+        formApiRef.current.setValue('claude_credential_files', validFiles);
+      }
+      setInputs((prev) => ({ ...prev, claude_credential_files: validFiles }));
+
+      const keyText = credentials.length > 0
+        ? (batch
+            ? credentials.map((item) => JSON.stringify(item)).join('\n')
+            : JSON.stringify(credentials[0]))
+        : '';
+      if (formApiRef.current) {
+        formApiRef.current.setValue('key', keyText);
+      }
+      handleInputChange('key', keyText);
+
+      if (errorNames.length > 0) {
+        showError(
+          t('以下文件解析失败，已忽略：{{list}}', {
+            list: errorNames.join(' ; '),
+          }),
+        );
+      }
+    })();
+  };
+
   const submit = async () => {
     const formValues = formApiRef.current ? formApiRef.current.getValues() : {};
     let localInputs = { ...formValues };
+
+    const claudeAuthMode = localInputs.claude_auth_mode || 'api_key';
+    const rawClaudeKeyText = typeof localInputs.key === 'string' ? localInputs.key.trim() : '';
+    if (
+      isEdit &&
+      localInputs.type === 14 &&
+      claudeAuthMode !== (initialClaudeAuthMode || 'api_key') &&
+      !rawClaudeKeyText
+    ) {
+      showInfo(t('切换认证方式后请重新输入密钥！'));
+      return;
+    }
+    if (localInputs.type === 14 && claudeAuthMode === 'kiro_json') {
+      const rawKeyText = rawClaudeKeyText;
+
+      if (!rawKeyText) {
+        const mustProvideCredential =
+          !isEdit || initialClaudeAuthMode !== 'kiro_json';
+        if (mustProvideCredential) {
+          showInfo(t('请上传或输入 Kiro JSON 凭证！'));
+          return;
+        }
+        delete localInputs.key;
+      } else {
+        try {
+          if (batch) {
+            let credentialList = [];
+            if (rawKeyText.startsWith('[')) {
+              const parsedArray = JSON.parse(rawKeyText);
+              if (!Array.isArray(parsedArray)) {
+                throw new Error(t('批量 Kiro 凭证必须为 JSON 数组'));
+              }
+              credentialList = parsedArray.map((item) =>
+                normalizeClaudeKiroCredential(item),
+              );
+            } else {
+              credentialList = rawKeyText
+                .split('\n')
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .map((line) => normalizeClaudeKiroCredential(JSON.parse(line)));
+            }
+            if (credentialList.length === 0) {
+              throw new Error(t('批量 Kiro 凭证不能为空'));
+            }
+            localInputs.key = credentialList
+              .map((item) => JSON.stringify(item))
+              .join('\n');
+          } else {
+            const parsedValue = JSON.parse(rawKeyText);
+            if (Array.isArray(parsedValue) && parsedValue.length === 0) {
+              throw new Error(t('Kiro 凭证数组不能为空'));
+            }
+            const normalized = Array.isArray(parsedValue)
+              ? normalizeClaudeKiroCredential(parsedValue[0])
+              : normalizeClaudeKiroCredential(parsedValue);
+            localInputs.key = JSON.stringify(normalized);
+          }
+        } catch (error) {
+          showError(t('Kiro JSON 凭证格式无效: {{msg}}', { msg: error.message }));
+          return;
+        }
+      }
+    }
 
     if (localInputs.type === 41) {
       const keyType = localInputs.vertex_key_type || 'json';
@@ -1039,6 +1237,7 @@ const EditChannelModal = (props) => {
       delete localInputs.key;
     }
     delete localInputs.vertex_files;
+    delete localInputs.claude_credential_files;
 
     if (!isEdit && (!localInputs.name || !localInputs.key)) {
       showInfo(t('请填写渠道名称和渠道密钥！'));
@@ -1115,6 +1314,11 @@ const EditChannelModal = (props) => {
       settings.aws_key_type = localInputs.aws_key_type || 'ak_sk';
     }
 
+    // type === 14 (Claude): 保存认证模式
+    if (localInputs.type === 14) {
+      settings.claude_auth_mode = localInputs.claude_auth_mode || 'api_key';
+    }
+
     // type === 1 (OpenAI) 或 type === 14 (Claude): 设置字段透传控制（显式保存布尔值）
     if (localInputs.type === 1 || localInputs.type === 14) {
       settings.allow_service_tier = localInputs.allow_service_tier === true;
@@ -1141,6 +1345,8 @@ const EditChannelModal = (props) => {
     delete localInputs.vertex_key_type;
     // 顶层的 aws_key_type 不应发送给后端
     delete localInputs.aws_key_type;
+    // 顶层的 claude_auth_mode 不应发送给后端
+    delete localInputs.claude_auth_mode;
     // 清理字段透传控制的临时字段
     delete localInputs.allow_service_tier;
     delete localInputs.disable_store;
@@ -1285,6 +1491,11 @@ const EditChannelModal = (props) => {
     }
   };
 
+  const isClaudeKiroJsonMode =
+    inputs.type === 14 && (inputs.claude_auth_mode || 'api_key') === 'kiro_json';
+  const isVertexJsonMode =
+    inputs.type === 41 && (inputs.vertex_key_type || 'json') === 'json';
+
   const batchAllowed = !isEdit || isMultiKeyChannel;
   const batchExtra = batchAllowed ? (
     <Space>
@@ -1294,22 +1505,47 @@ const EditChannelModal = (props) => {
           checked={batch}
           onChange={(e) => {
             const checked = e.target.checked;
+            const activeJsonFileList = isVertexJsonMode
+              ? vertexFileList
+              : isClaudeKiroJsonMode
+                ? claudeCredentialFileList
+                : [];
 
-            if (!checked && vertexFileList.length > 1) {
+            if (!checked && activeJsonFileList.length > 1) {
               Modal.confirm({
                 title: t('切换为单密钥模式'),
                 content: t(
                   '将仅保留第一个密钥文件，其余文件将被移除，是否继续？',
                 ),
                 onOk: () => {
-                  const firstFile = vertexFileList[0];
-                  const firstKey = vertexKeys[0] ? [vertexKeys[0]] : [];
+                  const firstFile = activeJsonFileList[0];
 
-                  setVertexFileList([firstFile]);
-                  setVertexKeys(firstKey);
-
-                  formApiRef.current?.setValue('vertex_files', [firstFile]);
-                  setInputs((prev) => ({ ...prev, vertex_files: [firstFile] }));
+                  if (isVertexJsonMode) {
+                    const firstKey = vertexKeys[0] ? [vertexKeys[0]] : [];
+                    setVertexFileList([firstFile]);
+                    setVertexKeys(firstKey);
+                    formApiRef.current?.setValue('vertex_files', [firstFile]);
+                    setInputs((prev) => ({ ...prev, vertex_files: [firstFile] }));
+                    if (firstKey.length > 0) {
+                      const keyText = JSON.stringify(firstKey[0]);
+                      formApiRef.current?.setValue('key', keyText);
+                      handleInputChange('key', keyText);
+                    }
+                  } else if (isClaudeKiroJsonMode) {
+                    setClaudeCredentialFileList([firstFile]);
+                    formApiRef.current?.setValue('claude_credential_files', [firstFile]);
+                    setInputs((prev) => ({
+                      ...prev,
+                      claude_credential_files: [firstFile],
+                    }));
+                    const currentKey = formApiRef.current?.getValue('key') || inputs.key || '';
+                    const firstLine = currentKey
+                      .split('\n')
+                      .map((line) => line.trim())
+                      .filter(Boolean)[0] || '';
+                    formApiRef.current?.setValue('key', firstLine);
+                    handleInputChange('key', firstLine);
+                  }
 
                   setBatch(false);
                   setMultiToSingle(false);
@@ -1328,10 +1564,8 @@ const EditChannelModal = (props) => {
               setMultiToSingle(false);
               setMultiKeyMode('random');
             } else {
-              // 批量模式下禁用手动输入，并清空手动输入的内容
               setUseManualInput(false);
-              if (inputs.type === 41) {
-                // 清空手动输入的密钥内容
+              if (isVertexJsonMode || isClaudeKiroJsonMode) {
                 if (formApiRef.current) {
                   formApiRef.current.setValue('key', '');
                 }
@@ -1367,7 +1601,7 @@ const EditChannelModal = (props) => {
             {t('密钥聚合模式')}
           </Checkbox>
 
-          {inputs.type !== 41 && (
+          {!isVertexJsonMode && !isClaudeKiroJsonMode && (
             <Button
               size='small'
               type='tertiary'
@@ -1667,6 +1901,41 @@ const EditChannelModal = (props) => {
                         }
                       />
                     )}
+
+                    {inputs.type === 14 && (
+                      <Form.Select
+                        field='claude_auth_mode'
+                        label={t('认证方式')}
+                        placeholder={t('请选择认证方式')}
+                        optionList={[
+                          { label: 'API Key', value: 'api_key' },
+                          { label: 'Kiro JSON 凭证', value: 'kiro_json' },
+                        ]}
+                        style={{ width: '100%' }}
+                        value={inputs.claude_auth_mode || 'api_key'}
+                        onChange={(value) => {
+                          handleChannelOtherSettingsChange(
+                            'claude_auth_mode',
+                            value,
+                          );
+                          if (value !== 'kiro_json') {
+                            setClaudeCredentialFileList([]);
+                            if (formApiRef.current) {
+                              formApiRef.current.setValue(
+                                'claude_credential_files',
+                                [],
+                              );
+                            }
+                          }
+                        }}
+                        extraText={
+                          (inputs.claude_auth_mode || 'api_key') === 'kiro_json'
+                            ? t('Kiro JSON 模式支持上传账号 JSON 凭证，系统会自动换取 access token')
+                            : t('API Key 模式下直接使用填写的密钥')
+                        }
+                      />
+                    )}
+
                     {batch ? (
                       inputs.type === 41 &&
                       (inputs.vertex_key_type || 'json') === 'json' ? (
@@ -1951,6 +2220,40 @@ const EditChannelModal = (props) => {
                         )}
                       </>
                     )}
+
+                    {inputs.type === 14 &&
+                      (inputs.claude_auth_mode || 'api_key') === 'kiro_json' && (
+                        <Form.Upload
+                          field='claude_credential_files'
+                          label={t('Kiro 凭证文件 (.json)')}
+                          accept='.json'
+                          multiple={batch}
+                          draggable
+                          dragIcon={<IconBolt />}
+                          dragMainText={t('点击上传文件或拖拽文件到这里')}
+                          dragSubText={
+                            batch
+                              ? t('仅支持 JSON 文件，支持多文件')
+                              : t('仅支持 JSON 文件')
+                          }
+                          style={{ marginTop: 10 }}
+                          uploadTrigger='custom'
+                          beforeUpload={() => false}
+                          onChange={handleClaudeCredentialUploadChange}
+                          fileList={claudeCredentialFileList}
+                          rules={
+                            isEdit
+                              ? []
+                              : [
+                                  {
+                                    required: true,
+                                    message: t('请上传 Kiro JSON 凭证文件'),
+                                  },
+                                ]
+                          }
+                          extraText={t('上传后将自动写入密钥输入框，可直接提交')}
+                        />
+                      )}
 
                     {isEdit && isMultiKeyChannel && (
                       <Form.Select

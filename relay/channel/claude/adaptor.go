@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -143,7 +144,11 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	c.Set("masquerade_original_headers", originalHeaders)
 
 	channel.SetupApiRequestHeader(info, c, req)
-	req.Set("x-api-key", info.ApiKey)
+	resolvedAPIKey, err := service.ResolveClaudeAPIKey(info.ApiKey, info.ChannelOtherSettings)
+	if err != nil {
+		return fmt.Errorf("resolve claude auth key failed: %w", err)
+	}
+	req.Set("x-api-key", resolvedAPIKey)
 	anthropicVersion := c.Request.Header.Get("anthropic-version")
 	if anthropicVersion == "" {
 		anthropicVersion = "2023-06-01"
