@@ -94,11 +94,10 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 		if info.ChannelSetting.SystemPrompt != "" {
 			// 如果有系统提示，则将其添加到请求中
-			request, ok := convertedRequest.(*dto.GeneralOpenAIRequest)
-			if ok {
+			if openaiReq, ok := convertedRequest.(*dto.GeneralOpenAIRequest); ok {
 				containSystemPrompt := false
-				for _, message := range request.Messages {
-					if message.Role == request.GetSystemRoleName() {
+				for _, message := range openaiReq.Messages {
+					if message.Role == openaiReq.GetSystemRoleName() {
 						containSystemPrompt = true
 						break
 					}
@@ -106,17 +105,17 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 				if !containSystemPrompt {
 					// 如果没有系统提示，则添加系统提示
 					systemMessage := dto.Message{
-						Role:    request.GetSystemRoleName(),
+						Role:    openaiReq.GetSystemRoleName(),
 						Content: info.ChannelSetting.SystemPrompt,
 					}
-					request.Messages = append([]dto.Message{systemMessage}, request.Messages...)
+					openaiReq.Messages = append([]dto.Message{systemMessage}, openaiReq.Messages...)
 				} else if info.ChannelSetting.SystemPromptOverride {
 					common.SetContextKey(c, constant.ContextKeySystemPromptOverride, true)
 					// 如果有系统提示，且允许覆盖，则拼接到前面
-					for i, message := range request.Messages {
-						if message.Role == request.GetSystemRoleName() {
+					for i, message := range openaiReq.Messages {
+						if message.Role == openaiReq.GetSystemRoleName() {
 							if message.IsStringContent() {
-								request.Messages[i].SetStringContent(info.ChannelSetting.SystemPrompt + "\n" + message.StringContent())
+								openaiReq.Messages[i].SetStringContent(info.ChannelSetting.SystemPrompt + "\n" + message.StringContent())
 							} else {
 								contents := message.ParseContent()
 								contents = append([]dto.MediaContent{
@@ -125,9 +124,33 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 										Text: info.ChannelSetting.SystemPrompt,
 									},
 								}, contents...)
-								request.Messages[i].Content = contents
+								openaiReq.Messages[i].Content = contents
 							}
 							break
+						}
+					}
+				}
+			} else if claudeReq, ok := convertedRequest.(*dto.ClaudeRequest); ok {
+				// Anthropic 渠道：ConvertOpenAIRequest 返回 *dto.ClaudeRequest
+				if claudeReq.System == nil {
+					claudeReq.SetStringSystem(info.ChannelSetting.SystemPrompt)
+				} else if info.ChannelSetting.SystemPromptOverride {
+					common.SetContextKey(c, constant.ContextKeySystemPromptOverride, true)
+					if claudeReq.IsStringSystem() {
+						existing := strings.TrimSpace(claudeReq.GetStringSystem())
+						if existing == "" {
+							claudeReq.SetStringSystem(info.ChannelSetting.SystemPrompt)
+						} else {
+							claudeReq.SetStringSystem(info.ChannelSetting.SystemPrompt + "\n" + existing)
+						}
+					} else {
+						systemContents := claudeReq.ParseSystem()
+						newSystem := dto.ClaudeMediaMessage{Type: dto.ContentTypeText}
+						newSystem.SetText(info.ChannelSetting.SystemPrompt)
+						if len(systemContents) == 0 {
+							claudeReq.System = []dto.ClaudeMediaMessage{newSystem}
+						} else {
+							claudeReq.System = append([]dto.ClaudeMediaMessage{newSystem}, systemContents...)
 						}
 					}
 				}
