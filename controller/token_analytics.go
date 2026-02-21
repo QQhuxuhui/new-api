@@ -61,6 +61,37 @@ func GetTokenStats(c *gin.Context) {
 		return
 	}
 
+	// Ensure token_name reflects current token name (fallback to log value if token missing)
+	if len(tokenStats) > 0 {
+		tokenIds := make([]int, 0, len(tokenStats))
+		for _, ts := range tokenStats {
+			tokenIds = append(tokenIds, ts.TokenId)
+		}
+		var tokens []struct {
+			Id   int    `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := model.DB.Model(&model.Token{}).
+			Select("id, name").
+			Where("user_id = ? AND id IN ?", userId, tokenIds).
+			Find(&tokens).Error; err == nil {
+			nameMap := make(map[int]string, len(tokens))
+			for _, tk := range tokens {
+				nameMap[tk.Id] = tk.Name
+			}
+			for _, ts := range tokenStats {
+				if name, ok := nameMap[ts.TokenId]; ok {
+					ts.TokenName = name
+				}
+			}
+			for _, td := range trendData {
+				if name, ok := nameMap[td.TokenId]; ok {
+					td.TokenName = name
+				}
+			}
+		}
+	}
+
 	// Build model map: tokenId -> { modelName -> { request_count, quota } }
 	modelMap := make(map[int]map[string]map[string]int64)
 	for _, mb := range modelBreakdown {
