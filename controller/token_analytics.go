@@ -116,11 +116,10 @@ func GetTokenStats(c *gin.Context) {
 	}
 	trends := make([]trendPoint, 0, len(trendData))
 	for _, td := range trendData {
-		t := time.Unix(td.DateBucket, 0).UTC()
 		trends = append(trends, trendPoint{
 			TokenId:      td.TokenId,
 			TokenName:    td.TokenName,
-			Date:         t.Format("2006-01-02"),
+			Date:         td.Date,
 			RequestCount: td.RequestCount,
 			Quota:        td.Quota,
 		})

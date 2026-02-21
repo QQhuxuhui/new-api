@@ -492,19 +492,50 @@ func GetTokenStatsModelBreakdown(userId int, startTimestamp, endTimestamp int64)
 type TokenStatsTrend struct {
 	TokenId      int    `json:"token_id"`
 	TokenName    string `json:"token_name"`
-	DateBucket   int64  `json:"date_bucket"`
+	Date         string `json:"date"`
 	RequestCount int64  `json:"request_count"`
 	Quota        int64  `json:"quota"`
 }
 
 // GetTokenStatsTrend aggregates log data by token + day for a given user and time range.
+// Uses database-specific date functions to ensure compatibility across SQLite, MySQL, and PostgreSQL.
 func GetTokenStatsTrend(userId int, startTimestamp, endTimestamp int64) ([]*TokenStatsTrend, error) {
+	var query string
+	switch common.LogSqlType {
+	case common.DatabaseTypeMySQL:
+		query = `
+			SELECT token_id, token_name,
+				DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'), '%Y-%m-%d') as date,
+				COUNT(*) as request_count, SUM(quota) as quota
+			FROM logs
+			WHERE user_id = ? AND type = ? AND created_at BETWEEN ? AND ?
+			GROUP BY token_id, token_name, date
+			ORDER BY date ASC
+		`
+	case common.DatabaseTypePostgreSQL:
+		query = `
+			SELECT token_id, token_name,
+				to_char(to_timestamp(created_at) at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
+				COUNT(*) as request_count, SUM(quota) as quota
+			FROM logs
+			WHERE user_id = ? AND type = ? AND created_at BETWEEN ? AND ?
+			GROUP BY token_id, token_name, date
+			ORDER BY date ASC
+		`
+	default:
+		// SQLite
+		query = `
+			SELECT token_id, token_name,
+				DATE(DATETIME(created_at, 'unixepoch', '+8 hours')) as date,
+				COUNT(*) as request_count, SUM(quota) as quota
+			FROM logs
+			WHERE user_id = ? AND type = ? AND created_at BETWEEN ? AND ?
+			GROUP BY token_id, token_name, date
+			ORDER BY date ASC
+		`
+	}
+
 	var stats []*TokenStatsTrend
-	err := LOG_DB.Model(&Log{}).
-		Select("token_id, token_name, (created_at - MOD(created_at, 86400)) as date_bucket, COUNT(*) as request_count, SUM(quota) as quota").
-		Where("user_id = ? AND type = ? AND created_at BETWEEN ? AND ?", userId, LogTypeConsume, startTimestamp, endTimestamp).
-		Group("token_id, token_name, date_bucket").
-		Order("date_bucket ASC").
-		Find(&stats).Error
+	err := LOG_DB.Raw(query, userId, LogTypeConsume, startTimestamp, endTimestamp).Scan(&stats).Error
 	return stats, err
 }

@@ -92,6 +92,5 @@ export function useTokenAnalytics() {
     selectPresetRange,
     selectCustomRange,
     initLoad,
-    PRESET_RANGES,
   };
 }
