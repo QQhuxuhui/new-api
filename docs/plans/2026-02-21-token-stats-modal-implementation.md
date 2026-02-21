@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a "用量统计" (Usage Statistics) button to the token management page that opens a modal showing per-token usage analytics (summary cards, ranking chart, overview table, model distribution chart).
+**Goal:** Add a "用量统计" (Usage Statistics) button to the token management page that opens a modal showing per-token usage analytics (summary cards, time trend chart, ranking chart, overview table, model distribution chart).
 
 **Architecture:** Backend adds one new API endpoint (`GET /api/token/stats`) that queries the existing `logs` table with GROUP BY aggregation. Frontend adds a modal component triggered from TokensActions, using VChart for visualizations and Semi Design for UI.
 
@@ -57,6 +57,27 @@ func GetTokenStatsModelBreakdown(userId int, startTimestamp, endTimestamp int64)
 		Select("token_id, model_name, COUNT(*) as request_count, SUM(quota) as quota").
 		Where("user_id = ? AND type = ? AND created_at BETWEEN ? AND ?", userId, LogTypeConsume, startTimestamp, endTimestamp).
 		Group("token_id, model_name").
+		Find(&stats).Error
+	return stats, err
+}
+
+// TokenStatsTrend holds per-day stats for a token
+type TokenStatsTrend struct {
+	TokenId      int    `json:"token_id"`
+	TokenName    string `json:"token_name"`
+	DateBucket   int64  `json:"date_bucket"`
+	RequestCount int64  `json:"request_count"`
+	Quota        int64  `json:"quota"`
+}
+
+// GetTokenStatsTrend aggregates log data by token + day for a given user and time range.
+func GetTokenStatsTrend(userId int, startTimestamp, endTimestamp int64) ([]*TokenStatsTrend, error) {
+	var stats []*TokenStatsTrend
+	err := LOG_DB.Model(&Log{}).
+		Select("token_id, token_name, (created_at - MOD(created_at, 86400)) as date_bucket, COUNT(*) as request_count, SUM(quota) as quota").
+		Where("user_id = ? AND type = ? AND created_at BETWEEN ? AND ?", userId, LogTypeConsume, startTimestamp, endTimestamp).
+		Group("token_id, token_name, date_bucket").
+		Order("date_bucket ASC").
 		Find(&stats).Error
 	return stats, err
 }
@@ -139,6 +160,16 @@ func GetTokenStats(c *gin.Context) {
 		return
 	}
 
+	// Query 3: per-token per-day trend
+	trendData, err := model.GetTokenStatsTrend(userId, startTimestamp, endTimestamp)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
 	// Build model map: tokenId -> { modelName -> { request_count, quota } }
 	modelMap := make(map[int]map[string]map[string]int64)
 	for _, mb := range modelBreakdown {
@@ -184,11 +215,32 @@ func GetTokenStats(c *gin.Context) {
 		})
 	}
 
+	// Build trend data: array of { token_id, token_name, date, request_count, quota }
+	type trendPoint struct {
+		TokenId      int    `json:"token_id"`
+		TokenName    string `json:"token_name"`
+		Date         string `json:"date"`
+		RequestCount int64  `json:"request_count"`
+		Quota        int64  `json:"quota"`
+	}
+	trends := make([]trendPoint, 0, len(trendData))
+	for _, td := range trendData {
+		t := time.Unix(td.DateBucket, 0).UTC()
+		trends = append(trends, trendPoint{
+			TokenId:      td.TokenId,
+			TokenName:    td.TokenName,
+			Date:         t.Format("2006-01-02"),
+			RequestCount: td.RequestCount,
+			Quota:        td.Quota,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
 			"tokens": tokens,
+			"trends": trends,
 			"summary": gin.H{
 				"total_requests": totalRequests,
 				"total_quota":    totalQuota,
@@ -387,9 +439,10 @@ Create `web/src/components/table/tokens/modals/TokenAnalyticsModal.jsx`.
 This is the largest frontend file. It contains:
 1. Time range selector (preset buttons + DatePicker)
 2. Summary cards (total requests, total quota, active tokens, total tokens)
-3. Bar chart (token ranking by quota, switchable to request count)
-4. Overview table with expandable rows (model breakdown)
-5. Pie chart (global model distribution)
+3. Time trend line chart (per-token daily consumption/request trend, switchable metric)
+4. Bar chart (token ranking by quota, switchable to request count)
+5. Overview table with expandable rows (model breakdown)
+6. Pie chart (global model distribution)
 
 ```jsx
 import React, { useState, useEffect, useMemo } from 'react';
@@ -426,6 +479,7 @@ const TokenAnalyticsModal = ({ visible, onClose, t }) => {
 
   const [barMetric, setBarMetric] = useState('quota');
   const [pieMetric, setPieMetric] = useState('quota');
+  const [trendMetric, setTrendMetric] = useState('quota');
 
   useEffect(() => {
     if (visible) {
@@ -440,6 +494,47 @@ const TokenAnalyticsModal = ({ visible, onClose, t }) => {
     { key: 'last7Days', label: t('最近 7 天') },
     { key: 'last30Days', label: t('最近 30 天') },
   ];
+
+  // Build trend line chart spec
+  const trendLineSpec = useMemo(() => {
+    if (!data?.trends?.length) return null;
+
+    const values = data.trends.map((item) => ({
+      date: item.date,
+      token: item.token_name || `Token #${item.token_id}`,
+      value: trendMetric === 'quota' ? item.quota : item.request_count,
+    }));
+
+    return {
+      type: 'line',
+      data: [{ id: 'trend', values }],
+      xField: 'date',
+      yField: 'value',
+      seriesField: 'token',
+      point: { visible: true },
+      title: {
+        visible: true,
+        text:
+          trendMetric === 'quota'
+            ? t('令牌消耗趋势（额度）')
+            : t('令牌调用趋势（次数）'),
+      },
+      legends: { visible: true },
+      tooltip: {
+        mark: {
+          content: [
+            {
+              key: (datum) => datum['token'],
+              value: (datum) =>
+                trendMetric === 'quota'
+                  ? renderQuota(datum['value'], 2)
+                  : renderNumber(datum['value']),
+            },
+          ],
+        },
+      },
+    };
+  }, [data, trendMetric, t]);
 
   // Build bar chart spec
   const barChartSpec = useMemo(() => {
@@ -713,6 +808,30 @@ const TokenAnalyticsModal = ({ visible, onClose, t }) => {
               </Card>
             </div>
 
+            {/* Time Trend Line Chart */}
+            {trendLineSpec && (
+              <Card
+                title={
+                  <div className='flex items-center justify-between w-full'>
+                    <span>{t('时间趋势')}</span>
+                    <RadioGroup
+                      type='button'
+                      size='small'
+                      value={trendMetric}
+                      onChange={(e) => setTrendMetric(e.target.value)}
+                    >
+                      <Radio value='quota'>{t('消耗额度')}</Radio>
+                      <Radio value='request_count'>{t('调用次数')}</Radio>
+                    </RadioGroup>
+                  </div>
+                }
+              >
+                <div style={{ height: 300 }}>
+                  <VChart spec={trendLineSpec} option={CHART_CONFIG} />
+                </div>
+              </Card>
+            )}
+
             {/* Bar Chart - Token Ranking */}
             {barChartSpec && (
               <Card
@@ -875,6 +994,9 @@ Add the following keys to `zh.json` (inside the `"translation"` object):
 "令牌对比排名": "令牌对比排名",
 "令牌消耗排名（额度）": "令牌消耗排名（额度）",
 "令牌调用排名（次数）": "令牌调用排名（次数）",
+"时间趋势": "时间趋势",
+"令牌消耗趋势（额度）": "令牌消耗趋势（额度）",
+"令牌调用趋势（次数）": "令牌调用趋势（次数）",
 "消耗额度": "消耗额度",
 "调用次数": "调用次数",
 "令牌概览": "令牌概览",
@@ -906,6 +1028,9 @@ Add the following keys to `en.json`:
 "令牌对比排名": "Token Ranking",
 "令牌消耗排名（额度）": "Token Ranking (Quota)",
 "令牌调用排名（次数）": "Token Ranking (Requests)",
+"时间趋势": "Time Trend",
+"令牌消耗趋势（额度）": "Token Consumption Trend (Quota)",
+"令牌调用趋势（次数）": "Token Usage Trend (Requests)",
 "消耗额度": "Quota",
 "调用次数": "Requests",
 "令牌概览": "Token Overview",
@@ -962,7 +1087,7 @@ git commit -m "fix: build fixes for token analytics"
 - `web/src/components/table/tokens/modals/TokenAnalyticsModal.jsx` - Modal component
 
 **Modified:**
-- `model/log.go` - Added 2 aggregation query functions + 2 structs
+- `model/log.go` - Added 3 aggregation query functions + 3 structs
 - `router/api-router.go` - Added 1 route line
 - `web/src/components/table/tokens/TokensActions.jsx` - Added button + modal integration
 - `web/src/i18n/locales/zh.json` - Added Chinese translation keys

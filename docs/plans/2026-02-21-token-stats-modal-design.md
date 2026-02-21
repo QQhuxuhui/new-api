@@ -37,6 +37,15 @@
         }
       }
     ],
+    "trends": [
+      {
+        "token_id": 1,
+        "token_name": "张三",
+        "date": "2026-02-15",
+        "request_count": 200,
+        "quota": 8000
+      }
+    ],
     "summary": {
       "total_requests": 5000,
       "total_quota": 200000,
@@ -67,6 +76,17 @@ FROM logs
 WHERE user_id = ? AND type = 2
   AND created_at BETWEEN ? AND ?
 GROUP BY token_id, model_name
+
+-- 按令牌 + 天聚合（时间趋势）
+SELECT token_id, token_name,
+       (created_at - MOD(created_at, 86400)) as date_bucket,
+       COUNT(*) as request_count,
+       SUM(quota) as total_quota
+FROM logs
+WHERE user_id = ? AND type = 2
+  AND created_at BETWEEN ? AND ?
+GROUP BY token_id, token_name, date_bucket
+ORDER BY date_bucket ASC
 ```
 
 时间范围限制：最大 90 天。
@@ -90,17 +110,22 @@ GROUP BY token_id, model_name
 - 活跃令牌数
 - 总 Token 数（prompt + completion）
 
-**3. 令牌对比排名**（柱状图）
+**3. 时间趋势**（折线图）
+- 每条线代表一个令牌，横轴为日期，纵轴为消耗/调用量
+- 可切换：调用次数 / 消耗额度
+- 按天粒度聚合
+
+**4. 令牌对比排名**（柱状图）
 - 横轴为令牌名称，纵轴为消耗额度
 - 可切换：调用次数 / 消耗额度
 - 前 10 个令牌，其余合并为「其他」
 
-**4. 令牌概览表格**
+**5. 令牌概览表格**
 - 列：令牌名称 | 调用次数 | 消耗额度 | Prompt Tokens | Completion Tokens | 最常用模型
 - 支持按各列排序
 - 点击某行可展开查看该令牌的模型分布详情
 
-**5. 模型分布**（饼图/环形图）
+**6. 模型分布**（饼图/环形图）
 - 全局模型使用占比（所有令牌合计）
 - 可切换：调用次数 / 消耗额度
 
