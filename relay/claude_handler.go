@@ -107,6 +107,15 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 	}
 
+	// 注入渠道自定义用户提示词
+	if info.ChannelSetting.UserPrompt != "" {
+		userMessage := dto.ClaudeMessage{
+			Role:    "user",
+			Content: info.ChannelSetting.UserPrompt,
+		}
+		request.Messages = append([]dto.ClaudeMessage{userMessage}, request.Messages...)
+	}
+
 	var requestBody io.Reader
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		body, err := common.GetRequestBody(c)
