@@ -446,3 +446,65 @@ func GetUserLogPlanOptions(userId int) (plans []LogPlanOption, err error) {
 		Find(&plans).Error
 	return
 }
+
+// TokenStatsSummary holds aggregated stats for a single token
+type TokenStatsSummary struct {
+	TokenId          int    `json:"token_id"`
+	TokenName        string `json:"token_name"`
+	RequestCount     int64  `json:"request_count"`
+	Quota            int64  `json:"quota"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+}
+
+// TokenStatsModelBreakdown holds per-model stats for a token
+type TokenStatsModelBreakdown struct {
+	TokenId      int    `json:"token_id"`
+	ModelName    string `json:"model_name"`
+	RequestCount int64  `json:"request_count"`
+	Quota        int64  `json:"quota"`
+}
+
+// GetTokenStatsByUserId aggregates log data by token for a given user and time range.
+func GetTokenStatsByUserId(userId int, startTimestamp, endTimestamp int64) ([]*TokenStatsSummary, error) {
+	var stats []*TokenStatsSummary
+	err := LOG_DB.Model(&Log{}).
+		Select("token_id, token_name, COUNT(*) as request_count, SUM(quota) as quota, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens").
+		Where("user_id = ? AND type = ? AND created_at BETWEEN ? AND ?", userId, LogTypeConsume, startTimestamp, endTimestamp).
+		Group("token_id, token_name").
+		Order("quota DESC").
+		Find(&stats).Error
+	return stats, err
+}
+
+// GetTokenStatsModelBreakdown aggregates log data by token+model for a given user and time range.
+func GetTokenStatsModelBreakdown(userId int, startTimestamp, endTimestamp int64) ([]*TokenStatsModelBreakdown, error) {
+	var stats []*TokenStatsModelBreakdown
+	err := LOG_DB.Model(&Log{}).
+		Select("token_id, model_name, COUNT(*) as request_count, SUM(quota) as quota").
+		Where("user_id = ? AND type = ? AND created_at BETWEEN ? AND ?", userId, LogTypeConsume, startTimestamp, endTimestamp).
+		Group("token_id, model_name").
+		Find(&stats).Error
+	return stats, err
+}
+
+// TokenStatsTrend holds per-day stats for a token
+type TokenStatsTrend struct {
+	TokenId      int    `json:"token_id"`
+	TokenName    string `json:"token_name"`
+	DateBucket   int64  `json:"date_bucket"`
+	RequestCount int64  `json:"request_count"`
+	Quota        int64  `json:"quota"`
+}
+
+// GetTokenStatsTrend aggregates log data by token + day for a given user and time range.
+func GetTokenStatsTrend(userId int, startTimestamp, endTimestamp int64) ([]*TokenStatsTrend, error) {
+	var stats []*TokenStatsTrend
+	err := LOG_DB.Model(&Log{}).
+		Select("token_id, token_name, (created_at - MOD(created_at, 86400)) as date_bucket, COUNT(*) as request_count, SUM(quota) as quota").
+		Where("user_id = ? AND type = ? AND created_at BETWEEN ? AND ?", userId, LogTypeConsume, startTimestamp, endTimestamp).
+		Group("token_id, token_name, date_bucket").
+		Order("date_bucket ASC").
+		Find(&stats).Error
+	return stats, err
+}
