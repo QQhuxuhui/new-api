@@ -341,6 +341,7 @@ const EditChannelModal = (props) => {
     pass_through_body_enabled: false,
     pass_through_metadata_masquerade: false,
     system_prompt: '',
+    user_prompt: '',
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
@@ -3534,6 +3535,21 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         '如果用户请求中包含系统提示词，则使用此设置拼接到用户的系统提示词前面',
+                      )}
+                    />
+                    <Form.TextArea
+                      field='user_prompt'
+                      label={t('用户提示词')}
+                      placeholder={t(
+                        '输入用户提示词，将作为第一条用户消息插入到请求中',
+                      )}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('user_prompt', value)
+                      }
+                      autosize
+                      showClear
+                      extraText={t(
+                        '始终生效：此提示词将作为一条独立的用户消息插入到所有用户消息之前',
                       )}
                     />
                   </Card>
