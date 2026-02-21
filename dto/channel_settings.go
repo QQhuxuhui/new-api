@@ -9,6 +9,7 @@ type ChannelSettings struct {
 	PassThroughMetadataMasquerade bool   `json:"pass_through_metadata_masquerade,omitempty"`
 	SystemPrompt                  string `json:"system_prompt,omitempty"`
 	SystemPromptOverride          bool   `json:"system_prompt_override,omitempty"`
+	UserPrompt                    string `json:"user_prompt,omitempty"`
 }
 
 type VertexKeyType string
