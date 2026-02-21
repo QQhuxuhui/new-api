@@ -157,6 +157,31 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 			}
 		}
 
+		// 注入渠道自定义用户提示词
+		if info.ChannelSetting.UserPrompt != "" {
+			if openaiReq, ok := convertedRequest.(*dto.GeneralOpenAIRequest); ok {
+				userMessage := dto.Message{
+					Role:    "user",
+					Content: info.ChannelSetting.UserPrompt,
+				}
+				// 插入到 system 消息之后、其他消息之前
+				insertIdx := 0
+				for i, msg := range openaiReq.Messages {
+					if msg.Role == openaiReq.GetSystemRoleName() {
+						insertIdx = i + 1
+						break
+					}
+				}
+				openaiReq.Messages = append(openaiReq.Messages[:insertIdx], append([]dto.Message{userMessage}, openaiReq.Messages[insertIdx:]...)...)
+			} else if claudeReq, ok := convertedRequest.(*dto.ClaudeRequest); ok {
+				userMessage := dto.ClaudeMessage{
+					Role:    "user",
+					Content: info.ChannelSetting.UserPrompt,
+				}
+				claudeReq.Messages = append([]dto.ClaudeMessage{userMessage}, claudeReq.Messages...)
+			}
+		}
+
 		jsonData, err := common.Marshal(convertedRequest)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeJsonMarshalFailed, types.ErrOptionWithSkipRetry())
