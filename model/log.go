@@ -469,9 +469,9 @@ type TokenStatsModelBreakdown struct {
 func GetTokenStatsByUserId(userId int, startTimestamp, endTimestamp int64) ([]*TokenStatsSummary, error) {
 	var stats []*TokenStatsSummary
 	err := LOG_DB.Model(&Log{}).
-		Select("token_id, token_name, COUNT(*) as request_count, SUM(quota) as quota, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens").
+		Select("token_id, MAX(token_name) as token_name, COUNT(*) as request_count, SUM(quota) as quota, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens").
 		Where("user_id = ? AND type = ? AND created_at BETWEEN ? AND ?", userId, LogTypeConsume, startTimestamp, endTimestamp).
-		Group("token_id, token_name").
+		Group("token_id").
 		Order("quota DESC").
 		Find(&stats).Error
 	return stats, err
@@ -504,33 +504,33 @@ func GetTokenStatsTrend(userId int, startTimestamp, endTimestamp int64) ([]*Toke
 	switch common.LogSqlType {
 	case common.DatabaseTypeMySQL:
 		query = `
-			SELECT token_id, token_name,
+			SELECT token_id, MAX(token_name) as token_name,
 				DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00'), '%Y-%m-%d') as date,
 				COUNT(*) as request_count, SUM(quota) as quota
 			FROM logs
 			WHERE user_id = ? AND type = ? AND created_at BETWEEN ? AND ?
-			GROUP BY token_id, token_name, date
+			GROUP BY token_id, date
 			ORDER BY date ASC
 		`
 	case common.DatabaseTypePostgreSQL:
 		query = `
-			SELECT token_id, token_name,
+			SELECT token_id, MAX(token_name) as token_name,
 				to_char(to_timestamp(created_at) at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
 				COUNT(*) as request_count, SUM(quota) as quota
 			FROM logs
 			WHERE user_id = ? AND type = ? AND created_at BETWEEN ? AND ?
-			GROUP BY token_id, token_name, date
+			GROUP BY token_id, date
 			ORDER BY date ASC
 		`
 	default:
 		// SQLite
 		query = `
-			SELECT token_id, token_name,
+			SELECT token_id, MAX(token_name) as token_name,
 				DATE(DATETIME(created_at, 'unixepoch', '+8 hours')) as date,
 				COUNT(*) as request_count, SUM(quota) as quota
 			FROM logs
 			WHERE user_id = ? AND type = ? AND created_at BETWEEN ? AND ?
-			GROUP BY token_id, token_name, date
+			GROUP BY token_id, date
 			ORDER BY date ASC
 		`
 	}
