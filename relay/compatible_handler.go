@@ -164,11 +164,12 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 					Role:    "user",
 					Content: info.ChannelSetting.UserPrompt,
 				}
-				// 插入到 system 消息之后、其他消息之前
+				// 插入到所有 system 消息之后、其他消息之前
 				insertIdx := 0
 				for i, msg := range openaiReq.Messages {
 					if msg.Role == openaiReq.GetSystemRoleName() {
 						insertIdx = i + 1
+					} else if insertIdx > 0 {
 						break
 					}
 				}

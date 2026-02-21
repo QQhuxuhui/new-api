@@ -532,6 +532,7 @@ const EditChannelModal = (props) => {
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
+          data.user_prompt = parsedSettings.user_prompt || '';
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -541,6 +542,7 @@ const EditChannelModal = (props) => {
           data.pass_through_metadata_masquerade = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
+          data.user_prompt = '';
         }
       } else {
         data.force_format = false;
@@ -550,6 +552,7 @@ const EditChannelModal = (props) => {
         data.pass_through_metadata_masquerade = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
+        data.user_prompt = '';
       }
 
       if (data.settings) {
@@ -643,6 +646,7 @@ const EditChannelModal = (props) => {
         pass_through_body_enabled: data.pass_through_body_enabled,
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
+        user_prompt: data.user_prompt,
       });
       // console.log(data);
     } else {
@@ -926,6 +930,7 @@ const EditChannelModal = (props) => {
       pass_through_metadata_masquerade: false,
       system_prompt: '',
       system_prompt_override: false,
+      user_prompt: '',
     });
     // 重置密钥模式状态
     setKeyMode('append');
@@ -1291,6 +1296,7 @@ const EditChannelModal = (props) => {
         localInputs.pass_through_metadata_masquerade || false,
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
+      user_prompt: localInputs.user_prompt || '',
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1341,6 +1347,7 @@ const EditChannelModal = (props) => {
     delete localInputs.pass_through_metadata_masquerade;
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
+    delete localInputs.user_prompt;
     delete localInputs.is_enterprise_account;
     // 顶层的 vertex_key_type 不应发送给后端
     delete localInputs.vertex_key_type;
