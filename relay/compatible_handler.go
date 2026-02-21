@@ -174,11 +174,24 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 				}
 				openaiReq.Messages = append(openaiReq.Messages[:insertIdx], append([]dto.Message{userMessage}, openaiReq.Messages[insertIdx:]...)...)
 			} else if claudeReq, ok := convertedRequest.(*dto.ClaudeRequest); ok {
-				userMessage := dto.ClaudeMessage{
-					Role:    "user",
-					Content: info.ChannelSetting.UserPrompt,
+				if len(claudeReq.Messages) > 0 && claudeReq.Messages[0].Role == "user" {
+					// 合并到第一条 user 消息，避免连续 user 角色导致 API 错误
+					if claudeReq.Messages[0].IsStringContent() {
+						claudeReq.Messages[0].SetStringContent(info.ChannelSetting.UserPrompt + "\n" + claudeReq.Messages[0].GetStringContent())
+					} else {
+						contents, _ := claudeReq.Messages[0].ParseContent()
+						newContent := dto.ClaudeMediaMessage{Type: dto.ContentTypeText}
+						newContent.SetText(info.ChannelSetting.UserPrompt)
+						contents = append([]dto.ClaudeMediaMessage{newContent}, contents...)
+						claudeReq.Messages[0].SetContent(contents)
+					}
+				} else {
+					userMessage := dto.ClaudeMessage{
+						Role:    "user",
+						Content: info.ChannelSetting.UserPrompt,
+					}
+					claudeReq.Messages = append([]dto.ClaudeMessage{userMessage}, claudeReq.Messages...)
 				}
-				claudeReq.Messages = append([]dto.ClaudeMessage{userMessage}, claudeReq.Messages...)
 			}
 		}
 
