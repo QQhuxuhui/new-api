@@ -27,9 +27,7 @@ import {
   Timeline,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
-import { API, showError, getRelativeTime } from '../../helpers';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { API, showError, getRelativeTime, renderMarkdown } from '../../helpers';
 import '../common/markdown/markdown.css';
 import {
   IllustrationNoContent,
@@ -56,20 +54,7 @@ const NoticeModal = ({
 
   const unreadSet = useMemo(() => new Set(unreadKeys), [unreadKeys]);
 
-  // 统一的 Markdown/HTML 处理：支持换行并进行安全清洗，避免渲染失败或 XSS 风险
-  const parseContent = (raw) => {
-    if (!raw) return '';
-    try {
-      const html = marked.parse(raw, { breaks: true, gfm: true });
-      return DOMPurify.sanitize(html, {
-        ADD_TAGS: ['iframe'],
-        ADD_ATTR: ['target', 'rel', 'style'],
-      });
-    } catch (err) {
-      console.error('公告内容解析失败:', err);
-      return DOMPurify.sanitize(raw);
-    }
-  };
+  const parseContent = renderMarkdown;
 
   const getKeyForItem = (item) =>
     `${item?.publishDate || ''}-${(item?.content || '').slice(0, 30)}`;
