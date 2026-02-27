@@ -1309,9 +1309,10 @@ func CopyChannel(c *gin.Context) {
 		return
 	}
 
-	// clone channel
-	clone := *origin // shallow copy is sufficient as we will overwrite primitives
-	clone.Id = 0     // let DB auto-generate
+	// clone channel – deep-copy maps inside ChannelInfo so the new channel
+	// does not share mutable state with the original.
+	clone := *origin
+	clone.Id = 0 // let DB auto-generate
 	clone.CreatedTime = common.GetTimestamp()
 	clone.Name = origin.Name + suffix
 	clone.TestTime = 0
@@ -1321,14 +1322,40 @@ func CopyChannel(c *gin.Context) {
 		clone.UsedQuota = 0
 	}
 
+	// Deep-copy ChannelInfo maps to avoid shared references between channels
+	if origin.ChannelInfo.MultiKeyStatusList != nil {
+		m := make(map[int]int, len(origin.ChannelInfo.MultiKeyStatusList))
+		for k, v := range origin.ChannelInfo.MultiKeyStatusList {
+			m[k] = v
+		}
+		clone.ChannelInfo.MultiKeyStatusList = m
+	}
+	if origin.ChannelInfo.MultiKeyDisabledReason != nil {
+		m := make(map[int]string, len(origin.ChannelInfo.MultiKeyDisabledReason))
+		for k, v := range origin.ChannelInfo.MultiKeyDisabledReason {
+			m[k] = v
+		}
+		clone.ChannelInfo.MultiKeyDisabledReason = m
+	}
+	if origin.ChannelInfo.MultiKeyDisabledTime != nil {
+		m := make(map[int]int64, len(origin.ChannelInfo.MultiKeyDisabledTime))
+		for k, v := range origin.ChannelInfo.MultiKeyDisabledTime {
+			m[k] = v
+		}
+		clone.ChannelInfo.MultiKeyDisabledTime = m
+	}
+	// Reset polling index for the new channel
+	clone.ChannelInfo.MultiKeyPollingIndex = 0
+
 	// insert
-	if err := model.BatchInsertChannels([]model.Channel{clone}); err != nil {
+	channels := []model.Channel{clone}
+	if err := model.BatchInsertChannels(channels); err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 		return
 	}
 	model.InitChannelCache()
 	// success
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": clone.Id}})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": channels[0].Id}})
 }
 
 // MultiKeyManageRequest represents the request for multi-key management operations
