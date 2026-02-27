@@ -206,13 +206,22 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 			}
 			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
-		// Check if error should trigger channel failover
-		if ShouldTriggerChannelFailover(resp.StatusCode, string(responseBody)) {
-			newApiErr = types.NewError(newApiErr.Err, types.ErrorCodeChannelUpstreamError)
-			newApiErr.StatusCode = resp.StatusCode
+			// Check if error should trigger channel failover.
+			//
+			// Important: when upstream response is not in our GeneralErrorResponse format,
+			// users may configure rules that match the generic error string (e.g.
+			// "bad response status code 400") rather than the raw body. Include both
+			// in the match input to keep rule behavior consistent across providers.
+			matchMsg := newApiErr.Error()
+			if len(responseBody) > 0 {
+				matchMsg += "\n" + string(responseBody)
+			}
+			if ShouldTriggerChannelFailover(resp.StatusCode, matchMsg) {
+				newApiErr = types.NewError(newApiErr.Err, types.ErrorCodeChannelUpstreamError)
+				newApiErr.StatusCode = resp.StatusCode
+			}
+			return
 		}
-		return
-	}
 	if errResponse.Error.Message != "" {
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		newApiErr = types.WithOpenAIError(errResponse.Error, resp.StatusCode)
