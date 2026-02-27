@@ -213,115 +213,134 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}()
 
-	// 获取中间件选择渠道时的优先级索引，重试时从下一个优先级继续
+	// 获取中间件选择渠道时的优先级索引，重试从该优先级开始并逐级降级
 	basePriorityIndex := common.GetContextKeyInt(c, constant.ContextKeyChannelPriorityIndex)
 
 	// 解耦优先级遍历与重试预算：
-	// - priorityIndex 只负责“往后扫描不同优先级”
+	// - priorityIndex 负责扫描优先级层级
+	// - 同一优先级会尝试所有未调用过的渠道后，再进入下一个优先级
 	// - attempts 仅用于计数和日志，不再限制优先级遍历
 	const maxPriorityLevels = 1000
 	attempts := 0
+retryLoop:
 	for priorityIndex := basePriorityIndex; priorityIndex < basePriorityIndex+maxPriorityLevels; priorityIndex++ {
-		// 客户端已断开，不再重试，避免无意义的上游请求和错误的渠道健康记录
-		if c.Request.Context().Err() != nil {
-			logger.LogWarn(c, "client disconnected, stopping retry loop")
-			// Ensure pre-consumed quota is returned via defer.
-			newAPIError = types.NewError(
-				fmt.Errorf("client disconnected: %w", c.Request.Context().Err()),
-				types.ErrorCodeContextCanceled,
-				types.ErrOptionWithSkipRetry(),
-				types.ErrOptionWithNoRecordErrorLog(),
-				types.ErrOptionWithHideErrMsg("client disconnected"),
-			)
-			break
-		}
-		channel, err := getChannel(c, group, originalModel, attempts, priorityIndex)
-		if err != nil {
-			logger.LogError(c, err.Error())
-			newAPIError = err
-			// 优先级已耗尽：退出优先级循环，进入跨计划/钱包降级
-			if errors.Is(err.Err, model.ErrPriorityExhausted) {
+		for {
+			// 客户端已断开，不再重试，避免无意义的上游请求和错误的渠道健康记录
+			if c.Request.Context().Err() != nil {
+				logger.LogWarn(c, "client disconnected, stopping retry loop")
+				// Ensure pre-consumed quota is returned via defer.
+				newAPIError = types.NewError(
+					fmt.Errorf("client disconnected: %w", c.Request.Context().Err()),
+					types.ErrorCodeContextCanceled,
+					types.ErrOptionWithSkipRetry(),
+					types.ErrOptionWithNoRecordErrorLog(),
+					types.ErrOptionWithHideErrMsg("client disconnected"),
+				)
+				break retryLoop
+			}
+
+			channel, err := getChannel(c, group, originalModel, attempts, priorityIndex)
+			if err != nil {
+				logger.LogError(c, err.Error())
+				newAPIError = err
+				// 优先级已耗尽：退出优先级循环，进入跨计划/钱包降级
+				if errors.Is(err.Err, model.ErrPriorityExhausted) {
+					break retryLoop
+				}
+				// Check if this is a SkipRetry error (real failure)
+				// or a retriable error (no healthy channel at this priority)
+				if types.IsSkipRetryError(err) {
+					break retryLoop
+				}
+				// 渠道级错误（例如 SetupContext 阶段失败）继续在当前优先级尝试其他未使用渠道
+				if types.IsChannelError(err) {
+					remainingRetries := maxPriorityLevels - attempts
+					if !shouldRetry(c, newAPIError, remainingRetries) {
+						break retryLoop
+					}
+					continue
+				}
+				// Continue to next priority if available
 				break
 			}
-			// Check if this is a SkipRetry error (real failure)
-			// or a retriable error (no healthy channel at this priority)
-			if types.IsSkipRetryError(err) {
+			if channel == nil {
+				// 当前优先级无更多可用渠道，尝试下一优先级
 				break
 			}
-			// Continue to next priority if available
-			continue
-		}
-		if channel == nil {
-			// 没有可用渠道但也没有错误，继续尝试下一优先级
-			continue
-		}
 
-		addUsedChannel(c, channel.Id)
+			addUsedChannel(c, channel.Id)
 
-		// 调试日志：记录重试时的渠道和令牌信息
-		contextKey := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
-		maskedKey := maskApiKeyForDebug(contextKey)
-		if attempts > 0 {
-			logger.LogInfo(c, fmt.Sprintf("[TokenDebug] 重试 %d: 切换到渠道 #%d (%s), Context令牌: %s",
-				attempts, channel.Id, channel.Name, maskedKey))
-		} else {
-			logger.LogInfo(c, fmt.Sprintf("[TokenDebug] 首次请求: 渠道 #%d (%s), Context令牌: %s",
-				channel.Id, channel.Name, maskedKey))
-		}
-
-		requestBody, _ := common.GetRequestBody(c)
-		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
-
-		// 实际发起一次上游调用，消耗一次尝试额度
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
-		}
-		attempts++
-
-		// Record channel health based on result
-		if newAPIError == nil {
-			// Success - record to health tracker
-			service.RecordChannelSuccess(channel.Id)
-			return
-		}
-
-		// 客户端断开导致的 context 取消不归咎于渠道：
-		// 跳过健康记录（避免污染渠道健康数据）和错误处理（避免误导性日志和虚假 MySQL 错误记录）
-		if newAPIError.GetErrorCode() != types.ErrorCodeContextCanceled {
-			// Record timeout errors (504/524) to health tracker for statistical analysis
-			// Timeouts won't trigger immediate retry but will accumulate in health stats
-			// If timeouts occur frequently (>30% failure rate), the channel will be suspended
-			if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) ||
-				newAPIError.StatusCode == 504 || newAPIError.StatusCode == 524 {
-				service.RecordChannelFailure(channel.Id, newAPIError.StatusCode, newAPIError.Error())
+			// 调试日志：记录重试时的渠道和令牌信息
+			contextKey := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
+			maskedKey := maskApiKeyForDebug(contextKey)
+			if attempts > 0 {
+				logger.LogInfo(c, fmt.Sprintf("[TokenDebug] 重试 %d: 切换到渠道 #%d (%s), Context令牌: %s",
+					attempts, channel.Id, channel.Name, maskedKey))
+			} else {
+				logger.LogInfo(c, fmt.Sprintf("[TokenDebug] 首次请求: 渠道 #%d (%s), Context令牌: %s",
+					channel.Id, channel.Name, maskedKey))
 			}
 
-			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
-		}
+			requestBody, _ := common.GetRequestBody(c)
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 
-		// remainingRetries 用于 shouldRetry 的“次数”判定，这里用一个足够大的剩余额度，避免受 RetryTimes 限制
-		remainingRetries := maxPriorityLevels - attempts
-		if !shouldRetry(c, newAPIError, remainingRetries) {
-			break
-		}
+			// 实际发起一次上游调用，消耗一次尝试额度
+			switch relayFormat {
+			case types.RelayFormatOpenAIRealtime:
+				newAPIError = relay.WssHelper(c, relayInfo)
+			case types.RelayFormatClaude:
+				newAPIError = relay.ClaudeHelper(c, relayInfo)
+			case types.RelayFormatGemini:
+				newAPIError = geminiRelayHandler(c, relayInfo)
+			default:
+				newAPIError = relayHandler(c, relayInfo)
+			}
+			attempts++
 
-		// 如果还可以重试，继续尝试下一层优先级
+			// Record channel health based on result
+			if newAPIError == nil {
+				// Success - record to health tracker
+				service.RecordChannelSuccess(channel.Id)
+				return
+			}
+
+			// 客户端断开导致的 context 取消不归咎于渠道：
+			// 跳过健康记录（避免污染渠道健康数据）和错误处理（避免误导性日志和虚假 MySQL 错误记录）
+			if newAPIError.GetErrorCode() != types.ErrorCodeContextCanceled {
+				// Record timeout errors (504/524) to health tracker for statistical analysis
+				// Timeouts won't trigger immediate retry but will accumulate in health stats
+				// If timeouts occur frequently (>30% failure rate), the channel will be suspended
+				if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) ||
+					newAPIError.StatusCode == 504 || newAPIError.StatusCode == 524 {
+					service.RecordChannelFailure(channel.Id, newAPIError.StatusCode, newAPIError.Error())
+				}
+
+				processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+			}
+
+			// remainingRetries 用于 shouldRetry 的“次数”判定，这里用一个足够大的剩余额度，避免受 RetryTimes 限制
+			remainingRetries := maxPriorityLevels - attempts
+			if !shouldRetry(c, newAPIError, remainingRetries) {
+				break retryLoop
+			}
+
+			// 允许重试：继续在当前优先级尝试未使用渠道；若耗尽会走 channel==nil 分支进入下一优先级
+		}
 	}
+
+	// 仅对“可重试/可切换”的错误进行后续降级尝试（跨计划/钱包）。
+	// 例如：指定渠道诊断请求、skip-retry 错误、典型客户端参数错误都不应触发降级。
+	shouldAttemptPostRetryFailover := newAPIError != nil &&
+		c.Request.Context().Err() == nil &&
+		shouldRetry(c, newAPIError, 1)
 
 	// After all retries within current plan failed, attempt cross-plan failover
 	// This is triggered when:
-	// 1. There's still an error (newAPIError != nil)
+	// 1. There's still an error and it is retryable/failover-eligible
 	// 2. Plan system is enabled
 	// 3. User has AutoSwitch enabled on their current plan
 	// 4. There are alternative plans with available channels
-	if newAPIError != nil && c.Request.Context().Err() == nil {
+	if shouldAttemptPostRetryFailover {
 		failoverChannel, failoverPlan, failoverGroup, success := service.AttemptCrossplanFailoverAfterRetry(c, originalModel)
 		if success && failoverChannel != nil {
 			// Setup context for the failover channel
@@ -408,7 +427,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	// Wallet fallback: if plan failover failed and用户仍有钱包余额/授权，尝试钱包计费的子分组
-	if newAPIError != nil && c.Request.Context().Err() == nil && (common.GetContextKeyInt(c, constant.ContextKeyUserQuota) > 0) {
+	if shouldAttemptPostRetryFailover && (common.GetContextKeyInt(c, constant.ContextKeyUserQuota) > 0) {
 		walletChannel, walletGroup, walletErr := service.AttemptWalletFallbackAfterRetry(c, originalModel)
 		if walletErr != nil {
 			logger.LogWarn(c, fmt.Sprintf("[WalletFallback] failed: %v", walletErr))
@@ -592,14 +611,15 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return false
 	}
 
-	// Priority 2: Channel errors (bypass RetryTimes)
-	if types.IsChannelError(openaiErr) {
-		return true
-	}
-
-	// Priority 3: Specific channel selection (no retry)
+	// Priority 2: Specific channel selection (no retry)
+	// Admin diagnostic requests must stay on the specified channel.
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
+	}
+
+	// Priority 3: Channel errors (bypass RetryTimes)
+	if types.IsChannelError(openaiErr) {
+		return true
 	}
 
 	// Priority 4: Status code checks (before RetryTimes check)

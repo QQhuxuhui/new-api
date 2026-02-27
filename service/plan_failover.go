@@ -13,11 +13,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetFailoverCandidates returns all valid user plans excluding the current plan
-// Plans are sorted by priority (descending) for failover attempts
-// Note: Checks both total quota (HasQuota) and daily quota limits
-// excludePlanId: can be either user_plan.id or plan_id depending on caller context
-func GetFailoverCandidates(userId, excludePlanId int) ([]*model.UserPlan, error) {
+// GetFailoverCandidates returns all valid user plans excluding the current user plan.
+// Plans are sorted by priority (descending) for failover attempts.
+// Note: Checks both total quota (HasQuota) and daily quota limits.
+func GetFailoverCandidates(userId, excludeUserPlanId int) ([]*model.UserPlan, error) {
 	// Get user's valid plans (active, not expired, not locked)
 	validPlans, err := model.CachedGetUserValidPlans(userId)
 	if err != nil {
@@ -27,10 +26,9 @@ func GetFailoverCandidates(userId, excludePlanId int) ([]*model.UserPlan, error)
 	// Filter out the current plan, locked plans, and plans without available quota
 	var candidates []*model.UserPlan
 	for _, plan := range validPlans {
-		// Skip if this is the current plan (check both user_plan.id and plan_id for compatibility)
-		isCurrentPlan := plan.Id == excludePlanId ||
-			(plan.PlanId != nil && *plan.PlanId == excludePlanId)
-		if isCurrentPlan || plan.IsLocked() {
+		// Exclude current user plan by user_plan.id only.
+		// Using plan_id here can cause false exclusion when numeric IDs collide.
+		if plan.Id == excludeUserPlanId || plan.IsLocked() {
 			continue
 		}
 
@@ -179,14 +177,14 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 				// If we got ErrPriorityExhausted, all priorities tried - try next group
 				if channelErr != nil && errors.Is(channelErr, model.ErrPriorityExhausted) {
 					logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) group=%s all_priorities_exhausted",
-						userId, planName, candidate.PlanId, group))
+						userId, planName, candidate.Id, group))
 					break
 				}
 
 				// System error (DB/config error) - log and try next group
 				if channelErr != nil {
 					logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) group=%s retry=%d error=%v",
-						userId, planName, candidate.PlanId, group, retry, channelErr))
+						userId, planName, candidate.Id, group, retry, channelErr))
 					break
 				}
 
@@ -197,7 +195,7 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 						actualGroup = group
 					}
 					logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan=%s(id=%d) group=%s retry=%d channel_found=%d",
-						userId, planName, candidate.PlanId, actualGroup, retry, channel.Id))
+						userId, planName, candidate.Id, actualGroup, retry, channel.Id))
 					return channel, candidate, actualGroup, nil
 				}
 
@@ -229,14 +227,12 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 		c.Set("using_group", originalUsingGroup)
 	}
 
-	triedPlanIds := make([]int, len(candidates))
-	for i, c := range candidates {
-		if c.PlanId != nil {
-			triedPlanIds[i] = *c.PlanId
-		}
+	triedUserPlanIds := make([]int, 0, len(candidates))
+	for _, candidate := range candidates {
+		triedUserPlanIds = append(triedUserPlanIds, candidate.Id)
 	}
-	logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d all_failover_attempts_failed tried_plans=%v",
-		userId, triedPlanIds))
+	logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d all_failover_attempts_failed tried_user_plans=%v",
+		userId, triedUserPlanIds))
 
 	return nil, nil, "", nil
 }
@@ -312,7 +308,7 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 	logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d current_user_plan=%d initiating cross-plan failover after retry exhaustion", userId, currentUserPlanId))
 
 	// Attempt to find alternative plan with available channels
-	// Pass user_plan.id as excludePlanId - GetFailoverCandidates already handles both user_plan.id and plan_id
+	// Pass user_plan.id as exclusion key.
 	failoverChannel, failoverPlan, failoverGroup, failoverErr := AttemptPlanFailover(c, userId, currentUserPlanId, modelName)
 
 	if failoverErr != nil {
