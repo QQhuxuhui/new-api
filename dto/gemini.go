@@ -11,6 +11,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func mimeTypeHasPrefixCaseInsensitive(mimeType string, prefix string) bool {
+	mimeType = strings.TrimSpace(strings.ToLower(mimeType))
+	prefix = strings.TrimSpace(strings.ToLower(prefix))
+	return strings.HasPrefix(mimeType, prefix)
+}
+
 type GeminiChatRequest struct {
 	Requests           []GeminiChatRequest        `json:"requests,omitempty"` // For batch requests
 	Contents           []GeminiChatContent        `json:"contents"`
@@ -59,17 +65,17 @@ func (r *GeminiChatRequest) GetTokenCountMeta() *types.TokenCountMeta {
 				inputTexts = append(inputTexts, part.Text)
 			}
 			if part.InlineData != nil && part.InlineData.Data != "" {
-				if strings.HasPrefix(part.InlineData.MimeType, "image/") {
+				if mimeTypeHasPrefixCaseInsensitive(part.InlineData.MimeType, "image/") {
 					files = append(files, &types.FileMeta{
 						FileType:   types.FileTypeImage,
 						OriginData: part.InlineData.Data,
 					})
-				} else if strings.HasPrefix(part.InlineData.MimeType, "audio/") {
+				} else if mimeTypeHasPrefixCaseInsensitive(part.InlineData.MimeType, "audio/") {
 					files = append(files, &types.FileMeta{
 						FileType:   types.FileTypeAudio,
 						OriginData: part.InlineData.Data,
 					})
-				} else if strings.HasPrefix(part.InlineData.MimeType, "video/") {
+				} else if mimeTypeHasPrefixCaseInsensitive(part.InlineData.MimeType, "video/") {
 					files = append(files, &types.FileMeta{
 						FileType:   types.FileTypeVideo,
 						OriginData: part.InlineData.Data,

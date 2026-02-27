@@ -121,6 +121,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			// Client disconnect / context canceled:
+			// - Don't log as relay failure (misleading)
+			// - Don't attempt to write response (connection is likely gone)
+			// Quota refund is handled by the pre-consume defer (keyed off newAPIError != nil).
+			if newAPIError.GetErrorCode() == types.ErrorCodeContextCanceled {
+				return
+			}
 			logger.LogError(c, fmt.Sprintf("relay error: %s", newAPIError.Error()))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			switch relayFormat {
@@ -218,6 +225,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		// 客户端已断开，不再重试，避免无意义的上游请求和错误的渠道健康记录
 		if c.Request.Context().Err() != nil {
 			logger.LogWarn(c, "client disconnected, stopping retry loop")
+			// Ensure pre-consumed quota is returned via defer.
+			newAPIError = types.NewError(
+				fmt.Errorf("client disconnected: %w", c.Request.Context().Err()),
+				types.ErrorCodeContextCanceled,
+				types.ErrOptionWithSkipRetry(),
+				types.ErrOptionWithNoRecordErrorLog(),
+				types.ErrOptionWithHideErrMsg("client disconnected"),
+			)
 			break
 		}
 		channel, err := getChannel(c, group, originalModel, attempts, priorityIndex)
@@ -277,16 +292,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			return
 		}
 
-		// Error occurred - check if it should trigger health tracking
-		// Record timeout errors (504/524) to health tracker for statistical analysis
-		// Timeouts won't trigger immediate retry but will accumulate in health stats
-		// If timeouts occur frequently (>30% failure rate), the channel will be suspended
-		if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) ||
-			newAPIError.StatusCode == 504 || newAPIError.StatusCode == 524 {
-			service.RecordChannelFailure(channel.Id, newAPIError.StatusCode, newAPIError.Error())
-		}
+		// 客户端断开导致的 context 取消不归咎于渠道：
+		// 跳过健康记录（避免污染渠道健康数据）和错误处理（避免误导性日志和虚假 MySQL 错误记录）
+		if newAPIError.GetErrorCode() != types.ErrorCodeContextCanceled {
+			// Record timeout errors (504/524) to health tracker for statistical analysis
+			// Timeouts won't trigger immediate retry but will accumulate in health stats
+			// If timeouts occur frequently (>30% failure rate), the channel will be suspended
+			if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) ||
+				newAPIError.StatusCode == 504 || newAPIError.StatusCode == 524 {
+				service.RecordChannelFailure(channel.Id, newAPIError.StatusCode, newAPIError.Error())
+			}
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		}
 
 		// remainingRetries 用于 shouldRetry 的“次数”判定，这里用一个足够大的剩余额度，避免受 RetryTimes 限制
 		remainingRetries := maxPriorityLevels - attempts

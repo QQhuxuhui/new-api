@@ -135,6 +135,21 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 	}
 
+	// 注入渠道自定义用户提示词
+	if info.ChannelSetting.UserPrompt != "" {
+		if len(request.Contents) > 0 && request.Contents[0].Role == "user" {
+			// 合并到第一条 user 内容，避免连续 user 角色导致 API 错误
+			newPart := dto.GeminiPart{Text: info.ChannelSetting.UserPrompt}
+			request.Contents[0].Parts = append([]dto.GeminiPart{newPart}, request.Contents[0].Parts...)
+		} else {
+			userMessage := dto.GeminiChatContent{
+				Role:  "user",
+				Parts: []dto.GeminiPart{{Text: info.ChannelSetting.UserPrompt}},
+			}
+			request.Contents = append([]dto.GeminiChatContent{userMessage}, request.Contents...)
+		}
+	}
+
 	var requestBody io.Reader
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		body, err := common.GetRequestBody(c)

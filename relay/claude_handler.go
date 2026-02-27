@@ -107,6 +107,28 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 	}
 
+	// 注入渠道自定义用户提示词
+	if info.ChannelSetting.UserPrompt != "" {
+		if len(request.Messages) > 0 && request.Messages[0].Role == "user" {
+			// 合并到第一条 user 消息，避免连续 user 角色导致 API 错误
+			if request.Messages[0].IsStringContent() {
+				request.Messages[0].SetStringContent(info.ChannelSetting.UserPrompt + "\n" + request.Messages[0].GetStringContent())
+			} else {
+				contents, _ := request.Messages[0].ParseContent()
+				newContent := dto.ClaudeMediaMessage{Type: dto.ContentTypeText}
+				newContent.SetText(info.ChannelSetting.UserPrompt)
+				contents = append([]dto.ClaudeMediaMessage{newContent}, contents...)
+				request.Messages[0].SetContent(contents)
+			}
+		} else {
+			userMessage := dto.ClaudeMessage{
+				Role:    "user",
+				Content: info.ChannelSetting.UserPrompt,
+			}
+			request.Messages = append([]dto.ClaudeMessage{userMessage}, request.Messages...)
+		}
+	}
+
 	var requestBody io.Reader
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		body, err := common.GetRequestBody(c)

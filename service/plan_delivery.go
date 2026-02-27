@@ -104,7 +104,8 @@ func DeliverPlan(orderId int, tx *gorm.DB) error {
 		// GetNextQueuePosition already returns (max(queue_position)+1).
 		queuePosition = nextPos
 		startedAt = 0 // Will be set when activated
-		expiresAt = 0 // Will be set when activated
+		// Precompute expires_at for display (will be recalculated on activation)
+		expiresAt = model.PrecomputeQueueExpiresAt(order.UserId, plan.ValidityDays)
 		originalExpiresAt = 0
 	}
 

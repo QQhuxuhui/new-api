@@ -818,6 +818,14 @@ html.dark .with-pastel-balls::before {
   padding: 10px !important;
 }
 
+/* 仪表盘卡片恢复默认 padding，避免全局 10px 压缩内容 */
+.dashboard-container .semi-card-header {
+  padding: 16px 20px 12px !important;
+}
+.dashboard-container .semi-card-body {
+  padding: 12px 20px 16px !important;
+}
+
 /* ==================== 自定义圆角样式 ==================== */
 .semi-radio,
 .semi-tagInput,

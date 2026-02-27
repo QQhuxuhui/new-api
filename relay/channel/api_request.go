@@ -486,6 +486,17 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 
 	resp, err := client.Do(req)
 	if err != nil {
+		// 区分"客户端断开导致 context 取消"和"上游真正故障"：
+		// 如果下游 context 已取消，说明是客户端断开（超时/主动取消），
+		// 不应归咎于渠道，也不应记录为渠道失败。
+		if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+			return nil, types.NewError(
+				fmt.Errorf("request canceled due to client disconnect: %w", err),
+				types.ErrorCodeContextCanceled,
+				types.ErrOptionWithSkipRetry(),
+				types.ErrOptionWithHideErrMsg("client disconnected"),
+			)
+		}
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}

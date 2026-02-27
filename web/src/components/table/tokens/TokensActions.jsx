@@ -25,6 +25,7 @@ import DeleteTokensModal from './modals/DeleteTokensModal';
 import TokenCreateModeSelector from './modals/TokenCreateModeSelector';
 import QuickCreateTokenModal from './modals/QuickCreateTokenModal';
 import TokenCreatedSuccess from './modals/TokenCreatedSuccess';
+import TokenAnalyticsModal from './modals/TokenAnalyticsModal';
 
 const TokensActions = ({
   selectedKeys,
@@ -43,6 +44,7 @@ const TokensActions = ({
   const [showQuickCreate, setShowQuickCreate] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [createdTokenData, setCreatedTokenData] = useState(null);
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   // Handle copy selected tokens with options
   const handleCopySelectedTokens = () => {
@@ -120,6 +122,15 @@ const TokensActions = ({
         </Button>
 
         <Button
+          type='secondary'
+          className='flex-1 md:flex-initial'
+          onClick={() => setShowAnalytics(true)}
+          size='small'
+        >
+          {t('用量统计')}
+        </Button>
+
+        <Button
           type='tertiary'
           className='flex-1 md:flex-initial'
           onClick={handleCopySelectedTokens}
@@ -173,6 +184,12 @@ const TokensActions = ({
         visible={showSuccessModal}
         tokenData={createdTokenData}
         onClose={handleSuccessClose}
+        t={t}
+      />
+
+      <TokenAnalyticsModal
+        visible={showAnalytics}
+        onClose={() => setShowAnalytics(false)}
         t={t}
       />
     </>

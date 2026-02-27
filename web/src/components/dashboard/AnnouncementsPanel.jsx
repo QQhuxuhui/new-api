@@ -20,8 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Card, Tag, Timeline, Empty } from '@douyinfe/semi-ui';
 import { Bell } from 'lucide-react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { renderMarkdown } from '../../helpers';
 import '../common/markdown/markdown.css';
 import {
   IllustrationConstruction,
@@ -29,19 +28,7 @@ import {
 } from '@douyinfe/semi-illustrations';
 import ScrollableContainer from '../common/ui/ScrollableContainer';
 
-const parseContent = (raw) => {
-  if (!raw) return '';
-  try {
-    const html = marked.parse(raw, { breaks: true, gfm: true });
-    return DOMPurify.sanitize(html, {
-      ADD_TAGS: ['iframe'],
-      ADD_ATTR: ['target', 'rel', 'style'],
-    });
-  } catch (err) {
-    console.error('公告内容解析失败:', err);
-    return DOMPurify.sanitize(raw);
-  }
-};
+const parseContent = renderMarkdown;
 
 const AnnouncementsPanel = ({
   announcementData,

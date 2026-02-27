@@ -19,12 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useContext, useEffect, useState, useRef } from 'react';
 import { Button } from '@douyinfe/semi-ui';
-import { API, showError } from '../../helpers';
+import { API, showError, renderMarkdown } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
 import { useTranslation } from 'react-i18next';
 import '../../components/common/markdown/markdown.css';
 import { IconPlay, IconFile, IconGithubLogo } from '@douyinfe/semi-icons';
@@ -54,14 +52,17 @@ const Home = () => {
   const isLoggedIn = !!localStorage.getItem('user');
 
   const displayHomePageContent = async () => {
-    setHomePageContent(localStorage.getItem('home_page_content') || '');
+    const cached = localStorage.getItem('home_page_content') || '';
+    setHomePageContent(
+      cached.startsWith('https://') ? cached : renderMarkdown(cached),
+    );
     try {
       const res = await API.get('/api/home_page_content');
       const { success, message, data } = res.data;
       if (success) {
         let content = data;
         if (!data.startsWith('https://')) {
-          content = marked.parse(data);
+          content = renderMarkdown(data);
         }
         setHomePageContent(content);
         localStorage.setItem('home_page_content', content);
@@ -160,10 +161,7 @@ const Home = () => {
             <div
               className='markdown-body mt-[60px]'
               dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(homePageContent, {
-                  ADD_TAGS: ['iframe'],
-                  ADD_ATTR: ['target', 'rel', 'style'],
-                }),
+                __html: homePageContent,
               }}
             />
           )}

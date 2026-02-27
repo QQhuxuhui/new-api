@@ -180,7 +180,7 @@ const Dashboard = () => {
   ]);
 
   return (
-    <div className='h-full'>
+    <div className='h-full dashboard-container'>
       <StatsCards
         groupedStatsData={groupedStatsData}
         loading={dashboardData.loading}

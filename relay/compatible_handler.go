@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/shopspring/decimal"
@@ -93,11 +94,10 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 		if info.ChannelSetting.SystemPrompt != "" {
 			// 如果有系统提示，则将其添加到请求中
-			request, ok := convertedRequest.(*dto.GeneralOpenAIRequest)
-			if ok {
+			if openaiReq, ok := convertedRequest.(*dto.GeneralOpenAIRequest); ok {
 				containSystemPrompt := false
-				for _, message := range request.Messages {
-					if message.Role == request.GetSystemRoleName() {
+				for _, message := range openaiReq.Messages {
+					if message.Role == openaiReq.GetSystemRoleName() {
 						containSystemPrompt = true
 						break
 					}
@@ -105,17 +105,17 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 				if !containSystemPrompt {
 					// 如果没有系统提示，则添加系统提示
 					systemMessage := dto.Message{
-						Role:    request.GetSystemRoleName(),
+						Role:    openaiReq.GetSystemRoleName(),
 						Content: info.ChannelSetting.SystemPrompt,
 					}
-					request.Messages = append([]dto.Message{systemMessage}, request.Messages...)
+					openaiReq.Messages = append([]dto.Message{systemMessage}, openaiReq.Messages...)
 				} else if info.ChannelSetting.SystemPromptOverride {
 					common.SetContextKey(c, constant.ContextKeySystemPromptOverride, true)
 					// 如果有系统提示，且允许覆盖，则拼接到前面
-					for i, message := range request.Messages {
-						if message.Role == request.GetSystemRoleName() {
+					for i, message := range openaiReq.Messages {
+						if message.Role == openaiReq.GetSystemRoleName() {
 							if message.IsStringContent() {
-								request.Messages[i].SetStringContent(info.ChannelSetting.SystemPrompt + "\n" + message.StringContent())
+								openaiReq.Messages[i].SetStringContent(info.ChannelSetting.SystemPrompt + "\n" + message.StringContent())
 							} else {
 								contents := message.ParseContent()
 								contents = append([]dto.MediaContent{
@@ -124,11 +124,74 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 										Text: info.ChannelSetting.SystemPrompt,
 									},
 								}, contents...)
-								request.Messages[i].Content = contents
+								openaiReq.Messages[i].Content = contents
 							}
 							break
 						}
 					}
+				}
+			} else if claudeReq, ok := convertedRequest.(*dto.ClaudeRequest); ok {
+				// Anthropic 渠道：ConvertOpenAIRequest 返回 *dto.ClaudeRequest
+				if claudeReq.System == nil {
+					claudeReq.SetStringSystem(info.ChannelSetting.SystemPrompt)
+				} else if info.ChannelSetting.SystemPromptOverride {
+					common.SetContextKey(c, constant.ContextKeySystemPromptOverride, true)
+					if claudeReq.IsStringSystem() {
+						existing := strings.TrimSpace(claudeReq.GetStringSystem())
+						if existing == "" {
+							claudeReq.SetStringSystem(info.ChannelSetting.SystemPrompt)
+						} else {
+							claudeReq.SetStringSystem(info.ChannelSetting.SystemPrompt + "\n" + existing)
+						}
+					} else {
+						systemContents := claudeReq.ParseSystem()
+						newSystem := dto.ClaudeMediaMessage{Type: dto.ContentTypeText}
+						newSystem.SetText(info.ChannelSetting.SystemPrompt)
+						if len(systemContents) == 0 {
+							claudeReq.System = []dto.ClaudeMediaMessage{newSystem}
+						} else {
+							claudeReq.System = append([]dto.ClaudeMediaMessage{newSystem}, systemContents...)
+						}
+					}
+				}
+			}
+		}
+
+		// 注入渠道自定义用户提示词
+		if info.ChannelSetting.UserPrompt != "" {
+			if openaiReq, ok := convertedRequest.(*dto.GeneralOpenAIRequest); ok {
+				userMessage := dto.Message{
+					Role:    "user",
+					Content: info.ChannelSetting.UserPrompt,
+				}
+				// 插入到所有 system 消息之后、其他消息之前
+				insertIdx := 0
+				for i, msg := range openaiReq.Messages {
+					if msg.Role == openaiReq.GetSystemRoleName() {
+						insertIdx = i + 1
+					} else if insertIdx > 0 {
+						break
+					}
+				}
+				openaiReq.Messages = append(openaiReq.Messages[:insertIdx], append([]dto.Message{userMessage}, openaiReq.Messages[insertIdx:]...)...)
+			} else if claudeReq, ok := convertedRequest.(*dto.ClaudeRequest); ok {
+				if len(claudeReq.Messages) > 0 && claudeReq.Messages[0].Role == "user" {
+					// 合并到第一条 user 消息，避免连续 user 角色导致 API 错误
+					if claudeReq.Messages[0].IsStringContent() {
+						claudeReq.Messages[0].SetStringContent(info.ChannelSetting.UserPrompt + "\n" + claudeReq.Messages[0].GetStringContent())
+					} else {
+						contents, _ := claudeReq.Messages[0].ParseContent()
+						newContent := dto.ClaudeMediaMessage{Type: dto.ContentTypeText}
+						newContent.SetText(info.ChannelSetting.UserPrompt)
+						contents = append([]dto.ClaudeMediaMessage{newContent}, contents...)
+						claudeReq.Messages[0].SetContent(contents)
+					}
+				} else {
+					userMessage := dto.ClaudeMessage{
+						Role:    "user",
+						Content: info.ChannelSetting.UserPrompt,
+					}
+					claudeReq.Messages = append([]dto.ClaudeMessage{userMessage}, claudeReq.Messages...)
 				}
 			}
 		}
@@ -348,13 +411,26 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	} else {
 		quotaCalculateDecimal = dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio).Mul(dChannelRatio)
 	}
-	// 添加 responses tools call 调用的配额
-	quotaCalculateDecimal = quotaCalculateDecimal.Add(dWebSearchQuota)
-	quotaCalculateDecimal = quotaCalculateDecimal.Add(dFileSearchQuota)
-	// 添加 audio input 独立计费
-	quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
-	// 添加 image generation call 计费
-	quotaCalculateDecimal = quotaCalculateDecimal.Add(dImageGenerationCallQuota)
+	extraQuota := sumExtraQuota(dWebSearchQuota, dClaudeWebSearchQuota, dFileSearchQuota, audioInputQuota, dImageGenerationCallQuota)
+	gemini4kCount := ctx.GetInt("gemini_image_4k_count")
+	quotaCalculateDecimal, modelName, modelPrice, fourKApplied := applyGemini4KPriceOverride(
+		quotaCalculateDecimal,
+		extraQuota,
+		relayInfo.PriceData.UsePrice,
+		gemini4kCount,
+		modelName,
+		modelPrice,
+		dQuotaPerUnit,
+		dGroupRatio,
+		dChannelRatio,
+	)
+	if gemini4kCount > 0 && relayInfo.PriceData.UsePrice {
+		if fourKApplied {
+			extraContent += fmt.Sprintf("检测到 4K 图片，使用模型 %s 价格 %.4f 计费", modelName, modelPrice)
+		} else {
+			logger.LogWarn(ctx, fmt.Sprintf("检测到 4K 图片但未找到模型 %s 的价格配置，使用原模型价格", modelName+"-4k"))
+		}
+	}
 
 	quota := int(quotaCalculateDecimal.Round(0).IntPart())
 	totalTokens := promptTokens + completionTokens
@@ -375,18 +451,15 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		}
 
 		// Check daily quota limit before updating stats (prevents excessive over-quota)
-		// Note: Request has already been served, but we can prevent recording excessive usage
-		// IMPORTANT: Use actualQuota for daily limit check
-		if relayInfo.UserPlanId > 0 {
-			actualQuota := int64(quota + relayInfo.FinalPreConsumedQuota)
-			if actualQuota > 0 {
-				if err := service.CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, actualQuota); err != nil {
-					// Daily quota would be exceeded - skip quota consumption and log error
-					// Request has already succeeded, but we won't charge the user
-					logger.LogError(ctx, fmt.Sprintf("daily quota check failed, skipping quota consumption: %v", err))
-					service.ReturnPreConsumedQuota(ctx, relayInfo)
-					return
-				}
+		// Note: Request has already been served, but we can prevent recording excessive usage.
+		// Only plan-charged portion should be checked against plan daily limit.
+		if planQuotaToCheck := calculatePlanQuotaForDailyCheck(relayInfo, quota); planQuotaToCheck > 0 {
+			if err := service.CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, planQuotaToCheck); err != nil {
+				// Daily quota would be exceeded - skip quota consumption and log error
+				// Request has already succeeded, but we won't charge the user
+				logger.LogError(ctx, fmt.Sprintf("daily quota check failed, skipping quota consumption: %v", err))
+				service.ReturnPreConsumedQuota(ctx, relayInfo)
+				return
 			}
 		}
 
@@ -412,7 +485,15 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		))
 	}
 
-	if quotaDelta != 0 {
+	// Always call PostConsumeQuota when billing source is plan or daily_pool,
+	// even if quotaDelta == 0, because plan/daily_pool quota is only deducted
+	// in PostConsumeQuota (not during pre-consume). This is critical for
+	// fixed-price (per-call) models where quota == FinalPreConsumedQuota => quotaDelta == 0.
+	needsPostConsume := quotaDelta != 0 ||
+		relayInfo.BillingSource == service.BillingSourcePlan ||
+		relayInfo.BillingSource == service.BillingSourceDailyPool ||
+		relayInfo.BillingSource == service.BillingSourcePlanAndUserBalance
+	if needsPostConsume {
 		err := service.PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
 		if err != nil {
 			logger.LogError(ctx, "error consuming token remain quota: "+err.Error())
@@ -474,6 +555,10 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		other["image_generation_call"] = true
 		other["image_generation_call_price"] = imageGenerationCallPrice
 	}
+	if gemini4kCount > 0 {
+		other["gemini_4k"] = true
+		other["gemini_4k_count"] = gemini4kCount
+	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     promptTokens,
@@ -489,6 +574,69 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+}
+
+func applyGemini4KPriceOverride(
+	baseQuota decimal.Decimal,
+	extraQuota decimal.Decimal,
+	usePrice bool,
+	gemini4kCount int,
+	modelName string,
+	modelPrice float64,
+	dQuotaPerUnit decimal.Decimal,
+	dGroupRatio decimal.Decimal,
+	dChannelRatio decimal.Decimal,
+) (decimal.Decimal, string, float64, bool) {
+	if !usePrice || gemini4kCount <= 0 {
+		return baseQuota.Add(extraQuota), modelName, modelPrice, false
+	}
+
+	fourKModelName := modelName + "-4k"
+	fourKPrice, found := ratio_setting.GetModelPrice(fourKModelName, false)
+	if !found || fourKPrice < 0 {
+		return baseQuota.Add(extraQuota), modelName, modelPrice, false
+	}
+
+	fourKBaseQuota := decimal.NewFromFloat(fourKPrice).Mul(dQuotaPerUnit).Mul(dGroupRatio).Mul(dChannelRatio)
+	return fourKBaseQuota.Add(extraQuota), fourKModelName, fourKPrice, true
+}
+
+func sumExtraQuota(
+	dWebSearchQuota decimal.Decimal,
+	dClaudeWebSearchQuota decimal.Decimal,
+	dFileSearchQuota decimal.Decimal,
+	audioInputQuota decimal.Decimal,
+	dImageGenerationCallQuota decimal.Decimal,
+) decimal.Decimal {
+	return dWebSearchQuota.
+		Add(dClaudeWebSearchQuota).
+		Add(dFileSearchQuota).
+		Add(audioInputQuota).
+		Add(dImageGenerationCallQuota)
+}
+
+func calculatePlanQuotaForDailyCheck(relayInfo *relaycommon.RelayInfo, quota int) int64 {
+	if relayInfo.UserPlanId <= 0 {
+		return 0
+	}
+
+	if relayInfo.BillingSource != service.BillingSourcePlan && relayInfo.BillingSource != service.BillingSourcePlanAndUserBalance {
+		return 0
+	}
+
+	planQuotaToCheck := int64(quota)
+	if relayInfo.BillingSource == service.BillingSourcePlanAndUserBalance && relayInfo.PlanPreConsumeQuota > 0 {
+		planPreConsumeQuota := int64(relayInfo.PlanPreConsumeQuota)
+		if planQuotaToCheck > planPreConsumeQuota {
+			planQuotaToCheck = planPreConsumeQuota
+		}
+	}
+
+	if planQuotaToCheck <= 0 {
+		return 0
+	}
+
+	return planQuotaToCheck
 }
 
 // maskApiKey 对 API Key 进行脱敏，显示前4位和后4位
