@@ -198,11 +198,17 @@ func MaskUpstreamSensitiveError(str string) string {
 	if str == "" {
 		return str
 	}
-	lowerStr := strings.ToLower(str)
+	base := str
+	suffix := ""
+	if idx := strings.LastIndex(str, " (request id: "); idx != -1 && strings.HasSuffix(str, ")") {
+		base = strings.TrimSpace(str[:idx])
+		suffix = str[idx:]
+	}
+	lowerStr := strings.ToLower(base)
 
 	for _, pattern := range upstreamSensitivePatterns {
 		if strings.Contains(lowerStr, strings.ToLower(pattern)) {
-			return "模型负载过高，请稍后重试"
+			return "模型负载过高，请稍后重试" + suffix
 		}
 	}
 
