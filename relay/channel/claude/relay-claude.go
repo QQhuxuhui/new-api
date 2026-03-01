@@ -862,7 +862,33 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
 	case types.RelayFormatClaude:
-		responseData = data
+		simulationActive := info.ChannelMeta != nil &&
+			info.ChannelMeta.ChannelSetting.CacheSimulation != nil &&
+			info.ChannelMeta.ChannelSetting.CacheSimulation.Enabled
+		if simulationActive && claudeResponse.Usage != nil &&
+			(claudeInfo.Usage.PromptTokensDetails.CachedTokens > 0 ||
+				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens > 0) {
+			claudeResponse.Usage.CacheReadInputTokens = claudeInfo.Usage.PromptTokensDetails.CachedTokens
+			claudeResponse.Usage.CacheCreationInputTokens = claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens
+			// Preserve unknown upstream fields by merging the updated usage into the raw JSON
+			// rather than re-marshaling the full struct (which would drop unknown fields).
+			merged := false
+			var raw map[string]json.RawMessage
+			if json.Unmarshal(data, &raw) == nil {
+				if usageBytes, merr := json.Marshal(claudeResponse.Usage); merr == nil {
+					raw["usage"] = json.RawMessage(usageBytes)
+					if b, merr := json.Marshal(raw); merr == nil {
+						responseData = b
+						merged = true
+					}
+				}
+			}
+			if !merged {
+				responseData = data
+			}
+		} else {
+			responseData = data
+		}
 	}
 
 	if claudeResponse.Usage != nil && claudeResponse.Usage.ServerToolUse != nil && claudeResponse.Usage.ServerToolUse.WebSearchRequests > 0 {
