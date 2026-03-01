@@ -40,6 +40,10 @@ type ChannelSettings struct {
 	// CacheSimulation: when non-nil and Enabled, simulates cache token data for channels
 	// whose upstream does not return cache statistics (e.g. Kiro).
 	CacheSimulation *CacheSimulationConfig `json:"cache_simulation,omitempty"`
+	// StripPlaceholders: when true, strips zero-width space (\u200B) placeholder characters
+	// from response text deltas. Enable when the upstream (e.g. CLIProxyAPIPlus forwarding
+	// Kiro responses) may not strip Kiro protocol placeholder echoes before returning them.
+	StripPlaceholders bool `json:"strip_placeholders,omitempty"`
 }
 
 type VertexKeyType string

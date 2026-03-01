@@ -709,6 +709,30 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
 	}
+
+	// Strip \u200B placeholder characters from text deltas (opt-in per channel).
+	// Kiro protocol injects \u200B as a placeholder for tool-use-only assistant messages;
+	// unpatched upstream proxies (e.g. CLIProxyAPIPlus) may not strip the model's echo
+	// of this character before forwarding the response.
+	needsReMarshal := false
+	if info.ChannelMeta != nil && info.ChannelMeta.ChannelSetting.StripPlaceholders &&
+		claudeResponse.Type == "content_block_delta" &&
+		claudeResponse.Delta != nil && claudeResponse.Delta.Type == "text_delta" &&
+		claudeResponse.Delta.Text != nil {
+		original := *claudeResponse.Delta.Text
+		cleaned := strings.ReplaceAll(original, "\u200B", "")
+		if cleaned != original {
+			// Placeholder was stripped — residual whitespace is also echo artifact.
+			cleaned = strings.TrimSpace(cleaned)
+			if cleaned == "" {
+				// Entire delta was a placeholder echo — suppress this event entirely.
+				return nil
+			}
+			claudeResponse.Delta.Text = &cleaned
+			needsReMarshal = true
+		}
+	}
+
 	if info.RelayFormat == types.RelayFormatClaude {
 		FormatClaudeResponseInfo(requestMode, &claudeResponse, nil, claudeInfo)
 
@@ -721,7 +745,13 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			} else if claudeResponse.Type == "message_delta" {
 			}
 		}
-		helper.ClaudeChunkData(c, claudeResponse, data)
+		writeData := data
+		if needsReMarshal {
+			if b, merr := common.Marshal(claudeResponse); merr == nil {
+				writeData = string(b)
+			}
+		}
+		helper.ClaudeChunkData(c, claudeResponse, writeData)
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
 		response := StreamResponseClaude2OpenAI(requestMode, &claudeResponse)
 

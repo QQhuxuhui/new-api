@@ -189,6 +189,8 @@ const EditChannelModal = (props) => {
     cache_sim_creation_ratio_min: 0,
     cache_sim_creation_ratio_max: 0,
     cache_sim_min_input_tokens: 0,
+    // 占位符剥离
+    strip_placeholders: false,
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -547,6 +549,8 @@ const EditChannelModal = (props) => {
           data.cache_sim_creation_ratio_min = cs.creation_ratio_min || 0;
           data.cache_sim_creation_ratio_max = cs.creation_ratio_max || 0;
           data.cache_sim_min_input_tokens = cs.min_input_tokens || 0;
+          data.strip_placeholders =
+            parsedSettings.strip_placeholders || false;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -563,6 +567,7 @@ const EditChannelModal = (props) => {
           data.cache_sim_creation_ratio_min = 0;
           data.cache_sim_creation_ratio_max = 0;
           data.cache_sim_min_input_tokens = 0;
+          data.strip_placeholders = false;
         }
       } else {
         data.force_format = false;
@@ -579,6 +584,7 @@ const EditChannelModal = (props) => {
         data.cache_sim_creation_ratio_min = 0;
         data.cache_sim_creation_ratio_max = 0;
         data.cache_sim_min_input_tokens = 0;
+        data.strip_placeholders = false;
       }
 
       if (data.settings) {
@@ -1337,6 +1343,9 @@ const EditChannelModal = (props) => {
       system_prompt_override: localInputs.system_prompt_override || false,
       user_prompt: localInputs.user_prompt || '',
       ...(cacheSimulation ? { cache_simulation: cacheSimulation } : {}),
+      ...(localInputs.strip_placeholders
+        ? { strip_placeholders: true }
+        : {}),
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1406,6 +1415,8 @@ const EditChannelModal = (props) => {
     delete localInputs.cache_sim_creation_ratio_min;
     delete localInputs.cache_sim_creation_ratio_max;
     delete localInputs.cache_sim_min_input_tokens;
+    // 清理占位符剥离的临时字段
+    delete localInputs.strip_placeholders;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -3622,6 +3633,22 @@ const EditChannelModal = (props) => {
                         '开启后当上游不返回缓存统计时，按配置比例模拟缓存 token 数据',
                       )}
                     />
+                    <Form.Switch
+                      field='strip_placeholders'
+                      label={t('占位符剥离')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange(
+                          'strip_placeholders',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '开启后自动剥离上游返回的零宽空格占位符（\\u200B），适用于上游为未修复的 CLIProxyAPIPlus 等 Kiro 代理',
+                      )}
+                    />
+
                     {inputs.cache_simulation_enabled && (
                       <>
                         <Row gutter={12}>
