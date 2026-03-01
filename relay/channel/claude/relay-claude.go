@@ -783,7 +783,7 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		}
 	}
 
-	// Apply cache simulation after usage is finalised (it may be recomputed above).
+	// Cache simulation overwrites any upstream cache statistics when enabled.
 	applyCacheSimulation(info, claudeInfo.Usage)
 
 	if info.RelayFormat == types.RelayFormatClaude {
@@ -850,8 +850,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			claudeInfo.Usage.ClaudeCacheCreation1hTokens = claudeResponse.Usage.GetCacheCreation1hTokens()
 		}
 	}
-	// Apply cache simulation after upstream usage is parsed. For OpenAI format the
-	// simulated values are serialised into the response body below.
+	// Cache simulation overwrites any upstream cache statistics when enabled.
 	applyCacheSimulation(info, claudeInfo.Usage)
 	var responseData []byte
 	switch info.RelayFormat {
@@ -898,8 +897,10 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 	return claudeInfo.Usage, nil
 }
 
-// applyCacheSimulation fills cached token usage when the channel has cache
-// simulation enabled and the upstream provides no cache statistics.
+// applyCacheSimulation fills cached token usage with simulated values when the
+// channel has cache simulation enabled. It unconditionally overwrites any cache
+// statistics already populated from upstream, so simulated values always take
+// effect on channels where simulation is configured.
 // It must be called after all upstream usage events have been processed.
 //
 // The function does NOT modify PromptTokens to avoid unintended billing side effects;
@@ -912,13 +913,6 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 	if cfg == nil || !cfg.Enabled {
 		return
 	}
-	if usage.PromptTokensDetails.CachedTokens > 0 ||
-		usage.PromptTokensDetails.CachedCreationTokens > 0 ||
-		usage.ClaudeCacheCreation5mTokens > 0 ||
-		usage.ClaudeCacheCreation1hTokens > 0 {
-		return
-	}
-
 	minTokens := cfg.MinInputTokens
 	if minTokens <= 0 {
 		minTokens = dto.DefaultCacheSimMinInputTokens
@@ -987,6 +981,10 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 		cachedCreationTokens = remaining
 	}
 
+	// Zero out Claude-specific cache creation sub-fields so they don't contradict
+	// the simulated CachedCreationTokens written below.
+	usage.ClaudeCacheCreation5mTokens = 0
+	usage.ClaudeCacheCreation1hTokens = 0
 	usage.PromptTokensDetails.CachedTokens = cachedTokens
 	usage.PromptTokensDetails.CachedCreationTokens = cachedCreationTokens
 }
