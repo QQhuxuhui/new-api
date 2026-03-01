@@ -268,7 +268,7 @@ func SendEmailVerification(c *gin.Context) {
 	if isInvalidQQEmail(localPart, domainPart) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "QQ 邮箱格式有误，本地部分必须为纯数字 QQ 号（5-12 位）",
+			"message": "邮箱格式不合法",
 		})
 		return
 	}
