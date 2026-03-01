@@ -173,6 +173,16 @@ func Register(c *gin.Context) {
 		})
 		return
 	}
+	if user.Email != "" {
+		parts := strings.Split(user.Email, "@")
+		if len(parts) == 2 && isInvalidQQEmail(parts[0], parts[1]) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "QQ 邮箱格式有误，本地部分必须为纯数字 QQ 号（5-12 位）",
+			})
+			return
+		}
+	}
 	if common.EmailVerificationEnabled {
 		if user.Email == "" || user.VerificationCode == "" {
 			c.JSON(http.StatusOK, gin.H{

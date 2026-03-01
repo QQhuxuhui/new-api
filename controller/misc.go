@@ -207,6 +207,24 @@ func GetHomePageContent(c *gin.Context) {
 	return
 }
 
+// isInvalidQQEmail reports whether an email with domain qq.com has an invalid
+// local part. A valid QQ number consists of 5-12 ASCII digits only.
+// Returns false for any domain other than qq.com (no restriction applied).
+func isInvalidQQEmail(localPart, domainPart string) bool {
+	if domainPart != "qq.com" {
+		return false
+	}
+	if len(localPart) < 5 || len(localPart) > 12 {
+		return true
+	}
+	for _, c := range localPart {
+		if c < '0' || c > '9' {
+			return true
+		}
+	}
+	return false
+}
+
 func SendEmailVerification(c *gin.Context) {
 	email := c.Query("email")
 	captchaToken := c.Query("captcha_token")
@@ -247,6 +265,13 @@ func SendEmailVerification(c *gin.Context) {
 	}
 	localPart := parts[0]
 	domainPart := parts[1]
+	if isInvalidQQEmail(localPart, domainPart) {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "QQ 邮箱格式有误，本地部分必须为纯数字 QQ 号（5-12 位）",
+		})
+		return
+	}
 	if common.EmailDomainRestrictionEnabled {
 		allowed := false
 		for _, domain := range common.EmailDomainWhitelist {
