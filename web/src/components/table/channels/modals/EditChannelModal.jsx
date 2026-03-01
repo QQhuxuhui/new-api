@@ -182,6 +182,13 @@ const EditChannelModal = (props) => {
     allow_safety_identifier: false,
     // Claude 渠道伪装标识
     masquerade_hash: '',
+    // 缓存模拟
+    cache_simulation_enabled: false,
+    cache_sim_read_ratio_min: 0,
+    cache_sim_read_ratio_max: 0,
+    cache_sim_creation_ratio_min: 0,
+    cache_sim_creation_ratio_max: 0,
+    cache_sim_min_input_tokens: 0,
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -533,6 +540,13 @@ const EditChannelModal = (props) => {
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
           data.user_prompt = parsedSettings.user_prompt || '';
+          const cs = parsedSettings.cache_simulation || {};
+          data.cache_simulation_enabled = cs.enabled || false;
+          data.cache_sim_read_ratio_min = cs.read_ratio_min || 0;
+          data.cache_sim_read_ratio_max = cs.read_ratio_max || 0;
+          data.cache_sim_creation_ratio_min = cs.creation_ratio_min || 0;
+          data.cache_sim_creation_ratio_max = cs.creation_ratio_max || 0;
+          data.cache_sim_min_input_tokens = cs.min_input_tokens || 0;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -543,6 +557,12 @@ const EditChannelModal = (props) => {
           data.system_prompt = '';
           data.system_prompt_override = false;
           data.user_prompt = '';
+          data.cache_simulation_enabled = false;
+          data.cache_sim_read_ratio_min = 0;
+          data.cache_sim_read_ratio_max = 0;
+          data.cache_sim_creation_ratio_min = 0;
+          data.cache_sim_creation_ratio_max = 0;
+          data.cache_sim_min_input_tokens = 0;
         }
       } else {
         data.force_format = false;
@@ -553,6 +573,12 @@ const EditChannelModal = (props) => {
         data.system_prompt = '';
         data.system_prompt_override = false;
         data.user_prompt = '';
+        data.cache_simulation_enabled = false;
+        data.cache_sim_read_ratio_min = 0;
+        data.cache_sim_read_ratio_max = 0;
+        data.cache_sim_creation_ratio_min = 0;
+        data.cache_sim_creation_ratio_max = 0;
+        data.cache_sim_min_input_tokens = 0;
       }
 
       if (data.settings) {
@@ -1287,6 +1313,19 @@ const EditChannelModal = (props) => {
     }
 
     // 生成渠道额外设置JSON
+    const cacheSimulation = localInputs.cache_simulation_enabled
+      ? {
+          enabled: true,
+          read_ratio_min: parseFloat(localInputs.cache_sim_read_ratio_min) || 0,
+          read_ratio_max: parseFloat(localInputs.cache_sim_read_ratio_max) || 0,
+          creation_ratio_min:
+            parseFloat(localInputs.cache_sim_creation_ratio_min) || 0,
+          creation_ratio_max:
+            parseFloat(localInputs.cache_sim_creation_ratio_max) || 0,
+          min_input_tokens:
+            parseInt(localInputs.cache_sim_min_input_tokens) || 0,
+        }
+      : undefined;
     const channelExtraSettings = {
       force_format: localInputs.force_format || false,
       thinking_to_content: localInputs.thinking_to_content || false,
@@ -1297,6 +1336,7 @@ const EditChannelModal = (props) => {
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
       user_prompt: localInputs.user_prompt || '',
+      ...(cacheSimulation ? { cache_simulation: cacheSimulation } : {}),
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1359,6 +1399,13 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_service_tier;
     delete localInputs.disable_store;
     delete localInputs.allow_safety_identifier;
+    // 清理缓存模拟的临时字段
+    delete localInputs.cache_simulation_enabled;
+    delete localInputs.cache_sim_read_ratio_min;
+    delete localInputs.cache_sim_read_ratio_max;
+    delete localInputs.cache_sim_creation_ratio_min;
+    delete localInputs.cache_sim_creation_ratio_max;
+    delete localInputs.cache_sim_min_input_tokens;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -3559,6 +3606,118 @@ const EditChannelModal = (props) => {
                         '始终生效：此提示词将作为一条独立的用户消息插入到所有用户消息之前',
                       )}
                     />
+
+                    <Form.Switch
+                      field='cache_simulation_enabled'
+                      label={t('缓存模拟')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange(
+                          'cache_simulation_enabled',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '开启后当上游不返回缓存统计时，按配置比例模拟缓存 token 数据',
+                      )}
+                    />
+                    {inputs.cache_simulation_enabled && (
+                      <>
+                        <Row gutter={12}>
+                          <Col span={12}>
+                            <Form.InputNumber
+                              field='cache_sim_read_ratio_min'
+                              label={t('缓存命中率下限')}
+                              placeholder='0.80'
+                              min={0}
+                              max={1}
+                              step={0.01}
+                              onNumberChange={(value) =>
+                                handleChannelSettingsChange(
+                                  'cache_sim_read_ratio_min',
+                                  value,
+                                )
+                              }
+                              style={{ width: '100%' }}
+                              extraText={t('填 0 使用默认值 0.80')}
+                            />
+                          </Col>
+                          <Col span={12}>
+                            <Form.InputNumber
+                              field='cache_sim_read_ratio_max'
+                              label={t('缓存命中率上限')}
+                              placeholder='0.95'
+                              min={0}
+                              max={1}
+                              step={0.01}
+                              onNumberChange={(value) =>
+                                handleChannelSettingsChange(
+                                  'cache_sim_read_ratio_max',
+                                  value,
+                                )
+                              }
+                              style={{ width: '100%' }}
+                              extraText={t('填 0 使用默认值 0.95')}
+                            />
+                          </Col>
+                        </Row>
+                        <Row gutter={12}>
+                          <Col span={12}>
+                            <Form.InputNumber
+                              field='cache_sim_creation_ratio_min'
+                              label={t('缓存写入率下限')}
+                              placeholder='0.005'
+                              min={0}
+                              max={1}
+                              step={0.001}
+                              onNumberChange={(value) =>
+                                handleChannelSettingsChange(
+                                  'cache_sim_creation_ratio_min',
+                                  value,
+                                )
+                              }
+                              style={{ width: '100%' }}
+                              extraText={t('填 0 使用默认值 0.005')}
+                            />
+                          </Col>
+                          <Col span={12}>
+                            <Form.InputNumber
+                              field='cache_sim_creation_ratio_max'
+                              label={t('缓存写入率上限')}
+                              placeholder='0.015'
+                              min={0}
+                              max={1}
+                              step={0.001}
+                              onNumberChange={(value) =>
+                                handleChannelSettingsChange(
+                                  'cache_sim_creation_ratio_max',
+                                  value,
+                                )
+                              }
+                              style={{ width: '100%' }}
+                              extraText={t('填 0 使用默认值 0.015')}
+                            />
+                          </Col>
+                        </Row>
+                        <Form.InputNumber
+                          field='cache_sim_min_input_tokens'
+                          label={t('最小触发 Token 数')}
+                          placeholder='1024'
+                          min={0}
+                          onNumberChange={(value) =>
+                            handleChannelSettingsChange(
+                              'cache_sim_min_input_tokens',
+                              value,
+                            )
+                          }
+                          style={{ width: '100%' }}
+                          extraText={t(
+                            '低于此 token 数的请求不模拟缓存，填 0 使用默认值 1024',
+                          )}
+                        />
+                      </>
+                    )}
                   </Card>
                 </div>
               </div>

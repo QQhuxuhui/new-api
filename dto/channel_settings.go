@@ -1,5 +1,32 @@
 package dto
 
+// Default cache simulation ratios used when CacheSimulationConfig fields are zero.
+const (
+	DefaultCacheSimReadRatioMin     = 0.80
+	DefaultCacheSimReadRatioMax     = 0.95
+	DefaultCacheSimCreationRatioMin = 0.005
+	DefaultCacheSimCreationRatioMax = 0.015
+	DefaultCacheSimMinInputTokens   = 1024
+)
+
+// CacheSimulationConfig defines per-channel cache token simulation parameters.
+// When Enabled is true and the upstream returns no cache token data, realistic
+// cache hit statistics are simulated so downstream consumers (dashboards, billing)
+// see Claude-style prompt caching values.
+//
+// All ratio/token fields fall back to the Default* constants when left as zero.
+type CacheSimulationConfig struct {
+	Enabled bool `json:"enabled"`
+	// ReadRatioMin/Max: range for simulated cache_read ratio (fraction of input tokens).
+	ReadRatioMin float64 `json:"read_ratio_min,omitempty"`
+	ReadRatioMax float64 `json:"read_ratio_max,omitempty"`
+	// CreationRatioMin/Max: range for simulated cache_creation ratio.
+	CreationRatioMin float64 `json:"creation_ratio_min,omitempty"`
+	CreationRatioMax float64 `json:"creation_ratio_max,omitempty"`
+	// MinInputTokens: requests below this threshold are not simulated (treated as first-turn).
+	MinInputTokens int `json:"min_input_tokens,omitempty"`
+}
+
 type ChannelSettings struct {
 	ForceFormat            bool   `json:"force_format,omitempty"`
 	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
@@ -10,6 +37,9 @@ type ChannelSettings struct {
 	SystemPrompt                  string `json:"system_prompt,omitempty"`
 	SystemPromptOverride          bool   `json:"system_prompt_override,omitempty"`
 	UserPrompt                    string `json:"user_prompt,omitempty"`
+	// CacheSimulation: when non-nil and Enabled, simulates cache token data for channels
+	// whose upstream does not return cache statistics (e.g. Kiro).
+	CacheSimulation *CacheSimulationConfig `json:"cache_simulation,omitempty"`
 }
 
 type VertexKeyType string

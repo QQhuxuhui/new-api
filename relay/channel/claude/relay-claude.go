@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 
@@ -752,6 +753,9 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		}
 	}
 
+	// Apply cache simulation after usage is finalised (it may be recomputed above).
+	applyCacheSimulation(info, claudeInfo.Usage)
+
 	if info.RelayFormat == types.RelayFormatClaude {
 		//
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
@@ -816,6 +820,9 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			claudeInfo.Usage.ClaudeCacheCreation1hTokens = claudeResponse.Usage.GetCacheCreation1hTokens()
 		}
 	}
+	// Apply cache simulation after upstream usage is parsed. For OpenAI format the
+	// simulated values are serialised into the response body below.
+	applyCacheSimulation(info, claudeInfo.Usage)
 	var responseData []byte
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
@@ -859,6 +866,99 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 		return nil, handleErr
 	}
 	return claudeInfo.Usage, nil
+}
+
+// applyCacheSimulation fills cached token usage when the channel has cache
+// simulation enabled and the upstream provides no cache statistics.
+// It must be called after all upstream usage events have been processed.
+//
+// The function does NOT modify PromptTokens to avoid unintended billing side effects;
+// it only fills the detail fields used for cache statistics display.
+func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
+	if usage == nil || info.ChannelMeta == nil {
+		return
+	}
+	cfg := info.ChannelMeta.ChannelSetting.CacheSimulation
+	if cfg == nil || !cfg.Enabled {
+		return
+	}
+	if usage.PromptTokensDetails.CachedTokens > 0 ||
+		usage.PromptTokensDetails.CachedCreationTokens > 0 ||
+		usage.ClaudeCacheCreation5mTokens > 0 ||
+		usage.ClaudeCacheCreation1hTokens > 0 {
+		return
+	}
+
+	minTokens := cfg.MinInputTokens
+	if minTokens <= 0 {
+		minTokens = dto.DefaultCacheSimMinInputTokens
+	}
+	if usage.PromptTokens <= minTokens {
+		return
+	}
+
+	readMin := cfg.ReadRatioMin
+	if readMin <= 0 {
+		readMin = dto.DefaultCacheSimReadRatioMin
+	}
+	readMax := cfg.ReadRatioMax
+	if readMax <= 0 {
+		readMax = dto.DefaultCacheSimReadRatioMax
+	}
+	if readMax < readMin {
+		readMin, readMax = readMax, readMin
+	}
+	creationMin := cfg.CreationRatioMin
+	if creationMin <= 0 {
+		creationMin = dto.DefaultCacheSimCreationRatioMin
+	}
+	creationMax := cfg.CreationRatioMax
+	if creationMax <= 0 {
+		creationMax = dto.DefaultCacheSimCreationRatioMax
+	}
+	if creationMax < creationMin {
+		creationMin, creationMax = creationMax, creationMin
+	}
+
+	readRatio := readMin + rand.Float64()*(readMax-readMin)
+	// Large context bonus: long conversations have higher cache hit rates.
+	if usage.PromptTokens > 50000 {
+		readRatio += 0.03
+		if readRatio > 0.97 {
+			readRatio = 0.97
+		}
+	}
+	creationRatio := creationMin + rand.Float64()*(creationMax-creationMin)
+
+	if readRatio < 0 {
+		readRatio = 0
+	} else if readRatio > 1 {
+		readRatio = 1
+	}
+	if creationRatio < 0 {
+		creationRatio = 0
+	} else if creationRatio > 1 {
+		creationRatio = 1
+	}
+
+	promptTokens := usage.PromptTokens
+	cachedTokens := int(float64(promptTokens) * readRatio)
+	if cachedTokens < 0 {
+		cachedTokens = 0
+	} else if cachedTokens > promptTokens {
+		cachedTokens = promptTokens
+	}
+
+	cachedCreationTokens := int(float64(promptTokens) * creationRatio)
+	remaining := promptTokens - cachedTokens
+	if cachedCreationTokens < 0 {
+		cachedCreationTokens = 0
+	} else if cachedCreationTokens > remaining {
+		cachedCreationTokens = remaining
+	}
+
+	usage.PromptTokensDetails.CachedTokens = cachedTokens
+	usage.PromptTokensDetails.CachedCreationTokens = cachedCreationTokens
 }
 
 func mapToolChoice(toolChoice any, parallelToolCalls *bool) *dto.ClaudeToolChoice {
