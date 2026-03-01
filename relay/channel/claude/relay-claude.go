@@ -711,26 +711,14 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	}
 
 	// Strip \u200B placeholder characters from text deltas (opt-in per channel).
-	// Kiro protocol injects \u200B as a placeholder for tool-use-only assistant messages;
-	// unpatched upstream proxies (e.g. CLIProxyAPIPlus) may not strip the model's echo
-	// of this character before forwarding the response.
 	needsReMarshal := false
-	if info.ChannelMeta != nil && info.ChannelMeta.ChannelSetting.StripPlaceholders &&
-		claudeResponse.Type == "content_block_delta" &&
-		claudeResponse.Delta != nil && claudeResponse.Delta.Type == "text_delta" &&
-		claudeResponse.Delta.Text != nil {
-		original := *claudeResponse.Delta.Text
-		cleaned := strings.ReplaceAll(original, "\u200B", "")
-		if cleaned != original {
-			// Placeholder was stripped — residual whitespace is also echo artifact.
-			cleaned = strings.TrimSpace(cleaned)
-			if cleaned == "" {
-				// Entire delta was a placeholder echo — suppress this event entirely.
-				return nil
-			}
-			claudeResponse.Delta.Text = &cleaned
-			needsReMarshal = true
+	if shouldStripPlaceholders(info) {
+		changed, suppress := stripPlaceholderDelta(&claudeResponse)
+		if suppress {
+			// Entire delta was a placeholder echo — suppress this event entirely.
+			return nil
 		}
+		needsReMarshal = changed
 	}
 
 	if info.RelayFormat == types.RelayFormatClaude {
@@ -833,6 +821,11 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
 	}
+	stripEnabled := shouldStripPlaceholders(info)
+	stripChanged := false
+	if stripEnabled {
+		stripChanged = stripPlaceholdersInNonStreamResponse(&claudeResponse, requestMode)
+	}
 	if requestMode == RequestModeCompletion {
 		completionTokens := service.CountTextToken(claudeResponse.Completion, info.OriginModelName)
 		claudeInfo.Usage.PromptTokens = info.PromptTokens
@@ -865,29 +858,20 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		simulationActive := info.ChannelMeta != nil &&
 			info.ChannelMeta.ChannelSetting.CacheSimulation != nil &&
 			info.ChannelMeta.ChannelSetting.CacheSimulation.Enabled
+		responseData = data
+		if stripEnabled && stripChanged {
+			if patched, ok := patchNonStreamStrippedContent(responseData, requestMode); ok {
+				responseData = patched
+			}
+		}
 		if simulationActive && claudeResponse.Usage != nil &&
 			(claudeInfo.Usage.PromptTokensDetails.CachedTokens > 0 ||
 				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens > 0) {
-			claudeResponse.Usage.CacheReadInputTokens = claudeInfo.Usage.PromptTokensDetails.CachedTokens
-			claudeResponse.Usage.CacheCreationInputTokens = claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens
-			// Preserve unknown upstream fields by merging the updated usage into the raw JSON
-			// rather than re-marshaling the full struct (which would drop unknown fields).
-			merged := false
-			var raw map[string]json.RawMessage
-			if json.Unmarshal(data, &raw) == nil {
-				if usageBytes, merr := json.Marshal(claudeResponse.Usage); merr == nil {
-					raw["usage"] = json.RawMessage(usageBytes)
-					if b, merr := json.Marshal(raw); merr == nil {
-						responseData = b
-						merged = true
-					}
-				}
+			if patched, ok := patchCacheUsageFields(responseData,
+				claudeInfo.Usage.PromptTokensDetails.CachedTokens,
+				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens); ok {
+				responseData = patched
 			}
-			if !merged {
-				responseData = data
-			}
-		} else {
-			responseData = data
 		}
 	}
 
@@ -1013,6 +997,196 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 	usage.ClaudeCacheCreation1hTokens = 0
 	usage.PromptTokensDetails.CachedTokens = cachedTokens
 	usage.PromptTokensDetails.CachedCreationTokens = cachedCreationTokens
+}
+
+func shouldStripPlaceholders(info *relaycommon.RelayInfo) bool {
+	return info != nil && info.ChannelMeta != nil && info.ChannelMeta.ChannelSetting.StripPlaceholders
+}
+
+func stripPlaceholderText(text string) (cleaned string, changed bool, suppress bool) {
+	cleaned = strings.ReplaceAll(text, "\u200B", "")
+	if cleaned == text {
+		return text, false, false
+	}
+	return cleaned, true, cleaned == ""
+}
+
+func stripPlaceholderDelta(claudeResponse *dto.ClaudeResponse) (changed bool, suppress bool) {
+	if claudeResponse == nil ||
+		claudeResponse.Type != "content_block_delta" ||
+		claudeResponse.Delta == nil ||
+		claudeResponse.Delta.Type != "text_delta" ||
+		claudeResponse.Delta.Text == nil {
+		return false, false
+	}
+	cleaned, changed, suppress := stripPlaceholderText(*claudeResponse.Delta.Text)
+	if !changed {
+		return false, false
+	}
+	if suppress {
+		return true, true
+	}
+	claudeResponse.Delta.Text = &cleaned
+	return true, false
+}
+
+func stripPlaceholdersInNonStreamResponse(claudeResponse *dto.ClaudeResponse, requestMode int) bool {
+	if claudeResponse == nil {
+		return false
+	}
+	changed := false
+	if requestMode == RequestModeCompletion {
+		cleaned, stripped, _ := stripPlaceholderText(claudeResponse.Completion)
+		if stripped {
+			claudeResponse.Completion = cleaned
+			changed = true
+		}
+		return changed
+	}
+
+	if len(claudeResponse.Content) == 0 {
+		return false
+	}
+	filtered := make([]dto.ClaudeMediaMessage, 0, len(claudeResponse.Content))
+	for _, item := range claudeResponse.Content {
+		if item.Type == "text" && item.Text != nil {
+			cleaned, stripped, suppress := stripPlaceholderText(*item.Text)
+			if stripped {
+				changed = true
+				if suppress {
+					continue
+				}
+				item.Text = &cleaned
+			}
+		}
+		filtered = append(filtered, item)
+	}
+	if len(filtered) != len(claudeResponse.Content) {
+		changed = true
+	}
+	claudeResponse.Content = filtered
+	return changed
+}
+
+func patchNonStreamStrippedContent(data []byte, requestMode int) ([]byte, bool) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, false
+	}
+
+	changed := false
+	if requestMode == RequestModeCompletion {
+		rawCompletion, ok := raw["completion"]
+		if !ok {
+			return nil, false
+		}
+		var completion string
+		if err := json.Unmarshal(rawCompletion, &completion); err != nil {
+			return nil, false
+		}
+		cleaned, stripped, _ := stripPlaceholderText(completion)
+		if stripped {
+			b, err := json.Marshal(cleaned)
+			if err != nil {
+				return nil, false
+			}
+			raw["completion"] = b
+			changed = true
+		}
+	} else {
+		rawContent, ok := raw["content"]
+		if !ok {
+			return nil, false
+		}
+		var blocks []map[string]json.RawMessage
+		if err := json.Unmarshal(rawContent, &blocks); err != nil {
+			return nil, false
+		}
+
+		filtered := make([]map[string]json.RawMessage, 0, len(blocks))
+		for _, block := range blocks {
+			blockType := ""
+			if rawType, ok := block["type"]; ok {
+				_ = json.Unmarshal(rawType, &blockType)
+			}
+			if blockType == "text" {
+				if rawText, ok := block["text"]; ok {
+					var text string
+					if err := json.Unmarshal(rawText, &text); err != nil {
+						return nil, false
+					}
+					cleaned, stripped, suppress := stripPlaceholderText(text)
+					if stripped {
+						changed = true
+						if suppress {
+							continue
+						}
+						b, err := json.Marshal(cleaned)
+						if err != nil {
+							return nil, false
+						}
+						block["text"] = b
+					}
+				}
+			}
+			filtered = append(filtered, block)
+		}
+		if changed || len(filtered) != len(blocks) {
+			contentBytes, err := json.Marshal(filtered)
+			if err != nil {
+				return nil, false
+			}
+			raw["content"] = contentBytes
+			changed = true
+		}
+	}
+
+	if !changed {
+		return data, true
+	}
+	patched, err := json.Marshal(raw)
+	if err != nil {
+		return nil, false
+	}
+	return patched, true
+}
+
+func patchCacheUsageFields(data []byte, cacheReadInputTokens int, cacheCreationInputTokens int) ([]byte, bool) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, false
+	}
+
+	rawUsage, ok := raw["usage"]
+	if !ok {
+		return nil, false
+	}
+	usageFields := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(rawUsage, &usageFields); err != nil {
+		return nil, false
+	}
+	readBytes, err := json.Marshal(cacheReadInputTokens)
+	if err != nil {
+		return nil, false
+	}
+	createBytes, err := json.Marshal(cacheCreationInputTokens)
+	if err != nil {
+		return nil, false
+	}
+	usageFields["cache_read_input_tokens"] = readBytes
+	usageFields["cache_creation_input_tokens"] = createBytes
+
+	usageBytes, err := json.Marshal(usageFields)
+	if err != nil {
+		return nil, false
+	}
+	raw["usage"] = usageBytes
+
+	patched, err := json.Marshal(raw)
+	if err != nil {
+		return nil, false
+	}
+	return patched, true
 }
 
 func mapToolChoice(toolChoice any, parallelToolCalls *bool) *dto.ClaudeToolChoice {
