@@ -169,7 +169,7 @@ func (e *NewAPIError) ToOpenAIError() OpenAIError {
 		result.Message = common.MaskSensitiveInfo(result.Message)
 		// 只对上游错误进行敏感信息脱敏，本系统错误（如余额不足）保留原始信息
 		// 注意：渠道错误（channel:* 错误码）即使 errorType 是 NewAPIError 也需要脱敏
-		if e.errorType != ErrorTypeNewAPIError || IsChannelError(e) {
+		if e.errorType != ErrorTypeNewAPIError || IsChannelError(e) || !isLocalQuotaErrorCode(e.errorCode) {
 			result.Message = common.MaskUpstreamSensitiveError(result.Message)
 		}
 	}
@@ -203,7 +203,7 @@ func (e *NewAPIError) ToClaudeError() ClaudeError {
 		result.Message = common.MaskSensitiveInfo(result.Message)
 		// 只对上游错误进行敏感信息脱敏，本系统错误（如余额不足）保留原始信息
 		// 注意：渠道错误（channel:* 错误码）即使 errorType 是 NewAPIError 也需要脱敏
-		if e.errorType != ErrorTypeNewAPIError || IsChannelError(e) {
+		if e.errorType != ErrorTypeNewAPIError || IsChannelError(e) || !isLocalQuotaErrorCode(e.errorCode) {
 			result.Message = common.MaskUpstreamSensitiveError(result.Message)
 		}
 	}
@@ -375,4 +375,13 @@ func IsRecordErrorLog(e *NewAPIError) bool {
 		return true
 	}
 	return *e.recordErrorLog
+}
+
+func isLocalQuotaErrorCode(code ErrorCode) bool {
+	switch code {
+	case ErrorCodeInsufficientUserQuota, ErrorCodePreConsumeTokenQuotaFailed:
+		return true
+	default:
+		return false
+	}
 }

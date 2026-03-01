@@ -14,9 +14,11 @@ func abortWithOpenAiMessage(c *gin.Context, statusCode int, message string, code
 		codeStr = code[0]
 	}
 	userId := c.GetInt("id")
+	messageWithId := common.MessageWithRequestId(message, c.GetString(common.RequestIdKey))
+	maskedMessage := common.MaskUpstreamSensitiveError(messageWithId)
 	c.JSON(statusCode, gin.H{
 		"error": gin.H{
-			"message": common.MessageWithRequestId(message, c.GetString(common.RequestIdKey)),
+			"message": maskedMessage,
 			"type":    "new_api_error",
 			"code":    codeStr,
 		},

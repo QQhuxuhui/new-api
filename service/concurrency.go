@@ -467,7 +467,8 @@ func GetBatchChannelsConcurrencyByIds(channelIds []int) map[int]interface{} {
 
 	// Batch query channels with keys (only necessary fields to minimize overhead)
 	var channels []*model.Channel
-	err := model.DB.Select("id, type, key, channel_info, max_concurrent_requests_per_key").
+	// NOTE: "key" is a reserved keyword in MySQL; use []string so GORM can quote identifiers correctly.
+	err := model.DB.Select([]string{"id", "type", "key", "channel_info", "max_concurrent_requests_per_key"}).
 		Where("id IN ?", channelIds).
 		Where("max_concurrent_requests_per_key > 0").
 		Find(&channels).Error
