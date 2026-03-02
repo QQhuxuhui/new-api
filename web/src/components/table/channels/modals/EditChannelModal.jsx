@@ -47,6 +47,8 @@ import {
   Highlight,
   Input,
   Progress,
+  RadioGroup,
+  Radio,
 } from '@douyinfe/semi-ui';
 import {
   getChannelModels,
@@ -184,10 +186,11 @@ const EditChannelModal = (props) => {
     masquerade_hash: '',
     // 缓存模拟
     cache_simulation_enabled: false,
-    cache_sim_read_ratio_min: 0,
-    cache_sim_read_ratio_max: 0,
-    cache_sim_creation_ratio_min: 0,
-    cache_sim_creation_ratio_max: 0,
+    cache_sim_preset: 'default',
+    cache_sim_total_ratio_min: 0,
+    cache_sim_total_ratio_max: 0,
+    cache_sim_read_frac_min: 0,
+    cache_sim_read_frac_max: 0,
     cache_sim_min_input_tokens: 0,
     // 占位符剥离
     strip_placeholders: false,
@@ -543,37 +546,40 @@ const EditChannelModal = (props) => {
           data.user_prompt = parsedSettings.user_prompt || '';
           const cs = parsedSettings.cache_simulation || {};
           data.cache_simulation_enabled = cs.enabled || false;
-          const legacyReadMin = Number(cs.read_ratio_min) || 0;
-          const legacyReadMax = Number(cs.read_ratio_max) || 0;
-          const legacyCreationMin = Number(cs.creation_ratio_min) || 0;
-          const legacyCreationMax = Number(cs.creation_ratio_max) || 0;
-          const hasLegacyRatios =
-            legacyReadMin > 0 ||
-            legacyReadMax > 0 ||
-            legacyCreationMin > 0 ||
-            legacyCreationMax > 0;
-          if (hasLegacyRatios) {
-            data.cache_sim_read_ratio_min = legacyReadMin;
-            data.cache_sim_read_ratio_max = legacyReadMax;
-            data.cache_sim_creation_ratio_min = legacyCreationMin;
-            data.cache_sim_creation_ratio_max = legacyCreationMax;
+          // Load new two-level format first; fall back to legacy ratio fields
+          const newTotalMin = Number(cs.total_cache_ratio_min) || 0;
+          const newTotalMax = Number(cs.total_cache_ratio_max) || 0;
+          const newFracMin = Number(cs.read_fraction_min) || 0;
+          const newFracMax = Number(cs.read_fraction_max) || 0;
+          const hasNewFields =
+            newTotalMin > 0 || newTotalMax > 0 || newFracMin > 0 || newFracMax > 0;
+          if (hasNewFields) {
+            data.cache_sim_total_ratio_min = newTotalMin;
+            data.cache_sim_total_ratio_max = newTotalMax;
+            data.cache_sim_read_frac_min = newFracMin;
+            data.cache_sim_read_frac_max = newFracMax;
+            data.cache_sim_preset = 'custom';
           } else {
-            const totalCacheMin = Number(cs.total_cache_ratio_min) || 0;
-            const totalCacheMax = Number(cs.total_cache_ratio_max) || 0;
-            const readFractionMin = Number(cs.read_fraction_min) || 0;
-            const readFractionMax = Number(cs.read_fraction_max) || 0;
-            data.cache_sim_read_ratio_min = Number(
-              (totalCacheMin * readFractionMin).toFixed(6),
-            );
-            data.cache_sim_read_ratio_max = Number(
-              (totalCacheMax * readFractionMax).toFixed(6),
-            );
-            data.cache_sim_creation_ratio_min = Number(
-              (totalCacheMin * (1 - readFractionMin)).toFixed(6),
-            );
-            data.cache_sim_creation_ratio_max = Number(
-              (totalCacheMax * (1 - readFractionMax)).toFixed(6),
-            );
+            // Legacy: derive two-level params from read+creation ratios
+            const legReadMin = Number(cs.read_ratio_min) || 0;
+            const legReadMax = Number(cs.read_ratio_max) || 0;
+            const legCreMin = Number(cs.creation_ratio_min) || 0;
+            const legCreMax = Number(cs.creation_ratio_max) || 0;
+            if (legReadMin > 0 || legReadMax > 0 || legCreMin > 0 || legCreMax > 0) {
+              const tMin = legReadMin + legCreMin;
+              const tMax = legReadMax + legCreMax;
+              data.cache_sim_total_ratio_min = tMin;
+              data.cache_sim_total_ratio_max = tMax;
+              data.cache_sim_read_frac_min = tMin > 0 ? Number((legReadMin / tMin).toFixed(4)) : 0;
+              data.cache_sim_read_frac_max = tMax > 0 ? Number((legReadMax / tMax).toFixed(4)) : 0;
+              data.cache_sim_preset = 'custom';
+            } else {
+              data.cache_sim_preset = 'default';
+              data.cache_sim_total_ratio_min = 0;
+              data.cache_sim_total_ratio_max = 0;
+              data.cache_sim_read_frac_min = 0;
+              data.cache_sim_read_frac_max = 0;
+            }
           }
           data.cache_sim_min_input_tokens = cs.min_input_tokens || 0;
           data.strip_placeholders = parsedSettings.strip_placeholders || false;
@@ -588,10 +594,11 @@ const EditChannelModal = (props) => {
           data.system_prompt_override = false;
           data.user_prompt = '';
           data.cache_simulation_enabled = false;
-          data.cache_sim_read_ratio_min = 0;
-          data.cache_sim_read_ratio_max = 0;
-          data.cache_sim_creation_ratio_min = 0;
-          data.cache_sim_creation_ratio_max = 0;
+          data.cache_sim_preset = 'default';
+          data.cache_sim_total_ratio_min = 0;
+          data.cache_sim_total_ratio_max = 0;
+          data.cache_sim_read_frac_min = 0;
+          data.cache_sim_read_frac_max = 0;
           data.cache_sim_min_input_tokens = 0;
           data.strip_placeholders = false;
         }
@@ -605,10 +612,11 @@ const EditChannelModal = (props) => {
         data.system_prompt_override = false;
         data.user_prompt = '';
         data.cache_simulation_enabled = false;
-        data.cache_sim_read_ratio_min = 0;
-        data.cache_sim_read_ratio_max = 0;
-        data.cache_sim_creation_ratio_min = 0;
-        data.cache_sim_creation_ratio_max = 0;
+        data.cache_sim_preset = 'default';
+        data.cache_sim_total_ratio_min = 0;
+        data.cache_sim_total_ratio_max = 0;
+        data.cache_sim_read_frac_min = 0;
+        data.cache_sim_read_frac_max = 0;
         data.cache_sim_min_input_tokens = 0;
         data.strip_placeholders = false;
       }
@@ -1361,35 +1369,35 @@ const EditChannelModal = (props) => {
       localInputs.other = 'v2.1';
     }
 
-    // 生成渠道额外设置JSON
-    const cacheReadRatioMin =
-      parseFloat(localInputs.cache_sim_read_ratio_min) || 0;
-    const cacheReadRatioMax =
-      parseFloat(localInputs.cache_sim_read_ratio_max) || 0;
-    const cacheCreationRatioMin =
-      parseFloat(localInputs.cache_sim_creation_ratio_min) || 0;
-    const cacheCreationRatioMax =
-      parseFloat(localInputs.cache_sim_creation_ratio_max) || 0;
-    const totalCacheRatioMin = cacheReadRatioMin + cacheCreationRatioMin;
-    const totalCacheRatioMax = cacheReadRatioMax + cacheCreationRatioMax;
-    const readFractionMin =
-      totalCacheRatioMin > 0 ? cacheReadRatioMin / totalCacheRatioMin : 0;
-    const readFractionMax =
-      totalCacheRatioMax > 0 ? cacheReadRatioMax / totalCacheRatioMax : 0;
+    // 生成渠道额外设置JSON —— 缓存模拟
+    const CACHE_SIM_PRESET_VALUES = {
+      default: { totalMin: 0, totalMax: 0, fracMin: 0, fracMax: 0 },
+      light:   { totalMin: 0.30, totalMax: 0.55, fracMin: 0.75, fracMax: 0.88 },
+      medium:  { totalMin: 0.55, totalMax: 0.80, fracMin: 0.85, fracMax: 0.95 },
+      heavy:   { totalMin: 0.75, totalMax: 0.92, fracMin: 0.90, fracMax: 0.98 },
+    };
+    let cacheTotalMin, cacheTotalMax, cacheReadFracMin, cacheReadFracMax;
+    const preset = localInputs.cache_sim_preset || 'default';
+    if (preset !== 'custom') {
+      const pv = CACHE_SIM_PRESET_VALUES[preset] || CACHE_SIM_PRESET_VALUES.default;
+      cacheTotalMin = pv.totalMin;
+      cacheTotalMax = pv.totalMax;
+      cacheReadFracMin = pv.fracMin;
+      cacheReadFracMax = pv.fracMax;
+    } else {
+      cacheTotalMin = parseFloat(localInputs.cache_sim_total_ratio_min) || 0;
+      cacheTotalMax = parseFloat(localInputs.cache_sim_total_ratio_max) || 0;
+      cacheReadFracMin = parseFloat(localInputs.cache_sim_read_frac_min) || 0;
+      cacheReadFracMax = parseFloat(localInputs.cache_sim_read_frac_max) || 0;
+    }
     const cacheSimulation = localInputs.cache_simulation_enabled
       ? {
           enabled: true,
-          total_cache_ratio_min: totalCacheRatioMin,
-          total_cache_ratio_max: totalCacheRatioMax,
-          read_fraction_min: Number(readFractionMin.toFixed(6)),
-          read_fraction_max: Number(readFractionMax.toFixed(6)),
-          // Legacy aliases: keep for rollback compatibility with older servers.
-          read_ratio_min: cacheReadRatioMin,
-          read_ratio_max: cacheReadRatioMax,
-          creation_ratio_min: cacheCreationRatioMin,
-          creation_ratio_max: cacheCreationRatioMax,
-          min_input_tokens:
-            parseInt(localInputs.cache_sim_min_input_tokens) || 0,
+          total_cache_ratio_min: cacheTotalMin,
+          total_cache_ratio_max: cacheTotalMax,
+          read_fraction_min: cacheReadFracMin,
+          read_fraction_max: cacheReadFracMax,
+          min_input_tokens: parseInt(localInputs.cache_sim_min_input_tokens) || 0,
         }
       : undefined;
     const channelExtraSettings = {
@@ -1468,10 +1476,11 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_safety_identifier;
     // 清理缓存模拟的临时字段
     delete localInputs.cache_simulation_enabled;
-    delete localInputs.cache_sim_read_ratio_min;
-    delete localInputs.cache_sim_read_ratio_max;
-    delete localInputs.cache_sim_creation_ratio_min;
-    delete localInputs.cache_sim_creation_ratio_max;
+    delete localInputs.cache_sim_preset;
+    delete localInputs.cache_sim_total_ratio_min;
+    delete localInputs.cache_sim_total_ratio_max;
+    delete localInputs.cache_sim_read_frac_min;
+    delete localInputs.cache_sim_read_frac_max;
     delete localInputs.cache_sim_min_input_tokens;
     // 清理占位符剥离的临时字段
     delete localInputs.strip_placeholders;
@@ -3720,102 +3729,163 @@ const EditChannelModal = (props) => {
                       )}
                     />
 
-                    {inputs.cache_simulation_enabled && (
-                      <>
-                        <Row gutter={12}>
-                          <Col span={12}>
-                            <Form.InputNumber
-                              field='cache_sim_read_ratio_min'
-                              label={t('缓存命中率下限')}
-                              placeholder='0.80'
-                              min={0}
-                              max={1}
-                              step={0.01}
-                              onNumberChange={(value) =>
-                                handleChannelSettingsChange(
-                                  'cache_sim_read_ratio_min',
-                                  value,
-                                )
-                              }
-                              style={{ width: '100%' }}
-                              extraText={t('填 0 使用默认值 0.80')}
-                            />
-                          </Col>
-                          <Col span={12}>
-                            <Form.InputNumber
-                              field='cache_sim_read_ratio_max'
-                              label={t('缓存命中率上限')}
-                              placeholder='0.95'
-                              min={0}
-                              max={1}
-                              step={0.01}
-                              onNumberChange={(value) =>
-                                handleChannelSettingsChange(
-                                  'cache_sim_read_ratio_max',
-                                  value,
-                                )
-                              }
-                              style={{ width: '100%' }}
-                              extraText={t('填 0 使用默认值 0.95')}
-                            />
-                          </Col>
-                        </Row>
-                        <Row gutter={12}>
-                          <Col span={12}>
-                            <Form.InputNumber
-                              field='cache_sim_creation_ratio_min'
-                              label={t('缓存写入率下限')}
-                              placeholder='0.005'
-                              min={0}
-                              max={1}
-                              step={0.001}
-                              onNumberChange={(value) =>
-                                handleChannelSettingsChange(
-                                  'cache_sim_creation_ratio_min',
-                                  value,
-                                )
-                              }
-                              style={{ width: '100%' }}
-                              extraText={t('填 0 使用默认值 0.005')}
-                            />
-                          </Col>
-                          <Col span={12}>
-                            <Form.InputNumber
-                              field='cache_sim_creation_ratio_max'
-                              label={t('缓存写入率上限')}
-                              placeholder='0.015'
-                              min={0}
-                              max={1}
-                              step={0.001}
-                              onNumberChange={(value) =>
-                                handleChannelSettingsChange(
-                                  'cache_sim_creation_ratio_max',
-                                  value,
-                                )
-                              }
-                              style={{ width: '100%' }}
-                              extraText={t('填 0 使用默认值 0.015')}
-                            />
-                          </Col>
-                        </Row>
-                        <Form.InputNumber
-                          field='cache_sim_min_input_tokens'
-                          label={t('最小触发 Token 数')}
-                          placeholder='1024'
-                          min={0}
-                          onNumberChange={(value) =>
-                            handleChannelSettingsChange(
-                              'cache_sim_min_input_tokens',
-                              value,
-                            )
-                          }
-                          style={{ width: '100%' }}
-                          extraText={t(
-                            '低于此 token 数的请求不模拟缓存，填 0 使用默认值 1024',
+                    {inputs.cache_simulation_enabled && (() => {
+                      // 预设定义
+                      const PRESETS = [
+                        { key: 'default', label: t('默认'),   totalMin: 0.55, totalMax: 0.90, fracMin: 0.88, fracMax: 0.97 },
+                        { key: 'light',   label: t('轻度'),   totalMin: 0.30, totalMax: 0.55, fracMin: 0.75, fracMax: 0.88 },
+                        { key: 'medium',  label: t('中度'),   totalMin: 0.55, totalMax: 0.80, fracMin: 0.85, fracMax: 0.95 },
+                        { key: 'heavy',   label: t('重度'),   totalMin: 0.75, totalMax: 0.92, fracMin: 0.90, fracMax: 0.98 },
+                        { key: 'custom',  label: t('自定义') },
+                      ];
+                      const preset = inputs.cache_sim_preset || 'default';
+                      // 当前生效的参数（预设或自定义）
+                      const activePreset = PRESETS.find(p => p.key === preset);
+                      const totalMin = preset === 'custom'
+                        ? (parseFloat(inputs.cache_sim_total_ratio_min) || 0.55)
+                        : (activePreset?.totalMin ?? 0.55);
+                      const totalMax = preset === 'custom'
+                        ? (parseFloat(inputs.cache_sim_total_ratio_max) || 0.90)
+                        : (activePreset?.totalMax ?? 0.90);
+                      const fracMin = preset === 'custom'
+                        ? (parseFloat(inputs.cache_sim_read_frac_min) || 0.88)
+                        : (activePreset?.fracMin ?? 0.88);
+                      const fracMax = preset === 'custom'
+                        ? (parseFloat(inputs.cache_sim_read_frac_max) || 0.97)
+                        : (activePreset?.fracMax ?? 0.97);
+                      // 实时效果预览计算
+                      const pNonCachedMin = Math.round((1 - totalMax) * 100);
+                      const pNonCachedMax = Math.round((1 - totalMin) * 100);
+                      const pReadMin = Math.round(totalMin * fracMin * 100);
+                      const pReadMax = Math.round(totalMax * fracMax * 100);
+                      const pCreMin = Math.round(totalMin * (1 - fracMax) * 100);
+                      const pCreMax = Math.round(totalMax * (1 - fracMin) * 100);
+                      return (
+                        <>
+                          {/* 预设选择 */}
+                          <div style={{ marginBottom: 12 }}>
+                            <Text type='secondary' size='small'>{t('缓存力度')}</Text>
+                            <div style={{ marginTop: 6 }}>
+                              <RadioGroup
+                                type='button'
+                                value={preset}
+                                onChange={(e) =>
+                                  handleChannelSettingsChange('cache_sim_preset', e.target.value)
+                                }
+                              >
+                                {PRESETS.map(p => (
+                                  <Radio key={p.key} value={p.key}>{p.label}</Radio>
+                                ))}
+                              </RadioGroup>
+                            </div>
+                          </div>
+                          {/* 实时效果预览 */}
+                          <div style={{
+                            background: 'var(--semi-color-fill-0)',
+                            borderRadius: 6,
+                            padding: '8px 12px',
+                            marginBottom: 12,
+                            fontSize: 12,
+                          }}>
+                            <Space spacing={12}>
+                              <span>
+                                <Tag color='light-blue' size='small'>{t('读命中')}</Tag>
+                                {` ${pReadMin}%~${pReadMax}%`}
+                              </span>
+                              <span>
+                                <Tag color='teal' size='small'>{t('缓存创建')}</Tag>
+                                {` ${pCreMin}%~${pCreMax}%`}
+                              </span>
+                              <span>
+                                <Tag color='grey' size='small'>{t('非缓存')}</Tag>
+                                {` ${pNonCachedMin}%~${pNonCachedMax}%`}
+                              </span>
+                            </Space>
+                          </div>
+                          {/* 自定义参数（仅 custom 模式显示） */}
+                          {preset === 'custom' && (
+                            <>
+                              <Row gutter={12}>
+                                <Col span={12}>
+                                  <Form.InputNumber
+                                    field='cache_sim_total_ratio_min'
+                                    label={t('总缓存占比下限')}
+                                    placeholder='0.55'
+                                    min={0}
+                                    max={0.99}
+                                    step={0.01}
+                                    onNumberChange={(value) =>
+                                      handleChannelSettingsChange('cache_sim_total_ratio_min', value)
+                                    }
+                                    style={{ width: '100%' }}
+                                    extraText={t('参与缓存的 token 占比最小值')}
+                                  />
+                                </Col>
+                                <Col span={12}>
+                                  <Form.InputNumber
+                                    field='cache_sim_total_ratio_max'
+                                    label={t('总缓存占比上限')}
+                                    placeholder='0.90'
+                                    min={0}
+                                    max={0.99}
+                                    step={0.01}
+                                    onNumberChange={(value) =>
+                                      handleChannelSettingsChange('cache_sim_total_ratio_max', value)
+                                    }
+                                    style={{ width: '100%' }}
+                                    extraText={t('参与缓存的 token 占比最大值')}
+                                  />
+                                </Col>
+                              </Row>
+                              <Row gutter={12}>
+                                <Col span={12}>
+                                  <Form.InputNumber
+                                    field='cache_sim_read_frac_min'
+                                    label={t('读命中占比下限')}
+                                    placeholder='0.88'
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    onNumberChange={(value) =>
+                                      handleChannelSettingsChange('cache_sim_read_frac_min', value)
+                                    }
+                                    style={{ width: '100%' }}
+                                    extraText={t('缓存中读命中占比最小值（其余为创建）')}
+                                  />
+                                </Col>
+                                <Col span={12}>
+                                  <Form.InputNumber
+                                    field='cache_sim_read_frac_max'
+                                    label={t('读命中占比上限')}
+                                    placeholder='0.97'
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    onNumberChange={(value) =>
+                                      handleChannelSettingsChange('cache_sim_read_frac_max', value)
+                                    }
+                                    style={{ width: '100%' }}
+                                    extraText={t('缓存中读命中占比最大值')}
+                                  />
+                                </Col>
+                              </Row>
+                            </>
                           )}
-                        />
-                      </>
-                    )}
+                          {/* 最小触发 token 数 */}
+                          <Form.InputNumber
+                            field='cache_sim_min_input_tokens'
+                            label={t('最小触发 Token 数')}
+                            placeholder='1024'
+                            min={0}
+                            onNumberChange={(value) =>
+                              handleChannelSettingsChange('cache_sim_min_input_tokens', value)
+                            }
+                            style={{ width: '100%' }}
+                            extraText={t('低于此 token 数的请求不模拟缓存，填 0 使用默认值 1024')}
+                          />
+                        </>
+                      );
+                    })()}
                   </Card>
                 </div>
               </div>
