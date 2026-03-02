@@ -512,15 +512,34 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	if extraContent != "" {
 		logContent += ", " + extraContent
 	}
-	other := service.GenerateTextOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio, cacheTokens, cacheRatio, modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
+	// For Anthropic channels accessed via OpenAI-compatible API, use Claude-style log format
+	// so that the frontend renders the same detail breakdown as Claude-native API requests.
+	// Also record only non-cached prompt tokens (matching PostClaudeConsumeQuota behaviour)
+	// so the "输入" list column shows the actual non-cached token count.
+	logPromptTokens := promptTokens
+	var other map[string]interface{}
+	if relayInfo.ChannelType == constant.ChannelTypeAnthropic {
+		logPromptTokens = promptTokens - cacheTokens - cachedCreationTokens
+		if logPromptTokens < 0 {
+			logPromptTokens = 0
+		}
+		other = service.GenerateClaudeOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio,
+			cacheTokens, cacheRatio,
+			cachedCreationTokens, cachedCreationRatio,
+			0, relayInfo.PriceData.CacheCreation5mRatio,
+			0, relayInfo.PriceData.CacheCreation1hRatio,
+			modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
+	} else {
+		other = service.GenerateTextOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio, cacheTokens, cacheRatio, modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
+		if cachedCreationTokens != 0 {
+			other["cache_creation_tokens"] = cachedCreationTokens
+			other["cache_creation_ratio"] = cachedCreationRatio
+		}
+	}
 	if imageTokens != 0 {
 		other["image"] = true
 		other["image_ratio"] = imageRatio
 		other["image_output"] = imageTokens
-	}
-	if cachedCreationTokens != 0 {
-		other["cache_creation_tokens"] = cachedCreationTokens
-		other["cache_creation_ratio"] = cachedCreationRatio
 	}
 	if !dWebSearchQuota.IsZero() {
 		if relayInfo.ResponsesUsageInfo != nil {
@@ -561,7 +580,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
-		PromptTokens:     promptTokens,
+		PromptTokens:     logPromptTokens,
 		CompletionTokens: completionTokens,
 		ModelName:        logModel,
 		TokenName:        tokenName,

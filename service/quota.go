@@ -327,6 +327,22 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		promptTokens -= cacheCreationTokens
 	}
 
+	// When cache simulation is active the simulated cached tokens are derived FROM
+	// promptTokens (which equals the total input when no real caching occurred).
+	// Subtract them to get the non-cached remainder so we do not double-bill:
+	// promptTokens already contains what cacheTokens covers.
+	// Skip for OpenRouter channels — the block above already adjusted promptTokens.
+	if relayInfo.ChannelType != constant.ChannelTypeOpenRouter &&
+		relayInfo.ChannelMeta != nil &&
+		relayInfo.ChannelMeta.ChannelSetting.CacheSimulation != nil &&
+		relayInfo.ChannelMeta.ChannelSetting.CacheSimulation.Enabled {
+		simAdj := cacheTokens + cacheCreationTokens
+		if simAdj > promptTokens {
+			simAdj = promptTokens
+		}
+		promptTokens -= simAdj
+	}
+
 	calculateQuota := 0.0
 	if !relayInfo.PriceData.UsePrice {
 		calculateQuota = float64(promptTokens)

@@ -867,7 +867,16 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		if simulationActive && claudeResponse.Usage != nil &&
 			(claudeInfo.Usage.PromptTokensDetails.CachedTokens > 0 ||
 				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens > 0) {
+			// Compute the non-cached remainder so input_tokens in the response body
+			// is consistent with the simulated cache fields.
+			nonCached := claudeInfo.Usage.PromptTokens -
+				claudeInfo.Usage.PromptTokensDetails.CachedTokens -
+				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens
+			if nonCached < 0 {
+				nonCached = 0
+			}
 			if patched, ok := patchCacheUsageFields(responseData,
+				nonCached,
 				claudeInfo.Usage.PromptTokensDetails.CachedTokens,
 				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens); ok {
 				responseData = patched
@@ -1151,7 +1160,7 @@ func patchNonStreamStrippedContent(data []byte, requestMode int) ([]byte, bool) 
 	return patched, true
 }
 
-func patchCacheUsageFields(data []byte, cacheReadInputTokens int, cacheCreationInputTokens int) ([]byte, bool) {
+func patchCacheUsageFields(data []byte, inputTokens int, cacheReadInputTokens int, cacheCreationInputTokens int) ([]byte, bool) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, false
@@ -1165,6 +1174,10 @@ func patchCacheUsageFields(data []byte, cacheReadInputTokens int, cacheCreationI
 	if err := json.Unmarshal(rawUsage, &usageFields); err != nil {
 		return nil, false
 	}
+	inputBytes, err := json.Marshal(inputTokens)
+	if err != nil {
+		return nil, false
+	}
 	readBytes, err := json.Marshal(cacheReadInputTokens)
 	if err != nil {
 		return nil, false
@@ -1173,6 +1186,7 @@ func patchCacheUsageFields(data []byte, cacheReadInputTokens int, cacheCreationI
 	if err != nil {
 		return nil, false
 	}
+	usageFields["input_tokens"] = inputBytes
 	usageFields["cache_read_input_tokens"] = readBytes
 	usageFields["cache_creation_input_tokens"] = createBytes
 

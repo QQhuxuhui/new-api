@@ -74,7 +74,8 @@ func TestPatchCacheUsageFieldsPreservesUnknownUsageFields(t *testing.T) {
 		"top_extra":"keep"
 	}`)
 
-	patched, ok := patchCacheUsageFields(input, 77, 11)
+	// inputTokens = 100 - 77 - 11 = 12 (non-cached remainder)
+	patched, ok := patchCacheUsageFields(input, 12, 77, 11)
 	if !ok {
 		t.Fatalf("expected patch success")
 	}
@@ -94,6 +95,13 @@ func TestPatchCacheUsageFieldsPreservesUnknownUsageFields(t *testing.T) {
 	var usage map[string]json.RawMessage
 	if err := json.Unmarshal(top["usage"], &usage); err != nil {
 		t.Fatalf("unmarshal usage failed: %v", err)
+	}
+	var inputToks int
+	if err := json.Unmarshal(usage["input_tokens"], &inputToks); err != nil {
+		t.Fatalf("unmarshal input_tokens failed: %v", err)
+	}
+	if inputToks != 12 {
+		t.Fatalf("patched input_tokens mismatch: got %d want 12", inputToks)
 	}
 	var read int
 	var create int
