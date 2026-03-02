@@ -14,9 +14,9 @@ package dto
 //   This leaves 10 %–45 % as uncached "提示" tokens and 3 %–12 % as cache-creation.
 const (
 	DefaultCacheSimTotalCacheRatioMin = 0.55
-	DefaultCacheSimTotalCacheRatioMax = 0.90
-	DefaultCacheSimReadFractionMin    = 0.88
-	DefaultCacheSimReadFractionMax    = 0.97
+	DefaultCacheSimTotalCacheRatioMax = 0.80
+	DefaultCacheSimReadFractionMin    = 0.85
+	DefaultCacheSimReadFractionMax    = 0.95
 	DefaultCacheSimMinInputTokens     = 1024
 )
 

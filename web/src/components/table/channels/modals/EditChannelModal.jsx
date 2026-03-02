@@ -100,7 +100,7 @@ const REGION_EXAMPLE = {
 };
 
 const CACHE_SIM_PRESET_VALUES = {
-  default: { totalMin: 0.55, totalMax: 0.9, fracMin: 0.88, fracMax: 0.97 },
+  default: { totalMin: 0.55, totalMax: 0.8, fracMin: 0.85, fracMax: 0.95 },
   light: { totalMin: 0.3, totalMax: 0.55, fracMin: 0.75, fracMax: 0.88 },
   medium: { totalMin: 0.55, totalMax: 0.8, fracMin: 0.85, fracMax: 0.95 },
   heavy: { totalMin: 0.75, totalMax: 0.92, fracMin: 0.9, fracMax: 0.98 },
