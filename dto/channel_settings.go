@@ -1,12 +1,23 @@
 package dto
 
-// Default cache simulation ratios used when CacheSimulationConfig fields are zero.
+// Default cache simulation parameters used when CacheSimulationConfig fields are zero.
+//
+// Two-level model:
+//   TotalCacheRatio  — what fraction of prompt tokens participated in any caching.
+//                      The complement (1 - ratio) becomes the "非缓存提示" portion in logs.
+//                      Must be < 1.0 to guarantee a non-zero non-cached token count.
+//   ReadFraction     — of the cached tokens, what fraction came from cache reads
+//                      (the rest is cache creation).  High value = mature conversation.
+//
+// Defaults reflect a typical multi-turn conversation with moderate cache engagement:
+//   55 %–90 % of tokens are cached overall, of which 88 %–97 % are reads.
+//   This leaves 10 %–45 % as uncached "提示" tokens and 3 %–12 % as cache-creation.
 const (
-	DefaultCacheSimReadRatioMin     = 0.80
-	DefaultCacheSimReadRatioMax     = 0.95
-	DefaultCacheSimCreationRatioMin = 0.005
-	DefaultCacheSimCreationRatioMax = 0.015
-	DefaultCacheSimMinInputTokens   = 1024
+	DefaultCacheSimTotalCacheRatioMin = 0.55
+	DefaultCacheSimTotalCacheRatioMax = 0.90
+	DefaultCacheSimReadFractionMin    = 0.88
+	DefaultCacheSimReadFractionMax    = 0.97
+	DefaultCacheSimMinInputTokens     = 1024
 )
 
 // CacheSimulationConfig defines per-channel cache token simulation parameters.
@@ -17,12 +28,22 @@ const (
 // All ratio/token fields fall back to the Default* constants when left as zero.
 type CacheSimulationConfig struct {
 	Enabled bool `json:"enabled"`
-	// ReadRatioMin/Max: range for simulated cache_read ratio (fraction of input tokens).
-	ReadRatioMin float64 `json:"read_ratio_min,omitempty"`
-	ReadRatioMax float64 `json:"read_ratio_max,omitempty"`
-	// CreationRatioMin/Max: range for simulated cache_creation ratio.
-	CreationRatioMin float64 `json:"creation_ratio_min,omitempty"`
-	CreationRatioMax float64 `json:"creation_ratio_max,omitempty"`
+	// TotalCacheRatioMin/Max: range for the fraction of prompt tokens attributed to
+	// any form of caching (read + creation combined).  Must be in (0, 1).
+	// Example: 0.70 means 70 % of tokens are cached; the remaining 30 % are uncached.
+	TotalCacheRatioMin float64 `json:"total_cache_ratio_min,omitempty"`
+	TotalCacheRatioMax float64 `json:"total_cache_ratio_max,omitempty"`
+	// ReadFractionMin/Max: range for the fraction of cached tokens that came from
+	// cache reads (as opposed to new cache creation).
+	// Example: 0.90 means 90 % of cached tokens are reads, 10 % are creation.
+	ReadFractionMin float64 `json:"read_fraction_min,omitempty"`
+	ReadFractionMax float64 `json:"read_fraction_max,omitempty"`
+	// LegacyReadRatio*/LegacyCreationRatio*: backward-compatible aliases for
+	// pre-two-level schema. They remain accepted for existing channel settings.
+	LegacyReadRatioMin     float64 `json:"read_ratio_min,omitempty"`
+	LegacyReadRatioMax     float64 `json:"read_ratio_max,omitempty"`
+	LegacyCreationRatioMin float64 `json:"creation_ratio_min,omitempty"`
+	LegacyCreationRatioMax float64 `json:"creation_ratio_max,omitempty"`
 	// MinInputTokens: requests below this threshold are not simulated (treated as first-turn).
 	MinInputTokens int `json:"min_input_tokens,omitempty"`
 }

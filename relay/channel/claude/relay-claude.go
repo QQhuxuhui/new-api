@@ -922,6 +922,21 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 // effect on channels where simulation is configured.
 // It must be called after all upstream usage events have been processed.
 //
+// Algorithm (two-level decomposition):
+//
+//  1. totalCacheRatio  ∈ [TotalCacheRatioMin, TotalCacheRatioMax]
+//     Fraction of prompt tokens attributed to any caching activity.
+//     totalCached = floor(promptTokens × totalCacheRatio)
+//
+//  2. readFraction ∈ [ReadFractionMin, ReadFractionMax]
+//     Of those cached tokens, the fraction that came from cache reads.
+//     cachedTokens     = floor(totalCached × readFraction)
+//     cachedCreation   = totalCached − cachedTokens   (integer subtraction, no float error)
+//
+// This guarantees:
+//   cachedTokens + cachedCreation == totalCached ≤ promptTokens
+//   nonCached = promptTokens − totalCached > 0  (as long as totalCacheRatio < 1)
+//
 // The function does NOT modify PromptTokens to avoid unintended billing side effects;
 // it only fills the detail fields used for cache statistics display.
 func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
@@ -940,65 +955,89 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 		return
 	}
 
-	readMin := cfg.ReadRatioMin
-	if readMin <= 0 {
-		readMin = dto.DefaultCacheSimReadRatioMin
-	}
-	readMax := cfg.ReadRatioMax
-	if readMax <= 0 {
-		readMax = dto.DefaultCacheSimReadRatioMax
-	}
-	if readMax < readMin {
-		readMin, readMax = readMax, readMin
-	}
-	creationMin := cfg.CreationRatioMin
-	if creationMin <= 0 {
-		creationMin = dto.DefaultCacheSimCreationRatioMin
-	}
-	creationMax := cfg.CreationRatioMax
-	if creationMax <= 0 {
-		creationMax = dto.DefaultCacheSimCreationRatioMax
-	}
-	if creationMax < creationMin {
-		creationMin, creationMax = creationMax, creationMin
-	}
-
-	readRatio := readMin + rand.Float64()*(readMax-readMin)
-	// Large context bonus: long conversations have higher cache hit rates.
-	if usage.PromptTokens > 50000 {
-		readRatio += 0.03
-		if readRatio > 0.97 {
-			readRatio = 0.97
+	// Backward compatibility: if the new two-level fields are absent, derive them
+	// from legacy read/creation ratios used by older channel settings.
+	newFieldsConfigured := cfg.TotalCacheRatioMin > 0 || cfg.TotalCacheRatioMax > 0 ||
+		cfg.ReadFractionMin > 0 || cfg.ReadFractionMax > 0
+	legacyFieldsConfigured := cfg.LegacyReadRatioMin > 0 || cfg.LegacyReadRatioMax > 0 ||
+		cfg.LegacyCreationRatioMin > 0 || cfg.LegacyCreationRatioMax > 0
+	if !newFieldsConfigured && legacyFieldsConfigured {
+		totalMinLegacy := cfg.LegacyReadRatioMin + cfg.LegacyCreationRatioMin
+		totalMaxLegacy := cfg.LegacyReadRatioMax + cfg.LegacyCreationRatioMax
+		cfg.TotalCacheRatioMin = totalMinLegacy
+		cfg.TotalCacheRatioMax = totalMaxLegacy
+		if totalMinLegacy > 0 {
+			cfg.ReadFractionMin = cfg.LegacyReadRatioMin / totalMinLegacy
+		}
+		if totalMaxLegacy > 0 {
+			cfg.ReadFractionMax = cfg.LegacyReadRatioMax / totalMaxLegacy
 		}
 	}
-	creationRatio := creationMin + rand.Float64()*(creationMax-creationMin)
 
-	if readRatio < 0 {
-		readRatio = 0
-	} else if readRatio > 1 {
-		readRatio = 1
+	// ── Level 1: total cache involvement ratio ─────────────────────────────
+	totalMin := cfg.TotalCacheRatioMin
+	if totalMin <= 0 {
+		totalMin = dto.DefaultCacheSimTotalCacheRatioMin
 	}
-	if creationRatio < 0 {
-		creationRatio = 0
-	} else if creationRatio > 1 {
-		creationRatio = 1
+	totalMax := cfg.TotalCacheRatioMax
+	if totalMax <= 0 {
+		totalMax = dto.DefaultCacheSimTotalCacheRatioMax
+	}
+	if totalMax > 1.0 {
+		totalMax = 1.0
+	}
+	if totalMin > totalMax {
+		totalMin, totalMax = totalMax, totalMin
 	}
 
+	totalCacheRatio := totalMin + rand.Float64()*(totalMax-totalMin)
+	// Large context bonus: long conversations have higher overall cache engagement.
+	if usage.PromptTokens > 50000 {
+		totalCacheRatio += 0.05
+	}
+	if totalCacheRatio > 0.95 {
+		totalCacheRatio = 0.95
+	}
+	if totalCacheRatio < 0 {
+		totalCacheRatio = 0
+	}
+
+	// ── Level 2: read vs creation split within the cached portion ──────────
+	readFracMin := cfg.ReadFractionMin
+	if readFracMin <= 0 {
+		readFracMin = dto.DefaultCacheSimReadFractionMin
+	}
+	readFracMax := cfg.ReadFractionMax
+	if readFracMax <= 0 {
+		readFracMax = dto.DefaultCacheSimReadFractionMax
+	}
+	if readFracMax > 1.0 {
+		readFracMax = 1.0
+	}
+	if readFracMin > readFracMax {
+		readFracMin, readFracMax = readFracMax, readFracMin
+	}
+
+	readFraction := readFracMin + rand.Float64()*(readFracMax-readFracMin)
+	if readFraction < 0 {
+		readFraction = 0
+	} else if readFraction > 1 {
+		readFraction = 1
+	}
+
+	// ── Compute token counts ───────────────────────────────────────────────
 	promptTokens := usage.PromptTokens
-	cachedTokens := int(float64(promptTokens) * readRatio)
-	if cachedTokens < 0 {
-		cachedTokens = 0
-	} else if cachedTokens > promptTokens {
-		cachedTokens = promptTokens
+	totalCached := int(float64(promptTokens) * totalCacheRatio)
+	if totalCached > promptTokens {
+		totalCached = promptTokens
 	}
 
-	cachedCreationTokens := int(float64(promptTokens) * creationRatio)
-	remaining := promptTokens - cachedTokens
-	if cachedCreationTokens < 0 {
-		cachedCreationTokens = 0
-	} else if cachedCreationTokens > remaining {
-		cachedCreationTokens = remaining
+	cachedTokens := int(float64(totalCached) * readFraction)
+	if cachedTokens > totalCached {
+		cachedTokens = totalCached
 	}
+	// Integer subtraction: cachedTokens + cachedCreationTokens == totalCached exactly.
+	cachedCreationTokens := totalCached - cachedTokens
 
 	// Zero out Claude-specific cache creation sub-fields so they don't contradict
 	// the simulated CachedCreationTokens written below.

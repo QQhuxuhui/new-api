@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
 func TestStripPlaceholderTextDoesNotTrimWhitespace(t *testing.T) {
@@ -121,5 +122,37 @@ func TestPatchCacheUsageFieldsPreservesUnknownUsageFields(t *testing.T) {
 	}
 	if !extraUsageFlag {
 		t.Fatalf("unknown usage field changed")
+	}
+}
+
+func TestApplyCacheSimulationSupportsLegacyRatioKeys(t *testing.T) {
+	var cfg dto.CacheSimulationConfig
+	if err := json.Unmarshal([]byte(`{
+		"enabled": true,
+		"read_ratio_min": 0.24,
+		"read_ratio_max": 0.24,
+		"creation_ratio_min": 0.06,
+		"creation_ratio_max": 0.06,
+		"min_input_tokens": 1
+	}`), &cfg); err != nil {
+		t.Fatalf("unmarshal config failed: %v", err)
+	}
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{
+				CacheSimulation: &cfg,
+			},
+		},
+	}
+	usage := &dto.Usage{PromptTokens: 2000}
+
+	applyCacheSimulation(info, usage)
+
+	if usage.PromptTokensDetails.CachedTokens != 480 {
+		t.Fatalf("cached read tokens mismatch: got %d want %d", usage.PromptTokensDetails.CachedTokens, 480)
+	}
+	if usage.PromptTokensDetails.CachedCreationTokens != 120 {
+		t.Fatalf("cached creation tokens mismatch: got %d want %d", usage.PromptTokensDetails.CachedCreationTokens, 120)
 	}
 }

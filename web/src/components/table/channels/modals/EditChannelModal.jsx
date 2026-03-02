@@ -214,8 +214,7 @@ const EditChannelModal = (props) => {
   const vertexErroredNames = useRef(new Set()); // 避免重复报错
   const [claudeCredentialFileList, setClaudeCredentialFileList] = useState([]);
   const claudeCredentialErroredNames = useRef(new Set());
-  const [initialClaudeAuthMode, setInitialClaudeAuthMode] =
-    useState('api_key');
+  const [initialClaudeAuthMode, setInitialClaudeAuthMode] = useState('api_key');
   const [isMultiKeyChannel, setIsMultiKeyChannel] = useState(false);
   const [channelSearchValue, setChannelSearchValue] = useState('');
   const [useManualInput, setUseManualInput] = useState(false); // 是否使用手动输入模式
@@ -544,13 +543,40 @@ const EditChannelModal = (props) => {
           data.user_prompt = parsedSettings.user_prompt || '';
           const cs = parsedSettings.cache_simulation || {};
           data.cache_simulation_enabled = cs.enabled || false;
-          data.cache_sim_read_ratio_min = cs.read_ratio_min || 0;
-          data.cache_sim_read_ratio_max = cs.read_ratio_max || 0;
-          data.cache_sim_creation_ratio_min = cs.creation_ratio_min || 0;
-          data.cache_sim_creation_ratio_max = cs.creation_ratio_max || 0;
+          const legacyReadMin = Number(cs.read_ratio_min) || 0;
+          const legacyReadMax = Number(cs.read_ratio_max) || 0;
+          const legacyCreationMin = Number(cs.creation_ratio_min) || 0;
+          const legacyCreationMax = Number(cs.creation_ratio_max) || 0;
+          const hasLegacyRatios =
+            legacyReadMin > 0 ||
+            legacyReadMax > 0 ||
+            legacyCreationMin > 0 ||
+            legacyCreationMax > 0;
+          if (hasLegacyRatios) {
+            data.cache_sim_read_ratio_min = legacyReadMin;
+            data.cache_sim_read_ratio_max = legacyReadMax;
+            data.cache_sim_creation_ratio_min = legacyCreationMin;
+            data.cache_sim_creation_ratio_max = legacyCreationMax;
+          } else {
+            const totalCacheMin = Number(cs.total_cache_ratio_min) || 0;
+            const totalCacheMax = Number(cs.total_cache_ratio_max) || 0;
+            const readFractionMin = Number(cs.read_fraction_min) || 0;
+            const readFractionMax = Number(cs.read_fraction_max) || 0;
+            data.cache_sim_read_ratio_min = Number(
+              (totalCacheMin * readFractionMin).toFixed(6),
+            );
+            data.cache_sim_read_ratio_max = Number(
+              (totalCacheMax * readFractionMax).toFixed(6),
+            );
+            data.cache_sim_creation_ratio_min = Number(
+              (totalCacheMin * (1 - readFractionMin)).toFixed(6),
+            );
+            data.cache_sim_creation_ratio_max = Number(
+              (totalCacheMax * (1 - readFractionMax)).toFixed(6),
+            );
+          }
           data.cache_sim_min_input_tokens = cs.min_input_tokens || 0;
-          data.strip_placeholders =
-            parsedSettings.strip_placeholders || false;
+          data.strip_placeholders = parsedSettings.strip_placeholders || false;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -643,7 +669,9 @@ const EditChannelModal = (props) => {
           const parsed = JSON.parse(data.allowed_clients);
           // 确保是数组且过滤空字符串
           if (Array.isArray(parsed)) {
-            data.allowed_clients = parsed.filter(item => typeof item === 'string' && item.trim() !== '');
+            data.allowed_clients = parsed.filter(
+              (item) => typeof item === 'string' && item.trim() !== '',
+            );
           } else {
             console.error('allowed_clients 不是数组格式');
             data.allowed_clients = [];
@@ -1031,7 +1059,8 @@ const EditChannelModal = (props) => {
       throw new Error(t('Kiro 凭证必须是 JSON 对象'));
     }
 
-    const refreshToken = typeof raw.refreshToken === 'string' ? raw.refreshToken.trim() : '';
+    const refreshToken =
+      typeof raw.refreshToken === 'string' ? raw.refreshToken.trim() : '';
     if (!refreshToken) {
       throw new Error(t('Kiro 凭证缺少 refreshToken'));
     }
@@ -1039,13 +1068,21 @@ const EditChannelModal = (props) => {
       throw new Error(t('Kiro 凭证 refreshToken 格式无效，应以 aor 开头'));
     }
 
-    const provider = typeof raw.provider === 'string' ? raw.provider.trim() : '';
-    const clientId = typeof raw.clientId === 'string' ? raw.clientId.trim() : '';
-    const clientSecret = typeof raw.clientSecret === 'string' ? raw.clientSecret.trim() : '';
+    const provider =
+      typeof raw.provider === 'string' ? raw.provider.trim() : '';
+    const clientId =
+      typeof raw.clientId === 'string' ? raw.clientId.trim() : '';
+    const clientSecret =
+      typeof raw.clientSecret === 'string' ? raw.clientSecret.trim() : '';
     const region = typeof raw.region === 'string' ? raw.region.trim() : '';
 
-    const isIdCProvider = ['builderid', 'enterprise'].includes(provider.toLowerCase());
-    if ((isIdCProvider || clientId || clientSecret) && (!clientId || !clientSecret)) {
+    const isIdCProvider = ['builderid', 'enterprise'].includes(
+      provider.toLowerCase(),
+    );
+    if (
+      (isIdCProvider || clientId || clientSecret) &&
+      (!clientId || !clientSecret)
+    ) {
       throw new Error(t('IdC 凭证必须同时包含 clientId 与 clientSecret'));
     }
 
@@ -1077,10 +1114,12 @@ const EditChannelModal = (props) => {
         try {
           return normalizeClaudeKiroCredential(item);
         } catch (error) {
-          throw new Error(t('第 {{index}} 条凭证无效: {{msg}}', {
-            index: index + 1,
-            msg: error.message,
-          }));
+          throw new Error(
+            t('第 {{index}} 条凭证无效: {{msg}}', {
+              index: index + 1,
+              msg: error.message,
+            }),
+          );
         }
       });
     }
@@ -1124,11 +1163,12 @@ const EditChannelModal = (props) => {
       }
       setInputs((prev) => ({ ...prev, claude_credential_files: validFiles }));
 
-      const keyText = credentials.length > 0
-        ? (batch
+      const keyText =
+        credentials.length > 0
+          ? batch
             ? credentials.map((item) => JSON.stringify(item)).join('\n')
-            : JSON.stringify(credentials[0]))
-        : '';
+            : JSON.stringify(credentials[0])
+          : '';
       if (formApiRef.current) {
         formApiRef.current.setValue('key', keyText);
       }
@@ -1149,7 +1189,8 @@ const EditChannelModal = (props) => {
     let localInputs = { ...formValues };
 
     const claudeAuthMode = localInputs.claude_auth_mode || 'api_key';
-    const rawClaudeKeyText = typeof localInputs.key === 'string' ? localInputs.key.trim() : '';
+    const rawClaudeKeyText =
+      typeof localInputs.key === 'string' ? localInputs.key.trim() : '';
     if (
       isEdit &&
       localInputs.type === 14 &&
@@ -1206,7 +1247,9 @@ const EditChannelModal = (props) => {
             localInputs.key = JSON.stringify(normalized);
           }
         } catch (error) {
-          showError(t('Kiro JSON 凭证格式无效: {{msg}}', { msg: error.message }));
+          showError(
+            t('Kiro JSON 凭证格式无效: {{msg}}', { msg: error.message }),
+          );
           return;
         }
       }
@@ -1319,15 +1362,32 @@ const EditChannelModal = (props) => {
     }
 
     // 生成渠道额外设置JSON
+    const cacheReadRatioMin =
+      parseFloat(localInputs.cache_sim_read_ratio_min) || 0;
+    const cacheReadRatioMax =
+      parseFloat(localInputs.cache_sim_read_ratio_max) || 0;
+    const cacheCreationRatioMin =
+      parseFloat(localInputs.cache_sim_creation_ratio_min) || 0;
+    const cacheCreationRatioMax =
+      parseFloat(localInputs.cache_sim_creation_ratio_max) || 0;
+    const totalCacheRatioMin = cacheReadRatioMin + cacheCreationRatioMin;
+    const totalCacheRatioMax = cacheReadRatioMax + cacheCreationRatioMax;
+    const readFractionMin =
+      totalCacheRatioMin > 0 ? cacheReadRatioMin / totalCacheRatioMin : 0;
+    const readFractionMax =
+      totalCacheRatioMax > 0 ? cacheReadRatioMax / totalCacheRatioMax : 0;
     const cacheSimulation = localInputs.cache_simulation_enabled
       ? {
           enabled: true,
-          read_ratio_min: parseFloat(localInputs.cache_sim_read_ratio_min) || 0,
-          read_ratio_max: parseFloat(localInputs.cache_sim_read_ratio_max) || 0,
-          creation_ratio_min:
-            parseFloat(localInputs.cache_sim_creation_ratio_min) || 0,
-          creation_ratio_max:
-            parseFloat(localInputs.cache_sim_creation_ratio_max) || 0,
+          total_cache_ratio_min: totalCacheRatioMin,
+          total_cache_ratio_max: totalCacheRatioMax,
+          read_fraction_min: Number(readFractionMin.toFixed(6)),
+          read_fraction_max: Number(readFractionMax.toFixed(6)),
+          // Legacy aliases: keep for rollback compatibility with older servers.
+          read_ratio_min: cacheReadRatioMin,
+          read_ratio_max: cacheReadRatioMax,
+          creation_ratio_min: cacheCreationRatioMin,
+          creation_ratio_max: cacheCreationRatioMax,
           min_input_tokens:
             parseInt(localInputs.cache_sim_min_input_tokens) || 0,
         }
@@ -1343,9 +1403,7 @@ const EditChannelModal = (props) => {
       system_prompt_override: localInputs.system_prompt_override || false,
       user_prompt: localInputs.user_prompt || '',
       ...(cacheSimulation ? { cache_simulation: cacheSimulation } : {}),
-      ...(localInputs.strip_placeholders
-        ? { strip_placeholders: true }
-        : {}),
+      ...(localInputs.strip_placeholders ? { strip_placeholders: true } : {}),
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1427,8 +1485,8 @@ const EditChannelModal = (props) => {
     if (Array.isArray(localInputs.allowed_clients)) {
       // 过滤空字符串并 trim
       const validClients = localInputs.allowed_clients
-        .filter(item => typeof item === 'string' && item.trim() !== '')
-        .map(item => item.trim());
+        .filter((item) => typeof item === 'string' && item.trim() !== '')
+        .map((item) => item.trim());
       if (validClients.length > 0) {
         localInputs.allowed_clients = JSON.stringify(validClients);
       } else {
@@ -1558,7 +1616,8 @@ const EditChannelModal = (props) => {
   };
 
   const isClaudeKiroJsonMode =
-    inputs.type === 14 && (inputs.claude_auth_mode || 'api_key') === 'kiro_json';
+    inputs.type === 14 &&
+    (inputs.claude_auth_mode || 'api_key') === 'kiro_json';
   const isVertexJsonMode =
     inputs.type === 41 && (inputs.vertex_key_type || 'json') === 'json';
 
@@ -1591,7 +1650,10 @@ const EditChannelModal = (props) => {
                     setVertexFileList([firstFile]);
                     setVertexKeys(firstKey);
                     formApiRef.current?.setValue('vertex_files', [firstFile]);
-                    setInputs((prev) => ({ ...prev, vertex_files: [firstFile] }));
+                    setInputs((prev) => ({
+                      ...prev,
+                      vertex_files: [firstFile],
+                    }));
                     if (firstKey.length > 0) {
                       const keyText = JSON.stringify(firstKey[0]);
                       formApiRef.current?.setValue('key', keyText);
@@ -1599,16 +1661,20 @@ const EditChannelModal = (props) => {
                     }
                   } else if (isClaudeKiroJsonMode) {
                     setClaudeCredentialFileList([firstFile]);
-                    formApiRef.current?.setValue('claude_credential_files', [firstFile]);
+                    formApiRef.current?.setValue('claude_credential_files', [
+                      firstFile,
+                    ]);
                     setInputs((prev) => ({
                       ...prev,
                       claude_credential_files: [firstFile],
                     }));
-                    const currentKey = formApiRef.current?.getValue('key') || inputs.key || '';
-                    const firstLine = currentKey
-                      .split('\n')
-                      .map((line) => line.trim())
-                      .filter(Boolean)[0] || '';
+                    const currentKey =
+                      formApiRef.current?.getValue('key') || inputs.key || '';
+                    const firstLine =
+                      currentKey
+                        .split('\n')
+                        .map((line) => line.trim())
+                        .filter(Boolean)[0] || '';
                     formApiRef.current?.setValue('key', firstLine);
                     handleInputChange('key', firstLine);
                   }
@@ -1996,7 +2062,9 @@ const EditChannelModal = (props) => {
                         }}
                         extraText={
                           (inputs.claude_auth_mode || 'api_key') === 'kiro_json'
-                            ? t('Kiro JSON 模式支持上传账号 JSON 凭证，系统会自动换取 access token')
+                            ? t(
+                                'Kiro JSON 模式支持上传账号 JSON 凭证，系统会自动换取 access token',
+                              )
                             : t('API Key 模式下直接使用填写的密钥')
                         }
                       />
@@ -2288,7 +2356,8 @@ const EditChannelModal = (props) => {
                     )}
 
                     {inputs.type === 14 &&
-                      (inputs.claude_auth_mode || 'api_key') === 'kiro_json' && (
+                      (inputs.claude_auth_mode || 'api_key') ===
+                        'kiro_json' && (
                         <Form.Upload
                           field='claude_credential_files'
                           label={t('Kiro 凭证文件 (.json)')}
@@ -2317,7 +2386,9 @@ const EditChannelModal = (props) => {
                                   },
                                 ]
                           }
-                          extraText={t('上传后将自动写入密钥输入框，可直接提交')}
+                          extraText={t(
+                            '上传后将自动写入密钥输入框，可直接提交',
+                          )}
                         />
                       )}
 
@@ -2986,8 +3057,7 @@ const EditChannelModal = (props) => {
                       placeholder={
                         t(
                           '此项可选，用于设置该渠道下特定模型的倍率，为一个 JSON 字符串，键为模型名称（支持通配符*），值为倍率，例如：',
-                        ) +
-                        `\n${JSON.stringify(MODEL_RATIO_EXAMPLE, null, 2)}`
+                        ) + `\n${JSON.stringify(MODEL_RATIO_EXAMPLE, null, 2)}`
                       }
                       value={inputs.model_ratio || ''}
                       onChange={(value) =>
@@ -3194,9 +3264,7 @@ const EditChannelModal = (props) => {
                       onChange={(value) =>
                         handleInputChange('enable_client_restriction', value)
                       }
-                      extraText={t(
-                        '开启后，仅允许指定客户端访问此渠道',
-                      )}
+                      extraText={t('开启后，仅允许指定客户端访问此渠道')}
                     />
 
                     {inputs.enable_client_restriction && (
@@ -3547,7 +3615,9 @@ const EditChannelModal = (props) => {
                           value,
                         )
                       }
-                      extraText={t('透传模式下也覆写 metadata.user_id 以防泄露真实用户标识')}
+                      extraText={t(
+                        '透传模式下也覆写 metadata.user_id 以防泄露真实用户标识',
+                      )}
                     />
 
                     {inputs.type === 14 && isEdit && (
@@ -3556,8 +3626,12 @@ const EditChannelModal = (props) => {
                         label={t('伪装身份 Hash')}
                         placeholder={t('留空则使用默认值，首次请求时自动学习')}
                         showClear
-                        onChange={(value) => handleInputChange('masquerade_hash', value)}
-                        extraText={t('用于 metadata.user_id 伪装的渠道专属标识（64 字符 SHA256），修改后会话池将重置')}
+                        onChange={(value) =>
+                          handleInputChange('masquerade_hash', value)
+                        }
+                        extraText={t(
+                          '用于 metadata.user_id 伪装的渠道专属标识（64 字符 SHA256），修改后会话池将重置',
+                        )}
                       />
                     )}
 
@@ -3639,10 +3713,7 @@ const EditChannelModal = (props) => {
                       checkedText={t('开')}
                       uncheckedText={t('关')}
                       onChange={(value) =>
-                        handleChannelSettingsChange(
-                          'strip_placeholders',
-                          value,
-                        )
+                        handleChannelSettingsChange('strip_placeholders', value)
                       }
                       extraText={t(
                         '开启后自动剥离上游返回的零宽空格占位符（\\u200B），适用于上游为未修复的 CLIProxyAPIPlus 等 Kiro 代理',
