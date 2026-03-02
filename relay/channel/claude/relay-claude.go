@@ -951,7 +951,7 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 	if minTokens <= 0 {
 		minTokens = dto.DefaultCacheSimMinInputTokens
 	}
-	if usage.PromptTokens <= minTokens {
+	if usage.PromptTokens < minTokens {
 		return
 	}
 

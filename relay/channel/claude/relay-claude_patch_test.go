@@ -156,3 +156,32 @@ func TestApplyCacheSimulationSupportsLegacyRatioKeys(t *testing.T) {
 		t.Fatalf("cached creation tokens mismatch: got %d want %d", usage.PromptTokensDetails.CachedCreationTokens, 120)
 	}
 }
+
+func TestApplyCacheSimulationAppliesAtMinInputTokensBoundary(t *testing.T) {
+	cfg := &dto.CacheSimulationConfig{
+		Enabled:            true,
+		TotalCacheRatioMin: 0.8,
+		TotalCacheRatioMax: 0.8,
+		ReadFractionMin:    0.9,
+		ReadFractionMax:    0.9,
+		MinInputTokens:     1024,
+	}
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{
+				CacheSimulation: cfg,
+			},
+		},
+	}
+	usage := &dto.Usage{PromptTokens: 1024}
+
+	applyCacheSimulation(info, usage)
+
+	if usage.PromptTokensDetails.CachedTokens == 0 && usage.PromptTokensDetails.CachedCreationTokens == 0 {
+		t.Fatalf("expected simulation to apply at threshold, got cachedTokens=%d cachedCreationTokens=%d",
+			usage.PromptTokensDetails.CachedTokens,
+			usage.PromptTokensDetails.CachedCreationTokens,
+		)
+	}
+}
