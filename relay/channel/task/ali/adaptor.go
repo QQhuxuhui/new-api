@@ -124,7 +124,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	// 阿里通义万相支持 JSON 格式，不使用 multipart
 	var taskReq relaycommon.TaskSubmitReq
 	if err := common.UnmarshalBodyReusable(c, &taskReq); err != nil {
-		return service.TaskErrorWrapper(err, "unmarshal_task_request_failed", http.StatusBadRequest)
+		return service.TaskErrorWrapperLocal(err, "unmarshal_task_request_failed", http.StatusBadRequest)
 	}
 	aliReq, err := a.convertToAliRequest(info, taskReq)
 	if err != nil {

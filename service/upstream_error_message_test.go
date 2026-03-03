@@ -73,3 +73,27 @@ func TestShouldUseUnifiedTaskUpstreamMessage_LocalError(t *testing.T) {
 		t.Fatal("expected local task error to bypass unified message")
 	}
 }
+
+func TestShouldUseUnifiedTaskUpstreamMessage_ClientBadRequestCode(t *testing.T) {
+	taskErr := &dto.TaskError{
+		Code:       "invalid_request",
+		Message:    "json parse failed",
+		StatusCode: http.StatusBadRequest,
+		LocalError: false,
+	}
+	if ShouldUseUnifiedTaskUpstreamMessage(taskErr) {
+		t.Fatal("expected client bad request code to bypass unified message")
+	}
+}
+
+func TestShouldUseUnifiedTaskUpstreamMessage_UpstreamBadRequestCode(t *testing.T) {
+	taskErr := &dto.TaskError{
+		Code:       "fail_to_fetch_task",
+		Message:    "upstream returned 400",
+		StatusCode: http.StatusBadRequest,
+		LocalError: false,
+	}
+	if !ShouldUseUnifiedTaskUpstreamMessage(taskErr) {
+		t.Fatal("expected upstream bad request to use unified message")
+	}
+}

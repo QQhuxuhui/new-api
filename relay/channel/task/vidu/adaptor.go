@@ -88,7 +88,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	}
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
-		return service.TaskErrorWrapper(err, "get_task_request_failed", http.StatusBadRequest)
+		return service.TaskErrorWrapperLocal(err, "get_task_request_failed", http.StatusBadRequest)
 	}
 	action := constant.TaskActionTextGenerate
 	if meatAction, ok := req.Metadata["action"]; ok {

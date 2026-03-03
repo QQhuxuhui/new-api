@@ -56,6 +56,9 @@ func ShouldUseUnifiedTaskUpstreamMessage(taskErr *dto.TaskError) bool {
 	if taskErr == nil {
 		return false
 	}
+	if isTaskDirectClientError(taskErr) {
+		return false
+	}
 	return !taskErr.LocalError
 }
 
@@ -91,4 +94,19 @@ func isDirectClientError(err *types.NewAPIError) bool {
 	}
 
 	return false
+}
+
+func isTaskDirectClientError(taskErr *dto.TaskError) bool {
+	if taskErr == nil {
+		return false
+	}
+
+	switch taskErr.Code {
+	case "invalid_request",
+		"get_task_request_failed",
+		"unmarshal_task_request_failed":
+		return true
+	default:
+		return false
+	}
 }
