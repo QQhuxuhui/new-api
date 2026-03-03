@@ -129,7 +129,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				return
 			}
 			logger.LogError(c, fmt.Sprintf("relay error: %s", newAPIError.Error()))
-			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			newAPIError.SetMessage(service.BuildRelayClientErrorMessage(newAPIError, requestId))
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -876,7 +876,9 @@ func RelayTask(c *gin.Context) {
 		logger.LogInfo(c, retryLogStr)
 	}
 	if taskErr != nil {
-		if taskErr.StatusCode == http.StatusTooManyRequests {
+		if service.ShouldUseUnifiedTaskUpstreamMessage(taskErr) {
+			taskErr.Message = service.UnifiedUpstreamClientMessage
+		} else if taskErr.StatusCode == http.StatusTooManyRequests {
 			taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 		}
 		c.JSON(taskErr.StatusCode, taskErr)
