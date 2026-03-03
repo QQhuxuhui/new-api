@@ -48,10 +48,51 @@ func (r *readCloser) Close() error {
 func newUTLSRoundTripper() *utlsRoundTripper {
 	base := http.DefaultTransport.(*http.Transport).Clone()
 	base.ForceAttemptHTTP2 = false
+
+	applyHTTPTransportTuning(base)
+
 	base.DialTLSContext = makeUTLSDialer(base)
 
 	return &utlsRoundTripper{
 		transport: base,
+	}
+}
+
+func applyHTTPTransportTuning(t *http.Transport) {
+	if t == nil {
+		return
+	}
+
+	// Go's default Transport settings are conservative (e.g., DefaultMaxIdleConnsPerHost = 2).
+	// In a gateway/proxy scenario with high concurrency, that can cause frequent connection churn and
+	// TLS handshakes. We tune for throughput by default, while keeping risky caps optional.
+
+	maxIdleConns := common.GetEnvOrDefault("HTTP_MAX_IDLE_CONNS", 1024)
+	if maxIdleConns < 0 {
+		maxIdleConns = 0
+	}
+	maxIdleConnsPerHost := common.GetEnvOrDefault("HTTP_MAX_IDLE_CONNS_PER_HOST", 64)
+	if maxIdleConnsPerHost < 0 {
+		maxIdleConnsPerHost = 0
+	}
+	if maxIdleConns != 0 && maxIdleConns < maxIdleConnsPerHost {
+		maxIdleConns = maxIdleConnsPerHost
+	}
+
+	t.MaxIdleConns = maxIdleConns
+	t.MaxIdleConnsPerHost = maxIdleConnsPerHost
+
+	// MaxConnsPerHost is an explicit concurrency cap. Setting it too low can introduce queueing and tail
+	// latency under load; setting it too high can stress upstreams. Keep it opt-in via env.
+	if v := common.GetEnvOrDefault("HTTP_MAX_CONNS_PER_HOST", 0); v > 0 {
+		t.MaxConnsPerHost = v
+	}
+
+	if seconds := common.GetEnvOrDefault("HTTP_IDLE_CONN_TIMEOUT_SECONDS", int(t.IdleConnTimeout.Seconds())); seconds >= 0 {
+		t.IdleConnTimeout = time.Duration(seconds) * time.Second
+	}
+	if seconds := common.GetEnvOrDefault("HTTP_RESPONSE_HEADER_TIMEOUT_SECONDS", 0); seconds > 0 {
+		t.ResponseHeaderTimeout = time.Duration(seconds) * time.Second
 	}
 }
 
@@ -120,6 +161,8 @@ func newProxyUTLSRoundTripper(proxyURL *url.URL) (*proxyUTLSRoundTripper, error)
 	base := http.DefaultTransport.(*http.Transport).Clone()
 	base.Proxy = nil
 	base.ForceAttemptHTTP2 = false
+
+	applyHTTPTransportTuning(base)
 
 	dialContext := base.DialContext
 	if dialContext == nil {
