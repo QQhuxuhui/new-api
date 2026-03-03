@@ -24,20 +24,20 @@ const (
 // QuotaLimitStatus represents the current quota limit status for a user plan
 type QuotaLimitStatus struct {
 	// Daily quota status (subscription plans only)
-	DailyQuotaLimit   int64   `json:"daily_quota_limit"`    // 0 means no limit
-	DailyQuotaUsed    int64   `json:"daily_quota_used"`
-	DailyQuotaRemain  int64   `json:"daily_quota_remaining"`
-	DailyResetTime    int64   `json:"daily_reset_time"`     // Unix timestamp when daily quota resets
+	DailyQuotaLimit  int64 `json:"daily_quota_limit"` // 0 means no limit
+	DailyQuotaUsed   int64 `json:"daily_quota_used"`
+	DailyQuotaRemain int64 `json:"daily_quota_remaining"`
+	DailyResetTime   int64 `json:"daily_reset_time"` // Unix timestamp when daily quota resets
 
 	// Rate limit status
-	RateLimited       bool    `json:"rate_limited"`
-	RateLimitWaitSec  int64   `json:"rate_limit_wait_seconds"` // Seconds to wait before rate limit resets
-	RateLimitMessage  string  `json:"rate_limit_message,omitempty"`
+	RateLimited      bool   `json:"rate_limited"`
+	RateLimitWaitSec int64  `json:"rate_limit_wait_seconds"` // Seconds to wait before rate limit resets
+	RateLimitMessage string `json:"rate_limit_message,omitempty"`
 
 	// Total quota status
-	TotalQuotaLimit   int64   `json:"total_quota_limit"`
-	TotalQuotaUsed    int64   `json:"total_quota_used"`
-	TotalQuotaRemain  int64   `json:"total_quota_remaining"`
+	TotalQuotaLimit  int64 `json:"total_quota_limit"`
+	TotalQuotaUsed   int64 `json:"total_quota_used"`
+	TotalQuotaRemain int64 `json:"total_quota_remaining"`
 }
 
 // CheckDailyQuotaBeforeConsume verifies if consuming the specified quota would exceed daily limit.
@@ -48,25 +48,15 @@ func CheckDailyQuotaBeforeConsume(userPlanId int, quotaAmount int64) error {
 		return nil
 	}
 
-	// Get user plan to check if it has daily quota limit
+	// Get user plan to check if it has daily quota limit.
+	// Note: user plans may be snapshot-only (plan_id NULL) after template deletion/migration,
+	// so we must rely on UserPlan snapshot fields (with Plan preload fallback) instead of plan_id.
 	userPlan, err := model.GetUserPlanById(userPlanId)
 	if err != nil {
 		// If can't get plan, log but don't fail (graceful degradation)
 		common.SysLog(fmt.Sprintf("failed to get user plan %d for daily quota check: %v", userPlanId, err))
 		return nil
 	}
-
-	// Get the plan details for the user plan
-	if userPlan.PlanId == nil {
-		common.SysLog(fmt.Sprintf("user plan %d has no associated plan_id", userPlanId))
-		return nil
-	}
-	plan, err := model.GetPlanById(*userPlan.PlanId)
-	if err != nil {
-		common.SysLog(fmt.Sprintf("failed to get plan %d for daily quota check: %v", *userPlan.PlanId, err))
-		return nil
-	}
-	userPlan.Plan = plan
 
 	// Check effective daily quota limit (user override > plan default)
 	dailyLimit, hasLimit := userPlan.GetEffectiveDailyQuotaLimit()

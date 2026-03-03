@@ -251,6 +251,18 @@ func AdminForceSwitch(c *gin.Context) {
 		return
 	}
 
+	// Clear sticky sessions to ensure new plan's channels are used immediately
+	// (same rationale as user-initiated plan switch)
+	sessionManager := &service.SessionManager{}
+	common.SysLog(fmt.Sprintf("[SessionClear] user=%d clearing sticky sessions on admin plan switch (user_plan_id=%d plan_id=%d)",
+		req.UserId, req.UserPlanId, req.PlanId))
+	if clearErr := sessionManager.UnbindAllUserSessionsByUserId(req.UserId); clearErr != nil {
+		common.SysLog(fmt.Sprintf("[SessionClear] user=%d failed to clear sessions: %v", req.UserId, clearErr))
+		// Don't fail the response - plan switch succeeded
+	} else {
+		common.SysLog(fmt.Sprintf("[SessionClear] user=%d cleared sessions successfully", req.UserId))
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "套餐切换成功",
@@ -605,26 +617,26 @@ func UserToggleAutoSwitch(c *gin.Context) {
 
 // UserPlanResponse is the response format for frontend (with mapped field names)
 type UserPlanResponse struct {
-	Id                      int          `json:"id"`
-	UserId                  int          `json:"user_id"`
-	PlanId                  int          `json:"plan_id"`
-	Quota                   int64        `json:"quota"`
-	UsedQuota               int64        `json:"used_quota"`
-	IsCurrent               int          `json:"is_current"`
-	AutoSwitch              int          `json:"auto_switch"`
-	CanSwitch               int          `json:"can_switch"`                 // Mapped from AllowUserSwitch
-	CanToggleAuto           int          `json:"can_toggle_auto"`            // Mapped from AllowUserToggle
-	Locked                  int          `json:"locked"`
-	LockedReason            string       `json:"locked_reason"`
-	AdminNote               string       `json:"admin_note"`
-	StartedAt               int64        `json:"started_at"`
-	ExpiresAt               int64        `json:"expires_at"`
-	Status                  int          `json:"status"`
-	CreatedAt               int64        `json:"created_at"`
-	UpdatedAt               int64        `json:"updated_at"`
-	DailyQuotaLimitOverride *int64       `json:"daily_quota_limit_override"` // Per-user daily quota limit override (nil = use plan default)
-	EffectiveDailyLimit     int64        `json:"effective_daily_limit"`      // Computed effective daily limit
-	Plan                    *model.Plan  `json:"plan,omitempty"`
+	Id                      int         `json:"id"`
+	UserId                  int         `json:"user_id"`
+	PlanId                  int         `json:"plan_id"`
+	Quota                   int64       `json:"quota"`
+	UsedQuota               int64       `json:"used_quota"`
+	IsCurrent               int         `json:"is_current"`
+	AutoSwitch              int         `json:"auto_switch"`
+	CanSwitch               int         `json:"can_switch"`      // Mapped from AllowUserSwitch
+	CanToggleAuto           int         `json:"can_toggle_auto"` // Mapped from AllowUserToggle
+	Locked                  int         `json:"locked"`
+	LockedReason            string      `json:"locked_reason"`
+	AdminNote               string      `json:"admin_note"`
+	StartedAt               int64       `json:"started_at"`
+	ExpiresAt               int64       `json:"expires_at"`
+	Status                  int         `json:"status"`
+	CreatedAt               int64       `json:"created_at"`
+	UpdatedAt               int64       `json:"updated_at"`
+	DailyQuotaLimitOverride *int64      `json:"daily_quota_limit_override"` // Per-user daily quota limit override (nil = use plan default)
+	EffectiveDailyLimit     int64       `json:"effective_daily_limit"`      // Computed effective daily limit
+	Plan                    *model.Plan `json:"plan,omitempty"`
 
 	// Queue management fields
 	QueuePosition int `json:"queue_position"` // Position in queue (0 = current/not in queue)
@@ -656,8 +668,8 @@ func convertToUserPlanResponse(up *model.UserPlan) *UserPlanResponse {
 		UsedQuota:               up.UsedQuota,
 		IsCurrent:               up.IsCurrent,
 		AutoSwitch:              up.AutoSwitch,
-		CanSwitch:               up.AllowUserSwitch,           // Map field name
-		CanToggleAuto:           up.AllowUserToggle,           // Map field name
+		CanSwitch:               up.AllowUserSwitch, // Map field name
+		CanToggleAuto:           up.AllowUserToggle, // Map field name
 		Locked:                  up.Locked,
 		LockedReason:            up.LockedReason,
 		AdminNote:               up.AdminNote,

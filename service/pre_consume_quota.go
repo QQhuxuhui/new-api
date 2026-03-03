@@ -209,6 +209,38 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 				dailyQuotaErr := CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, requiredQuota)
 				if dailyQuotaErr != nil {
 					logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 每日额度不足: %v, 回退到用户余额", relayInfo.UserId, relayInfo.UserPlanId, dailyQuotaErr))
+
+					// Daily quota exceeded for current plan. If auto-switch is enabled, try switching to
+					// another plan that can cover the full request (and has remaining daily quota).
+					if userPlan.AutoSwitch == 1 {
+						usingGroup := relayInfo.UsingGroup
+						if usingGroup == "" {
+							usingGroup = common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+						}
+						switchedPlan, switchErr := trySwitchToPlanForRequiredQuota(c, relayInfo, requiredQuota, usingGroup)
+						if switchErr != nil {
+							common.SysLog(fmt.Sprintf("failed to auto-switch plan for daily quota exceeded: user=%d user_plan=%d err=%v",
+								relayInfo.UserId, relayInfo.UserPlanId, switchErr))
+						} else if switchedPlan != nil && switchedPlan.Quota >= requiredQuota {
+							relayInfo.BillingSource = BillingSourcePlan
+							logger.LogInfo(c, fmt.Sprintf("用户 %d 自动切换到套餐 %d 后使用套餐计费, 需要: %s",
+								relayInfo.UserId, relayInfo.UserPlanId, logger.FormatQuota(preConsumedQuota)))
+
+							// For plan billing, SKIP user balance check and deduction entirely.
+							// Only pre-consume from token quota (if not unlimited/playground).
+							if !relayInfo.IsPlayground && !relayInfo.TokenUnlimited {
+								err := PreConsumeTokenQuota(relayInfo, preConsumedQuota)
+								if err != nil {
+									return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+								}
+							}
+
+							relayInfo.FinalPreConsumedQuota = preConsumedQuota
+							logger.LogInfo(c, fmt.Sprintf("用户 %d 使用套餐计费, 预记录 %s (不扣除用户余额)", relayInfo.UserId, logger.FormatQuota(preConsumedQuota)))
+							return nil
+						}
+					}
+
 					// Continue to user balance fallback
 				} else {
 					// Plan quota sufficient - use plan billing
@@ -245,6 +277,41 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 					}
 				}
 
+				// If daily quota is exhausted (planMax==0) and wallet can't cover the request,
+				// try switching to another plan that can cover it.
+				if planMax <= 0 && userPlan.AutoSwitch == 1 {
+					userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
+					if err != nil {
+						return types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+					}
+					if userQuota <= 0 || int64(userQuota) < requiredQuota {
+						usingGroup := relayInfo.UsingGroup
+						if usingGroup == "" {
+							usingGroup = common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+						}
+						switchedPlan, switchErr := trySwitchToPlanForRequiredQuota(c, relayInfo, requiredQuota, usingGroup)
+						if switchErr != nil {
+							common.SysLog(fmt.Sprintf("failed to auto-switch plan for daily quota exhausted: user=%d user_plan=%d err=%v",
+								relayInfo.UserId, relayInfo.UserPlanId, switchErr))
+						} else if switchedPlan != nil && switchedPlan.Quota >= requiredQuota {
+							relayInfo.BillingSource = BillingSourcePlan
+							logger.LogInfo(c, fmt.Sprintf("用户 %d 自动切换到套餐 %d 后使用套餐计费, 需要: %s",
+								relayInfo.UserId, relayInfo.UserPlanId, logger.FormatQuota(preConsumedQuota)))
+
+							// Pre-consume from token quota only (plan billing path).
+							if !relayInfo.IsPlayground && !relayInfo.TokenUnlimited {
+								if err := PreConsumeTokenQuota(relayInfo, preConsumedQuota); err != nil {
+									return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+								}
+							}
+
+							relayInfo.FinalPreConsumedQuota = preConsumedQuota
+							logger.LogInfo(c, fmt.Sprintf("用户 %d 使用套餐计费, 预记录 %s (不扣除用户余额)", relayInfo.UserId, logger.FormatQuota(preConsumedQuota)))
+							return nil
+						}
+					}
+				}
+
 				if planMax > 0 {
 					remainder := requiredQuota - planMax
 
@@ -253,6 +320,44 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 						return types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 					}
 					if userQuota <= 0 || int64(userQuota) < remainder {
+						// Wallet can't cover the remainder. If auto-switch is enabled, try switching to another
+						// plan that can cover the full request (keep UsingGroup unchanged to preserve the
+						// already-selected channel/group permissions for this request).
+						if userPlan.AutoSwitch == 1 {
+							usingGroup := relayInfo.UsingGroup
+							if usingGroup == "" {
+								usingGroup = common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+							}
+							switchedPlan, switchErr := trySwitchToPlanForRequiredQuota(c, relayInfo, requiredQuota, usingGroup)
+							if switchErr != nil {
+								common.SysLog(fmt.Sprintf("failed to auto-switch plan for insufficient remainder: user=%d user_plan=%d err=%v",
+									relayInfo.UserId, relayInfo.UserPlanId, switchErr))
+							} else if switchedPlan != nil {
+								userPlan = switchedPlan
+								planAvailable = userPlan.Quota
+
+								// Retry plan-only billing with the new plan.
+								if planAvailable >= requiredQuota {
+									if dailyQuotaErr := CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, requiredQuota); dailyQuotaErr == nil {
+										relayInfo.BillingSource = BillingSourcePlan
+										logger.LogInfo(c, fmt.Sprintf("用户 %d 自动切换到套餐 %d 后使用套餐计费, 需要: %s",
+											relayInfo.UserId, relayInfo.UserPlanId, logger.FormatQuota(preConsumedQuota)))
+
+										// Pre-consume from token quota only (plan billing path).
+										if !relayInfo.IsPlayground && !relayInfo.TokenUnlimited {
+											if err := PreConsumeTokenQuota(relayInfo, preConsumedQuota); err != nil {
+												return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+											}
+										}
+
+										relayInfo.FinalPreConsumedQuota = preConsumedQuota
+										logger.LogInfo(c, fmt.Sprintf("用户 %d 使用套餐计费, 预记录 %s (不扣除用户余额)", relayInfo.UserId, logger.FormatQuota(preConsumedQuota)))
+										return nil
+									}
+								}
+							}
+						}
+
 						// Not enough wallet to cover the remainder; fall back to wallet-only error path.
 						logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐 %d 余额不足以覆盖预扣费, 且钱包余额不足, 回退到用户余额校验失败", relayInfo.UserId, relayInfo.UserPlanId))
 					} else {
@@ -425,4 +530,68 @@ func userPlanAllowsGroup(plan *model.UserPlan, group string) bool {
 	}
 
 	return false
+}
+
+func trySwitchToPlanForRequiredQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo, requiredQuota int64, usingGroup string) (*model.UserPlan, error) {
+	if relayInfo == nil || relayInfo.UserId <= 0 {
+		return nil, nil
+	}
+
+	// Always read from DB to avoid stale cached quota/is_current values.
+	validPlans, err := model.GetUserValidPlans(relayInfo.UserId)
+	if err != nil {
+		return nil, err
+	}
+
+	tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+
+	for _, candidate := range validPlans {
+		if candidate == nil || candidate.Id <= 0 || candidate.Id == relayInfo.UserPlanId {
+			continue
+		}
+		if !candidate.IsValid() {
+			continue
+		}
+		if candidate.Quota < requiredQuota {
+			continue
+		}
+		if usingGroup != "" && !userPlanAllowsGroup(candidate, usingGroup) {
+			continue
+		}
+		if !hasPlanAvailableQuota(candidate) {
+			continue
+		}
+		// Must pass per-request daily quota check.
+		if err := CheckDailyQuotaBeforeConsume(candidate.Id, requiredQuota); err != nil {
+			continue
+		}
+
+		if err := model.SwitchToUserPlan(relayInfo.UserId, candidate.Id); err != nil {
+			// Candidate became unavailable or was invalidated concurrently; try next.
+			continue
+		}
+
+		relayInfo.UserPlanId = candidate.Id
+		relayInfo.PlanId = 0
+		if candidate.PlanId != nil {
+			relayInfo.PlanId = *candidate.PlanId
+		}
+
+		common.SetContextKey(c, constant.ContextKeyPlanId, relayInfo.PlanId)
+		common.SetContextKey(c, constant.ContextKeyUserPlanId, relayInfo.UserPlanId)
+		common.SetContextKey(c, constant.ContextKeyPlanName, candidate.GetDisplayName())
+		common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
+
+		planGroupSet := expandChannelGroupsToSet(candidate.GetChannelGroups())
+		effectiveGroups := applyTokenGroupConstraint(planGroupSet, tokenGroup)
+		if len(effectiveGroups) > 0 {
+			common.SetContextKey(c, constant.ContextKeyPlanGroups, effectiveGroups)
+			// Keep single plan group for compatibility; do not change UsingGroup.
+			common.SetContextKey(c, constant.ContextKeyPlanGroup, usingGroup)
+		}
+
+		return candidate, nil
+	}
+
+	return nil, nil
 }

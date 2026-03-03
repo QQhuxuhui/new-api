@@ -10,8 +10,10 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
+	miniredis "github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
 )
 
@@ -389,5 +391,321 @@ func TestPreConsumeQuota_ReSelectsValidPlanForCurrentGroup_WhenMiddlewarePlanSta
 	}
 	if reloaded.IsCurrent != 1 {
 		t.Fatalf("expected selected plan is_current=1, got %d", reloaded.IsCurrent)
+	}
+}
+
+func TestPreConsumeQuota_AutoSwitchesToAnotherPlan_WhenPlanInsufficientAndWalletInsufficient(t *testing.T) {
+	db := setupTestDB(t)
+
+	user := &model.User{
+		Username: "u1",
+		Password: "12345678",
+		Status:   1,
+		Quota:    0, // wallet is insufficient by design
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	plan := &model.Plan{
+		Name:         "plan1",
+		DisplayName:  "Plan 1",
+		Type:         model.PlanTypeSubscription,
+		Category:     model.PlanCategoryMonthly,
+		Status:       model.PlanStatusEnabled,
+		DefaultQuota: 1000,
+		ChannelGroup: "g1",
+	}
+	if err := db.Create(plan).Error; err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	planId := plan.Id
+
+	currentPlan := &model.UserPlan{
+		UserId:        user.Id,
+		PlanId:        &planId,
+		Quota:         100,
+		UsedQuota:     0,
+		OriginalQuota: 100,
+		IsCurrent:     1,
+		AutoSwitch:    1,
+		Status:        model.UserPlanStatusActive,
+		QueuePosition: 0,
+	}
+	if err := db.Create(currentPlan).Error; err != nil {
+		t.Fatalf("create current user_plan: %v", err)
+	}
+
+	nextPlan := &model.UserPlan{
+		UserId:           user.Id,
+		PlanId:           &planId,
+		Quota:            1000,
+		UsedQuota:        0,
+		OriginalQuota:    1000,
+		IsCurrent:        0,
+		Status:           model.UserPlanStatusActive,
+		QueuePosition:    1,
+		PlanValidityDays: 30,
+	}
+	if err := db.Create(nextPlan).Error; err != nil {
+		t.Fatalf("create next user_plan: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, "g1")
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:        user.Id,
+		UsingGroup:    "g1",
+		UserPlanId:    currentPlan.Id,
+		PlanId:        planId,
+		BillingSource: BillingSourcePlan,
+		IsPlayground:  true, // skip token quota operations in tests
+	}
+
+	const preConsume = 150
+	if apiErr := PreConsumeQuota(c, preConsume, relayInfo); apiErr != nil {
+		t.Fatalf("pre-consume returned error: %v", apiErr)
+	}
+
+	if relayInfo.BillingSource != BillingSourcePlan {
+		t.Fatalf("expected BillingSource=%q, got %q", BillingSourcePlan, relayInfo.BillingSource)
+	}
+	if relayInfo.UserPlanId != nextPlan.Id {
+		t.Fatalf("expected relayInfo.UserPlanId switched to %d, got %d", nextPlan.Id, relayInfo.UserPlanId)
+	}
+
+	// Wallet should not be touched (plan can fully cover after switching).
+	userQuota, err := model.GetUserQuota(user.Id, true)
+	if err != nil {
+		t.Fatalf("get user quota: %v", err)
+	}
+	if userQuota != 0 {
+		t.Fatalf("expected user quota stays 0, got %d", userQuota)
+	}
+
+	// DB current plan should be switched and queued plan should be activated.
+	var reloadedNext model.UserPlan
+	if err := db.First(&reloadedNext, nextPlan.Id).Error; err != nil {
+		t.Fatalf("reload next plan: %v", err)
+	}
+	if reloadedNext.IsCurrent != 1 || reloadedNext.QueuePosition != 0 || reloadedNext.StartedAt == 0 {
+		t.Fatalf("expected next plan activated (is_current=1, queue_position=0, started_at>0), got is_current=%d queue_position=%d started_at=%d",
+			reloadedNext.IsCurrent, reloadedNext.QueuePosition, reloadedNext.StartedAt)
+	}
+
+	var reloadedCurrent model.UserPlan
+	if err := db.First(&reloadedCurrent, currentPlan.Id).Error; err != nil {
+		t.Fatalf("reload current plan: %v", err)
+	}
+	if reloadedCurrent.IsCurrent != 0 {
+		t.Fatalf("expected old plan is_current=0 after switch, got %d", reloadedCurrent.IsCurrent)
+	}
+}
+
+func TestPreConsumeQuota_AutoSwitchesToAnotherPlan_WhenDailyQuotaExceededAndWalletInsufficient(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Enable Redis via miniredis to exercise daily quota tracking.
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	prevRDB := common.RDB
+	prevRedisEnabled := common.RedisEnabled
+	common.RDB = redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	common.RedisEnabled = true
+	defer func() {
+		_ = common.RDB.Close()
+		common.RDB = prevRDB
+		common.RedisEnabled = prevRedisEnabled
+	}()
+
+	user := &model.User{
+		Username: "u1",
+		Password: "12345678",
+		Status:   1,
+		Quota:    0, // wallet is insufficient by design
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	plan := &model.Plan{
+		Name:         "plan1",
+		DisplayName:  "Plan 1",
+		Type:         model.PlanTypeSubscription,
+		Category:     model.PlanCategoryMonthly,
+		Status:       model.PlanStatusEnabled,
+		DefaultQuota: 1000,
+		ChannelGroup: "g1",
+	}
+	if err := db.Create(plan).Error; err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	planId := plan.Id
+
+	limit := int64(100)
+	currentPlan := &model.UserPlan{
+		UserId:                  user.Id,
+		PlanId:                  &planId,
+		Quota:                   1000,
+		OriginalQuota:           1000,
+		IsCurrent:               1,
+		AutoSwitch:              1,
+		Status:                  model.UserPlanStatusActive,
+		DailyQuotaLimitOverride: &limit, // force daily quota limit on this user plan
+	}
+	if err := db.Create(currentPlan).Error; err != nil {
+		t.Fatalf("create current user_plan: %v", err)
+	}
+
+	nextPlan := &model.UserPlan{
+		UserId:        user.Id,
+		PlanId:        &planId,
+		Quota:         1000,
+		OriginalQuota: 1000,
+		IsCurrent:     0,
+		Status:        model.UserPlanStatusActive,
+		QueuePosition: 1,
+	}
+	if err := db.Create(nextPlan).Error; err != nil {
+		t.Fatalf("create next user_plan: %v", err)
+	}
+
+	// Exhaust current plan's daily quota.
+	if err := IncrDailyQuotaUsage(currentPlan.Id, limit); err != nil {
+		t.Fatalf("incr daily quota usage: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, "g1")
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:        user.Id,
+		UsingGroup:    "g1",
+		UserPlanId:    currentPlan.Id,
+		PlanId:        planId,
+		BillingSource: BillingSourcePlan,
+		IsPlayground:  true, // skip token quota operations in tests
+	}
+
+	const preConsume = 50
+	if apiErr := PreConsumeQuota(c, preConsume, relayInfo); apiErr != nil {
+		t.Fatalf("pre-consume returned error: %v", apiErr)
+	}
+
+	if relayInfo.BillingSource != BillingSourcePlan {
+		t.Fatalf("expected BillingSource=%q, got %q", BillingSourcePlan, relayInfo.BillingSource)
+	}
+	if relayInfo.UserPlanId != nextPlan.Id {
+		t.Fatalf("expected relayInfo.UserPlanId switched to %d, got %d", nextPlan.Id, relayInfo.UserPlanId)
+	}
+}
+
+func TestPreConsumeQuota_AutoSwitchesToAnotherPlan_WhenDailyQuotaExhaustedAndPlanSplitWouldFallbackToWallet(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Enable Redis via miniredis to exercise daily quota tracking.
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	prevRDB := common.RDB
+	prevRedisEnabled := common.RedisEnabled
+	common.RDB = redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	common.RedisEnabled = true
+	defer func() {
+		_ = common.RDB.Close()
+		common.RDB = prevRDB
+		common.RedisEnabled = prevRedisEnabled
+	}()
+
+	user := &model.User{
+		Username: "u1",
+		Password: "12345678",
+		Status:   1,
+		Quota:    0, // wallet is insufficient by design
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	plan := &model.Plan{
+		Name:         "plan1",
+		DisplayName:  "Plan 1",
+		Type:         model.PlanTypeSubscription,
+		Category:     model.PlanCategoryMonthly,
+		Status:       model.PlanStatusEnabled,
+		DefaultQuota: 1000,
+		ChannelGroup: "g1",
+	}
+	if err := db.Create(plan).Error; err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	planId := plan.Id
+
+	limit := int64(100)
+	currentPlan := &model.UserPlan{
+		UserId:                  user.Id,
+		PlanId:                  &planId,
+		Quota:                   50, // insufficient for the request, would normally split
+		OriginalQuota:           50,
+		IsCurrent:               1,
+		AutoSwitch:              1,
+		Status:                  model.UserPlanStatusActive,
+		DailyQuotaLimitOverride: &limit, // force daily quota limit on this user plan
+	}
+	if err := db.Create(currentPlan).Error; err != nil {
+		t.Fatalf("create current user_plan: %v", err)
+	}
+
+	nextPlan := &model.UserPlan{
+		UserId:        user.Id,
+		PlanId:        &planId,
+		Quota:         1000,
+		OriginalQuota: 1000,
+		IsCurrent:     0,
+		Status:        model.UserPlanStatusActive,
+		QueuePosition: 1,
+	}
+	if err := db.Create(nextPlan).Error; err != nil {
+		t.Fatalf("create next user_plan: %v", err)
+	}
+
+	// Exhaust current plan's daily quota so planMax becomes 0 and the code would fallback to wallet.
+	if err := IncrDailyQuotaUsage(currentPlan.Id, limit); err != nil {
+		t.Fatalf("incr daily quota usage: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, "g1")
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:        user.Id,
+		UsingGroup:    "g1",
+		UserPlanId:    currentPlan.Id,
+		PlanId:        planId,
+		BillingSource: BillingSourcePlan,
+		IsPlayground:  true, // skip token quota operations in tests
+	}
+
+	const preConsume = 80
+	if apiErr := PreConsumeQuota(c, preConsume, relayInfo); apiErr != nil {
+		t.Fatalf("pre-consume returned error: %v", apiErr)
+	}
+
+	if relayInfo.BillingSource != BillingSourcePlan {
+		t.Fatalf("expected BillingSource=%q, got %q", BillingSourcePlan, relayInfo.BillingSource)
+	}
+	if relayInfo.UserPlanId != nextPlan.Id {
+		t.Fatalf("expected relayInfo.UserPlanId switched to %d, got %d", nextPlan.Id, relayInfo.UserPlanId)
 	}
 }
