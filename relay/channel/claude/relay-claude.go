@@ -934,11 +934,13 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 //     cachedCreation   = totalCached − cachedTokens   (integer subtraction, no float error)
 //
 // This guarantees:
-//   cachedTokens + cachedCreation == totalCached ≤ promptTokens
-//   nonCached = promptTokens − totalCached > 0  (as long as totalCacheRatio < 1)
 //
-// The function does NOT modify PromptTokens to avoid unintended billing side effects;
-// it only fills the detail fields used for cache statistics display.
+//	cachedTokens + cachedCreation == totalCached ≤ promptTokens
+//	nonCached = promptTokens − totalCached > 0  (as long as totalCacheRatio < 1)
+//
+// The function normalizes PromptTokens to total input tokens
+// (non-cached + cache-read + cache-creation) so downstream billing and logs
+// can derive the non-cached remainder from simulated cache fields.
 func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 	if usage == nil || info.ChannelMeta == nil {
 		return
@@ -947,11 +949,28 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 	if cfg == nil || !cfg.Enabled {
 		return
 	}
+
+	// Claude /v1/messages input_tokens may represent only the non-cached remainder.
+	// Reconstruct source total input from all available components before simulation.
+	sourcePromptTokens := usage.PromptTokens
+	sourceCachedTokens := usage.PromptTokensDetails.CachedTokens
+	sourceCachedCreationTokens := usage.PromptTokensDetails.CachedCreationTokens
+	if sourceCachedCreationTokens <= 0 {
+		splitCreation := usage.ClaudeCacheCreation5mTokens + usage.ClaudeCacheCreation1hTokens
+		if splitCreation > 0 {
+			sourceCachedCreationTokens = splitCreation
+		}
+	}
+	sourceTotalInputTokens := sourcePromptTokens + sourceCachedTokens + sourceCachedCreationTokens
+	if sourceTotalInputTokens < sourcePromptTokens {
+		// Overflow guard: keep a sane lower bound.
+		sourceTotalInputTokens = sourcePromptTokens
+	}
 	minTokens := cfg.MinInputTokens
 	if minTokens <= 0 {
 		minTokens = dto.DefaultCacheSimMinInputTokens
 	}
-	if usage.PromptTokens < minTokens {
+	if sourceTotalInputTokens < minTokens {
 		return
 	}
 
@@ -992,7 +1011,7 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 
 	totalCacheRatio := totalMin + rand.Float64()*(totalMax-totalMin)
 	// Large context bonus: long conversations have higher overall cache engagement.
-	if usage.PromptTokens > 50000 {
+	if sourceTotalInputTokens > 50000 {
 		totalCacheRatio += 0.05
 	}
 	if totalCacheRatio > 0.95 {
@@ -1026,7 +1045,7 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 	}
 
 	// ── Compute token counts ───────────────────────────────────────────────
-	promptTokens := usage.PromptTokens
+	promptTokens := sourceTotalInputTokens
 	totalCached := int(float64(promptTokens) * totalCacheRatio)
 	if totalCached > promptTokens {
 		totalCached = promptTokens
@@ -1041,6 +1060,8 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 
 	// Zero out Claude-specific cache creation sub-fields so they don't contradict
 	// the simulated CachedCreationTokens written below.
+	usage.PromptTokens = sourceTotalInputTokens
+	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	usage.ClaudeCacheCreation5mTokens = 0
 	usage.ClaudeCacheCreation1hTokens = 0
 	usage.PromptTokensDetails.CachedTokens = cachedTokens

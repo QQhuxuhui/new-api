@@ -185,3 +185,58 @@ func TestApplyCacheSimulationAppliesAtMinInputTokensBoundary(t *testing.T) {
 		)
 	}
 }
+
+func TestApplyCacheSimulationUsesTotalInputForThresholdAndOverridesUpstreamStats(t *testing.T) {
+	cfg := &dto.CacheSimulationConfig{
+		Enabled:            true,
+		TotalCacheRatioMin: 0.8,
+		TotalCacheRatioMax: 0.8,
+		ReadFractionMin:    0.9,
+		ReadFractionMax:    0.9,
+		MinInputTokens:     1024,
+	}
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{
+				CacheSimulation: cfg,
+			},
+		},
+	}
+	usage := &dto.Usage{
+		PromptTokens: 0, // Claude /v1/messages input_tokens often represents non-cached remainder.
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         30361,
+			CachedCreationTokens: 127772,
+		},
+		ClaudeCacheCreation5mTokens: 127772,
+		ClaudeCacheCreation1hTokens: 0,
+	}
+
+	applyCacheSimulation(info, usage)
+
+	totalInputTokens := 0 + 30361 + 127772
+	// Large-context bonus applies when total input > 50000: +0.05 on total cache ratio.
+	totalCached := int(float64(totalInputTokens) * 0.85)
+	wantRead := int(float64(totalCached) * 0.9)
+	wantCreate := totalCached - wantRead
+	if usage.PromptTokens != totalInputTokens {
+		t.Fatalf("simulation should normalize prompt tokens to total input, got %d want %d", usage.PromptTokens, totalInputTokens)
+	}
+
+	if usage.PromptTokensDetails.CachedTokens != wantRead ||
+		usage.PromptTokensDetails.CachedCreationTokens != wantCreate {
+		t.Fatalf("simulation should overwrite upstream stats using total input, got read=%d create=%d want read=%d create=%d",
+			usage.PromptTokensDetails.CachedTokens,
+			usage.PromptTokensDetails.CachedCreationTokens,
+			wantRead,
+			wantCreate,
+		)
+	}
+	if usage.ClaudeCacheCreation5mTokens != 0 || usage.ClaudeCacheCreation1hTokens != 0 {
+		t.Fatalf("simulation should reset split cache creation fields, got 5m=%d 1h=%d",
+			usage.ClaudeCacheCreation5mTokens,
+			usage.ClaudeCacheCreation1hTokens,
+		)
+	}
+}

@@ -3,15 +3,17 @@ package dto
 // Default cache simulation parameters used when CacheSimulationConfig fields are zero.
 //
 // Two-level model:
-//   TotalCacheRatio  — what fraction of prompt tokens participated in any caching.
-//                      The complement (1 - ratio) becomes the "非缓存提示" portion in logs.
-//                      Must be < 1.0 to guarantee a non-zero non-cached token count.
-//   ReadFraction     — of the cached tokens, what fraction came from cache reads
-//                      (the rest is cache creation).  High value = mature conversation.
+//
+//	TotalCacheRatio  — what fraction of prompt tokens participated in any caching.
+//	                   The complement (1 - ratio) becomes the "非缓存提示" portion in logs.
+//	                   Must be < 1.0 to guarantee a non-zero non-cached token count.
+//	ReadFraction     — of the cached tokens, what fraction came from cache reads
+//	                   (the rest is cache creation).  High value = mature conversation.
 //
 // Defaults reflect a typical multi-turn conversation with moderate cache engagement:
-//   55 %–90 % of tokens are cached overall, of which 88 %–97 % are reads.
-//   This leaves 10 %–45 % as uncached "提示" tokens and 3 %–12 % as cache-creation.
+//
+//	55 %–90 % of tokens are cached overall, of which 88 %–97 % are reads.
+//	This leaves 10 %–45 % as uncached "提示" tokens and 3 %–12 % as cache-creation.
 const (
 	DefaultCacheSimTotalCacheRatioMin = 0.55
 	DefaultCacheSimTotalCacheRatioMax = 0.80
@@ -21,9 +23,9 @@ const (
 )
 
 // CacheSimulationConfig defines per-channel cache token simulation parameters.
-// When Enabled is true and the upstream returns no cache token data, realistic
-// cache hit statistics are simulated so downstream consumers (dashboards, billing)
-// see Claude-style prompt caching values.
+// When Enabled is true, cache hit statistics are simulated and overwrite
+// upstream cache fields so downstream consumers (dashboards, billing) see
+// consistent Claude-style prompt caching values.
 //
 // All ratio/token fields fall back to the Default* constants when left as zero.
 type CacheSimulationConfig struct {

@@ -3711,7 +3711,7 @@ const EditChannelModal = (props) => {
                         )
                       }
                       extraText={t(
-                        '开启后当上游不返回缓存统计时，按配置比例模拟缓存 token 数据',
+                        '开启后始终按配置比例模拟缓存 token 数据（覆盖上游缓存统计）',
                       )}
                     />
                     <Form.Switch

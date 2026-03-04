@@ -20,6 +20,10 @@ For commercial licensing, please contact support@quantumnous.com
 import i18next from 'i18next';
 import { Modal, Tag, Typography, Avatar } from '@douyinfe/semi-ui';
 import { copy, showSuccess } from './utils';
+import {
+  calculateClaudeEffectiveInputTokens,
+  hasSplitClaudeCacheCreation,
+} from './claudePrice';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 import { visit } from 'unist-util-visit';
 import * as LobeIcons from '@lobehub/icons';
@@ -1812,8 +1816,10 @@ export function renderClaudeModelPrice(
     const cacheCreationRatioPrice5m = modelRatio * 2.0 * cacheCreationRatio5m;
     const cacheCreationRatioPrice1h = modelRatio * 2.0 * cacheCreationRatio1h;
 
-    const hasSplitCacheCreation =
-      cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
+    const hasSplitCacheCreation = hasSplitClaudeCacheCreation(
+      cacheCreationTokens5m,
+      cacheCreationTokens1h,
+    );
 
     const shouldShowCache = cacheTokens > 0;
     const shouldShowLegacyCacheCreation =
@@ -1823,14 +1829,19 @@ export function renderClaudeModelPrice(
     const shouldShowCacheCreation1h =
       hasSplitCacheCreation && cacheCreationTokens1h > 0;
 
-    // Calculate effective input tokens (non-cached + cached with ratio applied + cache creation with ratio applied)
-    const nonCachedTokens = inputTokens;
-    const effectiveInputTokens =
-      nonCachedTokens +
-      cacheTokens * cacheRatio +
-      cacheCreationTokens * cacheCreationRatio +
-      cacheCreationTokens5m * cacheCreationRatio5m +
-      cacheCreationTokens1h * cacheCreationRatio1h;
+    // When 5m/1h split data exists, cache creation is priced from split fields only.
+    // Avoid adding legacy total cacheCreationTokens again (double counting).
+    const effectiveInputTokens = calculateClaudeEffectiveInputTokens({
+      inputTokens,
+      cacheTokens,
+      cacheRatio,
+      cacheCreationTokens,
+      cacheCreationRatio,
+      cacheCreationTokens5m,
+      cacheCreationRatio5m,
+      cacheCreationTokens1h,
+      cacheCreationRatio1h,
+    });
 
     let price =
       (effectiveInputTokens / 1000000) * inputRatioPrice * groupRatio +
