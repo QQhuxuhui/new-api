@@ -186,6 +186,65 @@ func TestApplyCacheSimulationAppliesAtMinInputTokensBoundary(t *testing.T) {
 	}
 }
 
+func TestApplyCacheSimulationPreservesPromptAndCompletionTokens(t *testing.T) {
+	cfg := &dto.CacheSimulationConfig{
+		Enabled:            true,
+		TotalCacheRatioMin: 0.8,
+		TotalCacheRatioMax: 0.8,
+		ReadFractionMin:    0.9,
+		ReadFractionMax:    0.9,
+		MinInputTokens:     1024,
+	}
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{
+				CacheSimulation: cfg,
+			},
+		},
+	}
+	usage := &dto.Usage{
+		PromptTokens:     2000,
+		CompletionTokens: 500,
+		TotalTokens:      2500,
+	}
+
+	applyCacheSimulation(info, usage)
+
+	// Based on sourceTotalInputTokens = 2000 (no upstream cache tokens)
+	// totalCached = 2000 * 0.8 = 1600
+	// cachedTokens = 1600 * 0.9 = 1440
+	// cachedCreationTokens = 1600 - 1440 = 160
+	wantRead := 1440
+	wantCreate := 160
+
+	if usage.PromptTokens != 2000 {
+		t.Fatalf("simulation should not modify prompt tokens, got %d want %d", usage.PromptTokens, 2000)
+	}
+	if usage.CompletionTokens != 500 {
+		t.Fatalf("simulation should not modify completion tokens, got %d want %d", usage.CompletionTokens, 500)
+	}
+	if usage.TotalTokens != 2500 {
+		t.Fatalf("simulation should not modify total tokens, got %d want %d", usage.TotalTokens, 2500)
+	}
+
+	if usage.PromptTokensDetails.CachedTokens != wantRead ||
+		usage.PromptTokensDetails.CachedCreationTokens != wantCreate {
+		t.Fatalf("simulation should only update cache fields, got read=%d create=%d want read=%d create=%d",
+			usage.PromptTokensDetails.CachedTokens,
+			usage.PromptTokensDetails.CachedCreationTokens,
+			wantRead,
+			wantCreate,
+		)
+	}
+	if usage.ClaudeCacheCreation5mTokens != 0 || usage.ClaudeCacheCreation1hTokens != 0 {
+		t.Fatalf("simulation should reset split cache creation fields, got 5m=%d 1h=%d",
+			usage.ClaudeCacheCreation5mTokens,
+			usage.ClaudeCacheCreation1hTokens,
+		)
+	}
+}
+
 func TestApplyCacheSimulationUsesTotalInputForThresholdAndOverridesUpstreamStats(t *testing.T) {
 	cfg := &dto.CacheSimulationConfig{
 		Enabled:            true,
@@ -204,7 +263,9 @@ func TestApplyCacheSimulationUsesTotalInputForThresholdAndOverridesUpstreamStats
 		},
 	}
 	usage := &dto.Usage{
-		PromptTokens: 0, // Claude /v1/messages input_tokens often represents non-cached remainder.
+		PromptTokens:     0, // Claude /v1/messages input_tokens often represents non-cached remainder.
+		CompletionTokens: 500,
+		TotalTokens:      500,
 		PromptTokensDetails: dto.InputTokenDetails{
 			CachedTokens:         30361,
 			CachedCreationTokens: 127772,
@@ -220,8 +281,17 @@ func TestApplyCacheSimulationUsesTotalInputForThresholdAndOverridesUpstreamStats
 	totalCached := int(float64(totalInputTokens) * 0.85)
 	wantRead := int(float64(totalCached) * 0.9)
 	wantCreate := totalCached - wantRead
+
+	// PromptTokens is normalized to reconstructed total input tokens so downstream
+	// can derive the non-cached remainder from cache fields.
 	if usage.PromptTokens != totalInputTokens {
 		t.Fatalf("simulation should normalize prompt tokens to total input, got %d want %d", usage.PromptTokens, totalInputTokens)
+	}
+	if usage.CompletionTokens != 500 {
+		t.Fatalf("simulation should not modify completion tokens, got %d want %d", usage.CompletionTokens, 500)
+	}
+	if usage.TotalTokens != totalInputTokens+500 {
+		t.Fatalf("simulation should update total tokens, got %d want %d", usage.TotalTokens, totalInputTokens+500)
 	}
 
 	if usage.PromptTokensDetails.CachedTokens != wantRead ||

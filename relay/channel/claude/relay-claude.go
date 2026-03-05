@@ -1045,10 +1045,11 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 	}
 
 	// ── Compute token counts ───────────────────────────────────────────────
-	promptTokens := sourceTotalInputTokens
-	totalCached := int(float64(promptTokens) * totalCacheRatio)
-	if totalCached > promptTokens {
-		totalCached = promptTokens
+	// Use sourceTotalInputTokens (reconstructed total) as the base for cache simulation
+	// to handle cases where upstream input_tokens represents only non-cached remainder.
+	totalCached := int(float64(sourceTotalInputTokens) * totalCacheRatio)
+	if totalCached > sourceTotalInputTokens {
+		totalCached = sourceTotalInputTokens
 	}
 
 	cachedTokens := int(float64(totalCached) * readFraction)
@@ -1057,6 +1058,10 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 	}
 	// Integer subtraction: cachedTokens + cachedCreationTokens == totalCached exactly.
 	cachedCreationTokens := totalCached - cachedTokens
+
+	// Normalize PromptTokens to reconstructed total input tokens so downstream
+	// billing and response patching can derive the non-cached remainder from
+	// the simulated cache fields.
 
 	// Zero out Claude-specific cache creation sub-fields so they don't contradict
 	// the simulated CachedCreationTokens written below.
