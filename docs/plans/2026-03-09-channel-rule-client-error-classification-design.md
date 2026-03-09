@@ -73,16 +73,19 @@ func CheckClientErrorRule(statusCode int, errorMessage string) (isClient bool, r
   │
   ├─ isClient == true:
   │   ├─ context 设置 ContextKeyClientErrorFlag = true
-  │   ├─ 不调用 RecordChannelFailure
+  │   ├─ 不调用 RecordChannelFailure（跳过健康记录）
+  │   ├─ 仍调用 processChannelError（保留错误日志和自动封禁逻辑）
   │   ├─ returnImm == true → 设置 ContextKeyReturnImmediately = true
   │   └─ returnImm == false → 继续重试
   │
   └─ isClient == false:
       ├─ 检查 ContextKeyClientErrorFlag
       │   ├─ true → 跳过 RecordChannelFailure（全局 flag 生效）
+      │   │         仍调用 processChannelError
       │   └─ false → 走现有逻辑：
       │       if ShouldTriggerChannelFailover(statusCode, msg) || 504/524:
       │           RecordChannelFailure(channelId, statusCode, msg)
+      │       processChannelError(...)
       └─ shouldRetry() 照常判断是否重试
 ```
 
@@ -105,6 +108,13 @@ if common.GetContextKeyBool(c, constant.ContextKeyReturnImmediately) {
 | 客户端规则 + 不立刻返回 | 否 | 是 | 所有渠道失败后 |
 | 客户端 flag 后续渠道失败 | 否 | 是 | 所有渠道失败后 |
 | 任何渠道成功 | 是（计成功） | — | 返回成功 |
+
+**注意事项**：
+
+1. **仅 `RecordChannelFailure` 被跳过**，`processChannelError`（错误日志 + 自动封禁）在所有路径下保留执行
+2. **`ShouldImmediateFailover` 隐式跳过**：该函数在 `RecordChannelFailure` 内部调用，跳过 `RecordChannelFailure` 即跳过立即暂停判定，符合"客户端错误不影响渠道"的语义
+3. **`returnImm=false` 对 400 状态码**：`shouldRetry()` 对 400 本身返回 false，因此 `returnImm=false` 与 `returnImm=true` 行为一致（均不重试）。这不是 bug，是 shouldRetry 现有逻辑的正常行为
+4. **`CheckClientErrorRule` 取第一条匹配规则**：按 priority DESC 遍历，命中第一条规则即返回，高优先级规则胜出
 
 ## 前端变更
 
