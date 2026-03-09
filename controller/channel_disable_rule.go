@@ -19,8 +19,8 @@ type disableRuleRequest struct {
 	Enabled           bool     `json:"enabled"`
 	Description       string   `json:"description"`
 	Priority          int      `json:"priority"`
-	ErrorType         string   `json:"error_type"`
-	ReturnImmediately bool     `json:"return_immediately"`
+	ErrorType         *string  `json:"error_type"`
+	ReturnImmediately *bool    `json:"return_immediately"`
 }
 
 type testRuleRequest struct {
@@ -59,7 +59,7 @@ func CreateDisableRule(c *gin.Context) {
 		Description:       req.Description,
 		Priority:          req.Priority,
 		ErrorType:         normalizeDisableRuleErrorType(req.ErrorType),
-		ReturnImmediately: req.ReturnImmediately && normalizeDisableRuleErrorType(req.ErrorType) == model.RuleErrorTypeClient,
+		ReturnImmediately: getDisableRuleReturnImmediately(req.ReturnImmediately, normalizeDisableRuleErrorType(req.ErrorType), false),
 	}
 	if err := model.CreateDisableRule(rule); err != nil {
 		common.ApiError(c, err)
@@ -99,8 +99,10 @@ func UpdateDisableRule(c *gin.Context) {
 	rule.Enabled = req.Enabled
 	rule.Description = req.Description
 	rule.Priority = req.Priority
-	rule.ErrorType = normalizeDisableRuleErrorType(req.ErrorType)
-	rule.ReturnImmediately = req.ReturnImmediately && rule.ErrorType == model.RuleErrorTypeClient
+	if hasDisableRuleErrorTypeValue(req.ErrorType) {
+		rule.ErrorType = normalizeDisableRuleErrorType(req.ErrorType)
+	}
+	rule.ReturnImmediately = getDisableRuleReturnImmediately(req.ReturnImmediately, rule.GetErrorType(), rule.ReturnImmediately)
 
 	if err := model.UpdateDisableRule(rule); err != nil {
 		common.ApiError(c, err)
@@ -190,14 +192,31 @@ func validateDisableRule(req disableRuleRequest) error {
 	return nil
 }
 
-func normalizeDisableRuleErrorType(errorType string) string {
-	if strings.EqualFold(strings.TrimSpace(errorType), model.RuleErrorTypeClient) {
+func normalizeDisableRuleErrorType(errorType *string) string {
+	if errorType != nil && strings.EqualFold(strings.TrimSpace(*errorType), model.RuleErrorTypeClient) {
 		return model.RuleErrorTypeClient
 	}
 	return model.RuleErrorTypeServer
 }
 
-func isValidDisableRuleErrorType(errorType string) bool {
-	normalized := strings.TrimSpace(strings.ToLower(errorType))
+func isValidDisableRuleErrorType(errorType *string) bool {
+	if errorType == nil {
+		return true
+	}
+	normalized := strings.TrimSpace(strings.ToLower(*errorType))
 	return normalized == "" || normalized == model.RuleErrorTypeServer || normalized == model.RuleErrorTypeClient
+}
+
+func getDisableRuleReturnImmediately(returnImmediately *bool, errorType string, currentValue bool) bool {
+	if errorType != model.RuleErrorTypeClient {
+		return false
+	}
+	if returnImmediately == nil {
+		return currentValue
+	}
+	return *returnImmediately
+}
+
+func hasDisableRuleErrorTypeValue(errorType *string) bool {
+	return errorType != nil && strings.TrimSpace(*errorType) != ""
 }

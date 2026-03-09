@@ -651,7 +651,7 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return true
 	}
 
-	if common.GetContextKeyBool(c, constant.ContextKeyClientErrorFlag) {
+	if isClient, _ := service.CheckClientErrorRule(openaiErr.StatusCode, openaiErr.Error()); isClient {
 		return retryTimes > 0
 	}
 
@@ -935,16 +935,16 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 	if taskErr == nil {
 		return false
 	}
+	if _, ok := c.Get("specific_channel_id"); ok {
+		return false
+	}
 	if common.GetContextKeyBool(c, constant.ContextKeyReturnImmediately) {
 		return false
 	}
-	if common.GetContextKeyBool(c, constant.ContextKeyClientErrorFlag) {
+	if isClient, _ := service.CheckClientErrorRule(taskErr.StatusCode, taskErr.Message); isClient {
 		return retryTimes > 0
 	}
 	if retryTimes <= 0 {
-		return false
-	}
-	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
 	}
 	if taskErr.StatusCode == http.StatusTooManyRequests {
