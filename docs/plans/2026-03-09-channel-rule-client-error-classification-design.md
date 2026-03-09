@@ -80,8 +80,10 @@ func CheckClientErrorRule(statusCode int, errorMessage string) (isClient bool, r
   └─ isClient == false:
       ├─ 检查 ContextKeyClientErrorFlag
       │   ├─ true → 跳过 RecordChannelFailure（全局 flag 生效）
-      │   └─ false → 正常调用 RecordChannelFailure
-      └─ 走现有逻辑
+      │   └─ false → 走现有逻辑：
+      │       if ShouldTriggerChannelFailover(statusCode, msg) || 504/524:
+      │           RecordChannelFailure(channelId, statusCode, msg)
+      └─ shouldRetry() 照常判断是否重试
 ```
 
 `shouldRetry()` 新增判断：
