@@ -1,0 +1,149 @@
+┌─────────────────────────────────────────────────────────────────┐
+│          A​PI请求首字节响应慢（TTFB 30秒+）- 解决方案总结          │
+└─────────────────────────────────────────────────────────────────┘
+
+📋 问题：高峰期用户调用模型A​PI时，首字节响应时间超过30秒
+
+🎯 根本原因：HTTP客户端连接池配置不足
+   - Go默认每个主机只保持2个空闲连接
+   - 高峰期并发请求超过2个时，需要重新建立TCP+TLS连接
+   - 到海外A​PI建立连接需要5-10秒，导致请求排队
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ 已完成的优化
+
+1. 优化HTTP客户端连接池（service/http_client.go）
+   ✓ MaxIdleConnsPerHost: 2 → 100
+   ✓ MaxConnsPerHost: 0 → 200
+   ✓ MaxIdleConns: 100 → 1000
+   ✓ 连接超时: 30秒 → 10秒
+   ✓ 响应头超时: 无 → 60秒
+
+2. 优化Docker配置（docker-compose.yml）
+   ✓ RELAY_TIMEOUT=120秒
+   ✓ STREAMING_TIMEOUT=300秒
+   ✓ DNS优化: 8.8.8.8, 1.1.1.1
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 快速部署（推荐）
+
+cd /usr/src/workspace/github/QQhuxuhui/new-api
+./docs/deploy-optimization.sh
+
+这个脚本会自动：
+✓ 备份当前配置
+✓ 重新构建镜像（包含代码优化）
+✓ 重启服务
+✓ 验证效果
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📝 手动部署步骤
+
+步骤1：诊断当前问题
+./docs/diagnose-api-performance.sh
+
+步骤2：重新构建镜像
+docker-compose build
+
+步骤3：重启服务
+docker-compose down
+docker-compose up -d
+
+步骤4：验证效果
+./docs/diagnose-api-performance.sh
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 预期效果
+
+场景                  优化前      优化后
+────────────────────────────────────────
+低并发（<5请求）      1-3秒       1-3秒
+中并发（5-20请求）    10-30秒     2-5秒
+高并发（>20请求）     30秒+       3-8秒
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📁 相关文件
+
+已修改的文件：
+  ✓ service/http_client.go          - HTTP客户端连接池优化
+  ✓ docker-compose.yml              - 超时和DNS配置
+
+工具脚本：
+  • docs/deploy-optimization.sh     - 一键部署脚本 ⭐
+  • docs/diagnose-api-performance.sh - 性能诊断脚本
+
+文档：
+  • docs/API_PERFORMANCE_QUICK_FIX.md      - 快速修复指南
+  • docs/api-performance-optimization.md   - 详细优化方案
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔍 监控命令
+
+# 查看服务日志
+docker-compose logs -f new-api
+
+# 查看资源使用
+docker stats
+
+# 运行性能诊断
+./docs/diagnose-api-performance.sh
+
+# 测试A​PI响应时间
+time curl -X POST https://sparkcode.top/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-3.5-turbo","messages":[{"role":"user","content":"Hi"}]}'
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ 重要提示
+
+1. 必须重新构建镜像才能应用代码优化
+2. 构建时间约5-10分钟
+3. 重启服务会有1-2分钟停机时间
+4. 建议在低峰期执行
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🆘 故障恢复
+
+如果优化后出现问题：
+
+cd backup_YYYYMMDD_HHMMSS
+cp docker-compose.yml.backup ../docker-compose.yml
+cp http_client.go.backup ../service/http_client.go
+cd ..
+docker-compose build
+docker-compose down && docker-compose up -d
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 核心优化原理
+
+问题：
+  并发请求 > 2 → 需要新建连接 → TCP握手(1-2秒) + TLS握手(2-3秒)
+  → 多个请求排队等待 → TTFB 30秒+
+
+解决：
+  增加连接池 → 复用现有连接 → 跳过握手过程 → TTFB 3-8秒
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📞 需要帮助？
+
+如果问题仍然存在，可能是：
+1. 上游A​PI本身响应慢
+2. 服务器带宽不足（200M峰值可能不够）
+3. 网络路由问题
+4. 防火墙/安全组限制
+
+运行诊断脚本获取详细信息：
+./docs/diagnose-api-performance.sh
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -1,0 +1,104 @@
+┌─────────────────────────────────────────────────────────────────┐
+│                  日志页面性能优化 - 快速参考                      │
+└─────────────────────────────────────────────────────────────────┘
+
+📋 问题：高峰期日志页面API响应时间30秒+
+
+🎯 目标：降低到1-3秒以内
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 快速解决方案（推荐）
+
+  1️⃣  一键优化（最简单）
+      cd /usr/src/workspace/github/QQhuxuhui/new-api
+      ./docs/optimize.sh
+
+      ✅ 自动备份配置
+      ✅ 添加数据库索引（5-15分钟）
+      ✅ 优化Docker配置
+      ✅ 重启服务
+
+      预期效果：30秒 → 1-3秒
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 诊断工具
+
+  ./docs/diagnose.sh
+
+  查看：
+  • 数据库表大小和记录数
+  • 索引使用情况
+  • 连接状态
+  • 慢查询统计
+  • 资源使用情况
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔧 手动优化步骤
+
+  步骤1：添加数据库索引
+  docker exec -i postgres psql -U root -d new-api < docs/optimize-indexes.sql
+
+  步骤2：更新Docker配置
+  cp docker-compose.yml docker-compose.yml.backup
+  cp docs/docker-compose-optimized.yml docker-compose.yml
+
+  步骤3：重启服务
+  docker-compose down && docker-compose up -d
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 优化效果对比
+
+  优化方案              预期TTFB    停机时间
+  ────────────────────────────────────────
+  仅添加索引            2-5秒       0分钟
+  索引+连接池优化       1-3秒       1-2分钟
+  索引+连接池+PG优化    0.5-1秒     1-2分钟
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔍 监控命令
+
+  # 查看应用日志
+  docker-compose logs -f new-api
+
+  # 查看数据库日志
+  docker-compose logs -f postgres
+
+  # 监控资源使用
+  docker stats
+
+  # 运行诊断
+  ./docs/diagnose.sh
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🆘 故障恢复
+
+  如果优化后出现问题：
+
+  cp backup_YYYYMMDD_HHMMSS/docker-compose.yml.backup docker-compose.yml
+  docker-compose down && docker-compose up -d
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📚 详细文档
+
+  docs/README.md                      - 完整使用指南
+  docs/performance-optimization.md    - 详细优化方案
+  docs/optimize-indexes.sql           - 索引优化SQL
+  docs/docker-compose-optimized.yml   - 优化配置文件
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 核心优化点
+
+  ✓ 添加10个针对性复合索引
+  ✓ 优化数据库连接池（200空闲/500最大）
+  ✓ 优化PostgreSQL参数（shared_buffers, work_mem等）
+  ✓ 启用SSD优化（random_page_cost=1.1）
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
