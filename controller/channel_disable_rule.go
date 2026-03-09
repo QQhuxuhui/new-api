@@ -12,13 +12,15 @@ import (
 )
 
 type disableRuleRequest struct {
-	Name        string   `json:"name"`
-	StatusCodes []int    `json:"status_codes"`
-	Keywords    []string `json:"keywords"`
-	MatchType   string   `json:"match_type"`
-	Enabled     bool     `json:"enabled"`
-	Description string   `json:"description"`
-	Priority    int      `json:"priority"`
+	Name              string   `json:"name"`
+	StatusCodes       []int    `json:"status_codes"`
+	Keywords          []string `json:"keywords"`
+	MatchType         string   `json:"match_type"`
+	Enabled           bool     `json:"enabled"`
+	Description       string   `json:"description"`
+	Priority          int      `json:"priority"`
+	ErrorType         string   `json:"error_type"`
+	ReturnImmediately bool     `json:"return_immediately"`
 }
 
 type testRuleRequest struct {
@@ -49,13 +51,15 @@ func CreateDisableRule(c *gin.Context) {
 	}
 
 	rule := &model.ChannelDisableRule{
-		Name:        req.Name,
-		StatusCodes: req.StatusCodes,
-		Keywords:    req.Keywords,
-		MatchType:   req.MatchType,
-		Enabled:     req.Enabled,
-		Description: req.Description,
-		Priority:    req.Priority,
+		Name:              req.Name,
+		StatusCodes:       req.StatusCodes,
+		Keywords:          req.Keywords,
+		MatchType:         req.MatchType,
+		Enabled:           req.Enabled,
+		Description:       req.Description,
+		Priority:          req.Priority,
+		ErrorType:         normalizeDisableRuleErrorType(req.ErrorType),
+		ReturnImmediately: req.ReturnImmediately && normalizeDisableRuleErrorType(req.ErrorType) == model.RuleErrorTypeClient,
 	}
 	if err := model.CreateDisableRule(rule); err != nil {
 		common.ApiError(c, err)
@@ -95,6 +99,8 @@ func UpdateDisableRule(c *gin.Context) {
 	rule.Enabled = req.Enabled
 	rule.Description = req.Description
 	rule.Priority = req.Priority
+	rule.ErrorType = normalizeDisableRuleErrorType(req.ErrorType)
+	rule.ReturnImmediately = req.ReturnImmediately && rule.ErrorType == model.RuleErrorTypeClient
 
 	if err := model.UpdateDisableRule(rule); err != nil {
 		common.ApiError(c, err)
@@ -178,5 +184,20 @@ func validateDisableRule(req disableRuleRequest) error {
 	default:
 		return fmt.Errorf("match_type 无效")
 	}
+	if !isValidDisableRuleErrorType(req.ErrorType) {
+		return fmt.Errorf("error_type 无效")
+	}
 	return nil
+}
+
+func normalizeDisableRuleErrorType(errorType string) string {
+	if strings.EqualFold(strings.TrimSpace(errorType), model.RuleErrorTypeClient) {
+		return model.RuleErrorTypeClient
+	}
+	return model.RuleErrorTypeServer
+}
+
+func isValidDisableRuleErrorType(errorType string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(errorType))
+	return normalized == "" || normalized == model.RuleErrorTypeServer || normalized == model.RuleErrorTypeClient
 }

@@ -68,4 +68,7 @@ const (
 	ContextKeyPlanGroups     ContextKey = "plan_groups"      // []string: all channel groups from plan (multi-group support)
 	ContextKeyPlanName       ContextKey = "plan_name"        // string: plan name for logging
 	ContextKeyPlanAutoSwitch ContextKey = "plan_auto_switch" // bool: if auto-switch occurred
+
+	ContextKeyClientErrorFlag   ContextKey = "client_error_rule_matched" // bool: current request matched a client-classified custom rule
+	ContextKeyReturnImmediately ContextKey = "return_immediately"        // bool: matched client rule requires immediate return
 )

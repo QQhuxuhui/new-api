@@ -14,20 +14,26 @@ const (
 	MatchTypeOR          = "OR"
 	MatchTypeStatusOnly  = "STATUS_ONLY"
 	MatchTypeKeywordOnly = "KEYWORD_ONLY"
+
+	RuleErrorTypeServer = "server"
+	RuleErrorTypeClient = "client"
 )
 
 // ChannelDisableRule defines a configurable rule that can trigger channel failover recording.
 type ChannelDisableRule struct {
-	Id          int       `json:"id" gorm:"primaryKey"`
-	Name        string    `json:"name" gorm:"type:varchar(100);not null"`
-	StatusCodes []int     `json:"status_codes" gorm:"type:json;serializer:json"`
-	Keywords    []string  `json:"keywords" gorm:"type:json;serializer:json"`
-	MatchType   string    `json:"match_type" gorm:"type:varchar(20);default:AND"`
-	Enabled     bool      `json:"enabled" gorm:"default:true"`
-	Description string    `json:"description" gorm:"type:text"`
-	Priority    int       `json:"priority" gorm:"default:0"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Id          int      `json:"id" gorm:"primaryKey"`
+	Name        string   `json:"name" gorm:"type:varchar(100);not null"`
+	StatusCodes []int    `json:"status_codes" gorm:"type:json;serializer:json"`
+	Keywords    []string `json:"keywords" gorm:"type:json;serializer:json"`
+	MatchType   string   `json:"match_type" gorm:"type:varchar(20);default:AND"`
+	Enabled     bool     `json:"enabled" gorm:"default:true"`
+	Description string   `json:"description" gorm:"type:text"`
+	Priority    int      `json:"priority" gorm:"default:0"`
+	ErrorType   string   `json:"error_type" gorm:"type:varchar(10);not null;default:server"`
+	// ReturnImmediately only applies when ErrorType is client.
+	ReturnImmediately bool      `json:"return_immediately" gorm:"default:false"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 func (ChannelDisableRule) TableName() string {
@@ -43,12 +49,16 @@ type DisableRuleMatchDetail struct {
 	StatusMatch  bool   `json:"status_match"`
 	KeywordMatch bool   `json:"keyword_match"`
 	Matched      bool   `json:"matched"`
+	ErrorType    string `json:"error_type"`
+	ReturnNow    bool   `json:"return_immediately"`
 }
 
 // TestDisableRulesResult aggregates the test API response.
 type TestDisableRulesResult struct {
 	WouldTriggerFailover bool                     `json:"would_trigger_failover"`
 	HardcodedMatch       bool                     `json:"hardcoded_match"`
+	IsClientError        bool                     `json:"is_client_error"`
+	ReturnImmediately    bool                     `json:"return_immediately"`
 	UserRuleMatches      []DisableRuleMatchDetail `json:"user_rule_matches"`
 }
 
@@ -116,6 +126,8 @@ func (r *ChannelDisableRule) MatchWithDetail(statusCode int, msg string) Disable
 		StatusMatch:  statusMatch,
 		KeywordMatch: keywordMatch,
 		Matched:      matched,
+		ErrorType:    r.GetErrorType(),
+		ReturnNow:    r.ReturnImmediately,
 	}
 }
 
@@ -123,6 +135,13 @@ func (r *ChannelDisableRule) MatchWithDetail(statusCode int, msg string) Disable
 func (r *ChannelDisableRule) Match(statusCode int, msg string) bool {
 	result := r.MatchWithDetail(statusCode, msg)
 	return result.Matched
+}
+
+func (r *ChannelDisableRule) GetErrorType() string {
+	if strings.EqualFold(strings.TrimSpace(r.ErrorType), RuleErrorTypeClient) {
+		return RuleErrorTypeClient
+	}
+	return RuleErrorTypeServer
 }
 
 // GetEnabledDisableRules returns enabled rules using an in-memory cache.
@@ -225,28 +244,38 @@ func TestDisableRules(statusCode int, errorMessage string) (*TestDisableRulesRes
 	}
 
 	var matches []DisableRuleMatchDetail
+	var firstMatched *DisableRuleMatchDetail
 	for _, rule := range rules {
 		detail := rule.MatchWithDetail(statusCode, errorMessage)
 		if !rule.Enabled {
 			detail.Matched = false
+		}
+		if detail.Matched && firstMatched == nil {
+			copyDetail := detail
+			firstMatched = &copyDetail
 		}
 		matches = append(matches, detail)
 	}
 
 	hardcodedMatch := matchHardcodedFailoverRules(statusCode, errorMessage)
 	wouldTrigger := hardcodedMatch
-	if !wouldTrigger {
-		for _, m := range matches {
-			if m.Matched {
-				wouldTrigger = true
-				break
-			}
+	isClientError := false
+	returnImmediately := false
+	if firstMatched != nil {
+		if firstMatched.ErrorType == RuleErrorTypeClient {
+			wouldTrigger = false
+			isClientError = true
+			returnImmediately = firstMatched.ReturnNow
+		} else {
+			wouldTrigger = true
 		}
 	}
 
 	return &TestDisableRulesResult{
 		WouldTriggerFailover: wouldTrigger,
 		HardcodedMatch:       hardcodedMatch,
+		IsClientError:        isClientError,
+		ReturnImmediately:    returnImmediately,
 		UserRuleMatches:      matches,
 	}, nil
 }

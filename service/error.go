@@ -107,6 +107,10 @@ func ShouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
 	// 例如：400状态码默认不触发故障转移，但用户可以通过关键词匹配规则强制触发
 	for _, rule := range model.GetEnabledDisableRules() {
 		if rule.Match(statusCode, errorMessage) {
+			if rule.GetErrorType() == model.RuleErrorTypeClient {
+				common.SysLog(fmt.Sprintf("客户端错误规则「%s」匹配成功 (状态码=%d)", rule.Name, statusCode))
+				return false
+			}
 			common.SysLog(fmt.Sprintf("故障转移规则「%s」匹配成功 (状态码=%d)", rule.Name, statusCode))
 			return true
 		}
@@ -147,6 +151,19 @@ func ShouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
 	}
 
 	return false
+}
+
+func CheckClientErrorRule(statusCode int, errorMessage string) (isClient bool, returnImmediately bool) {
+	for _, rule := range model.GetEnabledDisableRules() {
+		if !rule.Match(statusCode, errorMessage) {
+			continue
+		}
+		if rule.GetErrorType() != model.RuleErrorTypeClient {
+			return false, false
+		}
+		return true, rule.ReturnImmediately
+	}
+	return false, false
 }
 
 func ClaudeErrorWrapper(err error, code string, statusCode int) *dto.ClaudeErrorWithStatusCode {
@@ -206,22 +223,22 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 			}
 			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
-			// Check if error should trigger channel failover.
-			//
-			// Important: when upstream response is not in our GeneralErrorResponse format,
-			// users may configure rules that match the generic error string (e.g.
-			// "bad response status code 400") rather than the raw body. Include both
-			// in the match input to keep rule behavior consistent across providers.
-			matchMsg := newApiErr.Error()
-			if len(responseBody) > 0 {
-				matchMsg += "\n" + string(responseBody)
-			}
-			if ShouldTriggerChannelFailover(resp.StatusCode, matchMsg) {
-				newApiErr = types.NewError(newApiErr.Err, types.ErrorCodeChannelUpstreamError)
-				newApiErr.StatusCode = resp.StatusCode
-			}
-			return
+		// Check if error should trigger channel failover.
+		//
+		// Important: when upstream response is not in our GeneralErrorResponse format,
+		// users may configure rules that match the generic error string (e.g.
+		// "bad response status code 400") rather than the raw body. Include both
+		// in the match input to keep rule behavior consistent across providers.
+		matchMsg := newApiErr.Error()
+		if len(responseBody) > 0 {
+			matchMsg += "\n" + string(responseBody)
 		}
+		if ShouldTriggerChannelFailover(resp.StatusCode, matchMsg) {
+			newApiErr = types.NewError(newApiErr.Err, types.ErrorCodeChannelUpstreamError)
+			newApiErr.StatusCode = resp.StatusCode
+		}
+		return
+	}
 	if errResponse.Error.Message != "" {
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		newApiErr = types.WithOpenAIError(errResponse.Error, resp.StatusCode)

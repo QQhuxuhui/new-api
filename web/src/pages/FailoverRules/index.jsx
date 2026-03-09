@@ -77,6 +77,11 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
   const { t } = useTranslation();
   const formApi = useRef(null);
   const isEdit = !!initial?.id;
+  const [errorType, setErrorType] = useState(initial?.error_type || 'server');
+
+  useEffect(() => {
+    setErrorType(initial?.error_type || 'server');
+  }, [initial, visible]);
 
   const handleSubmit = () => {
     const values = formApi.current?.getValues() || {};
@@ -84,6 +89,11 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
       ...values,
       status_codes: parseIntArray(values.status_codes),
       keywords: (values.keywords || []).map((k) => k.trim()).filter(Boolean),
+      error_type: values.error_type || 'server',
+      return_immediately:
+        (values.error_type || 'server') === 'client'
+          ? !!values.return_immediately
+          : false,
     };
     onOk(payload);
   };
@@ -110,6 +120,8 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
           description: '',
           enabled: true,
           priority: 0,
+          error_type: 'server',
+          return_immediately: false,
           ...initial,
         }}
       >
@@ -152,6 +164,26 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
           placeholder={t('可选，描述规则用途')}
           autosize={{ minRows: 2, maxRows: 4 }}
         />
+        <Form.Select
+          field='error_type'
+          label={t('错误归属')}
+          optionList={[
+            { label: t('服务端错误'), value: 'server' },
+            { label: t('客户端错误'), value: 'client' },
+          ]}
+          onChange={(value) => setErrorType(value || 'server')}
+        />
+        {errorType === 'client' && (
+          <div style={{ marginBottom: 12 }}>
+            <Form.Switch
+              field='return_immediately'
+              label={t('立刻返回客户端')}
+            />
+            <Text type='tertiary' size='small'>
+              {t('开启后命中该规则将立即返回当前错误，不再尝试其他渠道。')}
+            </Text>
+          </div>
+        )}
         <Row gutter={16}>
           <Col span={12}>
             <Form.Switch field='enabled' label={t('启用')} />
@@ -186,6 +218,21 @@ const TestPanel = ({ loading, onTest, result }) => {
     { title: t('名称'), dataIndex: 'rule_name', width: 160 },
     { title: t('匹配方式'), dataIndex: 'match_type', width: 100 },
     {
+      title: t('错误归属'),
+      dataIndex: 'error_type',
+      width: 100,
+      render: (v) =>
+        v === 'client' ? (
+          <Tag color='blue' size='small'>
+            {t('客户端')}
+          </Tag>
+        ) : (
+          <Tag color='grey' size='small'>
+            {t('服务端')}
+          </Tag>
+        ),
+    },
+    {
       title: t('状态码匹配'),
       dataIndex: 'status_match',
       width: 100,
@@ -219,6 +266,16 @@ const TestPanel = ({ loading, onTest, result }) => {
           <Tag color='blue' size='small'>{t('未匹配')}</Tag>
         );
       },
+    },
+    {
+      title: t('立刻返回'),
+      dataIndex: 'return_immediately',
+      width: 100,
+      render: (v) => (
+        <Tag color={v ? 'blue' : 'grey'} size='small'>
+          {v ? t('是') : t('否')}
+        </Tag>
+      ),
     },
   ];
 
@@ -276,7 +333,7 @@ const TestPanel = ({ loading, onTest, result }) => {
           <Divider margin={16} />
 
           <Row gutter={24} style={{ marginBottom: 16 }}>
-            <Col span={12}>
+            <Col span={8}>
               <div
                 style={{
                   padding: '12px 16px',
@@ -294,7 +351,25 @@ const TestPanel = ({ loading, onTest, result }) => {
                 </Space>
               </div>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
+              <div
+                style={{
+                  padding: '12px 16px',
+                  borderRadius: 6,
+                  background: result.is_client_error
+                    ? 'var(--semi-color-info-light-default)'
+                    : 'var(--semi-color-fill-0)',
+                  border: `1px solid ${result.is_client_error ? 'var(--semi-color-info)' : 'var(--semi-color-border)'}`,
+                }}
+              >
+                <Space>
+                  <IconInfoCircle style={{ color: result.is_client_error ? 'var(--semi-color-info)' : 'var(--semi-color-text-2)' }} />
+                  <Text type='secondary'>{t('客户端错误规则匹配')}</Text>
+                  <Text strong>{result.is_client_error ? t('是') : t('否')}</Text>
+                </Space>
+              </div>
+            </Col>
+            <Col span={8}>
               <div
                 style={{
                   padding: '12px 16px',
@@ -319,6 +394,15 @@ const TestPanel = ({ loading, onTest, result }) => {
               </div>
             </Col>
           </Row>
+          {result.is_client_error && (
+            <div style={{ marginBottom: 16 }}>
+              <Tag color='blue' size='large'>
+                {result.return_immediately
+                  ? t('命中客户端规则后将立即返回')
+                  : t('命中客户端规则后继续尝试其他渠道')}
+              </Tag>
+            </div>
+          )}
 
           {(result.user_rule_matches || []).length > 0 && (
             <>
@@ -436,6 +520,21 @@ const FailoverRules = () => {
         dataIndex: 'name',
         width: 180,
         render: (text) => <Text strong>{text}</Text>,
+      },
+      {
+        title: t('错误归属'),
+        dataIndex: 'error_type',
+        width: 110,
+        render: (value) =>
+          value === 'client' ? (
+            <Tag color='blue' size='small' style={{ borderRadius: 4 }}>
+              {t('客户端')}
+            </Tag>
+          ) : (
+            <Tag color='grey' size='small' style={{ borderRadius: 4 }}>
+              {t('服务端')}
+            </Tag>
+          ),
       },
       {
         title: t('状态码'),
@@ -558,7 +657,7 @@ const FailoverRules = () => {
               {t('渠道故障转移规则')}
             </Title>
             <Text type='tertiary'>
-              {t('配置渠道错误匹配规则，当请求失败时自动触发故障转移')}
+              {t('配置渠道错误匹配规则，区分服务端错误与客户端错误，控制健康统计、重试和返回策略')}
             </Text>
           </div>
 

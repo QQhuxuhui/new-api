@@ -62,6 +62,11 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
   const { t } = useTranslation();
   const formApi = useRef(null);
   const isEdit = !!initial?.id;
+  const [errorType, setErrorType] = useState(initial?.error_type || 'server');
+
+  useEffect(() => {
+    setErrorType(initial?.error_type || 'server');
+  }, [initial, visible]);
 
   const handleSubmit = () => {
     const values = formApi.current?.getValues() || {};
@@ -69,6 +74,11 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
       ...values,
       status_codes: parseIntArray(values.status_codes),
       keywords: (values.keywords || []).map((k) => k.trim()).filter(Boolean),
+      error_type: values.error_type || 'server',
+      return_immediately:
+        (values.error_type || 'server') === 'client'
+          ? !!values.return_immediately
+          : false,
     };
     onOk(payload);
   };
@@ -95,6 +105,8 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
           description: '',
           enabled: true,
           priority: 0,
+          error_type: 'server',
+          return_immediately: false,
           ...initial,
         }}
       >
@@ -137,6 +149,26 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
           placeholder={t('可选，描述规则用途')}
           autosize={{ minRows: 2, maxRows: 4 }}
         />
+        <Form.Select
+          field='error_type'
+          label={t('错误归属')}
+          optionList={[
+            { label: t('服务端错误'), value: 'server' },
+            { label: t('客户端错误'), value: 'client' },
+          ]}
+          onChange={(value) => setErrorType(value || 'server')}
+        />
+        {errorType === 'client' && (
+          <>
+            <Form.Switch
+              field='return_immediately'
+              label={t('立刻返回客户端')}
+            />
+            <Typography.Text type='tertiary'>
+              {t('开启后命中该规则将立即返回当前错误，不再尝试其他渠道。')}
+            </Typography.Text>
+          </>
+        )}
         <Row gutter={16}>
           <Col span={12}>
             <Form.Switch field='enabled' label={t('启用')} />
@@ -212,6 +244,14 @@ const TestPanel = ({ loading, onTest, result }) => {
               {t('硬编码规则匹配')}：{result.hardcoded_match ? t('是') : t('否')}
             </Typography.Text>
             <Typography.Text>
+              {t('客户端错误规则匹配')}：
+              {result.is_client_error ? t('是') : t('否')}
+            </Typography.Text>
+            <Typography.Text>
+              {t('立刻返回客户端')}：
+              {result.return_immediately ? t('是') : t('否')}
+            </Typography.Text>
+            <Typography.Text>
               {t('最终是否触发故障转移')}：
               {result.would_trigger_failover ? t('是') : t('否')}
             </Typography.Text>
@@ -224,6 +264,17 @@ const TestPanel = ({ loading, onTest, result }) => {
             columns={[
               { title: t('名称'), dataIndex: 'rule_name', width: 160 },
               { title: t('匹配方式'), dataIndex: 'match_type', width: 120 },
+              {
+                title: t('错误归属'),
+                dataIndex: 'error_type',
+                render: (v) =>
+                  v === 'client' ? (
+                    <Tag color='blue'>{t('客户端')}</Tag>
+                  ) : (
+                    t('服务端')
+                  ),
+                width: 120,
+              },
               {
                 title: t('状态码匹配'),
                 dataIndex: 'status_match',
@@ -241,6 +292,12 @@ const TestPanel = ({ loading, onTest, result }) => {
                 dataIndex: 'matched',
                 render: (v, row) =>
                   row.enabled ? (v ? t('匹配') : t('未匹配')) : t('已禁用'),
+                width: 120,
+              },
+              {
+                title: t('立刻返回'),
+                dataIndex: 'return_immediately',
+                render: (v) => (v ? t('是') : t('否')),
                 width: 120,
               },
             ]}
@@ -324,6 +381,13 @@ const ChannelDisableRules = () => {
   const columns = useMemo(
     () => [
       { title: t('名称'), dataIndex: 'name', width: 180 },
+      {
+        title: t('错误归属'),
+        dataIndex: 'error_type',
+        width: 120,
+        render: (value) =>
+          value === 'client' ? <Tag color='blue'>{t('客户端')}</Tag> : t('服务端'),
+      },
       {
         title: t('状态码'),
         dataIndex: 'status_codes',
@@ -436,7 +500,7 @@ const ChannelDisableRules = () => {
       <Banner
         type='info'
         description={t(
-          '匹配成功会记录到健康检查并触发临时暂停（自动恢复），不会永久禁用渠道。',
+          '服务端规则会记录到健康检查并触发临时暂停（自动恢复）；客户端规则只影响重试与返回策略，不计入渠道健康。',
         )}
       />
       <Spin spinning={loading}>

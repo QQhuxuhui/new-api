@@ -310,8 +310,7 @@ retryLoop:
 				// Record timeout errors (504/524) to health tracker for statistical analysis
 				// Timeouts won't trigger immediate retry but will accumulate in health stats
 				// If timeouts occur frequently (>30% failure rate), the channel will be suspended
-				if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) ||
-					newAPIError.StatusCode == 504 || newAPIError.StatusCode == 524 {
+				if shouldRecordChannelFailure(c, newAPIError.StatusCode, newAPIError.Error()) {
 					service.RecordChannelFailure(channel.Id, newAPIError.StatusCode, newAPIError.Error())
 				}
 
@@ -417,8 +416,7 @@ retryLoop:
 				}
 
 				// Failover channel also failed - record health and continue to error response
-				if service.ShouldTriggerChannelFailover(newAPIError.StatusCode, newAPIError.Error()) ||
-					newAPIError.StatusCode == 504 || newAPIError.StatusCode == 524 {
+				if shouldRecordChannelFailure(c, newAPIError.StatusCode, newAPIError.Error()) {
 					service.RecordChannelFailure(failoverChannel.Id, newAPIError.StatusCode, newAPIError.Error())
 				}
 				logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failover channel=%d also failed: %s", failoverChannel.Id, newAPIError.Error()))
@@ -517,8 +515,7 @@ retryLoop:
 					if !shouldContinueWalletRetry(c, err) {
 						break
 					}
-					if service.ShouldTriggerChannelFailover(err.StatusCode, err.Error()) ||
-						err.StatusCode == 504 || err.StatusCode == 524 {
+					if shouldRecordChannelFailure(c, err.StatusCode, err.Error()) {
 						service.RecordChannelFailure(channel.Id, err.StatusCode, err.Error())
 					}
 					// 继续尝试钱包分组下一优先级
@@ -601,6 +598,34 @@ func getChannel(c *gin.Context, group, originalModel string, retryCount int, pri
 	return channel, nil
 }
 
+func applyClientRuleState(c *gin.Context, statusCode int, errorMessage string) bool {
+	if c == nil {
+		return false
+	}
+
+	isClient, returnImmediately := service.CheckClientErrorRule(statusCode, errorMessage)
+	if !isClient {
+		return false
+	}
+
+	common.SetContextKey(c, constant.ContextKeyClientErrorFlag, true)
+	if returnImmediately {
+		common.SetContextKey(c, constant.ContextKeyReturnImmediately, true)
+	}
+	return true
+}
+
+func shouldRecordChannelFailure(c *gin.Context, statusCode int, errorMessage string) bool {
+	if applyClientRuleState(c, statusCode, errorMessage) {
+		return false
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyClientErrorFlag) {
+		return false
+	}
+	return service.ShouldTriggerChannelFailover(statusCode, errorMessage) ||
+		statusCode == 504 || statusCode == 524
+}
+
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
 	if openaiErr == nil {
 		return false
@@ -617,9 +642,17 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return false
 	}
 
+	if common.GetContextKeyBool(c, constant.ContextKeyReturnImmediately) {
+		return false
+	}
+
 	// Priority 3: Channel errors (bypass RetryTimes)
 	if types.IsChannelError(openaiErr) {
 		return true
+	}
+
+	if common.GetContextKeyBool(c, constant.ContextKeyClientErrorFlag) {
+		return retryTimes > 0
 	}
 
 	// Priority 4: Status code checks (before RetryTimes check)
@@ -663,6 +696,10 @@ func shouldContinueWalletRetry(c *gin.Context, err *types.NewAPIError) bool {
 	}
 
 	if types.IsSkipRetryError(err) {
+		return false
+	}
+
+	if common.GetContextKeyBool(c, constant.ContextKeyReturnImmediately) {
 		return false
 	}
 
@@ -756,7 +793,7 @@ func RelayMidjourney(c *gin.Context) {
 		// Record channel health on failure
 		errorMessage := fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)
 		// For Midjourney errors, record to health tracker if it's a server/upstream error
-		if statusCode >= 500 || statusCode == http.StatusTooManyRequests || statusCode == 504 || statusCode == 524 {
+		if shouldRecordChannelFailure(c, statusCode, errorMessage) {
 			service.RecordChannelFailure(channelId, statusCode, errorMessage)
 		}
 
@@ -814,8 +851,7 @@ func RelayTask(c *gin.Context) {
 	} else {
 		// Error occurred - check if it should trigger health tracking
 		// Record timeout errors (504/524) and other upstream errors to health tracker
-		if service.ShouldTriggerChannelFailover(taskErr.StatusCode, taskErr.Message) ||
-			taskErr.StatusCode == 504 || taskErr.StatusCode == 524 {
+		if shouldRecordChannelFailure(c, taskErr.StatusCode, taskErr.Message) {
 			service.RecordChannelFailure(channelId, taskErr.StatusCode, taskErr.Message)
 		}
 	}
@@ -859,8 +895,7 @@ func RelayTask(c *gin.Context) {
 		}
 
 		// Error occurred - check if it should trigger health tracking
-		if service.ShouldTriggerChannelFailover(taskErr.StatusCode, taskErr.Message) ||
-			taskErr.StatusCode == 504 || taskErr.StatusCode == 524 {
+		if shouldRecordChannelFailure(c, taskErr.StatusCode, taskErr.Message) {
 			service.RecordChannelFailure(channelId, taskErr.StatusCode, taskErr.Message)
 		}
 
@@ -899,6 +934,12 @@ func taskRelayHandler(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dto.Tas
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError, retryTimes int) bool {
 	if taskErr == nil {
 		return false
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyReturnImmediately) {
+		return false
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyClientErrorFlag) {
+		return retryTimes > 0
 	}
 	if retryTimes <= 0 {
 		return false
