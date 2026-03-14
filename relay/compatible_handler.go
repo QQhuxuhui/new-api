@@ -16,6 +16,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/openaicompat"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -78,6 +79,12 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
+
+	// Check if this request should be converted to responses format
+	if shouldUseChatViaResponses(info, request) {
+		return chatCompletionsViaResponses(c, info, request, adaptor)
+	}
+
 	var requestBody io.Reader
 
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
@@ -250,6 +257,25 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		postConsumeQuota(c, info, usage.(*dto.Usage), "")
 	}
 	return nil
+}
+
+// shouldUseChatViaResponses checks if the request should be converted to responses format
+func shouldUseChatViaResponses(info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) bool {
+	// Skip if pass-through is enabled
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+		return false
+	}
+	// Skip if n > 1 (responses API doesn't support multiple choices)
+	if request.N > 1 {
+		return false
+	}
+	policy := model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy
+	return openaicompat.ShouldChatCompletionsUseResponses(
+		policy,
+		info.ChannelId,
+		info.ChannelType,
+		request.Model,
+	)
 }
 
 func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent string) {
