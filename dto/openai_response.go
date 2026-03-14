@@ -341,6 +341,12 @@ type ResponsesOutput struct {
 	Content []ResponsesOutputContent `json:"content"`
 	Quality string                   `json:"quality"`
 	Size    string                   `json:"size"`
+	// function_call output fields
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+	// reasoning output fields
+	Summary []ResponsesOutputContent `json:"summary,omitempty"`
 }
 
 type ResponsesOutputContent struct {
@@ -363,12 +369,37 @@ const (
 	ResponsesOutputTypeItemDone  = "response.output_item.done"
 )
 
+const (
+	ResponsesEventCreated                   = "response.created"
+	ResponsesEventCompleted                 = "response.completed"
+	ResponsesEventFailed                    = "response.failed"
+	ResponsesEventIncomplete                = "response.incomplete"
+	ResponsesEventOutputItemAdded           = "response.output_item.added"
+	ResponsesEventOutputItemDone            = "response.output_item.done"
+	ResponsesEventContentPartAdded          = "response.content_part.added"
+	ResponsesEventContentPartDone           = "response.content_part.done"
+	ResponsesEventOutputTextDelta           = "response.output_text.delta"
+	ResponsesEventOutputTextDone            = "response.output_text.done"
+	ResponsesEventFuncCallArgsDelta         = "response.function_call_arguments.delta"
+	ResponsesEventFuncCallArgsDone          = "response.function_call_arguments.done"
+	ResponsesEventReasoningSummaryTextDelta = "response.reasoning_summary_text.delta"
+	ResponsesEventReasoningSummaryTextDone  = "response.reasoning_summary_text.done"
+	ResponsesEventWebSearchCallSearching    = "response.web_search_call.searching"
+	ResponsesEventWebSearchCallCompleted    = "response.web_search_call.completed"
+)
+
 // ResponsesStreamResponse 用于处理 /v1/responses 流式响应
 type ResponsesStreamResponse struct {
 	Type     string                   `json:"type"`
 	Response *OpenAIResponsesResponse `json:"response,omitempty"`
 	Delta    string                   `json:"delta,omitempty"`
 	Item     *ResponsesOutput         `json:"item,omitempty"`
+	// Additional fields for stream events
+	ItemID       string                  `json:"item_id,omitempty"`
+	OutputIndex  int                     `json:"output_index,omitempty"`
+	ContentIndex int                     `json:"content_index,omitempty"`
+	Part         *ResponsesOutputContent `json:"part,omitempty"`
+	SummaryIndex int                     `json:"summary_index,omitempty"`
 }
 
 // GetOpenAIError 从动态错误类型中提取OpenAIError结构
