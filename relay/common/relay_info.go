@@ -111,6 +111,7 @@ type RelayInfo struct {
 	SendResponseCount      int
 	FinalPreConsumedQuota  int  // 最终预消耗的配额
 	IsClaudeBetaQuery      bool // /v1/messages?beta=true
+	ConvertedViaResponses  bool // 标识请求经过了 chat→responses 转换
 
 	// Plan-related fields
 	UserPlanId    int    // User's current plan assignment ID for quota tracking
