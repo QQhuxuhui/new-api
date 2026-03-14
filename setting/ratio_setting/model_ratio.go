@@ -406,6 +406,14 @@ func GetModelPrice(name string, printErr bool) (float64, bool) {
 
 	price, ok := modelPriceMap[name]
 	if !ok {
+		// Compact model fallback: strip suffix and try original model
+		if strings.HasSuffix(name, CompactModelSuffix) {
+			originalName := strings.TrimSuffix(name, CompactModelSuffix)
+			originalName = FormatMatchingModelName(originalName)
+			if p, found := modelPriceMap[originalName]; found {
+				return p, true
+			}
+		}
 		if printErr {
 			common.SysError("model price not found: " + name)
 		}
@@ -441,6 +449,14 @@ func GetModelRatio(name string) (float64, bool, string) {
 
 	ratio, ok := modelRatioMap[name]
 	if !ok {
+		// Compact model fallback: strip suffix and try original model
+		if strings.HasSuffix(name, CompactModelSuffix) {
+			originalName := strings.TrimSuffix(name, CompactModelSuffix)
+			originalName = FormatMatchingModelName(originalName)
+			if r, found := modelRatioMap[originalName]; found {
+				return r, true, name
+			}
+		}
 		return 37.5, operation_setting.SelfUseModeEnabled, name
 	}
 	return ratio, true, name
@@ -519,6 +535,22 @@ func GetCompletionRatio(name string) float64 {
 	}
 	if ratio, ok := CompletionRatio[name]; ok {
 		return ratio
+	}
+	// Compact model fallback: strip suffix and try original model
+	if strings.HasSuffix(name, CompactModelSuffix) {
+		originalName := strings.TrimSuffix(name, CompactModelSuffix)
+		originalName = FormatMatchingModelName(originalName)
+		if strings.Contains(originalName, "/") {
+			if ratio, ok := CompletionRatio[originalName]; ok {
+				return ratio
+			}
+		}
+		if r, found := getHardcodedCompletionModelRatio(originalName); found {
+			return r
+		}
+		if ratio, ok := CompletionRatio[originalName]; ok {
+			return ratio
+		}
 	}
 	return hardCodedRatio
 }

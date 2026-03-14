@@ -2,6 +2,7 @@ package ratio_setting
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -123,6 +124,13 @@ func GetCacheRatio(name string) (float64, bool) {
 	defer cacheRatioMapMutex.RUnlock()
 	ratio, ok := cacheRatioMap[name]
 	if !ok {
+		// Compact model fallback: strip suffix and try original model
+		if strings.HasSuffix(name, CompactModelSuffix) {
+			originalName := strings.TrimSuffix(name, CompactModelSuffix)
+			if r, found := cacheRatioMap[originalName]; found {
+				return r, true
+			}
+		}
 		return 1, false // Default to 1 if not found
 	}
 	return ratio, true
@@ -131,6 +139,13 @@ func GetCacheRatio(name string) (float64, bool) {
 func GetCreateCacheRatio(name string) (float64, bool) {
 	ratio, ok := defaultCreateCacheRatio[name]
 	if !ok {
+		// Compact model fallback: strip suffix and try original model
+		if strings.HasSuffix(name, CompactModelSuffix) {
+			originalName := strings.TrimSuffix(name, CompactModelSuffix)
+			if r, found := defaultCreateCacheRatio[originalName]; found {
+				return r, true
+			}
+		}
 		return 1.25, false // Default to 1.25 if not found
 	}
 	return ratio, true
