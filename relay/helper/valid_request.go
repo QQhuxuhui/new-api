@@ -34,6 +34,8 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 		request, err = GetAndValidateClaudeRequest(c)
 	case types.RelayFormatOpenAIResponses:
 		request, err = GetAndValidateResponsesRequest(c)
+	case types.RelayFormatOpenAIResponsesCompaction:
+		request, err = GetAndValidateCompactRequest(c)
 
 	case types.RelayFormatOpenAIImage:
 		request, err = GetAndValidOpenAIImageRequest(c, relayMode)
@@ -324,4 +326,16 @@ func GetAndValidateGeminiBatchEmbeddingRequest(c *gin.Context) (*dto.GeminiBatch
 		return nil, err
 	}
 	return request, nil
+}
+
+func GetAndValidateCompactRequest(c *gin.Context) (*dto.OpenAIResponsesCompactionRequest, error) {
+	var compactRequest dto.OpenAIResponsesCompactionRequest
+	err := common.UnmarshalBodyReusable(c, &compactRequest)
+	if err != nil {
+		return nil, err
+	}
+	if compactRequest.Model == "" {
+		return nil, errors.New("model is required")
+	}
+	return &compactRequest, nil
 }
