@@ -6,9 +6,37 @@ import (
 	"github.com/QuantumNous/new-api/setting/config"
 )
 
+// ChatCompletionsToResponsesPolicy 控制 chat completions 请求是否转换为 responses 格式
+type ChatCompletionsToResponsesPolicy struct {
+	Enabled       bool     `json:"enabled"`
+	AllChannels   bool     `json:"all_channels"`
+	ChannelIDs    []int    `json:"channel_ids"`
+	ChannelTypes  []int    `json:"channel_types"`
+	ModelPatterns []string `json:"model_patterns"`
+}
+
+// IsChannelEnabled 判断指定渠道是否启用转换
+func (p ChatCompletionsToResponsesPolicy) IsChannelEnabled(channelID int, channelType int) bool {
+	if p.AllChannels {
+		return true
+	}
+	for _, id := range p.ChannelIDs {
+		if id == channelID {
+			return true
+		}
+	}
+	for _, ct := range p.ChannelTypes {
+		if ct == channelType {
+			return true
+		}
+	}
+	return false
+}
+
 type GlobalSettings struct {
-	PassThroughRequestEnabled bool     `json:"pass_through_request_enabled"`
-	ThinkingModelBlacklist    []string `json:"thinking_model_blacklist"`
+	PassThroughRequestEnabled        bool                              `json:"pass_through_request_enabled"`
+	ThinkingModelBlacklist           []string                          `json:"thinking_model_blacklist"`
+	ChatCompletionsToResponsesPolicy ChatCompletionsToResponsesPolicy  `json:"chat_completions_to_responses_policy"`
 }
 
 // 默认配置
