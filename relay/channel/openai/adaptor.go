@@ -606,6 +606,8 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		usage, err = OpenaiHandlerWithUsage(c, info, resp)
 	case relayconstant.RelayModeRerank:
 		usage, err = common_handler.RerankHandler(c, info, resp)
+	case relayconstant.RelayModeResponsesCompact:
+		usage, err = OaiResponsesCompactionHandler(c, info, resp)
 	case relayconstant.RelayModeResponses:
 		if info.ConvertedViaResponses {
 			// Route to chat-via-responses handlers for format conversion
