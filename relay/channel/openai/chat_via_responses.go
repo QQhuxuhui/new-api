@@ -146,6 +146,10 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				if !exists {
 					idx = nextToolIndex
 					toolCallIndices[callID] = idx
+					// Also store by item ID so FuncCallArgsDelta can look up by item_id
+					if streamResponse.Item.ID != "" {
+						toolCallIndices[streamResponse.Item.ID] = idx
+					}
 					nextToolIndex++
 				}
 

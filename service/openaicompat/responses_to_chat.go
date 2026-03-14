@@ -81,7 +81,10 @@ func ResponsesResponseToChatCompletionsResponse(
 
 	// Set tool calls (ToolCalls is json.RawMessage — must marshal)
 	if len(toolCalls) > 0 {
-		tcJSON, _ := json.Marshal(toolCalls)
+		tcJSON, err := json.Marshal(toolCalls)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal tool calls: %w", err)
+		}
 		choice.Message.ToolCalls = tcJSON
 	}
 

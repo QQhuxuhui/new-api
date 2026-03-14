@@ -96,6 +96,8 @@ func ResponsesCompactHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPI
 		info.OriginModelName = originalModel.(string)
 	}
 
-	postConsumeQuota(c, info, usage.(*dto.Usage), "")
+	if usage != nil {
+		postConsumeQuota(c, info, usage.(*dto.Usage), "")
+	}
 	return nil
 }

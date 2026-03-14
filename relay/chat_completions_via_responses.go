@@ -123,7 +123,10 @@ func chatCompletionsViaResponses(
 		return apiErr
 	}
 
-	_ = usage
+	// Consume quota for the converted request
+	if usage != nil {
+		postConsumeQuota(c, info, usage.(*dto.Usage), "")
+	}
 	return nil
 }
 

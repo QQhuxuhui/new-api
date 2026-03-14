@@ -481,6 +481,11 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 			return GenRelayInfoResponses(c, request), nil
 		}
 		return nil, errors.New("request is not a OpenAIResponsesRequest")
+	case types.RelayFormatOpenAIResponsesCompaction:
+		info := genBaseRelayInfo(c, request)
+		info.RelayMode = relayconstant.RelayModeResponsesCompact
+		info.RelayFormat = types.RelayFormatOpenAIResponsesCompaction
+		return info, nil
 	case types.RelayFormatTask:
 		return genBaseRelayInfo(c, nil), nil
 	case types.RelayFormatMjProxy:

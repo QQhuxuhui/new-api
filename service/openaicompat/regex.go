@@ -1,8 +1,11 @@
 package openaicompat
 
 import (
+	"fmt"
 	"regexp"
 	"sync"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 // compiledRegexCache 使用 sync.Map 缓存已编译的正则表达式
@@ -26,7 +29,8 @@ func matchAnyRegex(patterns []string, s string) bool {
 	for _, pattern := range patterns {
 		re, err := getCompiledRegex(pattern)
 		if err != nil {
-			continue // 跳过无效的正则
+			common.SysLog(fmt.Sprintf("invalid regex pattern %q in ChatCompletionsToResponsesPolicy: %v", pattern, err))
+			continue
 		}
 		if re.MatchString(s) {
 			return true
