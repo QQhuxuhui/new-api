@@ -38,6 +38,14 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, "Invalid request, "+err.Error())
 			return
 		}
+
+		// For compact responses mode, save original model and use compact-suffixed model for pricing
+		relayMode := relayconstant.Path2RelayMode(c.Request.URL.Path)
+		if relayMode == relayconstant.RelayModeResponsesCompact {
+			c.Set("original_model_for_compact", modelRequest.Model)
+			modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
+		}
+
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {
