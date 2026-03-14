@@ -15,6 +15,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/openaicompat"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -53,6 +54,16 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
+
+	// Check if this request should be converted via responses format
+	if shouldUseChatViaResponsesForClaude(info, request) {
+		// Convert Claude request to OpenAI chat format first
+		openAIReq, convertErr := service.ClaudeToOpenAIRequest(*request, info)
+		if convertErr != nil {
+			return types.NewError(convertErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		return chatCompletionsViaResponses(c, info, openAIReq, adaptor)
+	}
 
 	if request.MaxTokens == 0 {
 		request.MaxTokens = uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model))
@@ -210,6 +221,20 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	service.PostClaudeConsumeQuota(c, info, usage.(*dto.Usage))
 	return nil
+}
+
+// shouldUseChatViaResponsesForClaude checks if a Claude request should be converted via responses format
+func shouldUseChatViaResponsesForClaude(info *relaycommon.RelayInfo, request *dto.ClaudeRequest) bool {
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+		return false
+	}
+	policy := model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy
+	return openaicompat.ShouldChatCompletionsUseResponses(
+		policy,
+		info.ChannelId,
+		info.ChannelType,
+		request.Model,
+	)
 }
 
 // maskClaudeApiKey 对 API Key 进行脱敏，显示前4位和后4位
