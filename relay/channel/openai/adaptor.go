@@ -607,10 +607,19 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	case relayconstant.RelayModeRerank:
 		usage, err = common_handler.RerankHandler(c, info, resp)
 	case relayconstant.RelayModeResponses:
-		if info.IsStream {
-			usage, err = OaiResponsesStreamHandler(c, info, resp)
+		if info.ConvertedViaResponses {
+			// Route to chat-via-responses handlers for format conversion
+			if info.IsStream {
+				usage, err = OaiResponsesToChatStreamHandler(c, info, resp)
+			} else {
+				usage, err = OaiResponsesToChatHandler(c, info, resp)
+			}
 		} else {
-			usage, err = OaiResponsesHandler(c, info, resp)
+			if info.IsStream {
+				usage, err = OaiResponsesStreamHandler(c, info, resp)
+			} else {
+				usage, err = OaiResponsesHandler(c, info, resp)
+			}
 		}
 	default:
 		if info.IsStream {
