@@ -285,14 +285,16 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, te
 		if message.Role == "system" {
 			// 根据Claude API规范，system字段使用数组格式更有通用性
 			if message.IsStringContent() {
-				systemMessages = append(systemMessages, dto.ClaudeMediaMessage{
-					Type: "text",
-					Text: common.GetPointer[string](message.StringContent()),
-				})
+				if text := message.StringContent(); text != "" {
+					systemMessages = append(systemMessages, dto.ClaudeMediaMessage{
+						Type: "text",
+						Text: common.GetPointer[string](text),
+					})
+				}
 			} else {
 				// 支持复合内容的system消息（虽然不常见，但需要考虑完整性）
 				for _, ctx := range message.ParseContent() {
-					if ctx.Type == "text" {
+					if ctx.Type == "text" && ctx.Text != "" {
 						systemMessages = append(systemMessages, dto.ClaudeMediaMessage{
 							Type: "text",
 							Text: common.GetPointer[string](ctx.Text),
@@ -354,16 +356,23 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, te
 			} else {
 				claudeMediaMessages := make([]dto.ClaudeMediaMessage, 0)
 				for _, mediaMessage := range message.ParseContent() {
-					claudeMediaMessage := dto.ClaudeMediaMessage{
-						Type: mediaMessage.Type,
-					}
 					if mediaMessage.Type == "text" {
-						claudeMediaMessage.Text = common.GetPointer[string](mediaMessage.Text)
+						// Skip empty text blocks — Claude rejects them with
+						// "messages: text content blocks must be non-empty"
+						if mediaMessage.Text == "" {
+							continue
+						}
+						claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
+							Type: mediaMessage.Type,
+							Text: common.GetPointer[string](mediaMessage.Text),
+						})
 					} else {
 						imageUrl := mediaMessage.GetImageMedia()
-						claudeMediaMessage.Type = "image"
-						claudeMediaMessage.Source = &dto.ClaudeMessageSource{
-							Type: "base64",
+						claudeMediaMessage := dto.ClaudeMediaMessage{
+							Type: "image",
+							Source: &dto.ClaudeMessageSource{
+								Type: "base64",
+							},
 						}
 						// 判断是否是url
 						if strings.HasPrefix(imageUrl.Url, "http") {
@@ -382,8 +391,8 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, te
 							claudeMediaMessage.Source.MediaType = "image/" + format
 							claudeMediaMessage.Source.Data = base64String
 						}
+						claudeMediaMessages = append(claudeMediaMessages, claudeMediaMessage)
 					}
-					claudeMediaMessages = append(claudeMediaMessages, claudeMediaMessage)
 				}
 				if message.ToolCalls != nil {
 					for _, toolCall := range message.ParseToolCalls() {
@@ -401,6 +410,11 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, te
 					}
 				}
 				claudeMessage.Content = claudeMediaMessages
+				// If all text blocks were filtered as empty and no other content remains,
+				// use "..." placeholder (consistent with the nil content guard at line 272)
+				if len(claudeMediaMessages) == 0 {
+					claudeMessage.Content = "..."
+				}
 			}
 			claudeMessages = append(claudeMessages, claudeMessage)
 		}

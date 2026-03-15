@@ -148,6 +148,12 @@ func buildUserInputItem(msg dto.Message) map[string]interface{} {
 		"role": "user",
 	}
 	content := convertMessageContent(msg.Content, "user")
+	if len(content) == 0 {
+		// Empty content is not a valid responses message; use placeholder
+		content = []map[string]interface{}{
+			{"type": "input_text", "text": "..."},
+		}
+	}
 	item["content"] = content
 	return item
 }
@@ -212,6 +218,9 @@ func convertMessageContent(content any, role string) []map[string]interface{} {
 
 	// Try as string first
 	if s, ok := content.(string); ok {
+		if s == "" {
+			return nil
+		}
 		textType := "input_text"
 		if role == "assistant" {
 			textType = "output_text"
@@ -239,11 +248,14 @@ func convertMessageContent(content any, role string) []map[string]interface{} {
 		contentType, _ := m["type"].(string)
 		switch contentType {
 		case "text":
+			text, _ := m["text"].(string)
+			if text == "" {
+				continue
+			}
 			textType := "input_text"
 			if role == "assistant" {
 				textType = "output_text"
 			}
-			text, _ := m["text"].(string)
 			parts = append(parts, map[string]interface{}{
 				"type": textType,
 				"text": text,
