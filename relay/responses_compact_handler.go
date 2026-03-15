@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -30,10 +32,19 @@ func ResponsesCompactHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPI
 		)
 	}
 
+	// OriginModelName has the compact suffix (applied in controller/relay.go for pricing).
+	// Strip it for model mapping — channel model mappings are configured with original model names.
+	compactModelName := info.OriginModelName
+	originalModel := strings.TrimSuffix(compactModelName, ratio_setting.CompactModelSuffix)
+	info.OriginModelName = originalModel
+
 	err := helper.ModelMappedHelper(c, info, compactReq)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
+
+	// Restore compact suffix for billing
+	info.OriginModelName = compactModelName
 
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
@@ -89,11 +100,6 @@ func ResponsesCompactHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPI
 	if apiErr != nil {
 		service.ResetStatusCode(apiErr, statusCodeMappingStr)
 		return apiErr
-	}
-
-	// Restore original model name for logging (remove compact suffix)
-	if originalModel, exists := c.Get("original_model_for_compact"); exists {
-		info.OriginModelName = originalModel.(string)
 	}
 
 	if usage != nil {

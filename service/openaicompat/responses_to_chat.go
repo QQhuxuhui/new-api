@@ -97,7 +97,7 @@ func ResponsesResponseToChatCompletionsResponse(
 	if resp.Status == "incomplete" {
 		choice.FinishReason = "length"
 	} else if resp.Status == "failed" {
-		choice.FinishReason = "error"
+		choice.FinishReason = "stop"
 	} else if hasFunctionCall {
 		choice.FinishReason = "tool_calls"
 	} else {

@@ -251,8 +251,8 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			}
 
 		case dto.ResponsesEventFailed:
-			// Send error finish_reason
-			finishReason := "error"
+			// Map to "stop" — "error" is not a standard chat completions finish_reason
+			finishReason := "stop"
 			chunk := newStreamChunk(responseID)
 			chunk.Created = createdAt
 			chunk.Model = model

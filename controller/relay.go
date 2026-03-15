@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -170,6 +171,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
+	}
+
+	// For compact requests, apply the compact model suffix to OriginModelName for pricing.
+	// This must happen after GenRelayInfo (which uses the original model for routing)
+	// but before ModelPriceHelper (which uses OriginModelName for pricing lookup).
+	// The suffix enables admins to configure separate pricing for compact requests.
+	if c.GetBool("is_compact_request") {
+		relayInfo.OriginModelName = ratio_setting.WithCompactModelSuffix(relayInfo.OriginModelName)
 	}
 
 	meta := request.GetTokenCountMeta()

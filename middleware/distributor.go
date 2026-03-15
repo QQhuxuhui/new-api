@@ -39,11 +39,11 @@ func Distribute() func(c *gin.Context) {
 			return
 		}
 
-		// For compact responses mode, save original model and use compact-suffixed model for pricing
+		// For compact responses mode, mark in context (do NOT mutate model name here;
+		// the suffix is applied later for pricing only, after routing/channel selection)
 		relayMode := relayconstant.Path2RelayMode(c.Request.URL.Path)
 		if relayMode == relayconstant.RelayModeResponsesCompact {
-			c.Set("original_model_for_compact", modelRequest.Model)
-			modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
+			c.Set("is_compact_request", true)
 		}
 
 		if ok {
