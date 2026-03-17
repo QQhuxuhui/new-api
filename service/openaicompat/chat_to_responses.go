@@ -115,6 +115,11 @@ func ChatCompletionsToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.Open
 	// 8. Default truncation
 	responsesReq.Truncation = "auto"
 
+	// 9. Normalize all function_call IDs to fc_ format
+	if err := NormalizeResponsesInputToolCallIDs(responsesReq); err != nil {
+		return nil, fmt.Errorf("normalize tool call IDs: %w", err)
+	}
+
 	return responsesReq, nil
 }
 
@@ -186,9 +191,10 @@ func buildAssistantInputItems(msg dto.Message) []map[string]interface{} {
 			for _, tc := range toolCalls {
 				// Decode fc_ format back to original call_id
 				originalCallID := ConvertCallIDFromOpenAIFormat(tc.ID)
+				convertedID := ConvertCallIDToOpenAIFormat(originalCallID)
 				fcItem := map[string]interface{}{
 					"type":      "function_call",
-					"id":        ConvertCallIDToOpenAIFormat(originalCallID),
+					"id":        convertedID,
 					"call_id":   originalCallID,
 					"name":      tc.Function.Name,
 					"arguments": tc.Function.Arguments,
