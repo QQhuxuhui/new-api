@@ -237,6 +237,14 @@ func NormalizeResponsesInputToolCallIDs(req *dto.OpenAIResponsesRequest) error {
 		return fmt.Errorf("unmarshal responses input items: %w", err)
 	}
 
+	// Log all items for debugging
+	for i, item := range items {
+		itemType, _ := item["type"].(string)
+		itemID, _ := item["id"].(string)
+		callID, _ := item["call_id"].(string)
+		fmt.Printf("[NormalizeIDs] Item[%d] type=%s, id=%s, call_id=%s\n", i, itemType, itemID, callID)
+	}
+
 	changed := false
 	for i, item := range items {
 		itemType, _ := item["type"].(string)
@@ -247,17 +255,15 @@ func NormalizeResponsesInputToolCallIDs(req *dto.OpenAIResponsesRequest) error {
 		currentID, _ := item["id"].(string)
 		callID, _ := item["call_id"].(string)
 
-		fmt.Printf("[NormalizeIDs] Item[%d] type=%s, id=%s, call_id=%s\n", i, itemType, currentID, callID)
-
 		switch {
 		case currentID != "" && !strings.HasPrefix(currentID, "fc_"):
 			newID := ConvertCallIDToOpenAIFormat(currentID)
-			fmt.Printf("[NormalizeIDs] Converting id: %s -> %s\n", currentID, newID)
+			fmt.Printf("[NormalizeIDs] Item[%d] Converting id: %s -> %s\n", i, currentID, newID)
 			item["id"] = newID
 			changed = true
 		case currentID == "" && callID != "":
 			newID := ConvertCallIDToOpenAIFormat(callID)
-			fmt.Printf("[NormalizeIDs] Setting id from call_id: %s -> %s\n", callID, newID)
+			fmt.Printf("[NormalizeIDs] Item[%d] Setting id from call_id: %s -> %s\n", i, callID, newID)
 			item["id"] = newID
 			changed = true
 		}
