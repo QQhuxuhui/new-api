@@ -142,6 +142,8 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			// When a function_call output item is added, send the initial tool call chunk
 			if streamResponse.Item != nil && streamResponse.Item.Type == "function_call" {
 				callID := streamResponse.Item.CallID
+				// Convert call_id to OpenAI format (fc_ prefix)
+				convertedCallID := openaicompat.ConvertCallIDToOpenAIFormat(callID)
 				idx, exists := toolCallIndices[callID]
 				if !exists {
 					idx = nextToolIndex
@@ -154,7 +156,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				}
 
 				tc := dto.ToolCallResponse{
-					ID:   callID,
+					ID:   convertedCallID,
 					Type: "function",
 					Function: dto.FunctionResponse{
 						Name:      streamResponse.Item.Name,

@@ -185,7 +185,7 @@ func buildAssistantInputItems(msg dto.Message) []map[string]interface{} {
 			for _, tc := range toolCalls {
 				fcItem := map[string]interface{}{
 					"type":      "function_call",
-					"call_id":   tc.ID,
+					"call_id":   ConvertCallIDFromOpenAIFormat(tc.ID),
 					"name":      tc.Function.Name,
 					"arguments": tc.Function.Arguments,
 				}
@@ -205,7 +205,7 @@ func buildToolOutputItem(msg dto.Message) map[string]interface{} {
 		"output": text,
 	}
 	if msg.ToolCallId != "" {
-		item["call_id"] = msg.ToolCallId
+		item["call_id"] = ConvertCallIDFromOpenAIFormat(msg.ToolCallId)
 	}
 	return item
 }
