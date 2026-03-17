@@ -120,3 +120,73 @@ func TestConvertOpenAIResponsesRequest_PreservesValidFunctionCallIDs(t *testing.
 		t.Fatalf("expected valid call_id to be preserved, got %v", got)
 	}
 }
+
+func TestConvertOpenAIResponsesRequest_StripsFunctionCallOutputIDs(t *testing.T) {
+	adaptor := &Adaptor{}
+	request := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.4",
+		Input: json.RawMessage(`[
+			{
+				"type": "function_call_output",
+				"id": "callaf72636e3a81445d902d8f07",
+				"call_id": "callaf72636e3a81445d902d8f07",
+				"output": "ok"
+			}
+		]`),
+	}
+
+	converted, err := adaptor.ConvertOpenAIResponsesRequest(nil, nil, request)
+	if err != nil {
+		t.Fatalf("ConvertOpenAIResponsesRequest returned error: %v", err)
+	}
+
+	convertedReq := converted.(dto.OpenAIResponsesRequest)
+
+	var items []map[string]any
+	if err := json.Unmarshal(convertedReq.Input, &items); err != nil {
+		t.Fatalf("failed to unmarshal converted input: %v", err)
+	}
+
+	if got := items[0]["call_id"]; got != "callaf72636e3a81445d902d8f07" {
+		t.Fatalf("expected function_call_output call_id to be preserved, got %v", got)
+	}
+	if _, exists := items[0]["id"]; exists {
+		t.Fatalf("expected function_call_output id to be removed, got %v", items[0]["id"])
+	}
+}
+
+func TestConvertOpenAIResponsesRequest_NormalizesItemReferenceIDs(t *testing.T) {
+	adaptor := &Adaptor{}
+	request := dto.OpenAIResponsesRequest{
+		Model: "gpt-5.4",
+		Input: json.RawMessage(`[
+			{
+				"type": "item_reference",
+				"id": "call_123|fc_456"
+			},
+			{
+				"type": "item_reference",
+				"id": "call_789"
+			}
+		]`),
+	}
+
+	converted, err := adaptor.ConvertOpenAIResponsesRequest(nil, nil, request)
+	if err != nil {
+		t.Fatalf("ConvertOpenAIResponsesRequest returned error: %v", err)
+	}
+
+	convertedReq := converted.(dto.OpenAIResponsesRequest)
+
+	var items []map[string]any
+	if err := json.Unmarshal(convertedReq.Input, &items); err != nil {
+		t.Fatalf("failed to unmarshal converted input: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected only recoverable item_reference to remain, got %d items", len(items))
+	}
+	if got := items[0]["id"]; got != "fc_456" {
+		t.Fatalf("expected recoverable item_reference id to be rewritten, got %v", got)
+	}
+}

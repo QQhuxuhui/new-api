@@ -17,10 +17,13 @@ func normalizeResponsesInputIdentifiers(input json.RawMessage) (json.RawMessage,
 	}
 
 	changed := false
+	normalizedItems := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		if item == nil {
+			normalizedItems = append(normalizedItems, item)
 			continue
 		}
+		drop := false
 		switch stringField(item["type"]) {
 		case "function_call":
 			if normalizeFunctionCallItem(item) {
@@ -30,13 +33,22 @@ func normalizeResponsesInputIdentifiers(input json.RawMessage) (json.RawMessage,
 			if normalizeFunctionCallOutputItem(item) {
 				changed = true
 			}
+		case "item_reference":
+			if itemChanged, itemDropped := normalizeItemReferenceItem(item); itemChanged {
+				changed = true
+				drop = itemDropped
+			}
 		}
+		if drop {
+			continue
+		}
+		normalizedItems = append(normalizedItems, item)
 	}
 
 	if !changed {
 		return input, nil
 	}
-	return json.Marshal(items)
+	return json.Marshal(normalizedItems)
 }
 
 func normalizeFunctionCallItem(item map[string]any) bool {
@@ -96,11 +108,14 @@ func normalizeFunctionCallOutputItem(item map[string]any) bool {
 	if splitCallID, _, ok := splitCompoundToolCallID(callID); ok {
 		callID = splitCallID
 	}
+	if splitCallID, _, ok := splitCompoundToolCallID(originalItemID); ok && callID == "" {
+		callID = splitCallID
+	}
 	if callID == "" && looksLikeResponsesCallID(originalItemID) {
 		callID = originalItemID
 	}
 
-	changed := callID != originalCallID
+	changed := callID != originalCallID || originalItemID != ""
 	if !changed {
 		return false
 	}
@@ -111,11 +126,34 @@ func normalizeFunctionCallOutputItem(item map[string]any) bool {
 		delete(item, "call_id")
 	}
 
-	if originalCallID == "" && originalItemID != "" && looksLikeResponsesCallID(originalItemID) {
-		delete(item, "id")
+	delete(item, "id")
+	return true
+}
+
+func normalizeItemReferenceItem(item map[string]any) (changed bool, drop bool) {
+	originalItemID := stringField(item["id"])
+	itemID := originalItemID
+
+	if _, splitItemID, ok := splitCompoundToolCallID(itemID); ok {
+		itemID = splitItemID
 	}
 
-	return true
+	if itemID == "" {
+		delete(item, "id")
+		return true, true
+	}
+
+	if looksLikeResponsesCallID(itemID) {
+		delete(item, "id")
+		return true, true
+	}
+
+	if itemID == originalItemID {
+		return false, false
+	}
+
+	item["id"] = itemID
+	return true, false
 }
 
 func splitCompoundToolCallID(raw string) (callID string, itemID string, ok bool) {
