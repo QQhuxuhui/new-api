@@ -41,28 +41,18 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
-	var requestBody io.Reader
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
-		// Even with pass-through, normalize tool call IDs to fc_ format (required by Responses API)
-		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-		jsonData, err := common.Marshal(convertedRequest)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-		requestBody = bytes.NewBuffer(jsonData)
-	} else {
-		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-		jsonData, err := common.Marshal(convertedRequest)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
+	// Always convert (normalizes tool call IDs to fc_ format required by Responses API)
+	convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
+	if err != nil {
+		return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
+	jsonData, err := common.Marshal(convertedRequest)
+	if err != nil {
+		return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
 
+	isPassThrough := model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled
+	if !isPassThrough {
 		// remove disabled fields for OpenAI Responses API
 		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings)
 		if err != nil {
@@ -80,8 +70,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if common.DebugEnabled {
 			println("requestBody: ", string(jsonData))
 		}
-		requestBody = bytes.NewBuffer(jsonData)
 	}
+
+	var requestBody io.Reader = bytes.NewBuffer(jsonData)
 
 	var httpResp *http.Response
 	resp, err := adaptor.DoRequest(c, info, requestBody)
