@@ -76,10 +76,55 @@ func TestChatCompletionsToResponsesRequest_DecodesToolCallIDs(t *testing.T) {
 		t.Fatalf("expected 2 input items, got %d", len(inputItems))
 	}
 
+	if got := inputItems[0]["id"]; got != converted {
+		t.Fatalf("expected assistant function_call id %q, got %#v", converted, got)
+	}
 	if got := inputItems[0]["call_id"]; got != original {
 		t.Fatalf("expected assistant function_call call_id %q, got %#v", original, got)
 	}
 	if got := inputItems[1]["call_id"]; got != original {
 		t.Fatalf("expected tool function_call_output call_id %q, got %#v", original, got)
+	}
+}
+
+func TestNormalizeResponsesInputToolCallIDs(t *testing.T) {
+	req := &dto.OpenAIResponsesRequest{}
+	input, err := json.Marshal([]map[string]any{
+		{
+			"type":      "function_call",
+			"id":        "call_bad_id_123",
+			"call_id":   "call_bad_id_123",
+			"name":      "lookup_weather",
+			"arguments": `{"city":"shanghai"}`,
+		},
+		{
+			"type":    "function_call_output",
+			"call_id": "call_bad_id_123",
+			"output":  "sunny",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	req.Input = input
+
+	if err := NormalizeResponsesInputToolCallIDs(req); err != nil {
+		t.Fatalf("normalize request: %v", err)
+	}
+
+	var items []map[string]any
+	if err := json.Unmarshal(req.Input, &items); err != nil {
+		t.Fatalf("unmarshal normalized input: %v", err)
+	}
+
+	expectedID := ConvertCallIDToOpenAIFormat("call_bad_id_123")
+	if got := items[0]["id"]; got != expectedID {
+		t.Fatalf("expected normalized function_call id %q, got %#v", expectedID, got)
+	}
+	if got := items[0]["call_id"]; got != "call_bad_id_123" {
+		t.Fatalf("expected function_call call_id to stay raw, got %#v", got)
+	}
+	if got := items[1]["call_id"]; got != "call_bad_id_123" {
+		t.Fatalf("expected function_call_output call_id to stay raw, got %#v", got)
 	}
 }

@@ -2,6 +2,7 @@ package openaicompat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
@@ -185,6 +186,7 @@ func buildAssistantInputItems(msg dto.Message) []map[string]interface{} {
 			for _, tc := range toolCalls {
 				fcItem := map[string]interface{}{
 					"type":      "function_call",
+					"id":        tc.ID,
 					"call_id":   ConvertCallIDFromOpenAIFormat(tc.ID),
 					"name":      tc.Function.Name,
 					"arguments": tc.Function.Arguments,
@@ -208,6 +210,52 @@ func buildToolOutputItem(msg dto.Message) map[string]interface{} {
 		item["call_id"] = ConvertCallIDFromOpenAIFormat(msg.ToolCallId)
 	}
 	return item
+}
+
+// NormalizeResponsesInputToolCallIDs ensures Responses function_call items use OpenAI-compatible item IDs.
+func NormalizeResponsesInputToolCallIDs(req *dto.OpenAIResponsesRequest) error {
+	if req == nil || len(req.Input) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(string(req.Input)) == "" {
+		return nil
+	}
+
+	var items []map[string]any
+	if err := json.Unmarshal(req.Input, &items); err != nil {
+		return fmt.Errorf("unmarshal responses input items: %w", err)
+	}
+
+	changed := false
+	for _, item := range items {
+		itemType, _ := item["type"].(string)
+		if itemType != "function_call" {
+			continue
+		}
+
+		currentID, _ := item["id"].(string)
+		callID, _ := item["call_id"].(string)
+
+		switch {
+		case currentID != "" && !strings.HasPrefix(currentID, "fc_"):
+			item["id"] = ConvertCallIDToOpenAIFormat(currentID)
+			changed = true
+		case currentID == "" && callID != "":
+			item["id"] = ConvertCallIDToOpenAIFormat(callID)
+			changed = true
+		}
+	}
+
+	if !changed {
+		return nil
+	}
+
+	input, err := json.Marshal(items)
+	if err != nil {
+		return fmt.Errorf("marshal normalized responses input items: %w", err)
+	}
+	req.Input = input
+	return nil
 }
 
 // convertMessageContent converts chat message content to responses API content format

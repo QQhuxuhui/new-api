@@ -27,6 +27,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/common_handler"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/openaicompat"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -576,6 +577,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 			request.Reasoning.Effort = effort
 		}
 		request.Model = originModel
+	}
+	if err := openaicompat.NormalizeResponsesInputToolCallIDs(&request); err != nil {
+		return nil, err
 	}
 	return request, nil
 }
