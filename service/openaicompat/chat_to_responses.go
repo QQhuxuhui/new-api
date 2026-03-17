@@ -192,6 +192,9 @@ func buildAssistantInputItems(msg dto.Message) []map[string]interface{} {
 				// Decode fc_ format back to original call_id
 				originalCallID := ConvertCallIDFromOpenAIFormat(tc.ID)
 				convertedID := ConvertCallIDToOpenAIFormat(originalCallID)
+
+				fmt.Printf("[ToolCallID] Original: %s -> Decoded: %s -> Converted: %s\n", tc.ID, originalCallID, convertedID)
+
 				fcItem := map[string]interface{}{
 					"type":      "function_call",
 					"id":        convertedID,
@@ -235,7 +238,7 @@ func NormalizeResponsesInputToolCallIDs(req *dto.OpenAIResponsesRequest) error {
 	}
 
 	changed := false
-	for _, item := range items {
+	for i, item := range items {
 		itemType, _ := item["type"].(string)
 		if itemType != "function_call" {
 			continue
@@ -244,12 +247,18 @@ func NormalizeResponsesInputToolCallIDs(req *dto.OpenAIResponsesRequest) error {
 		currentID, _ := item["id"].(string)
 		callID, _ := item["call_id"].(string)
 
+		fmt.Printf("[NormalizeIDs] Item[%d] type=%s, id=%s, call_id=%s\n", i, itemType, currentID, callID)
+
 		switch {
 		case currentID != "" && !strings.HasPrefix(currentID, "fc_"):
-			item["id"] = ConvertCallIDToOpenAIFormat(currentID)
+			newID := ConvertCallIDToOpenAIFormat(currentID)
+			fmt.Printf("[NormalizeIDs] Converting id: %s -> %s\n", currentID, newID)
+			item["id"] = newID
 			changed = true
 		case currentID == "" && callID != "":
-			item["id"] = ConvertCallIDToOpenAIFormat(callID)
+			newID := ConvertCallIDToOpenAIFormat(callID)
+			fmt.Printf("[NormalizeIDs] Setting id from call_id: %s -> %s\n", callID, newID)
+			item["id"] = newID
 			changed = true
 		}
 	}
