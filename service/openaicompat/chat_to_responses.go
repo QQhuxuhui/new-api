@@ -184,10 +184,12 @@ func buildAssistantInputItems(msg dto.Message) []map[string]interface{} {
 		var toolCalls []dto.ToolCallResponse
 		if err := json.Unmarshal(msg.ToolCalls, &toolCalls); err == nil {
 			for _, tc := range toolCalls {
+				// Decode fc_ format back to original call_id
+				originalCallID := ConvertCallIDFromOpenAIFormat(tc.ID)
 				fcItem := map[string]interface{}{
 					"type":      "function_call",
-					"id":        tc.ID,
-					"call_id":   ConvertCallIDFromOpenAIFormat(tc.ID),
+					"id":        ConvertCallIDToOpenAIFormat(originalCallID),
+					"call_id":   originalCallID,
 					"name":      tc.Function.Name,
 					"arguments": tc.Function.Arguments,
 				}
