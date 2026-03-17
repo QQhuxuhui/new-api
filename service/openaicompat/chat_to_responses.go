@@ -2,7 +2,6 @@ package openaicompat
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
@@ -115,11 +114,6 @@ func ChatCompletionsToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.Open
 	// 8. Default truncation
 	responsesReq.Truncation = "auto"
 
-	// 9. Normalize all function_call IDs to fc_ format
-	if err := NormalizeResponsesInputToolCallIDs(responsesReq); err != nil {
-		return nil, fmt.Errorf("normalize tool call IDs: %w", err)
-	}
-
 	return responsesReq, nil
 }
 
@@ -189,16 +183,9 @@ func buildAssistantInputItems(msg dto.Message) []map[string]interface{} {
 		var toolCalls []dto.ToolCallResponse
 		if err := json.Unmarshal(msg.ToolCalls, &toolCalls); err == nil {
 			for _, tc := range toolCalls {
-				// Decode fc_ format back to original call_id
-				originalCallID := ConvertCallIDFromOpenAIFormat(tc.ID)
-				convertedID := ConvertCallIDToOpenAIFormat(originalCallID)
-
-				fmt.Printf("[ToolCallID] Original: %s -> Decoded: %s -> Converted: %s\n", tc.ID, originalCallID, convertedID)
-
 				fcItem := map[string]interface{}{
 					"type":      "function_call",
-					"id":        convertedID,
-					"call_id":   originalCallID,
+					"call_id":   tc.ID,
 					"name":      tc.Function.Name,
 					"arguments": tc.Function.Arguments,
 				}
@@ -218,67 +205,9 @@ func buildToolOutputItem(msg dto.Message) map[string]interface{} {
 		"output": text,
 	}
 	if msg.ToolCallId != "" {
-		item["call_id"] = ConvertCallIDFromOpenAIFormat(msg.ToolCallId)
+		item["call_id"] = msg.ToolCallId
 	}
 	return item
-}
-
-// NormalizeResponsesInputToolCallIDs ensures Responses function_call items use OpenAI-compatible item IDs.
-func NormalizeResponsesInputToolCallIDs(req *dto.OpenAIResponsesRequest) error {
-	if req == nil || len(req.Input) == 0 {
-		return nil
-	}
-	if strings.TrimSpace(string(req.Input)) == "" {
-		return nil
-	}
-
-	var items []map[string]any
-	if err := json.Unmarshal(req.Input, &items); err != nil {
-		return fmt.Errorf("unmarshal responses input items: %w", err)
-	}
-
-	// Log all items for debugging
-	for i, item := range items {
-		itemType, _ := item["type"].(string)
-		itemID, _ := item["id"].(string)
-		callID, _ := item["call_id"].(string)
-		fmt.Printf("[NormalizeIDs] Item[%d] type=%s, id=%s, call_id=%s\n", i, itemType, itemID, callID)
-	}
-
-	changed := false
-	for i, item := range items {
-		itemType, _ := item["type"].(string)
-		if itemType != "function_call" {
-			continue
-		}
-
-		currentID, _ := item["id"].(string)
-		callID, _ := item["call_id"].(string)
-
-		switch {
-		case currentID != "" && !strings.HasPrefix(currentID, "fc_"):
-			newID := ConvertCallIDToOpenAIFormat(currentID)
-			fmt.Printf("[NormalizeIDs] Item[%d] Converting id: %s -> %s\n", i, currentID, newID)
-			item["id"] = newID
-			changed = true
-		case currentID == "" && callID != "":
-			newID := ConvertCallIDToOpenAIFormat(callID)
-			fmt.Printf("[NormalizeIDs] Item[%d] Setting id from call_id: %s -> %s\n", i, callID, newID)
-			item["id"] = newID
-			changed = true
-		}
-	}
-
-	if !changed {
-		return nil
-	}
-
-	input, err := json.Marshal(items)
-	if err != nil {
-		return fmt.Errorf("marshal normalized responses input items: %w", err)
-	}
-	req.Input = input
-	return nil
 }
 
 // convertMessageContent converts chat message content to responses API content format

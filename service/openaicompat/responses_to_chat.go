@@ -1,7 +1,6 @@
 package openaicompat
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -9,29 +8,6 @@ import (
 
 	"github.com/QuantumNous/new-api/dto"
 )
-
-const encodedCallIDPrefix = "fc_map_"
-
-// ConvertCallIDToOpenAIFormat converts a call_id to OpenAI-compatible format (fc_ prefix)
-func ConvertCallIDToOpenAIFormat(callID string) string {
-	if strings.HasPrefix(callID, "fc_") {
-		return callID
-	}
-	return encodedCallIDPrefix + base64.RawURLEncoding.EncodeToString([]byte(callID))
-}
-
-// ConvertCallIDFromOpenAIFormat converts a Chat Completions tool_call_id back to the original Responses API call_id.
-func ConvertCallIDFromOpenAIFormat(callID string) string {
-	if !strings.HasPrefix(callID, encodedCallIDPrefix) {
-		return callID
-	}
-
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(callID, encodedCallIDPrefix))
-	if err != nil {
-		return callID
-	}
-	return string(decoded)
-}
 
 // ResponsesResponseToChatCompletionsResponse converts a responses API response
 // to a chat completions response.
@@ -78,7 +54,7 @@ func ResponsesResponseToChatCompletionsResponse(
 		case "function_call":
 			hasFunctionCall = true
 			tc := dto.ToolCallResponse{
-				ID:   ConvertCallIDToOpenAIFormat(output.CallID),
+				ID:   output.CallID,
 				Type: "function",
 				Function: dto.FunctionResponse{
 					Name:      output.Name,
