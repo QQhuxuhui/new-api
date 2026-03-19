@@ -822,6 +822,75 @@ func TestApplyCacheSimulationSessionPrefixKeepsLongContextTailNearCurrentTurn(t 
 	}
 }
 
+func TestApplyCacheSimulationSessionPrefixReusesMostHistoryWithinFiveMinutes(t *testing.T) {
+	sessionPrefixSimulationStore = cachesim.NewMemoryStore(16, 32)
+
+	makeInfo := func(messages []dto.ClaudeMessage, promptTokens int, at time.Time) *relaycommon.RelayInfo {
+		return &relaycommon.RelayInfo{
+			UserId:          1,
+			TokenId:         10,
+			OriginModelName: "claude-3-7-sonnet-20250219",
+			PromptTokens:    promptTokens,
+			StartTime:       at,
+			Request: &dto.ClaudeRequest{
+				Model:  "claude-3-7-sonnet-20250219",
+				System: strings.Repeat("s", 3000),
+				Messages: messages,
+			},
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelId: 100,
+				ChannelSetting: dto.ChannelSettings{
+					CacheSimulation: &dto.CacheSimulationConfig{
+						Enabled:         true,
+						Mode:            dto.CacheSimulationModeSessionPrefix,
+						MinInputTokens:  1,
+						TargetCostRatio: 35,
+					},
+				},
+			},
+		}
+	}
+
+	firstMessages := []dto.ClaudeMessage{
+		{Role: "user", Content: strings.Repeat("u0", 7000)},
+		{Role: "assistant", Content: strings.Repeat("a0", 6500)},
+		{Role: "user", Content: strings.Repeat("u1", 7000)},
+		{Role: "assistant", Content: strings.Repeat("a1", 6500)},
+		{Role: "user", Content: strings.Repeat("u2", 7000)},
+		{Role: "assistant", Content: strings.Repeat("a2", 6500)},
+		{Role: "user", Content: strings.Repeat("current-user", 90)},
+	}
+	secondMessages := append([]dto.ClaudeMessage{}, firstMessages[:len(firstMessages)-1]...)
+	secondMessages = append(secondMessages,
+		dto.ClaudeMessage{Role: "user", Content: strings.Repeat("current-user", 90)},
+		dto.ClaudeMessage{Role: "assistant", Content: strings.Repeat("assistant-reply", 120)},
+		dto.ClaudeMessage{Role: "user", Content: strings.Repeat("next-user", 80)},
+	)
+
+	firstUsage := &dto.Usage{CompletionTokens: 40, TotalTokens: 40}
+	secondUsage := &dto.Usage{CompletionTokens: 45, TotalTokens: 45}
+	start := time.Date(2026, 3, 19, 10, 0, 0, 0, time.UTC)
+
+	applyCacheSimulation(makeInfo(firstMessages, 85000, start), firstUsage)
+	applyCacheSimulation(makeInfo(secondMessages, 85300, start.Add(2*time.Minute)), secondUsage)
+
+	if secondUsage.PromptTokensDetails.CachedTokens <= 0 {
+		t.Fatalf("expected second request to reuse cached history, got cached=%d", secondUsage.PromptTokensDetails.CachedTokens)
+	}
+	if secondUsage.ClaudeCacheCreation5mTokens <= 0 {
+		t.Fatalf("expected second request to create a small tail 5m chunk, got %d", secondUsage.ClaudeCacheCreation5mTokens)
+	}
+	if secondUsage.ClaudeCacheCreation5mTokens >= 10000 {
+		t.Fatalf("expected second request 5m cache creation to stay bounded to tail chunks, got %d", secondUsage.ClaudeCacheCreation5mTokens)
+	}
+	if secondUsage.ClaudeCacheCreation5mTokens >= firstUsage.ClaudeCacheCreation5mTokens {
+		t.Fatalf("expected second request to create less 5m cache than cold start, got first=%d second=%d",
+			firstUsage.ClaudeCacheCreation5mTokens,
+			secondUsage.ClaudeCacheCreation5mTokens,
+		)
+	}
+}
+
 func TestApplyCacheSimulationSessionPrefixUsesCapturedCompatibleClaudeRequest(t *testing.T) {
 	sessionPrefixSimulationStore = cachesim.NewMemoryStore(16, 16)
 	cfg := &dto.CacheSimulationConfig{

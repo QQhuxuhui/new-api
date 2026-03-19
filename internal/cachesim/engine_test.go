@@ -154,3 +154,44 @@ func TestSessionPrefixEngineIsolatesScopes(t *testing.T) {
 		t.Fatalf("expected isolated scope to behave as cold start, got 1h=%d 5m=%d", result.CacheWrite1hTokens, result.CacheWrite5mTokens)
 	}
 }
+
+func TestSessionPrefixEngineRetainsContiguousPrefixWhenCheckpointLimitExceeded(t *testing.T) {
+	store := NewMemoryStore(16, 4)
+	engine := NewSessionPrefixEngine(store)
+	scope := ScopeKey{UserID: 1, TokenID: 10, ChannelID: 100, Model: "claude-3-7-sonnet-20250219"}
+	start := time.Date(2026, 3, 19, 10, 0, 0, 0, time.UTC)
+
+	snapshot := makeSnapshot(
+		scope,
+		start,
+		Segment{Kind: SegmentKindSystem, TTL: TTL1h, TokenCount: 10, Fingerprint: "system:v1"},
+		Segment{Kind: SegmentKindHistory, TTL: TTL5m, TokenCount: 10, Fingerprint: "history:1"},
+		Segment{Kind: SegmentKindHistory, TTL: TTL5m, TokenCount: 10, Fingerprint: "history:2"},
+		Segment{Kind: SegmentKindHistory, TTL: TTL5m, TokenCount: 10, Fingerprint: "history:3"},
+		Segment{Kind: SegmentKindHistory, TTL: TTL5m, TokenCount: 10, Fingerprint: "history:4"},
+		Segment{Kind: SegmentKindHistory, TTL: TTL5m, TokenCount: 10, Fingerprint: "history:5"},
+		Segment{Kind: SegmentKindCurrent, TTL: TTLNone, TokenCount: 5, Fingerprint: "current:v1"},
+	)
+	if _, err := engine.Simulate(snapshot); err != nil {
+		t.Fatalf("seed simulate returned error: %v", err)
+	}
+
+	second := snapshot
+	second.RequestedAt = start.Add(2 * time.Minute)
+	result, err := engine.Simulate(second)
+	if err != nil {
+		t.Fatalf("simulate returned error: %v", err)
+	}
+	if result.CacheReadTokens != 40 {
+		t.Fatalf("expected cache read to retain first 4 checkpoints = 40, got %d", result.CacheReadTokens)
+	}
+	if result.CacheWrite1hTokens != 0 {
+		t.Fatalf("expected no additional 1h writes, got %d", result.CacheWrite1hTokens)
+	}
+	if result.CacheWrite5mTokens != 20 {
+		t.Fatalf("expected overflow tail to rewrite last two history chunks = 20, got %d", result.CacheWrite5mTokens)
+	}
+	if result.InputTokens != 5 {
+		t.Fatalf("expected current turn to remain uncached input = 5, got %d", result.InputTokens)
+	}
+}

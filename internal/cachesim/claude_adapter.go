@@ -8,6 +8,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 )
 
+const historyChunkTargetTokens = 4096
+
 func BuildClaudeSnapshot(
 	req *dto.ClaudeRequest,
 	scope ScopeKey,
@@ -54,15 +56,8 @@ func BuildClaudeSnapshotWithProfile(
 		})
 	}
 
-	historyText, currentText := serializeClaudeMessages(req.Messages)
-	if historyText != "" {
-		segments = append(segments, Segment{
-			Kind:        SegmentKindHistory,
-			TTL:         TTL5m,
-			TokenCount:  countTokens(historyText),
-			Fingerprint: historyText,
-		})
-	}
+	segments = append(segments, buildClaudeHistorySegments(req.Messages, countTokens)...)
+	currentText := serializeClaudeCurrentMessage(req.Messages)
 	if currentText != "" {
 		segments = append(segments, Segment{
 			Kind:        SegmentKindCurrent,
@@ -101,16 +96,54 @@ func serializeClaudeSystem(req *dto.ClaudeRequest) string {
 	return marshalFingerprint(req.System)
 }
 
-func serializeClaudeMessages(messages []dto.ClaudeMessage) (history string, current string) {
+func serializeClaudeCurrentMessage(messages []dto.ClaudeMessage) string {
 	if len(messages) == 0 {
-		return "", ""
+		return ""
 	}
-	if len(messages) == 1 {
-		return "", marshalFingerprint(messages[0])
+	return marshalFingerprint(messages[len(messages)-1])
+}
+
+func buildClaudeHistorySegments(messages []dto.ClaudeMessage, countTokens func(string) int) []Segment {
+	if len(messages) <= 1 || countTokens == nil {
+		return nil
 	}
-	history = marshalFingerprint(messages[:len(messages)-1])
-	current = marshalFingerprint(messages[len(messages)-1])
-	return history, current
+
+	historyMessages := messages[:len(messages)-1]
+	segments := make([]Segment, 0, len(historyMessages))
+	chunk := make([]dto.ClaudeMessage, 0, len(historyMessages))
+	chunkTokenCount := 0
+
+	flush := func() {
+		if len(chunk) == 0 {
+			return
+		}
+		chunkFingerprint := marshalFingerprint(chunk)
+		if chunkFingerprint != "" {
+			segments = append(segments, Segment{
+				Kind:        SegmentKindHistory,
+				TTL:         TTL5m,
+				TokenCount:  countTokens(chunkFingerprint),
+				Fingerprint: chunkFingerprint,
+			})
+		}
+		chunk = chunk[:0]
+		chunkTokenCount = 0
+	}
+
+	for _, message := range historyMessages {
+		messageFingerprint := marshalFingerprint(message)
+		if messageFingerprint == "" {
+			continue
+		}
+		messageTokenCount := countTokens(messageFingerprint)
+		if chunkTokenCount > 0 && chunkTokenCount+messageTokenCount > historyChunkTargetTokens {
+			flush()
+		}
+		chunk = append(chunk, message)
+		chunkTokenCount += messageTokenCount
+	}
+	flush()
+	return segments
 }
 
 func marshalFingerprint(v any) string {

@@ -34,7 +34,9 @@ func (s *MemoryStore) Save(scope ScopeKey, state State) error {
 		s.evictOldest()
 	}
 	if s.maxCheckpoints > 0 && len(state.Checkpoints) > s.maxCheckpoints {
-		state.Checkpoints = append([]Checkpoint(nil), state.Checkpoints[len(state.Checkpoints)-s.maxCheckpoints:]...)
+		// Prefix matching depends on the earliest contiguous checkpoints remaining available.
+		// Keeping only the newest entries would drop the root prefixes and collapse reads to zero.
+		state.Checkpoints = append([]Checkpoint(nil), state.Checkpoints[:s.maxCheckpoints]...)
 	}
 	s.states[scope] = copyState(state)
 	return nil

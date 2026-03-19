@@ -159,3 +159,36 @@ func TestBuildClaudeSnapshotWithProfileKeepsTailNearCurrentTurnBaseline(t *testi
 		t.Fatalf("expected light tail to remain bounded by current-turn scale, got light=%d baseline=%d", lightTail, baselineTail)
 	}
 }
+
+func TestBuildClaudeSnapshotSplitsLongHistoryIntoMultiple5mSegments(t *testing.T) {
+	req := &dto.ClaudeRequest{
+		System: "system prompt",
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: strings.Repeat("h1", 1800)},
+			{Role: "assistant", Content: strings.Repeat("a1", 1800)},
+			{Role: "user", Content: strings.Repeat("h2", 1800)},
+			{Role: "assistant", Content: strings.Repeat("a2", 1800)},
+			{Role: "user", Content: strings.Repeat("h3", 1800)},
+			{Role: "assistant", Content: strings.Repeat("a3", 1800)},
+			{Role: "user", Content: "current question"},
+		},
+	}
+	scope := ScopeKey{UserID: 1, TokenID: 10, ChannelID: 100, Model: "claude-3-7-sonnet-20250219"}
+
+	snapshot, err := BuildClaudeSnapshot(req, scope, 0, time.Date(2026, 3, 19, 12, 0, 0, 0, time.UTC), func(text string) int {
+		return len(text)
+	})
+	if err != nil {
+		t.Fatalf("build snapshot returned error: %v", err)
+	}
+
+	historySegmentCount := 0
+	for _, segment := range snapshot.Segments {
+		if segment.TTL == TTL5m {
+			historySegmentCount++
+		}
+	}
+	if historySegmentCount < 2 {
+		t.Fatalf("expected long history to be split into multiple 5m segments, got %d", historySegmentCount)
+	}
+}
