@@ -161,7 +161,8 @@ func rebalanceSegmentTokenCountsWithProfile(segments []Segment, totalInputTokens
 		return rebalanceSegmentTokenCounts(segments, totalInputTokens, nil)
 	}
 
-	out := append([]Segment(nil), segments...)
+	baseline := rebalanceSegmentTokenCounts(segments, totalInputTokens, nil)
+	out := append([]Segment(nil), baseline...)
 	groupIndexes := map[SegmentTTL][]int{
 		TTL1h:   {},
 		TTL5m:   {},
@@ -177,71 +178,110 @@ func rebalanceSegmentTokenCountsWithProfile(segments []Segment, totalInputTokens
 		groupRawTotals[segment.TTL] += segment.TokenCount
 	}
 
-	targetFractions := map[SegmentTTL]float64{
-		TTL1h:   profile.StableFraction,
-		TTL5m:   profile.HistoryFraction,
-		TTLNone: profile.TailFraction,
+	baselineTailTokens := groupRawTotals[TTLNone]
+	targetTailTokens := baselineTailTokens
+	if baselineTailTokens > 0 {
+		targetTailTokens = int(float64(baselineTailTokens) * profile.TailExpansionFactor)
+		if targetTailTokens < baselineTailTokens {
+			targetTailTokens = baselineTailTokens
+		}
+		if profile.TailFraction > 0 {
+			tailCapTokens := int(profile.TailFraction * float64(totalInputTokens))
+			if tailCapTokens < baselineTailTokens {
+				tailCapTokens = baselineTailTokens
+			}
+			if targetTailTokens > tailCapTokens {
+				targetTailTokens = tailCapTokens
+			}
+		}
+		if targetTailTokens > totalInputTokens {
+			targetTailTokens = totalInputTokens
+		}
 	}
-	presentTTLs := make([]SegmentTTL, 0, 3)
-	fractionSum := 0.0
-	for _, ttl := range []SegmentTTL{TTL1h, TTL5m, TTLNone} {
+	applyGroupTarget(out, groupIndexes[TTLNone], groupRawTotals[TTLNone], targetTailTokens)
+
+	cacheableTargetTokens := totalInputTokens - targetTailTokens
+	if cacheableTargetTokens < 0 {
+		cacheableTargetTokens = 0
+	}
+	cacheableTTLs := make([]SegmentTTL, 0, 2)
+	cacheableFractionSum := 0.0
+	cacheableTargetFractions := map[SegmentTTL]float64{
+		TTL1h: profile.StableFraction,
+		TTL5m: profile.HistoryFraction,
+	}
+	for _, ttl := range []SegmentTTL{TTL1h, TTL5m} {
 		if len(groupIndexes[ttl]) == 0 {
 			continue
 		}
-		presentTTLs = append(presentTTLs, ttl)
-		fractionSum += targetFractions[ttl]
+		cacheableTTLs = append(cacheableTTLs, ttl)
+		cacheableFractionSum += cacheableTargetFractions[ttl]
 	}
-	if len(presentTTLs) == 0 || fractionSum <= 0 {
-		return rebalanceSegmentTokenCounts(segments, totalInputTokens, nil)
+	if len(cacheableTTLs) == 0 {
+		return out
+	}
+	if cacheableFractionSum <= 0 {
+		cacheableFractionSum = 0
+		for _, ttl := range cacheableTTLs {
+			cacheableFractionSum += float64(groupRawTotals[ttl])
+		}
+		if cacheableFractionSum <= 0 {
+			return out
+		}
+		for _, ttl := range cacheableTTLs {
+			cacheableTargetFractions[ttl] = float64(groupRawTotals[ttl]) / cacheableFractionSum
+		}
+		cacheableFractionSum = 1.0
 	}
 
-	groupTargets := make(map[SegmentTTL]int, len(presentTTLs))
-	remaining := totalInputTokens
-	for i, ttl := range presentTTLs {
-		if i == len(presentTTLs)-1 {
-			groupTargets[ttl] = remaining
+	remainingCacheable := cacheableTargetTokens
+	for i, ttl := range cacheableTTLs {
+		targetTokens := remainingCacheable
+		if i != len(cacheableTTLs)-1 {
+			normalizedFraction := cacheableTargetFractions[ttl] / cacheableFractionSum
+			targetTokens = int(normalizedFraction * float64(cacheableTargetTokens))
+			if targetTokens < 0 {
+				targetTokens = 0
+			}
+			if targetTokens > remainingCacheable {
+				targetTokens = remainingCacheable
+			}
+			remainingCacheable -= targetTokens
+		}
+		applyGroupTarget(out, groupIndexes[ttl], groupRawTotals[ttl], targetTokens)
+	}
+	return out
+}
+
+func applyGroupTarget(segments []Segment, indexes []int, rawTotal int, targetTotal int) {
+	if len(indexes) == 0 {
+		return
+	}
+	if targetTotal < 0 {
+		targetTotal = 0
+	}
+	if len(indexes) == 1 {
+		segments[indexes[0]].TokenCount = targetTotal
+		return
+	}
+	remaining := targetTotal
+	for pos, idx := range indexes {
+		if pos == len(indexes)-1 {
+			segments[idx].TokenCount = remaining
 			break
 		}
-		normalizedFraction := targetFractions[ttl] / fractionSum
-		target := int(normalizedFraction * float64(totalInputTokens))
-		if target < 0 {
-			target = 0
+		rawTokenCount := segments[idx].TokenCount
+		target := 0
+		if rawTotal > 0 {
+			target = int(float64(rawTokenCount) / float64(rawTotal) * float64(targetTotal))
+		}
+		if rawTokenCount > 0 && target == 0 && remaining > 0 {
+			target = 1
 		}
 		if target > remaining {
 			target = remaining
 		}
-		groupTargets[ttl] = target
+		segments[idx].TokenCount = target
 		remaining -= target
 	}
-
-	for _, ttl := range presentTTLs {
-		groupTotal := groupTargets[ttl]
-		indexes := groupIndexes[ttl]
-		rawTotal := groupRawTotals[ttl]
-		if len(indexes) == 1 {
-			out[indexes[0]].TokenCount = groupTotal
-			continue
-		}
-		remainingGroup := groupTotal
-		for pos, idx := range indexes {
-			if pos == len(indexes)-1 {
-				out[idx].TokenCount = remainingGroup
-				break
-			}
-			rawTokenCount := out[idx].TokenCount
-			target := 0
-			if rawTotal > 0 {
-				target = int(float64(rawTokenCount) / float64(rawTotal) * float64(groupTotal))
-			}
-			if rawTokenCount > 0 && target == 0 && remainingGroup > 0 {
-				target = 1
-			}
-			if target > remainingGroup {
-				target = remainingGroup
-			}
-			out[idx].TokenCount = target
-			remainingGroup -= target
-		}
-	}
-	return out
 }

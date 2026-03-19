@@ -134,17 +134,17 @@ const _parseF = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n 
 const clampCacheCostRatio = (pct) =>
   Math.min(90, Math.max(15, parseInt(pct) || 47));
 const lerp = (start, end, progress) => start + (end - start) * progress;
-const deriveSessionPrefixSharesFromCostRatio = (pct) => {
+const deriveSessionPrefixPreviewFromCostRatio = (pct) => {
   const normalized = (clampCacheCostRatio(pct) - 15) / (90 - 15);
   const stable = lerp(0.62, 0.30, normalized);
   const history = lerp(0.30, 0.12, normalized);
-  const tail = 1 - stable - history;
-  const stablePct = Math.round(stable * 100);
-  const historyPct = Math.round(history * 100);
+  const cacheable = stable + history;
+  const stablePct = Math.round((stable / cacheable) * 100);
+  const historyPct = Math.max(0, 100 - stablePct);
   return {
     stablePct,
     historyPct,
-    tailPct: Math.max(0, 100 - stablePct - historyPct),
+    tailMultiplier: lerp(1.0, 1.6, normalized).toFixed(2),
   };
 };
 
@@ -3755,14 +3755,14 @@ const EditChannelModal = (props) => {
                         const {
                           stablePct,
                           historyPct,
-                          tailPct,
-                        } = deriveSessionPrefixSharesFromCostRatio(costPct);
+                          tailMultiplier,
+                        } = deriveSessionPrefixPreviewFromCostRatio(costPct);
                         return (
                           <>
                             <div style={{ marginBottom: 8 }}>
                               <Row type='flex' justify='space-between' align='middle'>
                                 <Text type='secondary' size='small'>
-                                  {t('缓存强度 / 目标费用占比（估算）')}
+                                  {t('缓存强度 / 动态尾部放大量（估算）')}
                                 </Text>
                                 <Text strong style={{ fontSize: 16, color: 'var(--semi-color-primary)' }}>
                                   {costPct}%
@@ -3790,20 +3790,19 @@ const EditChannelModal = (props) => {
                               }}>
                                 <div style={{ width: `${stablePct}%`, background: 'var(--semi-color-primary)' }} />
                                 <div style={{ width: `${historyPct}%`, background: 'var(--semi-color-success)' }} />
-                                <div style={{ width: `${tailPct}%`, background: 'var(--semi-color-fill-2)' }} />
                               </div>
                               <Space spacing={12} style={{ fontSize: 12 }}>
                                 <span>
-                                  <Tag color='light-blue' size='small'>{t('1h稳定前缀')}</Tag>
+                                  <Tag color='light-blue' size='small'>{t('1h稳定前缀权重')}</Tag>
                                   {` ${stablePct}%`}
                                 </span>
                                 <span>
-                                  <Tag color='green' size='small'>{t('5m历史前缀')}</Tag>
+                                  <Tag color='green' size='small'>{t('5m历史前缀权重')}</Tag>
                                   {` ${historyPct}%`}
                                 </span>
                                 <span>
-                                  <Tag color='grey' size='small'>{t('未缓存尾部')}</Tag>
-                                  {` ${tailPct}%`}
+                                  <Tag color='grey' size='small'>{t('动态尾部上限')}</Tag>
+                                  {` x${tailMultiplier}`}
                                 </span>
                               </Space>
                                 <div
@@ -3814,7 +3813,7 @@ const EditChannelModal = (props) => {
                                   }}
                                 >
                                   {t(
-                                    '滑块越靠左，更多 token 会分配给 1h/5m 前缀层；越靠右，最后一段未缓存尾部会更大，日志中的输入看起来也会更接近冷启动请求',
+                                    '未缓存尾部会先锚定当前轮真实消息大小，再按滑块做有限放大；越靠左越接近真实增量，越靠右允许把更多 token 留在当前轮尾部',
                                   )}
                                 </div>
                               </div>

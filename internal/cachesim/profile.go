@@ -1,9 +1,10 @@
 package cachesim
 
 type SessionProfile struct {
-	StableFraction  float64
-	HistoryFraction float64
-	TailFraction    float64
+	StableFraction      float64
+	HistoryFraction     float64
+	TailFraction        float64
+	TailExpansionFactor float64
 }
 
 func ProfileFromTargetCostRatio(pct int) *SessionProfile {
@@ -23,9 +24,10 @@ func ProfileFromTargetCostRatio(pct int) *SessionProfile {
 	tail := 1.0 - stable - history
 
 	return &SessionProfile{
-		StableFraction:  stable,
-		HistoryFraction: history,
-		TailFraction:    tail,
+		StableFraction:      stable,
+		HistoryFraction:     history,
+		TailFraction:        tail,
+		TailExpansionFactor: lerp(1.0, 1.6, progress),
 	}
 }
 

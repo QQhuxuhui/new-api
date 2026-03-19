@@ -776,6 +776,52 @@ func TestApplyCacheSimulationSessionPrefixTargetCostRatioAdjustsUncachedTail(t *
 	}
 }
 
+func TestApplyCacheSimulationSessionPrefixKeepsLongContextTailNearCurrentTurn(t *testing.T) {
+	sessionPrefixSimulationStore = cachesim.NewMemoryStore(16, 16)
+
+	info := &relaycommon.RelayInfo{
+		UserId:          1,
+		TokenId:         10,
+		OriginModelName: "claude-3-7-sonnet-20250219",
+		PromptTokens:    60000,
+		StartTime:       time.Date(2026, 3, 19, 10, 0, 0, 0, time.UTC),
+		Request: &dto.ClaudeRequest{
+			Model:  "claude-3-7-sonnet-20250219",
+			System: strings.Repeat("s", 4000),
+			Tools: []any{
+				dto.Tool{Name: "search", Description: strings.Repeat("t", 3000)},
+			},
+			Messages: []dto.ClaudeMessage{
+				{Role: "user", Content: strings.Repeat("h", 24000)},
+				{Role: "assistant", Content: strings.Repeat("a", 18000)},
+				{Role: "user", Content: strings.Repeat("c", 1200)},
+			},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 100,
+			ChannelSetting: dto.ChannelSettings{
+				CacheSimulation: &dto.CacheSimulationConfig{
+					Enabled:         true,
+					Mode:            dto.CacheSimulationModeSessionPrefix,
+					MinInputTokens:  1,
+					TargetCostRatio: 35,
+				},
+			},
+		},
+	}
+	usage := &dto.Usage{CompletionTokens: 50, TotalTokens: 50}
+
+	applyCacheSimulation(info, usage)
+
+	tail := usage.PromptTokens - usage.PromptTokensDetails.CachedTokens - usage.PromptTokensDetails.CachedCreationTokens
+	if tail <= 0 {
+		t.Fatalf("expected uncached tail > 0, got %d", tail)
+	}
+	if tail > 4000 {
+		t.Fatalf("expected long-context uncached tail to stay near current turn, got tail=%d", tail)
+	}
+}
+
 func TestApplyCacheSimulationSessionPrefixUsesCapturedCompatibleClaudeRequest(t *testing.T) {
 	sessionPrefixSimulationStore = cachesim.NewMemoryStore(16, 16)
 	cfg := &dto.CacheSimulationConfig{

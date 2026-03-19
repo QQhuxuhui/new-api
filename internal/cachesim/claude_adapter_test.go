@@ -1,6 +1,7 @@
 package cachesim
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -95,5 +96,66 @@ func TestBuildClaudeSnapshotWithProfileAdjustsTailShare(t *testing.T) {
 	lightCacheable := light.TotalInputTokens - lightTail
 	if heavyCacheable <= lightCacheable {
 		t.Fatalf("expected heavy cache profile to allocate more cacheable tokens, got heavy=%d light=%d", heavyCacheable, lightCacheable)
+	}
+}
+
+func TestBuildClaudeSnapshotWithProfileKeepsTailNearCurrentTurnBaseline(t *testing.T) {
+	req := &dto.ClaudeRequest{
+		System: strings.Repeat("s", 4000),
+		Tools: []any{
+			dto.Tool{Name: "search", Description: strings.Repeat("t", 3000)},
+		},
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: strings.Repeat("h", 24000)},
+			{Role: "assistant", Content: strings.Repeat("a", 18000)},
+			{Role: "user", Content: strings.Repeat("c", 1200)},
+		},
+	}
+	scope := ScopeKey{UserID: 1, TokenID: 10, ChannelID: 100, Model: "claude-3-7-sonnet-20250219"}
+	at := time.Date(2026, 3, 19, 12, 0, 0, 0, time.UTC)
+	countTokens := func(text string) int { return len(text) }
+
+	baseline, err := BuildClaudeSnapshot(req, scope, 60000, at, countTokens)
+	if err != nil {
+		t.Fatalf("build baseline snapshot returned error: %v", err)
+	}
+	heavy, err := BuildClaudeSnapshotWithProfile(
+		req,
+		scope,
+		60000,
+		at,
+		countTokens,
+		ProfileFromTargetCostRatio(35),
+	)
+	if err != nil {
+		t.Fatalf("build heavy snapshot returned error: %v", err)
+	}
+	light, err := BuildClaudeSnapshotWithProfile(
+		req,
+		scope,
+		60000,
+		at,
+		countTokens,
+		ProfileFromTargetCostRatio(80),
+	)
+	if err != nil {
+		t.Fatalf("build light snapshot returned error: %v", err)
+	}
+
+	baselineTail := baseline.Segments[len(baseline.Segments)-1].TokenCount
+	heavyTail := heavy.Segments[len(heavy.Segments)-1].TokenCount
+	lightTail := light.Segments[len(light.Segments)-1].TokenCount
+
+	if heavyTail < baselineTail {
+		t.Fatalf("expected heavy tail to stay above current-turn baseline, got heavy=%d baseline=%d", heavyTail, baselineTail)
+	}
+	if heavyTail > baselineTail*2 {
+		t.Fatalf("expected heavy tail to stay near current-turn baseline, got heavy=%d baseline=%d", heavyTail, baselineTail)
+	}
+	if lightTail < heavyTail {
+		t.Fatalf("expected lighter cache profile to allow a larger tail, got heavy=%d light=%d", heavyTail, lightTail)
+	}
+	if lightTail > baselineTail*3 {
+		t.Fatalf("expected light tail to remain bounded by current-turn scale, got light=%d baseline=%d", lightTail, baselineTail)
 	}
 }
