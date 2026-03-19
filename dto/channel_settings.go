@@ -22,6 +22,13 @@ const (
 	DefaultCacheSimMinInputTokens     = 1024
 )
 
+type CacheSimulationMode string
+
+const (
+	CacheSimulationModeRatio         CacheSimulationMode = "ratio"
+	CacheSimulationModeSessionPrefix CacheSimulationMode = "session_prefix"
+)
+
 // CacheSimulationConfig defines per-channel cache token simulation parameters.
 // When Enabled is true, cache hit statistics are simulated and overwrite
 // upstream cache fields so downstream consumers (dashboards, billing) see
@@ -29,7 +36,11 @@ const (
 //
 // All ratio/token fields fall back to the Default* constants when left as zero.
 type CacheSimulationConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled bool                `json:"enabled"`
+	Mode    CacheSimulationMode `json:"mode,omitempty"`
+	// TargetCostRatio: session_prefix 模式下的目标费用占比（15-90）。
+	// 它不直接决定最终 usage 比例，而是用于推导 1h / 5m / 未缓存尾部的启发式分层分布。
+	TargetCostRatio int `json:"target_cost_ratio,omitempty"`
 	// TotalCacheRatioMin/Max: range for the fraction of prompt tokens attributed to
 	// any form of caching (read + creation combined).  Must be in (0, 1).
 	// Example: 0.70 means 70 % of tokens are cached; the remaining 30 % are uncached.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -120,5 +121,71 @@ func TestCalculatePlanQuotaForDailyCheck_NonPlanBillingSkipsCheck(t *testing.T) 
 	planQuotaToCheck := calculatePlanQuotaForDailyCheck(relayInfo, 100)
 	if planQuotaToCheck != 0 {
 		t.Fatalf("expected planQuotaToCheck=0, got %d", planQuotaToCheck)
+	}
+}
+
+func TestCalculateAnthropicPromptQuotaUsesSplitCacheCreationRatios(t *testing.T) {
+	quota := calculateAnthropicPromptQuota(
+		200,
+		60,
+		80,
+		20,
+		60,
+		0.1,
+		1.25,
+		1.25,
+		2.0,
+	)
+
+	expected := decimal.NewFromFloat(60).
+		Add(decimal.NewFromFloat(60 * 0.1)).
+		Add(decimal.NewFromFloat(20 * 1.25)).
+		Add(decimal.NewFromFloat(60 * 2.0))
+	if !quota.Equal(expected) {
+		t.Fatalf("expected quota %s, got %s", expected.String(), quota.String())
+	}
+}
+
+func TestCaptureAnthropicSimulationRequestStoresCompatibleClaudeRequest(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+	claudeReq := &dto.ClaudeRequest{
+		Model:  "claude-3-7-sonnet-20250219",
+		System: "system prompt",
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "hello"},
+		},
+	}
+
+	captureAnthropicSimulationRequest(info, claudeReq)
+
+	if info.CacheSimulationRequest != claudeReq {
+		t.Fatalf("expected claude request to be captured for simulation")
+	}
+
+	captureAnthropicSimulationRequest(info, &dto.GeneralOpenAIRequest{Model: "gpt-4.1"})
+	if info.CacheSimulationRequest != nil {
+		t.Fatalf("expected non-claude request to clear simulation request")
+	}
+}
+
+func TestCalculateAnthropicPromptQuotaNormalizesOversizedSplit(t *testing.T) {
+	quota := calculateAnthropicPromptQuota(
+		180,
+		40,
+		60,
+		40,
+		40,
+		0.1,
+		1.25,
+		1.25,
+		2.0,
+	)
+
+	expected := decimal.NewFromFloat(80).
+		Add(decimal.NewFromFloat(40 * 0.1)).
+		Add(decimal.NewFromFloat(30 * 1.25)).
+		Add(decimal.NewFromFloat(30 * 2.0))
+	if !quota.Equal(expected) {
+		t.Fatalf("expected normalized quota %s, got %s", expected.String(), quota.String())
 	}
 }

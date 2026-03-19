@@ -43,6 +43,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	if err != nil {
 		return types.NewError(fmt.Errorf("failed to copy request to ClaudeRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
+	info.CacheSimulationRequest = request
 
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
@@ -139,6 +140,11 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			request.Messages = append([]dto.ClaudeMessage{userMessage}, request.Messages...)
 		}
 	}
+
+	// Keep RelayInfo request aligned with the effective Claude request so
+	// downstream cache simulation uses the same prompt structure that is sent upstream.
+	info.Request = request
+	info.CacheSimulationRequest = request
 
 	var requestBody io.Reader
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
