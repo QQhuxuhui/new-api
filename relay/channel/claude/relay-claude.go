@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -29,7 +30,31 @@ const (
 	WebSearchMaxUsesHigh   = 10
 )
 
-var sessionPrefixSimulationStore cachesim.Store = cachesim.NewMemoryStore(10000, 64)
+var (
+	sessionPrefixSimulationStore cachesim.Store
+	sessionPrefixStoreOnce       sync.Once
+)
+
+func getSessionPrefixStore() cachesim.Store {
+	sessionPrefixStoreOnce.Do(func() {
+		// If tests (or other code) already assigned a store, keep it.
+		if sessionPrefixSimulationStore != nil {
+			return
+		}
+		gs := model_setting.GetGlobalSettings()
+		sessionPrefixSimulationStore = cachesim.NewMemoryStore(
+			gs.GetCacheSimMaxScopes(),
+			gs.GetCacheSimMaxCheckpoints(),
+		)
+	})
+	// Sync limits from global config on every call so hot-reloaded values
+	// take effect without restarting the process.
+	if ms, ok := sessionPrefixSimulationStore.(*cachesim.MemoryStore); ok {
+		gs := model_setting.GetGlobalSettings()
+		ms.UpdateLimits(gs.GetCacheSimMaxScopes(), gs.GetCacheSimMaxCheckpoints())
+	}
+	return sessionPrefixSimulationStore
+}
 
 func stopReasonClaude2OpenAI(reason string) string {
 	switch reason {
@@ -1121,9 +1146,13 @@ func applySessionPrefixCacheSimulation(info *relaycommon.RelayInfo, usage *dto.U
 		return false
 	}
 
-	totalInputTokens := info.PromptTokens
+	// Prefer upstream response usage as the total input token count, since it
+	// reflects the actual request processed by the API (after any prompt injection
+	// or model mapping). info.PromptTokens is computed before those modifications
+	// and may undercount.
+	totalInputTokens := usage.PromptTokens + usage.PromptTokensDetails.CachedTokens + usage.PromptTokensDetails.CachedCreationTokens
 	if totalInputTokens <= 0 {
-		totalInputTokens = usage.PromptTokens + usage.PromptTokensDetails.CachedTokens + usage.PromptTokensDetails.CachedCreationTokens
+		totalInputTokens = info.PromptTokens
 	}
 	minTokens := cfg.MinInputTokens
 	if minTokens <= 0 {
@@ -1138,10 +1167,14 @@ func applySessionPrefixCacheSimulation(info *relaycommon.RelayInfo, usage *dto.U
 		modelName = info.OriginModelName
 	}
 	profile := cachesim.ProfileFromTargetCostRatio(cfg.TargetCostRatio)
+	channelID := info.ChannelMeta.ChannelId
+	if cfg.SharedScope {
+		channelID = 0
+	}
 	scope := cachesim.ScopeKey{
 		UserID:    info.UserId,
 		TokenID:   info.TokenId,
-		ChannelID: info.ChannelMeta.ChannelId,
+		ChannelID: channelID,
 		Model:     modelName,
 	}
 	var snapshot cachesim.PromptSnapshot
@@ -1173,7 +1206,7 @@ func applySessionPrefixCacheSimulation(info *relaycommon.RelayInfo, usage *dto.U
 		return false
 	}
 
-	engine := cachesim.NewSessionPrefixEngine(sessionPrefixSimulationStore)
+	engine := cachesim.NewSessionPrefixEngine(getSessionPrefixStore())
 	result, err := engine.Simulate(snapshot)
 	if err != nil {
 		logger.LogDebug(context.Background(), fmt.Sprintf("[Claude] session-prefix simulation failed: %v", err))

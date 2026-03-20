@@ -43,7 +43,21 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	if err != nil {
 		return types.NewError(fmt.Errorf("failed to copy request to ClaudeRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
-	info.CacheSimulationRequest = request
+
+	// In passthrough mode the original body is sent upstream unmodified, so cache
+	// simulation must analyze the original request, not the modified one. Save a
+	// separate deep copy now, before model mapping / prompt injection mutate request.
+	isPassThrough := model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled
+	if isPassThrough {
+		ptCopy, copyErr := common.DeepCopy(claudeReq)
+		if copyErr == nil {
+			info.CacheSimulationRequest = ptCopy
+		} else {
+			info.CacheSimulationRequest = request
+		}
+	} else {
+		info.CacheSimulationRequest = request
+	}
 
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
@@ -144,10 +158,16 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	// Keep RelayInfo request aligned with the effective Claude request so
 	// downstream cache simulation uses the same prompt structure that is sent upstream.
 	info.Request = request
-	info.CacheSimulationRequest = request
+	if !isPassThrough {
+		// Non-passthrough: the modified request is what gets sent upstream,
+		// so cache simulation should use the same modified version.
+		info.CacheSimulationRequest = request
+	}
+	// In passthrough mode info.CacheSimulationRequest still holds the original
+	// deep copy made before modifications — matching the actual body sent upstream.
 
 	var requestBody io.Reader
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+	if isPassThrough {
 		body, err := common.GetRequestBody(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())

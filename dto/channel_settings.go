@@ -59,6 +59,10 @@ type CacheSimulationConfig struct {
 	LegacyCreationRatioMax float64 `json:"creation_ratio_max,omitempty"`
 	// MinInputTokens: requests below this threshold are not simulated (treated as first-turn).
 	MinInputTokens int `json:"min_input_tokens,omitempty"`
+	// SharedScope: when true, cache simulation state is shared across all channels
+	// that also set shared_scope=true for the same {UserID, TokenID, Model} combination.
+	// This prevents cache write spikes when requests are load-balanced across channels.
+	SharedScope bool `json:"shared_scope,omitempty"`
 }
 
 type ChannelSettings struct {

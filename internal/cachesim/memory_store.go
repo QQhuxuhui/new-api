@@ -42,6 +42,28 @@ func (s *MemoryStore) Save(scope ScopeKey, state State) error {
 	return nil
 }
 
+func (s *MemoryStore) UpdateLimits(maxScopes int, maxCheckpoints int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if maxScopes > 0 {
+		s.maxScopes = maxScopes
+		// Evict excess scopes when the limit is reduced.
+		for s.maxScopes > 0 && len(s.states) > s.maxScopes {
+			s.evictOldest()
+		}
+	}
+	if maxCheckpoints > 0 {
+		s.maxCheckpoints = maxCheckpoints
+		// Trim existing scopes' checkpoint lists when the limit is reduced.
+		for scope, state := range s.states {
+			if len(state.Checkpoints) > s.maxCheckpoints {
+				state.Checkpoints = append([]Checkpoint(nil), state.Checkpoints[:s.maxCheckpoints]...)
+				s.states[scope] = state
+			}
+		}
+	}
+}
+
 func (s *MemoryStore) evictOldest() {
 	var oldestScope ScopeKey
 	var oldestFound bool

@@ -70,7 +70,7 @@ type Store interface {
 	Save(scope ScopeKey, state State) error
 }
 
-func (s PromptSnapshot) Validate() error {
+func (s *PromptSnapshot) Validate() error {
 	if len(s.Segments) == 0 {
 		return errors.New("segments required")
 	}
