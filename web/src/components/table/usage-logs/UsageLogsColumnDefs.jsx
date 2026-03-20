@@ -32,6 +32,7 @@ import {
   renderQuota,
   stringToColor,
   getLogOther,
+  getDisplayPromptTokens,
   renderModelTag,
   renderClaudeLogContent,
   renderLogContent,
@@ -466,8 +467,9 @@ export const getLogsColumns = ({
       title: t('输入'),
       dataIndex: 'prompt_tokens',
       render: (text, record, index) => {
+        const displayPromptTokens = getDisplayPromptTokens(record);
         return record.type === 0 || record.type === 2 || record.type === 5 ? (
-          <>{<span> {text} </span>}</>
+          <>{<span> {displayPromptTokens} </span>}</>
         ) : (
           <></>
         );
@@ -643,8 +645,8 @@ export const getLogsColumns = ({
               other?.user_group_ratio,
               other.cache_tokens || 0,
               other.cache_ratio || 1.0,
-              0,
-              1.0,
+              other.cache_creation_tokens || 0,
+              other.cache_creation_ratio || 1.0,
               0,
               1.0,
               0,

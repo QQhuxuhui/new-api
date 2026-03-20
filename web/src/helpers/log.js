@@ -24,3 +24,40 @@ export function getLogOther(otherStr) {
   let other = JSON.parse(otherStr);
   return other;
 }
+
+export function calculateNonCachedPromptTokens(
+  promptTokens,
+  cacheTokens = 0,
+  cacheCreationTokens = 0,
+) {
+  const totalPromptTokens = parseInt(promptTokens, 10) || 0;
+  const cachedReadTokens = parseInt(cacheTokens, 10) || 0;
+  const cachedCreationTokens = parseInt(cacheCreationTokens, 10) || 0;
+  const nonCachedPromptTokens =
+    totalPromptTokens - cachedReadTokens - cachedCreationTokens;
+  return nonCachedPromptTokens > 0 ? nonCachedPromptTokens : 0;
+}
+
+export function getDisplayPromptTokens(record) {
+  const promptTokens = parseInt(record?.prompt_tokens, 10) || 0;
+  if (!record) {
+    return 0;
+  }
+
+  let other = {};
+  if (typeof record.other === 'string') {
+    other = getLogOther(record.other);
+  } else if (record.other && typeof record.other === 'object') {
+    other = record.other;
+  }
+
+  if (other?.claude) {
+    return promptTokens;
+  }
+
+  return calculateNonCachedPromptTokens(
+    promptTokens,
+    other?.cache_tokens,
+    other?.cache_creation_tokens,
+  );
+}
