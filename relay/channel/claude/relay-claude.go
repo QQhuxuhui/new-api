@@ -1,15 +1,18 @@
 package claude
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/internal/cachesim"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -26,6 +29,32 @@ const (
 	WebSearchMaxUsesMedium = 5
 	WebSearchMaxUsesHigh   = 10
 )
+
+var (
+	sessionPrefixSimulationStore cachesim.Store
+	sessionPrefixStoreOnce       sync.Once
+)
+
+func getSessionPrefixStore() cachesim.Store {
+	sessionPrefixStoreOnce.Do(func() {
+		// If tests (or other code) already assigned a store, keep it.
+		if sessionPrefixSimulationStore != nil {
+			return
+		}
+		gs := model_setting.GetGlobalSettings()
+		sessionPrefixSimulationStore = cachesim.NewMemoryStore(
+			gs.GetCacheSimMaxScopes(),
+			gs.GetCacheSimMaxCheckpoints(),
+		)
+	})
+	// Sync limits from global config on every call so hot-reloaded values
+	// take effect without restarting the process.
+	if ms, ok := sessionPrefixSimulationStore.(*cachesim.MemoryStore); ok {
+		gs := model_setting.GetGlobalSettings()
+		ms.UpdateLimits(gs.GetCacheSimMaxScopes(), gs.GetCacheSimMaxCheckpoints())
+	}
+	return sessionPrefixSimulationStore
+}
 
 func stopReasonClaude2OpenAI(reason string) string {
 	switch reason {
@@ -646,12 +675,13 @@ func ResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse) *dto
 }
 
 type ClaudeResponseInfo struct {
-	ResponseId   string
-	Created      int64
-	Model        string
-	ResponseText strings.Builder
-	Usage        *dto.Usage
-	Done         bool
+	ResponseId             string
+	Created                int64
+	Model                  string
+	ResponseText           strings.Builder
+	Usage                  *dto.Usage
+	Done                   bool
+	CacheSimulationApplied bool
 }
 
 func FormatClaudeResponseInfo(requestMode int, claudeResponse *dto.ClaudeResponse, oaiResponse *dto.ChatCompletionsStreamResponse, claudeInfo *ClaudeResponseInfo) bool {
@@ -753,6 +783,19 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 				writeData = string(b)
 			}
 		}
+		if requestMode != RequestModeCompletion &&
+			claudeResponse.Type == "message_delta" &&
+			claudeResponse.Usage != nil &&
+			info != nil &&
+			info.ChannelMeta != nil &&
+			info.ChannelMeta.ChannelSetting.CacheSimulation != nil &&
+			info.ChannelMeta.ChannelSetting.CacheSimulation.Enabled {
+			applyCacheSimulation(info, claudeInfo.Usage)
+			claudeInfo.CacheSimulationApplied = true
+			if patched, ok := patchClaudeResponseUsagePayload([]byte(writeData), claudeInfo.Usage); ok {
+				writeData = string(patched)
+			}
+		}
 		helper.ClaudeChunkData(c, claudeResponse, writeData)
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
 		response := StreamResponseClaude2OpenAI(requestMode, &claudeResponse)
@@ -770,9 +813,11 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, requestMode int) {
+	recomputedUsage := false
 
 	if requestMode == RequestModeCompletion {
 		claudeInfo.Usage = service.ResponseText2Usage(claudeInfo.ResponseText.String(), info.UpstreamModelName, info.PromptTokens)
+		recomputedUsage = true
 	} else {
 		if claudeInfo.Usage.PromptTokens == 0 {
 			//上游出错
@@ -782,11 +827,14 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 				common.SysLog("claude response usage is not complete, maybe upstream error")
 			}
 			claudeInfo.Usage = service.ResponseText2Usage(claudeInfo.ResponseText.String(), info.UpstreamModelName, claudeInfo.Usage.PromptTokens)
+			recomputedUsage = true
 		}
 	}
 
 	// Cache simulation overwrites any upstream cache statistics when enabled.
-	applyCacheSimulation(info, claudeInfo.Usage)
+	if !claudeInfo.CacheSimulationApplied || recomputedUsage {
+		applyCacheSimulation(info, claudeInfo.Usage)
+	}
 
 	if info.RelayFormat == types.RelayFormatClaude {
 		//
@@ -881,18 +929,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		if simulationActive && claudeResponse.Usage != nil &&
 			(claudeInfo.Usage.PromptTokensDetails.CachedTokens > 0 ||
 				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens > 0) {
-			// Compute the non-cached remainder so input_tokens in the response body
-			// is consistent with the simulated cache fields.
-			nonCached := claudeInfo.Usage.PromptTokens -
-				claudeInfo.Usage.PromptTokensDetails.CachedTokens -
-				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens
-			if nonCached < 0 {
-				nonCached = 0
-			}
-			if patched, ok := patchCacheUsageFields(responseData,
-				nonCached,
-				claudeInfo.Usage.PromptTokensDetails.CachedTokens,
-				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens); ok {
+			if patched, ok := patchClaudeResponseUsagePayload(responseData, claudeInfo.Usage); ok {
 				responseData = patched
 			}
 		}
@@ -961,6 +998,9 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 	}
 	cfg := info.ChannelMeta.ChannelSetting.CacheSimulation
 	if cfg == nil || !cfg.Enabled {
+		return
+	}
+	if applySessionPrefixCacheSimulation(info, usage) {
 		return
 	}
 
@@ -1085,6 +1125,95 @@ func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
 	usage.ClaudeCacheCreation1hTokens = 0
 	usage.PromptTokensDetails.CachedTokens = cachedTokens
 	usage.PromptTokensDetails.CachedCreationTokens = cachedCreationTokens
+}
+
+func applySessionPrefixCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	cfg := info.ChannelMeta.ChannelSetting.CacheSimulation
+	if cfg == nil || !cfg.Enabled || cfg.Mode != dto.CacheSimulationModeSessionPrefix {
+		return false
+	}
+	request := info.CacheSimulationRequest
+	if request == nil {
+		req, ok := info.Request.(*dto.ClaudeRequest)
+		if ok {
+			request = req
+		}
+	}
+	if request == nil {
+		return false
+	}
+
+	// Prefer upstream response usage as the total input token count, since it
+	// reflects the actual request processed by the API (after any prompt injection
+	// or model mapping). info.PromptTokens is computed before those modifications
+	// and may undercount.
+	totalInputTokens := usage.PromptTokens + usage.PromptTokensDetails.CachedTokens + usage.PromptTokensDetails.CachedCreationTokens
+	if totalInputTokens <= 0 {
+		totalInputTokens = info.PromptTokens
+	}
+	minTokens := cfg.MinInputTokens
+	if minTokens <= 0 {
+		minTokens = dto.DefaultCacheSimMinInputTokens
+	}
+	if totalInputTokens < minTokens {
+		return false
+	}
+
+	modelName := request.Model
+	if modelName == "" {
+		modelName = info.OriginModelName
+	}
+	profile := cachesim.ProfileFromTargetCostRatio(cfg.TargetCostRatio)
+	channelID := info.ChannelMeta.ChannelId
+	if cfg.SharedScope {
+		channelID = 0
+	}
+	scope := cachesim.ScopeKey{
+		UserID:    info.UserId,
+		TokenID:   info.TokenId,
+		ChannelID: channelID,
+		Model:     modelName,
+	}
+	var snapshot cachesim.PromptSnapshot
+	var err error
+	if profile != nil {
+		snapshot, err = cachesim.BuildClaudeSnapshotWithProfile(
+			request,
+			scope,
+			totalInputTokens,
+			info.StartTime,
+			func(text string) int {
+				return len([]rune(text))
+			},
+			profile,
+		)
+	} else {
+		snapshot, err = cachesim.BuildClaudeSnapshot(
+			request,
+			scope,
+			totalInputTokens,
+			info.StartTime,
+			func(text string) int {
+				return len([]rune(text))
+			},
+		)
+	}
+	if err != nil {
+		logger.LogDebug(context.Background(), fmt.Sprintf("[Claude] build session-prefix snapshot failed: %v", err))
+		return false
+	}
+
+	engine := cachesim.NewSessionPrefixEngine(getSessionPrefixStore())
+	result, err := engine.Simulate(snapshot)
+	if err != nil {
+		logger.LogDebug(context.Background(), fmt.Sprintf("[Claude] session-prefix simulation failed: %v", err))
+		return false
+	}
+	cachesim.ProjectClaudeUsage(usage, result)
+	return true
 }
 
 func shouldStripPlaceholders(info *relaycommon.RelayInfo) bool {
@@ -1239,7 +1368,7 @@ func patchNonStreamStrippedContent(data []byte, requestMode int) ([]byte, bool) 
 	return patched, true
 }
 
-func patchCacheUsageFields(data []byte, inputTokens int, cacheReadInputTokens int, cacheCreationInputTokens int) ([]byte, bool) {
+func patchCacheUsageFields(data []byte, inputTokens int, cacheReadInputTokens int, cacheCreationInputTokens int, cacheCreation5mTokens int, cacheCreation1hTokens int) ([]byte, bool) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, false
@@ -1253,6 +1382,11 @@ func patchCacheUsageFields(data []byte, inputTokens int, cacheReadInputTokens in
 	if err := json.Unmarshal(rawUsage, &usageFields); err != nil {
 		return nil, false
 	}
+	cacheCreation5mTokens, cacheCreation1hTokens = normalizeCacheCreationSplit(
+		cacheCreationInputTokens,
+		cacheCreation5mTokens,
+		cacheCreation1hTokens,
+	)
 	inputBytes, err := json.Marshal(inputTokens)
 	if err != nil {
 		return nil, false
@@ -1265,9 +1399,31 @@ func patchCacheUsageFields(data []byte, inputTokens int, cacheReadInputTokens in
 	if err != nil {
 		return nil, false
 	}
+	create5mBytes, err := json.Marshal(cacheCreation5mTokens)
+	if err != nil {
+		return nil, false
+	}
+	create1hBytes, err := json.Marshal(cacheCreation1hTokens)
+	if err != nil {
+		return nil, false
+	}
 	usageFields["input_tokens"] = inputBytes
 	usageFields["cache_read_input_tokens"] = readBytes
 	usageFields["cache_creation_input_tokens"] = createBytes
+	usageFields["claude_cache_creation_5_m_tokens"] = create5mBytes
+	usageFields["claude_cache_creation_1_h_tokens"] = create1hBytes
+
+	cacheCreationFields := make(map[string]json.RawMessage)
+	if rawCacheCreation, ok := usageFields["cache_creation"]; ok {
+		_ = json.Unmarshal(rawCacheCreation, &cacheCreationFields)
+	}
+	cacheCreationFields["ephemeral_5m_input_tokens"] = create5mBytes
+	cacheCreationFields["ephemeral_1h_input_tokens"] = create1hBytes
+	cacheCreationBytes, err := json.Marshal(cacheCreationFields)
+	if err != nil {
+		return nil, false
+	}
+	usageFields["cache_creation"] = cacheCreationBytes
 
 	usageBytes, err := json.Marshal(usageFields)
 	if err != nil {
@@ -1280,6 +1436,75 @@ func patchCacheUsageFields(data []byte, inputTokens int, cacheReadInputTokens in
 		return nil, false
 	}
 	return patched, true
+}
+
+func patchClaudeResponseUsagePayload(data []byte, usage *dto.Usage) ([]byte, bool) {
+	if len(data) == 0 || usage == nil {
+		return nil, false
+	}
+	inputTokens, cacheReadInputTokens, cacheCreationInputTokens, cacheCreation5mTokens, cacheCreation1hTokens :=
+		claudeResponseUsagePatchFields(usage)
+	patched, ok := patchCacheUsageFields(
+		data,
+		inputTokens,
+		cacheReadInputTokens,
+		cacheCreationInputTokens,
+		cacheCreation5mTokens,
+		cacheCreation1hTokens,
+	)
+	if !ok {
+		return nil, false
+	}
+	return patched, true
+}
+
+func claudeResponseUsagePatchFields(usage *dto.Usage) (inputTokens int, cacheReadInputTokens int, cacheCreationInputTokens int, cacheCreation5mTokens int, cacheCreation1hTokens int) {
+	if usage == nil {
+		return 0, 0, 0, 0, 0
+	}
+	cacheReadInputTokens = usage.PromptTokensDetails.CachedTokens
+	cacheCreationInputTokens = usage.PromptTokensDetails.CachedCreationTokens
+	cacheCreation5mTokens, cacheCreation1hTokens = normalizeCacheCreationSplit(
+		cacheCreationInputTokens,
+		usage.ClaudeCacheCreation5mTokens,
+		usage.ClaudeCacheCreation1hTokens,
+	)
+	inputTokens = usage.PromptTokens - cacheReadInputTokens - cacheCreationInputTokens
+	if inputTokens < 0 {
+		inputTokens = 0
+	}
+	return inputTokens, cacheReadInputTokens, cacheCreationInputTokens, cacheCreation5mTokens, cacheCreation1hTokens
+}
+
+func normalizeCacheCreationSplit(cacheCreationInputTokens int, cacheCreation5mTokens int, cacheCreation1hTokens int) (int, int) {
+	if cacheCreationInputTokens <= 0 {
+		return 0, 0
+	}
+	if cacheCreation5mTokens < 0 {
+		cacheCreation5mTokens = 0
+	}
+	if cacheCreation1hTokens < 0 {
+		cacheCreation1hTokens = 0
+	}
+	splitTotal := cacheCreation5mTokens + cacheCreation1hTokens
+	if splitTotal == cacheCreationInputTokens {
+		return cacheCreation5mTokens, cacheCreation1hTokens
+	}
+	if splitTotal <= 0 {
+		// Legacy ratio mode has no 5m/1h breakdown. Default the whole creation
+		// allocation into 5m so the returned Claude usage remains internally consistent.
+		return cacheCreationInputTokens, 0
+	}
+
+	normalized5mTokens := int(float64(cacheCreationInputTokens) * (float64(cacheCreation5mTokens) / float64(splitTotal)))
+	if normalized5mTokens > cacheCreationInputTokens {
+		normalized5mTokens = cacheCreationInputTokens
+	}
+	if normalized5mTokens < 0 {
+		normalized5mTokens = 0
+	}
+	normalized1hTokens := cacheCreationInputTokens - normalized5mTokens
+	return normalized5mTokens, normalized1hTokens
 }
 
 func mapToolChoice(toolChoice any, parallelToolCalls *bool) *dto.ClaudeToolChoice {

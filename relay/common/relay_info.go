@@ -126,7 +126,8 @@ type RelayInfo struct {
 
 	PriceData types.PriceData
 
-	Request dto.Request
+	Request                dto.Request
+	CacheSimulationRequest *dto.ClaudeRequest
 
 	ThinkingContentInfo
 	*ClaudeConvertInfo

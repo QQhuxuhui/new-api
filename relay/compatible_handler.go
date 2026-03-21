@@ -29,6 +29,7 @@ import (
 
 func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
+	info.CacheSimulationRequest = nil
 
 	// 调试日志：确认 InitChannelMeta 后的令牌信息
 	maskedKey := maskApiKey(info.ApiKey)
@@ -203,6 +204,8 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 			}
 		}
 
+		captureAnthropicSimulationRequest(info, convertedRequest)
+
 		jsonData, err := common.Marshal(convertedRequest)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeJsonMarshalFailed, types.ErrOptionWithSkipRetry())
@@ -294,6 +297,8 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	audioTokens := usage.PromptTokensDetails.AudioTokens
 	completionTokens := usage.CompletionTokens
 	cachedCreationTokens := usage.PromptTokensDetails.CachedCreationTokens
+	cacheCreationTokens5m := usage.ClaudeCacheCreation5mTokens
+	cacheCreationTokens1h := usage.ClaudeCacheCreation1hTokens
 
 	modelName := relayInfo.OriginModelName
 
@@ -305,6 +310,8 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
 	modelPrice := relayInfo.PriceData.ModelPrice
 	cachedCreationRatio := relayInfo.PriceData.CacheCreationRatio
+	cachedCreationRatio5m := relayInfo.PriceData.CacheCreation5mRatio
+	cachedCreationRatio1h := relayInfo.PriceData.CacheCreation1hRatio
 	// 从 context 获取最新的渠道倍率（重试场景下可能已切换渠道）
 	channelRatio := common.GetContextKeyFloat64(ctx, constant.ContextKeyChannelRatio)
 	if channelRatio == 0 {
@@ -312,7 +319,6 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	}
 
 	// Convert values to decimal for precise calculation
-	dPromptTokens := decimal.NewFromInt(int64(promptTokens))
 	dCacheTokens := decimal.NewFromInt(int64(cacheTokens))
 	dImageTokens := decimal.NewFromInt(int64(imageTokens))
 	dAudioTokens := decimal.NewFromInt(int64(audioTokens))
@@ -325,7 +331,6 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	dGroupRatio := decimal.NewFromFloat(groupRatio)
 	dChannelRatio := decimal.NewFromFloat(channelRatio)
 	dModelPrice := decimal.NewFromFloat(modelPrice)
-	dCachedCreationRatio := decimal.NewFromFloat(cachedCreationRatio)
 	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 
 	ratio := dModelRatio.Mul(dGroupRatio).Mul(dChannelRatio)
@@ -393,39 +398,58 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	var audioInputQuota decimal.Decimal
 	var audioInputPrice float64
 	if !relayInfo.PriceData.UsePrice {
-		baseTokens := dPromptTokens
-		// 减去 cached tokens
-		var cachedTokensWithRatio decimal.Decimal
-		if !dCacheTokens.IsZero() {
-			baseTokens = baseTokens.Sub(dCacheTokens)
-			cachedTokensWithRatio = dCacheTokens.Mul(dCacheRatio)
-		}
-		var dCachedCreationTokensWithRatio decimal.Decimal
-		if !dCachedCreationTokens.IsZero() {
-			baseTokens = baseTokens.Sub(dCachedCreationTokens)
-			dCachedCreationTokensWithRatio = dCachedCreationTokens.Mul(dCachedCreationRatio)
-		}
-
-		// 减去 image tokens
 		var imageTokensWithRatio decimal.Decimal
 		if !dImageTokens.IsZero() {
-			baseTokens = baseTokens.Sub(dImageTokens)
 			imageTokensWithRatio = dImageTokens.Mul(dImageRatio)
+		}
+
+		promptTokensForQuota := promptTokens - imageTokens
+		if promptTokensForQuota < 0 {
+			promptTokensForQuota = 0
 		}
 
 		// 减去 Gemini audio tokens
 		if !dAudioTokens.IsZero() {
 			audioInputPrice = operation_setting.GetGeminiInputAudioPricePerMillionTokens(modelName)
 			if audioInputPrice > 0 {
-				// 重新计算 base tokens
-				baseTokens = baseTokens.Sub(dAudioTokens)
+				promptTokensForQuota -= audioTokens
+				if promptTokensForQuota < 0 {
+					promptTokensForQuota = 0
+				}
 				audioInputQuota = decimal.NewFromFloat(audioInputPrice).Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dGroupRatio).Mul(dChannelRatio).Mul(dQuotaPerUnit)
 				extraContent += fmt.Sprintf("Audio Input 花费 %s", audioInputQuota.String())
 			}
 		}
-		promptQuota := baseTokens.Add(cachedTokensWithRatio).
-			Add(imageTokensWithRatio).
-			Add(dCachedCreationTokensWithRatio)
+
+		var promptQuota decimal.Decimal
+		if relayInfo.ChannelType == constant.ChannelTypeAnthropic {
+			promptQuota = calculateAnthropicPromptQuota(
+				promptTokensForQuota,
+				cacheTokens,
+				cachedCreationTokens,
+				cacheCreationTokens5m,
+				cacheCreationTokens1h,
+				cacheRatio,
+				cachedCreationRatio,
+				cachedCreationRatio5m,
+				cachedCreationRatio1h,
+			).Add(imageTokensWithRatio)
+		} else {
+			baseTokens := decimal.NewFromInt(int64(promptTokensForQuota))
+			var cachedTokensWithRatio decimal.Decimal
+			if !dCacheTokens.IsZero() {
+				baseTokens = baseTokens.Sub(dCacheTokens)
+				cachedTokensWithRatio = dCacheTokens.Mul(dCacheRatio)
+			}
+			var dCachedCreationTokensWithRatio decimal.Decimal
+			if !dCachedCreationTokens.IsZero() {
+				baseTokens = baseTokens.Sub(dCachedCreationTokens)
+				dCachedCreationTokensWithRatio = dCachedCreationTokens.Mul(decimal.NewFromFloat(cachedCreationRatio))
+			}
+			promptQuota = baseTokens.Add(cachedTokensWithRatio).
+				Add(imageTokensWithRatio).
+				Add(dCachedCreationTokensWithRatio)
+		}
 
 		completionQuota := dCompletionTokens.Mul(dCompletionRatio)
 
@@ -552,8 +576,8 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		other = service.GenerateClaudeOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio,
 			cacheTokens, cacheRatio,
 			cachedCreationTokens, cachedCreationRatio,
-			0, relayInfo.PriceData.CacheCreation5mRatio,
-			0, relayInfo.PriceData.CacheCreation1hRatio,
+			cacheCreationTokens5m, relayInfo.PriceData.CacheCreation5mRatio,
+			cacheCreationTokens1h, relayInfo.PriceData.CacheCreation1hRatio,
 			modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
 	} else {
 		other = service.GenerateTextOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio, cacheTokens, cacheRatio, modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
@@ -619,6 +643,74 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+}
+
+func captureAnthropicSimulationRequest(info *relaycommon.RelayInfo, request any) {
+	if info == nil {
+		return
+	}
+	info.CacheSimulationRequest = nil
+	claudeReq, ok := request.(*dto.ClaudeRequest)
+	if ok {
+		info.CacheSimulationRequest = claudeReq
+	}
+}
+
+func calculateAnthropicPromptQuota(promptTokens int, cacheTokens int, cacheCreationTokens int, cacheCreationTokens5m int, cacheCreationTokens1h int, cacheRatio float64, cacheCreationRatio float64, cacheCreationRatio5m float64, cacheCreationRatio1h float64) decimal.Decimal {
+	if promptTokens < 0 {
+		promptTokens = 0
+	}
+	cacheCreationTokens5m, cacheCreationTokens1h, remainingCacheCreationTokens := normalizeAnthropicCacheCreationSplit(
+		cacheCreationTokens,
+		cacheCreationTokens5m,
+		cacheCreationTokens1h,
+	)
+	nonCachedPromptTokens := promptTokens - cacheTokens - cacheCreationTokens
+	if nonCachedPromptTokens < 0 {
+		nonCachedPromptTokens = 0
+	}
+
+	quota := decimal.NewFromInt(int64(nonCachedPromptTokens))
+	if cacheTokens > 0 {
+		quota = quota.Add(decimal.NewFromInt(int64(cacheTokens)).Mul(decimal.NewFromFloat(cacheRatio)))
+	}
+	if cacheCreationTokens5m > 0 {
+		quota = quota.Add(decimal.NewFromInt(int64(cacheCreationTokens5m)).Mul(decimal.NewFromFloat(cacheCreationRatio5m)))
+	}
+	if cacheCreationTokens1h > 0 {
+		quota = quota.Add(decimal.NewFromInt(int64(cacheCreationTokens1h)).Mul(decimal.NewFromFloat(cacheCreationRatio1h)))
+	}
+	if remainingCacheCreationTokens > 0 {
+		quota = quota.Add(decimal.NewFromInt(int64(remainingCacheCreationTokens)).Mul(decimal.NewFromFloat(cacheCreationRatio)))
+	}
+	return quota
+}
+
+func normalizeAnthropicCacheCreationSplit(cacheCreationTokens int, cacheCreationTokens5m int, cacheCreationTokens1h int) (int, int, int) {
+	if cacheCreationTokens <= 0 {
+		return 0, 0, 0
+	}
+	if cacheCreationTokens5m < 0 {
+		cacheCreationTokens5m = 0
+	}
+	if cacheCreationTokens1h < 0 {
+		cacheCreationTokens1h = 0
+	}
+
+	splitTotal := cacheCreationTokens5m + cacheCreationTokens1h
+	if splitTotal <= cacheCreationTokens {
+		return cacheCreationTokens5m, cacheCreationTokens1h, cacheCreationTokens - splitTotal
+	}
+
+	normalized5mTokens := int(float64(cacheCreationTokens) * (float64(cacheCreationTokens5m) / float64(splitTotal)))
+	if normalized5mTokens > cacheCreationTokens {
+		normalized5mTokens = cacheCreationTokens
+	}
+	if normalized5mTokens < 0 {
+		normalized5mTokens = 0
+	}
+	normalized1hTokens := cacheCreationTokens - normalized5mTokens
+	return normalized5mTokens, normalized1hTokens, 0
 }
 
 func applyGemini4KPriceOverride(

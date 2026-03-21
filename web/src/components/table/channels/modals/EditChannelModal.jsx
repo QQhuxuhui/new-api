@@ -131,6 +131,22 @@ const calcCostRatioPctFromParams = (totalMin, totalMax, fracMin, fracMax) => {
 };
 
 const _parseF = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+const clampCacheCostRatio = (pct) =>
+  Math.min(90, Math.max(15, parseInt(pct) || 47));
+const lerp = (start, end, progress) => start + (end - start) * progress;
+const deriveSessionPrefixPreviewFromCostRatio = (pct) => {
+  const normalized = (clampCacheCostRatio(pct) - 15) / (90 - 15);
+  const stable = lerp(0.62, 0.30, normalized);
+  const history = lerp(0.30, 0.12, normalized);
+  const cacheable = stable + history;
+  const stablePct = Math.round((stable / cacheable) * 100);
+  const historyPct = Math.max(0, 100 - stablePct);
+  return {
+    stablePct,
+    historyPct,
+    tailMultiplier: lerp(1.0, 1.6, normalized).toFixed(2),
+  };
+};
 
 // 支持并且已适配通过接口获取模型列表的渠道类型
 const MODEL_FETCHABLE_TYPES = new Set([
@@ -219,6 +235,7 @@ const EditChannelModal = (props) => {
     masquerade_hash: '',
     // 缓存模拟
     cache_simulation_enabled: false,
+    cache_simulation_mode: 'session_prefix',
     cache_sim_cost_ratio: 47,
     cache_sim_min_input_tokens: 0,
     // 占位符剥离
@@ -575,34 +592,38 @@ const EditChannelModal = (props) => {
           data.user_prompt = parsedSettings.user_prompt || '';
           const cs = parsedSettings.cache_simulation || {};
           data.cache_simulation_enabled = cs.enabled || false;
-          // Load new two-level format first; fall back to legacy ratio fields
-          const newTotalMin = _parseF(cs.total_cache_ratio_min);
-          const newTotalMax = _parseF(cs.total_cache_ratio_max);
-          const newFracMin  = _parseF(cs.read_fraction_min);
-          const newFracMax  = _parseF(cs.read_fraction_max);
-          const hasNewFields =
-            newTotalMin > 0 ||
-            newTotalMax > 0 ||
-            newFracMin > 0 ||
-            newFracMax > 0;
-          if (hasNewFields) {
-            data.cache_sim_cost_ratio = calcCostRatioPctFromParams(
-              newTotalMin, newTotalMax, newFracMin, newFracMax,
-            );
+          data.cache_simulation_mode = 'session_prefix';
+          if ((parseInt(cs.target_cost_ratio) || 0) > 0) {
+            data.cache_sim_cost_ratio = clampCacheCostRatio(cs.target_cost_ratio);
           } else {
-            // Legacy: derive two-level params from read+creation ratios
-            const legReadMin = _parseF(cs.read_ratio_min);
-            const legReadMax = _parseF(cs.read_ratio_max);
-            const legCreMin  = _parseF(cs.creation_ratio_min);
-            const legCreMax  = _parseF(cs.creation_ratio_max);
-            if (legReadMin > 0 || legReadMax > 0 || legCreMin > 0 || legCreMax > 0) {
-              const tMin = legReadMin + legCreMin;
-              const tMax = legReadMax + legCreMax;
-              const fMin = tMin > 0 ? legReadMin / tMin : _CACHE_READ_FRAC;
-              const fMax = tMax > 0 ? legReadMax / tMax : _CACHE_READ_FRAC;
-              data.cache_sim_cost_ratio = calcCostRatioPctFromParams(tMin, tMax, fMin, fMax);
+            // 兼容旧 ratio 配置：继续从历史比例字段反推出滑块值，保存时会迁移为 session_prefix。
+            const newTotalMin = _parseF(cs.total_cache_ratio_min);
+            const newTotalMax = _parseF(cs.total_cache_ratio_max);
+            const newFracMin  = _parseF(cs.read_fraction_min);
+            const newFracMax  = _parseF(cs.read_fraction_max);
+            const hasNewFields =
+              newTotalMin > 0 ||
+              newTotalMax > 0 ||
+              newFracMin > 0 ||
+              newFracMax > 0;
+            if (hasNewFields) {
+              data.cache_sim_cost_ratio = calcCostRatioPctFromParams(
+                newTotalMin, newTotalMax, newFracMin, newFracMax,
+              );
             } else {
-              data.cache_sim_cost_ratio = 47;
+              const legReadMin = _parseF(cs.read_ratio_min);
+              const legReadMax = _parseF(cs.read_ratio_max);
+              const legCreMin  = _parseF(cs.creation_ratio_min);
+              const legCreMax  = _parseF(cs.creation_ratio_max);
+              if (legReadMin > 0 || legReadMax > 0 || legCreMin > 0 || legCreMax > 0) {
+                const tMin = legReadMin + legCreMin;
+                const tMax = legReadMax + legCreMax;
+                const fMin = tMin > 0 ? legReadMin / tMin : _CACHE_READ_FRAC;
+                const fMax = tMax > 0 ? legReadMax / tMax : _CACHE_READ_FRAC;
+                data.cache_sim_cost_ratio = calcCostRatioPctFromParams(tMin, tMax, fMin, fMax);
+              } else {
+                data.cache_sim_cost_ratio = 47;
+              }
             }
           }
           data.cache_sim_min_input_tokens = cs.min_input_tokens || 0;
@@ -618,6 +639,7 @@ const EditChannelModal = (props) => {
           data.system_prompt_override = false;
           data.user_prompt = '';
           data.cache_simulation_enabled = false;
+          data.cache_simulation_mode = 'session_prefix';
           data.cache_sim_cost_ratio = 47;
           data.cache_sim_min_input_tokens = 0;
           data.strip_placeholders = false;
@@ -632,6 +654,7 @@ const EditChannelModal = (props) => {
         data.system_prompt_override = false;
         data.user_prompt = '';
         data.cache_simulation_enabled = false;
+        data.cache_simulation_mode = 'session_prefix';
         data.cache_sim_cost_ratio = 47;
         data.cache_sim_min_input_tokens = 0;
         data.strip_placeholders = false;
@@ -1386,20 +1409,16 @@ const EditChannelModal = (props) => {
     }
 
     // 生成渠道额外设置JSON —— 缓存模拟
-    const {
-      totalMin: cacheTotalMin, totalMax: cacheTotalMax,
-      fracMin: cacheReadFracMin, fracMax: cacheReadFracMax,
-    } = deriveCacheParamsFromCostRatio(
-      parseInt(localInputs.cache_sim_cost_ratio) || 47,
+    const cacheTargetCostRatio = clampCacheCostRatio(
+      localInputs.cache_sim_cost_ratio,
     );
     const cacheSimulation = localInputs.cache_simulation_enabled
       ? {
           enabled: true,
-          total_cache_ratio_min: cacheTotalMin,
-          total_cache_ratio_max: cacheTotalMax,
-          read_fraction_min: cacheReadFracMin,
-          read_fraction_max: cacheReadFracMax,
-          min_input_tokens: parseInt(localInputs.cache_sim_min_input_tokens) || 0,
+          mode: 'session_prefix',
+          target_cost_ratio: cacheTargetCostRatio,
+          min_input_tokens:
+            parseInt(localInputs.cache_sim_min_input_tokens) || 0,
         }
       : undefined;
     const channelExtraSettings = {
@@ -1478,6 +1497,7 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_safety_identifier;
     // 清理缓存模拟的临时字段
     delete localInputs.cache_simulation_enabled;
+    delete localInputs.cache_simulation_mode;
     delete localInputs.cache_sim_cost_ratio;
     delete localInputs.cache_sim_min_input_tokens;
     // 清理占位符剥离的临时字段
@@ -3711,7 +3731,7 @@ const EditChannelModal = (props) => {
                         )
                       }
                       extraText={t(
-                        '开启后始终按配置比例模拟缓存 token 数据（覆盖上游缓存统计）',
+                        '开启后按会话前缀缓存算法模拟 Claude 缓存行为，并用下面的滑块调节缓存强度',
                       )}
                     />
                     <Form.Switch
@@ -3729,21 +3749,20 @@ const EditChannelModal = (props) => {
 
                     {inputs.cache_simulation_enabled &&
                       (() => {
-                        const costPct = parseInt(inputs.cache_sim_cost_ratio) || 47;
-                        const { totalMin, totalMax, fracMin, fracMax } =
-                          deriveCacheParamsFromCostRatio(costPct);
-                        const T = (totalMin + totalMax) / 2;
-                        const F = (fracMin + fracMax) / 2;
-                        const readPct      = Math.round(T * F * 100);
-                        const creationPct  = Math.round(T * (1 - F) * 100);
-                        const nonCachedPct = 100 - readPct - creationPct;
+                        const costPct = clampCacheCostRatio(
+                          inputs.cache_sim_cost_ratio,
+                        );
+                        const {
+                          stablePct,
+                          historyPct,
+                          tailMultiplier,
+                        } = deriveSessionPrefixPreviewFromCostRatio(costPct);
                         return (
                           <>
-                            {/* 费用占比滑块 */}
                             <div style={{ marginBottom: 8 }}>
                               <Row type='flex' justify='space-between' align='middle'>
                                 <Text type='secondary' size='small'>
-                                  {t('费用占比（相对于不缓存的价格）')}
+                                  {t('缓存强度 / 动态尾部放大量（估算）')}
                                 </Text>
                                 <Text strong style={{ fontSize: 16, color: 'var(--semi-color-primary)' }}>
                                   {costPct}%
@@ -3761,7 +3780,6 @@ const EditChannelModal = (props) => {
                                 style={{ marginTop: 4, marginBottom: 4 }}
                               />
                             </div>
-                            {/* Token 分布可视化 */}
                             <div style={{ marginBottom: 12 }}>
                               <div style={{
                                 display: 'flex',
@@ -3770,25 +3788,35 @@ const EditChannelModal = (props) => {
                                 overflow: 'hidden',
                                 marginBottom: 6,
                               }}>
-                                <div style={{ width: `${readPct}%`, background: 'var(--semi-color-primary)' }} />
-                                <div style={{ width: `${creationPct}%`, background: 'var(--semi-color-success)' }} />
-                                <div style={{ width: `${nonCachedPct}%`, background: 'var(--semi-color-fill-2)' }} />
+                                <div style={{ width: `${stablePct}%`, background: 'var(--semi-color-primary)' }} />
+                                <div style={{ width: `${historyPct}%`, background: 'var(--semi-color-success)' }} />
                               </div>
                               <Space spacing={12} style={{ fontSize: 12 }}>
                                 <span>
-                                  <Tag color='light-blue' size='small'>{t('读命中')}</Tag>
-                                  {` ${readPct}%`}
+                                  <Tag color='light-blue' size='small'>{t('1h稳定前缀权重')}</Tag>
+                                  {` ${stablePct}%`}
                                 </span>
                                 <span>
-                                  <Tag color='green' size='small'>{t('缓存创建')}</Tag>
-                                  {` ${creationPct}%`}
+                                  <Tag color='green' size='small'>{t('5m历史前缀权重')}</Tag>
+                                  {` ${historyPct}%`}
                                 </span>
                                 <span>
-                                  <Tag color='grey' size='small'>{t('非缓存')}</Tag>
-                                  {` ${nonCachedPct}%`}
+                                  <Tag color='grey' size='small'>{t('动态尾部上限')}</Tag>
+                                  {` x${tailMultiplier}`}
                                 </span>
                               </Space>
-                            </div>
+                                <div
+                                  style={{
+                                    marginTop: 6,
+                                    color: 'var(--semi-color-text-2)',
+                                    fontSize: 12,
+                                  }}
+                                >
+                                  {t(
+                                    '未缓存尾部会先锚定当前轮真实消息大小，再按滑块做有限放大；越靠左越接近真实增量，越靠右允许把更多 token 留在当前轮尾部',
+                                  )}
+                                </div>
+                              </div>
                             {/* 最小触发 token 数 */}
                             <Form.InputNumber
                               field='cache_sim_min_input_tokens'
@@ -3803,7 +3831,7 @@ const EditChannelModal = (props) => {
                               }
                               style={{ width: '100%' }}
                               extraText={t(
-                                '低于此 token 数的请求不模拟缓存，填 0 使用默认值 1024',
+                                '低于此 token 数的请求不进入会话前缀模拟，填 0 使用默认值 1024',
                               )}
                             />
                           </>
