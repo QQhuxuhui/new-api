@@ -28,6 +28,12 @@ const (
 	WebSearchMaxUsesLow    = 1
 	WebSearchMaxUsesMedium = 5
 	WebSearchMaxUsesHigh   = 10
+
+	// redisStoreMaxCheckpoints is the per-scope checkpoint cap when using
+	// RedisStore. Higher than the MemoryStore default (512) because Redis
+	// manages memory externally, and 1M-context models with per-message
+	// segments can produce 1000+ checkpoints in dense conversations.
+	redisStoreMaxCheckpoints = 2048
 )
 
 var (
@@ -42,10 +48,17 @@ func getSessionPrefixStore() cachesim.Store {
 			return
 		}
 		gs := model_setting.GetGlobalSettings()
-		sessionPrefixSimulationStore = cachesim.NewMemoryStore(
-			gs.GetCacheSimMaxScopes(),
-			gs.GetCacheSimMaxCheckpoints(),
-		)
+		if common.RedisEnabled && common.RDB != nil {
+			sessionPrefixSimulationStore = cachesim.NewRedisStore(
+				common.RDB,
+				redisStoreMaxCheckpoints,
+			)
+		} else {
+			sessionPrefixSimulationStore = cachesim.NewMemoryStore(
+				gs.GetCacheSimMaxScopes(),
+				gs.GetCacheSimMaxCheckpoints(),
+			)
+		}
 	})
 	// Sync limits from global config on every call so hot-reloaded values
 	// take effect without restarting the process.

@@ -31,8 +31,9 @@ func TestBuildClaudeSnapshotSplitsStableHistoryAndCurrentSegments(t *testing.T) 
 	if snapshot.TotalInputTokens != 123 {
 		t.Fatalf("expected total input tokens = 123, got %d", snapshot.TotalInputTokens)
 	}
-	if len(snapshot.Segments) != 4 {
-		t.Fatalf("expected 4 segments, got %d", len(snapshot.Segments))
+	// With per-message history segments: tools + system + 2 history messages + current = 5
+	if len(snapshot.Segments) != 5 {
+		t.Fatalf("expected 5 segments, got %d", len(snapshot.Segments))
 	}
 	if snapshot.Segments[0].Kind != SegmentKindTools || snapshot.Segments[0].TTL != TTL1h {
 		t.Fatalf("expected tools segment to be 1h, got kind=%s ttl=%s", snapshot.Segments[0].Kind, snapshot.Segments[0].TTL)
@@ -41,10 +42,13 @@ func TestBuildClaudeSnapshotSplitsStableHistoryAndCurrentSegments(t *testing.T) 
 		t.Fatalf("expected system segment to be 1h, got kind=%s ttl=%s", snapshot.Segments[1].Kind, snapshot.Segments[1].TTL)
 	}
 	if snapshot.Segments[2].Kind != SegmentKindHistory || snapshot.Segments[2].TTL != TTL5m {
-		t.Fatalf("expected history segment to be 5m, got kind=%s ttl=%s", snapshot.Segments[2].Kind, snapshot.Segments[2].TTL)
+		t.Fatalf("expected first history segment to be 5m, got kind=%s ttl=%s", snapshot.Segments[2].Kind, snapshot.Segments[2].TTL)
 	}
-	if snapshot.Segments[3].Kind != SegmentKindCurrent || snapshot.Segments[3].TTL != TTLNone {
-		t.Fatalf("expected current segment to be uncached, got kind=%s ttl=%s", snapshot.Segments[3].Kind, snapshot.Segments[3].TTL)
+	if snapshot.Segments[3].Kind != SegmentKindHistory || snapshot.Segments[3].TTL != TTL5m {
+		t.Fatalf("expected second history segment to be 5m, got kind=%s ttl=%s", snapshot.Segments[3].Kind, snapshot.Segments[3].TTL)
+	}
+	if snapshot.Segments[4].Kind != SegmentKindCurrent || snapshot.Segments[4].TTL != TTLNone {
+		t.Fatalf("expected current segment to be uncached, got kind=%s ttl=%s", snapshot.Segments[4].Kind, snapshot.Segments[4].TTL)
 	}
 }
 
@@ -160,7 +164,7 @@ func TestBuildClaudeSnapshotWithProfileKeepsTailNearCurrentTurnBaseline(t *testi
 	}
 }
 
-func TestBuildClaudeSnapshotSplitsLongHistoryIntoMultiple5mSegments(t *testing.T) {
+func TestBuildClaudeSnapshotCreatesPerMessageHistorySegments(t *testing.T) {
 	req := &dto.ClaudeRequest{
 		System: "system prompt",
 		Messages: []dto.ClaudeMessage{
@@ -188,7 +192,67 @@ func TestBuildClaudeSnapshotSplitsLongHistoryIntoMultiple5mSegments(t *testing.T
 			historySegmentCount++
 		}
 	}
-	if historySegmentCount < 2 {
-		t.Fatalf("expected long history to be split into multiple 5m segments, got %d", historySegmentCount)
+	// With per-message segments, each of the 6 history messages is its own segment
+	if historySegmentCount != 6 {
+		t.Fatalf("expected each history message to be its own 5m segment, got %d", historySegmentCount)
+	}
+}
+
+func TestPerMessageSegmentsPrefixStabilityAcrossRequests(t *testing.T) {
+	scope := ScopeKey{UserID: 1, TokenID: 10, ChannelID: 100, Model: "claude-3-7-sonnet-20250219"}
+	at := time.Date(2026, 3, 19, 12, 0, 0, 0, time.UTC)
+	countTokens := func(text string) int { return len(text) }
+
+	// Request N: 2 history messages + 1 current
+	reqN := &dto.ClaudeRequest{
+		System: "system prompt",
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "hi there"},
+			{Role: "user", Content: "current question"},
+		},
+	}
+	snapshotN, err := BuildClaudeSnapshot(reqN, scope, 0, at, countTokens)
+	if err != nil {
+		t.Fatalf("build snapshot N returned error: %v", err)
+	}
+
+	// Request N+1: previous current becomes history, new current added
+	reqN1 := &dto.ClaudeRequest{
+		System: "system prompt",
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "hi there"},
+			{Role: "user", Content: "current question"},
+			{Role: "assistant", Content: "here is my answer"},
+			{Role: "user", Content: "follow up question"},
+		},
+	}
+	snapshotN1, err := BuildClaudeSnapshot(reqN1, scope, 0, at.Add(time.Minute), countTokens)
+	if err != nil {
+		t.Fatalf("build snapshot N+1 returned error: %v", err)
+	}
+
+	// The first segments (system + 2 shared history messages) should have identical fingerprints
+	// so that the prefix hash chain remains stable.
+	if len(snapshotN.Segments) < 3 || len(snapshotN1.Segments) < 3 {
+		t.Fatalf("expected at least 3 segments in both snapshots, got N=%d N+1=%d",
+			len(snapshotN.Segments), len(snapshotN1.Segments))
+	}
+
+	prefixesN := buildPrefixes(snapshotN.Segments)
+	prefixesN1 := buildPrefixes(snapshotN1.Segments)
+
+	// system prefix hash should match
+	if prefixesN[0].hash != prefixesN1[0].hash {
+		t.Fatalf("system prefix hash changed between requests")
+	}
+	// system + msg1 (user "hello") prefix hash should match
+	if prefixesN[1].hash != prefixesN1[1].hash {
+		t.Fatalf("system+msg1 prefix hash changed between requests")
+	}
+	// system + msg1 + msg2 (assistant "hi there") prefix hash should match
+	if prefixesN[2].hash != prefixesN1[2].hash {
+		t.Fatalf("system+msg1+msg2 prefix hash changed between requests")
 	}
 }

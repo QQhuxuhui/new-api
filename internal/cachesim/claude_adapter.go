@@ -8,8 +8,6 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 )
 
-const historyChunkTargetTokens = 4096
-
 func BuildClaudeSnapshot(
 	req *dto.ClaudeRequest,
 	scope ScopeKey,
@@ -110,39 +108,19 @@ func buildClaudeHistorySegments(messages []dto.ClaudeMessage, countTokens func(s
 
 	historyMessages := messages[:len(messages)-1]
 	segments := make([]Segment, 0, len(historyMessages))
-	chunk := make([]dto.ClaudeMessage, 0, len(historyMessages))
-	chunkTokenCount := 0
-
-	flush := func() {
-		if len(chunk) == 0 {
-			return
-		}
-		chunkFingerprint := marshalFingerprint(chunk)
-		if chunkFingerprint != "" {
-			segments = append(segments, Segment{
-				Kind:        SegmentKindHistory,
-				TTL:         TTL5m,
-				TokenCount:  countTokens(chunkFingerprint),
-				Fingerprint: chunkFingerprint,
-			})
-		}
-		chunk = chunk[:0]
-		chunkTokenCount = 0
-	}
 
 	for _, message := range historyMessages {
 		messageFingerprint := marshalFingerprint(message)
 		if messageFingerprint == "" {
 			continue
 		}
-		messageTokenCount := countTokens(messageFingerprint)
-		if chunkTokenCount > 0 && chunkTokenCount+messageTokenCount > historyChunkTargetTokens {
-			flush()
-		}
-		chunk = append(chunk, message)
-		chunkTokenCount += messageTokenCount
+		segments = append(segments, Segment{
+			Kind:        SegmentKindHistory,
+			TTL:         TTL5m,
+			TokenCount:  countTokens(messageFingerprint),
+			Fingerprint: messageFingerprint,
+		})
 	}
-	flush()
 	return segments
 }
 

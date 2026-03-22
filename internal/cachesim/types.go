@@ -54,15 +54,15 @@ type SimulationResult struct {
 }
 
 type Checkpoint struct {
-	Hash       string
-	TokenCount int
-	TTL        SegmentTTL
-	ExpiresAt  time.Time
+	Hash       string     `json:"h"`
+	TokenCount int        `json:"t"`
+	TTL        SegmentTTL `json:"l"`
+	ExpiresAt  time.Time  `json:"e"`
 }
 
 type State struct {
-	Checkpoints []Checkpoint
-	LastSeenAt  time.Time
+	Checkpoints []Checkpoint `json:"c"`
+	LastSeenAt  time.Time    `json:"s"`
 }
 
 type Store interface {

@@ -41,9 +41,9 @@ type GlobalSettings struct {
 	// combinations) the in-memory session-prefix cache store can hold. Older scopes are
 	// evicted when this limit is reached. Default: 10000.
 	CacheSimMaxScopes int `json:"cache_sim_max_scopes"`
-	// CacheSimMaxCheckpoints: maximum number of prefix checkpoints retained per scope.
-	// Higher values support more concurrent conversations per scope without checkpoint
-	// truncation. Default: 512. Recommended: 512+ for high-concurrency deployments.
+	// CacheSimMaxCheckpoints: maximum number of prefix checkpoints retained per scope
+	// for the in-memory fallback store (MemoryStore). When Redis is enabled, a
+	// separate higher limit (2048) is used to support 1M-context models. Default: 512.
 	CacheSimMaxCheckpoints int `json:"cache_sim_max_checkpoints"`
 }
 

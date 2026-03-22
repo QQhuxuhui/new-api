@@ -238,6 +238,7 @@ const EditChannelModal = (props) => {
     cache_simulation_mode: 'session_prefix',
     cache_sim_cost_ratio: 47,
     cache_sim_min_input_tokens: 0,
+    cache_sim_shared_scope: false,
     // 占位符剥离
     strip_placeholders: false,
   };
@@ -627,6 +628,7 @@ const EditChannelModal = (props) => {
             }
           }
           data.cache_sim_min_input_tokens = cs.min_input_tokens || 0;
+          data.cache_sim_shared_scope = cs.shared_scope || false;
           data.strip_placeholders = parsedSettings.strip_placeholders || false;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
@@ -642,6 +644,7 @@ const EditChannelModal = (props) => {
           data.cache_simulation_mode = 'session_prefix';
           data.cache_sim_cost_ratio = 47;
           data.cache_sim_min_input_tokens = 0;
+          data.cache_sim_shared_scope = false;
           data.strip_placeholders = false;
         }
       } else {
@@ -657,6 +660,7 @@ const EditChannelModal = (props) => {
         data.cache_simulation_mode = 'session_prefix';
         data.cache_sim_cost_ratio = 47;
         data.cache_sim_min_input_tokens = 0;
+        data.cache_sim_shared_scope = false;
         data.strip_placeholders = false;
       }
 
@@ -1419,6 +1423,7 @@ const EditChannelModal = (props) => {
           target_cost_ratio: cacheTargetCostRatio,
           min_input_tokens:
             parseInt(localInputs.cache_sim_min_input_tokens) || 0,
+          shared_scope: localInputs.cache_sim_shared_scope || false,
         }
       : undefined;
     const channelExtraSettings = {
@@ -1500,6 +1505,7 @@ const EditChannelModal = (props) => {
     delete localInputs.cache_simulation_mode;
     delete localInputs.cache_sim_cost_ratio;
     delete localInputs.cache_sim_min_input_tokens;
+    delete localInputs.cache_sim_shared_scope;
     // 清理占位符剥离的临时字段
     delete localInputs.strip_placeholders;
 
@@ -3734,6 +3740,23 @@ const EditChannelModal = (props) => {
                         '开启后按会话前缀缓存算法模拟 Claude 缓存行为，并用下面的滑块调节缓存强度',
                       )}
                     />
+                    {inputs.cache_simulation_enabled && (
+                      <Form.Switch
+                        field='cache_sim_shared_scope'
+                        label={t('跨渠道缓存共享')}
+                        checkedText={t('开')}
+                        uncheckedText={t('关')}
+                        onChange={(value) =>
+                          handleChannelSettingsChange(
+                            'cache_sim_shared_scope',
+                            value,
+                          )
+                        }
+                        extraText={t(
+                          '开启后同一用户在不同渠道间切换时缓存模拟保持连续，适用于多渠道负载均衡场景',
+                        )}
+                      />
+                    )}
                     <Form.Switch
                       field='strip_placeholders'
                       label={t('占位符剥离')}
