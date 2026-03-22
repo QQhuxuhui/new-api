@@ -36,3 +36,4 @@ concurrency_translations.txt
 .gomod*
 
 .worktrees/
+.serena/
