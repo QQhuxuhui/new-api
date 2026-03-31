@@ -210,44 +210,55 @@ func CovertGemini2OpenAI(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 		}
 	}
 
-	adaptorWithExtraBody := false
+	hasThinkingConfigOverride := false
 
 	if len(textRequest.ExtraBody) > 0 {
-		if !strings.HasSuffix(info.UpstreamModelName, "-nothinking") {
-			var extraBody map[string]interface{}
-			if err := common.Unmarshal(textRequest.ExtraBody, &extraBody); err != nil {
-				return nil, fmt.Errorf("invalid extra body: %w", err)
+		var extraBody map[string]interface{}
+		if err := common.Unmarshal(textRequest.ExtraBody, &extraBody); err != nil {
+			return nil, fmt.Errorf("invalid extra body: %w", err)
+		}
+		// eg. {"google":{"thinking_config":{"thinking_budget":5324,"include_thoughts":true}}}
+		if googleBody, ok := extraBody["google"].(map[string]interface{}); ok {
+			// check error param name like thinkingConfig, should be thinking_config
+			if _, hasErrorParam := googleBody["thinkingConfig"]; hasErrorParam {
+				return nil, errors.New("extra_body.google.thinkingConfig is not supported, use extra_body.google.thinking_config instead")
 			}
-			// eg. {"google":{"thinking_config":{"thinking_budget":5324,"include_thoughts":true}}}
-			if googleBody, ok := extraBody["google"].(map[string]interface{}); ok {
-				adaptorWithExtraBody = true
-				// check error param name like thinkingConfig, should be thinking_config
-				if _, hasErrorParam := googleBody["thinkingConfig"]; hasErrorParam {
-					return nil, errors.New("extra_body.google.thinkingConfig is not supported, use extra_body.google.thinking_config instead")
-				}
 
-				if thinkingConfig, ok := googleBody["thinking_config"].(map[string]interface{}); ok {
-					// check error param name like thinkingBudget, should be thinking_budget
-					if _, hasErrorParam := thinkingConfig["thinkingBudget"]; hasErrorParam {
-						return nil, errors.New("extra_body.google.thinking_config.thinkingBudget is not supported, use extra_body.google.thinking_config.thinking_budget instead")
+			if thinkingConfig, ok := googleBody["thinking_config"].(map[string]interface{}); ok && !strings.HasSuffix(info.UpstreamModelName, "-nothinking") {
+				hasThinkingConfigOverride = true
+				// check error param name like thinkingBudget, should be thinking_budget
+				if _, hasErrorParam := thinkingConfig["thinkingBudget"]; hasErrorParam {
+					return nil, errors.New("extra_body.google.thinking_config.thinkingBudget is not supported, use extra_body.google.thinking_config.thinking_budget instead")
+				}
+				if budget, ok := thinkingConfig["thinking_budget"].(float64); ok {
+					budgetInt := int(budget)
+					geminiRequest.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{
+						ThinkingBudget:  common.GetPointer(budgetInt),
+						IncludeThoughts: true,
 					}
-					if budget, ok := thinkingConfig["thinking_budget"].(float64); ok {
-						budgetInt := int(budget)
-						geminiRequest.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{
-							ThinkingBudget:  common.GetPointer(budgetInt),
-							IncludeThoughts: true,
-						}
-					} else {
-						geminiRequest.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{
-							IncludeThoughts: true,
-						}
+				} else {
+					geminiRequest.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{
+						IncludeThoughts: true,
 					}
 				}
+			}
+
+			// check error param name like imageConfig, should be image_config
+			if _, hasErrorParam := googleBody["imageConfig"]; hasErrorParam {
+				return nil, errors.New("extra_body.google.imageConfig is not supported, use extra_body.google.image_config instead")
+			}
+
+			if imageConfig, ok := googleBody["image_config"]; ok {
+				imageConfigBytes, err := json.Marshal(imageConfig)
+				if err != nil {
+					return nil, fmt.Errorf("invalid extra_body.google.image_config: %w", err)
+				}
+				geminiRequest.GenerationConfig.ImageConfig = imageConfigBytes
 			}
 		}
 	}
 
-	if !adaptorWithExtraBody {
+	if !hasThinkingConfigOverride {
 		ThinkingAdaptor(&geminiRequest, info, textRequest)
 	}
 
