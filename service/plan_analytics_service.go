@@ -20,29 +20,30 @@ func ConvertQuotaToUSD(quota int64) float64 {
 func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 	var overview dto.PlanUsageOverview
 	db := model.DB
-	now := time.Now().UnixMilli()
 
-	// Parse time range
-	startTime, _ := ParseTimeRange(timeRange)
+	// Parse time range — use endTime as the reference point instead of now,
+	// so custom historical ranges query "as if we were at endTime".
+	startTime, endTime := ParseTimeRange(timeRange)
 	startTimeMs := startTime * 1000
+	refTimeMs := endTime * 1000
 
 	// Total plans count (all statuses that had overlap with time range)
 	// As per spec: "Total Plans Count: Total number of user plans (all statuses)"
 	var totalPlans int64
 	if err := db.Model(&model.UserPlan{}).
-		Where("started_at <= ?", now).                                      // Started before now
+		Where("started_at <= ?", refTimeMs).                                  // Started before reference time
 		Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs).          // Not expired before time range start
 		Count(&totalPlans).Error; err != nil {
 		return nil, err
 	}
 	overview.TotalPlans = int(totalPlans)
 
-	// Active plans count (currently active and were active in time range)
+	// Active plans count (active at reference time and were active in time range)
 	activeQuery := db.Model(&model.UserPlan{}).
 		Where("status = ?", model.UserPlanStatusActive).
 		Where("locked = ?", 0).
-		Where("(expires_at = 0 OR expires_at > ?)", now).                  // Currently not expired
-		Where("started_at <= ?", now).                                      // Already started
+		Where("(expires_at = 0 OR expires_at > ?)", refTimeMs).             // Not expired at reference time
+		Where("started_at <= ?", refTimeMs).                                  // Already started
 		Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs)           // Was active during time range
 
 	var activePlans int64
@@ -51,13 +52,13 @@ func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 	}
 	overview.ActivePlans = int(activePlans)
 
-	// Plans expiring within 3 days (from currently active plans)
-	threeDaysLater := time.Now().Add(72 * time.Hour).UnixMilli()
+	// Plans expiring within 3 days from reference time
+	threeDaysLater := refTimeMs + 3*24*60*60*1000
 	expiringQuery := db.Model(&model.UserPlan{}).
 		Where("status = ?", model.UserPlanStatusActive).
-		Where("expires_at > ?", now).
+		Where("expires_at > ?", refTimeMs).
 		Where("expires_at <= ?", threeDaysLater).
-		Where("started_at <= ?", now).
+		Where("started_at <= ?", refTimeMs).
 		Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs)           // Was active during time range
 
 	var expiringPlans int64
@@ -70,7 +71,7 @@ func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 	var lockedPlans int64
 	if err := db.Model(&model.UserPlan{}).
 		Where("locked = ?", 1).
-		Where("started_at <= ?", now).
+		Where("started_at <= ?", refTimeMs).
 		Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs).
 		Count(&lockedPlans).Error; err != nil {
 		return nil, err
@@ -87,7 +88,7 @@ func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 	err := db.Model(&model.UserPlan{}).
 		Select("COALESCE(SUM(quota), 0) as total_quota, COALESCE(SUM(used_quota), 0) as total_used").
 		Where("status = ?", model.UserPlanStatusActive).
-		Where("started_at <= ?", now).
+		Where("started_at <= ?", refTimeMs).
 		Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs).
 		Scan(&sums).Error
 
@@ -105,8 +106,8 @@ func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 			Select("AVG(CASE WHEN (quota + used_quota) > 0 THEN (used_quota * 100.0 / (quota + used_quota)) ELSE 0 END) as avg_rate").
 			Where("status = ?", model.UserPlanStatusActive).
 			Where("locked = ?", 0).
-			Where("(expires_at = 0 OR expires_at > ?)", now).
-			Where("started_at <= ?", now).
+			Where("(expires_at = 0 OR expires_at > ?)", refTimeMs).
+			Where("started_at <= ?", refTimeMs).
 			Where("(expires_at = 0 OR expires_at >= ?)", startTimeMs).
 			Scan(&avgUsageRate).Error
 
@@ -122,18 +123,15 @@ func GetPlanUsageOverview(timeRange string) (*dto.PlanUsageOverview, error) {
 // Time range is used to filter usage logs when counting requests
 func GetPlanUsageList(filters *dto.PlanUsageFilters) (*dto.PlanUsageListResponse, error) {
 	db := model.DB
-	now := time.Now().UnixMilli()
 
-	// Parse time range for request counting
-	var startTimeSeconds int64
+	// Parse time range for request counting — use endTime as reference point
+	var startTimeSeconds, endTimeSeconds int64
 	if filters.TimeRange != "" {
-		startTime, _ := ParseTimeRange(filters.TimeRange)
-		startTimeSeconds = startTime
+		startTimeSeconds, endTimeSeconds = ParseTimeRange(filters.TimeRange)
 	} else {
-		// Default to 30 days if not specified
-		startTime, _ := ParseTimeRange("30d")
-		startTimeSeconds = startTime
+		startTimeSeconds, endTimeSeconds = ParseTimeRange("30d")
 	}
+	refTimeMs := endTimeSeconds * 1000
 
 	// Build base query
 	query := db.Model(&model.UserPlan{}).
@@ -154,14 +152,14 @@ func GetPlanUsageList(filters *dto.PlanUsageFilters) (*dto.PlanUsageListResponse
 	case "active":
 		query = query.Where("user_plans.status = ?", model.UserPlanStatusActive).
 			Where("user_plans.locked = ?", 0).
-			Where("(user_plans.expires_at = 0 OR user_plans.expires_at > ?)", now)
+			Where("(user_plans.expires_at = 0 OR user_plans.expires_at > ?)", refTimeMs)
 	case "expiring":
-		threeDaysLater := time.Now().Add(72 * time.Hour).UnixMilli()
+		threeDaysLater := refTimeMs + 3*24*60*60*1000
 		query = query.Where("user_plans.status = ?", model.UserPlanStatusActive).
-			Where("user_plans.expires_at > ?", now).
+			Where("user_plans.expires_at > ?", refTimeMs).
 			Where("user_plans.expires_at <= ?", threeDaysLater)
 	case "expired":
-		query = query.Where("user_plans.expires_at > 0 AND user_plans.expires_at < ?", now)
+		query = query.Where("user_plans.expires_at > 0 AND user_plans.expires_at < ?", refTimeMs)
 	case "locked":
 		query = query.Where("user_plans.locked = ?", 1)
 	}
@@ -268,10 +266,10 @@ func GetPlanUsageList(filters *dto.PlanUsageFilters) (*dto.PlanUsageListResponse
 func GetPlanTypeDistribution(timeRange string) ([]dto.PlanTypeDistribution, error) {
 	db := model.DB
 
-	// Parse time range
-	startTime, _ := ParseTimeRange(timeRange)
+	// Parse time range — use endTime as reference point
+	startTime, endTime := ParseTimeRange(timeRange)
 	startTimeMs := startTime * 1000
-	now := time.Now().UnixMilli()
+	refTimeMs := endTime * 1000
 
 	type DistResult struct {
 		PlanType   string
@@ -284,7 +282,7 @@ func GetPlanTypeDistribution(timeRange string) ([]dto.PlanTypeDistribution, erro
 		Select("plans.type as plan_type, COUNT(DISTINCT user_plans.user_id) as user_count, SUM(user_plans.quota) as total_quota").
 		Joins("LEFT JOIN plans ON user_plans.plan_id = plans.id").
 		Where("user_plans.status = ?", model.UserPlanStatusActive).
-		Where("user_plans.started_at <= ?", now).
+		Where("user_plans.started_at <= ?", refTimeMs).
 		Where("(user_plans.expires_at = 0 OR user_plans.expires_at >= ?)", startTimeMs).
 		Group("plans.type").
 		Scan(&results).Error
@@ -328,15 +326,13 @@ func GetPlanConsumptionRanking(limit int, timeRange string) ([]dto.PlanConsumpti
 	db := model.DB
 
 	// Parse time range
-	var startTimeSeconds int64
+	var startTimeSeconds, endTimeSeconds int64
 	if timeRange != "" {
-		startTime, _ := ParseTimeRange(timeRange)
-		startTimeSeconds = startTime
+		startTimeSeconds, endTimeSeconds = ParseTimeRange(timeRange)
 	} else {
-		// Default to 30 days
-		startTime, _ := ParseTimeRange("30d")
-		startTimeSeconds = startTime
+		startTimeSeconds, endTimeSeconds = ParseTimeRange("30d")
 	}
+	_ = endTimeSeconds // used for consistency; log queries use startTimeSeconds
 
 	// Get all active user plans with their plan info
 	type UserPlanInfo struct {

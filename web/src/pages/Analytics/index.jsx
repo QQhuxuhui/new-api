@@ -34,7 +34,6 @@ import {
   Space,
   Empty,
   DatePicker,
-  Banner,
 } from '@douyinfe/semi-ui';
 import {
   IconRefresh,
@@ -82,23 +81,29 @@ const Analytics = () => {
   // UI-level time range state (managed here, not in the hook)
   const [timeRangeKey, setTimeRangeKey] = useState('7d');
   const [customDateRange, setCustomDateRange] = useState(null);
+  // Track the last valid preset so we don't send "custom" to the backend
+  // while the user hasn't finished picking dates yet.
+  const [lastPreset, setLastPreset] = useState('7d');
   const [activeTab, setActiveTab] = useState('channel-cost');
   const [refreshVersion, setRefreshVersion] = useState(0);
 
+  // Build "custom:START:END" from Date objects using UTC+8 day boundaries.
+  const buildCustomRange = (startDate, endDate) => {
+    const bjOffsetMs = 8 * 60 * 60 * 1000;
+    const startUtcMs = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate()) - bjOffsetMs;
+    const endUtcMs = Date.UTC(endDate.getFullYear(), endDate.getMonth(), endDate.getDate(), 23, 59, 59, 999) - bjOffsetMs;
+    return `custom:${Math.floor(startUtcMs / 1000)}:${Math.floor(endUtcMs / 1000)}`;
+  };
+
   // Compute the effective time range string sent to the backend.
-  // For custom ranges, encode as "custom:START_UNIX:END_UNIX" using UTC+8.
+  // While "custom" is selected but no dates are picked yet, keep the previous preset
+  // to avoid sending the raw string "custom" (which falls back to 7d on the backend).
   const effectiveTimeRange = (() => {
-    if (timeRangeKey === 'custom' && customDateRange && customDateRange.length === 2) {
-      const [start, end] = customDateRange;
-      // Convert to Beijing time (UTC+8) day boundaries
-      const bjOffsetMs = 8 * 60 * 60 * 1000;
-      const startDate = new Date(start);
-      const endDate = new Date(end);
-      // Get the UTC timestamp for 00:00:00 Beijing time of the start date
-      const startUtcMs = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate()) - bjOffsetMs;
-      // Get the UTC timestamp for 23:59:59.999 Beijing time of the end date
-      const endUtcMs = Date.UTC(endDate.getFullYear(), endDate.getMonth(), endDate.getDate(), 23, 59, 59, 999) - bjOffsetMs;
-      return `custom:${Math.floor(startUtcMs / 1000)}:${Math.floor(endUtcMs / 1000)}`;
+    if (timeRangeKey === 'custom') {
+      if (customDateRange && customDateRange.length === 2) {
+        return buildCustomRange(customDateRange[0], customDateRange[1]);
+      }
+      return lastPreset; // keep previous range until dates are picked
     }
     return timeRangeKey;
   })();
@@ -431,24 +436,24 @@ const Analytics = () => {
     setTimeRangeKey(value);
     if (value !== 'custom') {
       setCustomDateRange(null);
-      // For preset ranges, sync to hook immediately
+      setLastPreset(value);
       hookSetTimeRange(value);
     }
+    // When switching to 'custom', don't fire any request —
+    // wait until the user actually picks dates.
   };
 
+  // Semi DatePicker onChange with onChangeWithDateFirst:
+  // first argument is [Date, Date], second is [string, string].
   const handleDateRangeChange = (dates) => {
-    setCustomDateRange(dates);
-    if (dates && dates.length === 2) {
-      // Recompute and sync to hook — effectiveTimeRange will update on next render,
-      // but we need to trigger the hook now with the correct value.
-      const [start, end] = dates;
-      const bjOffsetMs = 8 * 60 * 60 * 1000;
-      const startUtcMs = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()) - bjOffsetMs;
-      const endUtcMs = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999) - bjOffsetMs;
-      const customRange = `custom:${Math.floor(startUtcMs / 1000)}:${Math.floor(endUtcMs / 1000)}`;
-      hookSetTimeRange(customRange);
-      setRefreshVersion(v => v + 1);
+    if (!dates || dates.length !== 2 || !dates[0] || !dates[1]) {
+      setCustomDateRange(null);
+      return;
     }
+    setCustomDateRange(dates);
+    const customRange = buildCustomRange(dates[0], dates[1]);
+    hookSetTimeRange(customRange);
+    setRefreshVersion(v => v + 1);
   };
 
   return (
@@ -470,6 +475,7 @@ const Analytics = () => {
               type="dateRange"
               value={customDateRange}
               onChange={handleDateRangeChange}
+              onChangeWithDateFirst
               style={{ width: 260 }}
               placeholder={['开始日期', '结束日期']}
             />
@@ -524,14 +530,6 @@ const Analytics = () => {
             tab={<span><IconBox className="mr-1" />套餐分析</span>}
             itemKey="plan-usage"
           >
-            {timeRangeKey === 'custom' && (
-              <Banner
-                type="warning"
-                description="套餐分析不支持自定义日期范围，将显示从所选起始日期到当前的数据"
-                style={{ marginBottom: 16 }}
-                closeIcon={null}
-              />
-            )}
             <PlanUsageTab timeRange={effectiveTimeRange} />
           </TabPane>
 
