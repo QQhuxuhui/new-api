@@ -62,7 +62,7 @@ const { Title, Text } = Typography;
 // Custom Statistic component to replace removed semi-ui Statistic
 const Statistic = ({ title, value, prefix, suffix }) => (
   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-    <Text type="tertiary" style={{ fontSize: '14px' }}>
+    <Text type='tertiary' style={{ fontSize: '14px' }}>
       {title}
     </Text>
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -90,8 +90,22 @@ const Analytics = () => {
   // Build "custom:START:END" from Date objects using UTC+8 day boundaries.
   const buildCustomRange = (startDate, endDate) => {
     const bjOffsetMs = 8 * 60 * 60 * 1000;
-    const startUtcMs = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate()) - bjOffsetMs;
-    const endUtcMs = Date.UTC(endDate.getFullYear(), endDate.getMonth(), endDate.getDate(), 23, 59, 59, 999) - bjOffsetMs;
+    const startUtcMs =
+      Date.UTC(
+        startDate.getFullYear(),
+        startDate.getMonth(),
+        startDate.getDate(),
+      ) - bjOffsetMs;
+    const endUtcMs =
+      Date.UTC(
+        endDate.getFullYear(),
+        endDate.getMonth(),
+        endDate.getDate(),
+        23,
+        59,
+        59,
+        999,
+      ) - bjOffsetMs;
     return `custom:${Math.floor(startUtcMs / 1000)}:${Math.floor(endUtcMs / 1000)}`;
   };
 
@@ -132,18 +146,42 @@ const Analytics = () => {
   ];
 
   const exportMenuItems = [
-    { node: 'item', name: '导出活跃用户 (JSON)', onClick: () => exportData('active_users', 'json') },
-    { node: 'item', name: '导出活跃用户 (CSV)', onClick: () => exportData('active_users', 'csv') },
-    { node: 'item', name: '导出消费趋势 (JSON)', onClick: () => exportData('consumption_trend', 'json') },
-    { node: 'item', name: '导出消费趋势 (CSV)', onClick: () => exportData('consumption_trend', 'csv') },
-    { node: 'item', name: '导出模型使用 (JSON)', onClick: () => exportData('models', 'json') },
-    { node: 'item', name: '导出模型使用 (CSV)', onClick: () => exportData('models', 'csv') },
+    {
+      node: 'item',
+      name: '导出活跃用户 (JSON)',
+      onClick: () => exportData('active_users', 'json'),
+    },
+    {
+      node: 'item',
+      name: '导出活跃用户 (CSV)',
+      onClick: () => exportData('active_users', 'csv'),
+    },
+    {
+      node: 'item',
+      name: '导出消费趋势 (JSON)',
+      onClick: () => exportData('consumption_trend', 'json'),
+    },
+    {
+      node: 'item',
+      name: '导出消费趋势 (CSV)',
+      onClick: () => exportData('consumption_trend', 'csv'),
+    },
+    {
+      node: 'item',
+      name: '导出模型使用 (JSON)',
+      onClick: () => exportData('models', 'json'),
+    },
+    {
+      node: 'item',
+      name: '导出模型使用 (CSV)',
+      onClick: () => exportData('models', 'csv'),
+    },
   ];
 
   // Overview cards
   const renderOverviewCards = () => {
     if (!userOverview) {
-      return <Empty description="暂无数据" />;
+      return <Empty description='暂无数据' />;
     }
 
     const growthColor = userOverview.growth_rate >= 0 ? '#52c41a' : '#ff4d4f';
@@ -154,7 +192,7 @@ const Analytics = () => {
         <Col xs={24} sm={12} md={6}>
           <Card>
             <Statistic
-              title="总用户数"
+              title='总用户数'
               value={userOverview.total_users}
               prefix={<IconUser />}
             />
@@ -163,7 +201,7 @@ const Analytics = () => {
         <Col xs={24} sm={12} md={6}>
           <Card>
             <Statistic
-              title="今日活跃"
+              title='今日活跃'
               value={userOverview.active_users_today}
               prefix={<IconPulse />}
             />
@@ -172,11 +210,12 @@ const Analytics = () => {
         <Col xs={24} sm={12} md={6}>
           <Card>
             <Statistic
-              title="7日活跃"
+              title='7日活跃'
               value={userOverview.active_users_7d}
               suffix={
                 <Text style={{ fontSize: 14, color: growthColor }}>
-                  {growthIcon} {Math.abs(userOverview.growth_rate || 0).toFixed(1)}%
+                  {growthIcon}{' '}
+                  {Math.abs(userOverview.growth_rate || 0).toFixed(1)}%
                 </Text>
               }
             />
@@ -184,10 +223,7 @@ const Analytics = () => {
         </Col>
         <Col xs={24} sm={12} md={6}>
           <Card>
-            <Statistic
-              title="30日活跃"
-              value={userOverview.active_users_30d}
-            />
+            <Statistic title='30日活跃' value={userOverview.active_users_30d} />
           </Card>
         </Col>
       </Row>
@@ -226,13 +262,13 @@ const Analytics = () => {
     ];
 
     return (
-      <Card title="活跃用户排行">
+      <Card title='活跃用户排行'>
         <Table
           columns={columns}
           dataSource={activeUsers}
           pagination={{ pageSize: 10 }}
           loading={loading}
-          rowKey="user_id"
+          rowKey='user_id'
         />
       </Card>
     );
@@ -259,22 +295,19 @@ const Analytics = () => {
         dataIndex: 'total_usd',
         sorter: (a, b) => (a.total_usd || 0) - (b.total_usd || 0),
         render: (value, record) => (
-          <MoneyWithDetails
-            usd={value}
-            requests={record.request_count}
-          />
+          <MoneyWithDetails usd={value} requests={record.request_count} />
         ),
       },
     ];
 
     return (
-      <Card title="消费排行">
+      <Card title='消费排行'>
         <Table
           columns={columns}
           dataSource={topSpenders}
           pagination={{ pageSize: 10 }}
           loading={loading}
-          rowKey="user_id"
+          rowKey='user_id'
         />
       </Card>
     );
@@ -316,13 +349,13 @@ const Analytics = () => {
     ];
 
     return (
-      <Card title="模型使用统计">
+      <Card title='模型使用统计'>
         <Table
           columns={columns}
           dataSource={modelUsage}
           pagination={{ pageSize: 10 }}
           loading={loading}
-          rowKey="model_name"
+          rowKey='model_name'
         />
       </Card>
     );
@@ -358,7 +391,8 @@ const Analytics = () => {
       {
         title: '用户',
         dataIndex: 'username',
-        render: (text, record) => text || (record.user_id ? `用户 ${record.user_id}` : '-'),
+        render: (text, record) =>
+          text || (record.user_id ? `用户 ${record.user_id}` : '-'),
       },
       {
         title: '描述',
@@ -367,9 +401,9 @@ const Analytics = () => {
     ];
 
     return (
-      <Card title="风险监控">
+      <Card title='风险监控'>
         {riskIndicators.length === 0 ? (
-          <Empty description="暂无风险提示" />
+          <Empty description='暂无风险提示' />
         ) : (
           <Table
             columns={columns}
@@ -387,8 +421,8 @@ const Analytics = () => {
   const renderConsumptionTrend = () => {
     if (!consumptionTrend || consumptionTrend.length === 0) {
       return (
-        <Card title="消费趋势">
-          <Empty description="暂无数据" />
+        <Card title='消费趋势'>
+          <Empty description='暂无数据' />
         </Card>
       );
     }
@@ -402,10 +436,7 @@ const Analytics = () => {
         title: '消费金额',
         dataIndex: 'total_usd',
         render: (value, record) => (
-          <MoneyWithDetails
-            usd={value}
-            requests={record.request_count}
-          />
+          <MoneyWithDetails usd={value} requests={record.request_count} />
         ),
       },
       {
@@ -420,13 +451,13 @@ const Analytics = () => {
     ];
 
     return (
-      <Card title="消费趋势">
+      <Card title='消费趋势'>
         <Table
           columns={columns}
           dataSource={consumptionTrend}
           pagination={{ pageSize: 10 }}
           loading={loading}
-          rowKey="date"
+          rowKey='date'
         />
       </Card>
     );
@@ -448,19 +479,20 @@ const Analytics = () => {
   const handleDateRangeChange = (dates) => {
     if (!dates || dates.length !== 2 || !dates[0] || !dates[1]) {
       setCustomDateRange(null);
+      hookSetTimeRange(lastPreset);
       return;
     }
     setCustomDateRange(dates);
     const customRange = buildCustomRange(dates[0], dates[1]);
     hookSetTimeRange(customRange);
-    setRefreshVersion(v => v + 1);
+    setRefreshVersion((v) => v + 1);
   };
 
   return (
-    <div className="mt-[60px] px-4">
-      <div className="mb-4 flex justify-between items-center">
+    <div className='mt-[60px] px-4'>
+      <div className='mb-4 flex justify-between items-center'>
         <Title heading={3}>
-          <IconPulse className="mr-2" />
+          <IconPulse className='mr-2' />
           用户行为分析
         </Title>
         <Space>
@@ -472,7 +504,7 @@ const Analytics = () => {
           />
           {timeRangeKey === 'custom' && (
             <DatePicker
-              type="dateRange"
+              type='dateRange'
               value={customDateRange}
               onChange={handleDateRangeChange}
               onChangeWithDateFirst
@@ -484,13 +516,13 @@ const Analytics = () => {
             icon={<IconRefresh />}
             onClick={() => {
               refreshData();
-              setRefreshVersion(v => v + 1);
+              setRefreshVersion((v) => v + 1);
             }}
             loading={loading}
           >
             刷新
           </Button>
-          <Dropdown menu={exportMenuItems} trigger="click">
+          <Dropdown menu={exportMenuItems} trigger='click'>
             <Button icon={<IconDownload />}>导出</Button>
           </Dropdown>
         </Space>
@@ -498,65 +530,108 @@ const Analytics = () => {
 
       {error && (
         <Card style={{ marginBottom: 16 }}>
-          <Text type="danger">{error}</Text>
+          <Text type='danger'>{error}</Text>
         </Card>
       )}
 
       <Spin spinning={loading}>
         <Tabs activeKey={activeTab} onChange={setActiveTab}>
           <TabPane
-            tab={<span><IconServer className="mr-1" />渠道消耗</span>}
-            itemKey="channel-cost"
+            tab={
+              <span>
+                <IconServer className='mr-1' />
+                渠道消耗
+              </span>
+            }
+            itemKey='channel-cost'
           >
-            <ChannelCostTab timeRange={effectiveTimeRange} refreshVersion={refreshVersion} />
+            <ChannelCostTab
+              timeRange={effectiveTimeRange}
+              refreshVersion={refreshVersion}
+            />
           </TabPane>
 
           <TabPane
-            tab={<span><IconPriceTag className="mr-1" />消费分析</span>}
-            itemKey="consumption"
+            tab={
+              <span>
+                <IconPriceTag className='mr-1' />
+                消费分析
+              </span>
+            }
+            itemKey='consumption'
           >
             {renderConsumptionTrend()}
             <UserConsumptionTab timeRange={effectiveTimeRange} />
           </TabPane>
 
           <TabPane
-            tab={<span><IconCoinMoneyStroked className="mr-1" />余额分析</span>}
-            itemKey="balance"
+            tab={
+              <span>
+                <IconCoinMoneyStroked className='mr-1' />
+                余额分析
+              </span>
+            }
+            itemKey='balance'
           >
             <BalanceAnalysisTab timeRange={effectiveTimeRange} />
           </TabPane>
 
           <TabPane
-            tab={<span><IconBox className="mr-1" />套餐分析</span>}
-            itemKey="plan-usage"
+            tab={
+              <span>
+                <IconBox className='mr-1' />
+                套餐分析
+              </span>
+            }
+            itemKey='plan-usage'
           >
             <PlanUsageTab timeRange={effectiveTimeRange} />
           </TabPane>
 
           <TabPane
-            tab={<span><IconPriceTag className="mr-1" />成本效益</span>}
-            itemKey="cost-efficiency"
+            tab={
+              <span>
+                <IconPriceTag className='mr-1' />
+                成本效益
+              </span>
+            }
+            itemKey='cost-efficiency'
           >
             <CostEfficiencyTab timeRange={effectiveTimeRange} />
           </TabPane>
 
           <TabPane
-            tab={<span><IconServer className="mr-1" />模型使用</span>}
-            itemKey="models"
+            tab={
+              <span>
+                <IconServer className='mr-1' />
+                模型使用
+              </span>
+            }
+            itemKey='models'
           >
             {renderModelUsage()}
           </TabPane>
 
           <TabPane
-            tab={<span><IconAlertTriangle className="mr-1" />风险监控</span>}
-            itemKey="risks"
+            tab={
+              <span>
+                <IconAlertTriangle className='mr-1' />
+                风险监控
+              </span>
+            }
+            itemKey='risks'
           >
             {renderRiskIndicators()}
           </TabPane>
 
           <TabPane
-            tab={<span><IconSearch className="mr-1" />{t('伪装追踪')}</span>}
-            itemKey="masquerade"
+            tab={
+              <span>
+                <IconSearch className='mr-1' />
+                {t('伪装追踪')}
+              </span>
+            }
+            itemKey='masquerade'
           >
             <MasqueradeTraceTab t={t} />
           </TabPane>
