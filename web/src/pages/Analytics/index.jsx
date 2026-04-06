@@ -33,6 +33,7 @@ import {
   Dropdown,
   Space,
   Empty,
+  DatePicker,
 } from '@douyinfe/semi-ui';
 import {
   IconRefresh,
@@ -92,14 +93,16 @@ const Analytics = () => {
     exportData,
   } = useAnalyticsData('7d');
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('channel-cost');
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [customDateRange, setCustomDateRange] = useState(null);
 
   const timeRangeOptions = [
     { value: '1d', label: '最近24小时' },
     { value: '7d', label: '最近7天' },
     { value: '30d', label: '最近30天' },
     { value: '90d', label: '最近90天' },
+    { value: 'custom', label: '自定义范围' },
   ];
 
   const exportMenuItems = [
@@ -403,6 +406,33 @@ const Analytics = () => {
     );
   };
 
+  // Compute effective timeRange for child components:
+  // When 'custom' is selected and a valid date range exists, encode as "custom:START:END"
+  const effectiveTimeRange = (() => {
+    if (timeRange === 'custom' && customDateRange && customDateRange.length === 2) {
+      const [start, end] = customDateRange;
+      const startUnix = Math.floor(new Date(start).setHours(0, 0, 0, 0) / 1000);
+      const endUnix = Math.floor(new Date(end).setHours(23, 59, 59, 999) / 1000);
+      return `custom:${startUnix}:${endUnix}`;
+    }
+    return timeRange;
+  })();
+
+  const handleTimeRangeChange = (value) => {
+    setTimeRange(value);
+    if (value !== 'custom') {
+      setCustomDateRange(null);
+    }
+  };
+
+  const handleDateRangeChange = (dates) => {
+    setCustomDateRange(dates);
+    if (dates && dates.length === 2) {
+      // Trigger refresh
+      setRefreshVersion(v => v + 1);
+    }
+  };
+
   return (
     <div className="mt-[60px] px-4">
       <div className="mb-4 flex justify-between items-center">
@@ -413,10 +443,19 @@ const Analytics = () => {
         <Space>
           <Select
             value={timeRange}
-            onChange={setTimeRange}
+            onChange={handleTimeRangeChange}
             optionList={timeRangeOptions}
             style={{ width: 150 }}
           />
+          {timeRange === 'custom' && (
+            <DatePicker
+              type="dateRange"
+              value={customDateRange}
+              onChange={handleDateRangeChange}
+              style={{ width: 260 }}
+              placeholder={['开始日期', '结束日期']}
+            />
+          )}
           <Button
             icon={<IconRefresh />}
             onClick={() => {
@@ -442,20 +481,10 @@ const Analytics = () => {
       <Spin spinning={loading}>
         <Tabs activeKey={activeTab} onChange={setActiveTab}>
           <TabPane
-            tab={<span><IconUser className="mr-1" />概览</span>}
-            itemKey="overview"
+            tab={<span><IconServer className="mr-1" />渠道消耗</span>}
+            itemKey="channel-cost"
           >
-            <div className="space-y-4">
-              {renderOverviewCards()}
-              <Row gutter={16}>
-                <Col xs={24} lg={12}>
-                  {renderActiveUsers()}
-                </Col>
-                <Col xs={24} lg={12}>
-                  {renderTopSpenders()}
-                </Col>
-              </Row>
-            </div>
+            <ChannelCostTab timeRange={effectiveTimeRange} refreshVersion={refreshVersion} />
           </TabPane>
 
           <TabPane
@@ -463,35 +492,28 @@ const Analytics = () => {
             itemKey="consumption"
           >
             {renderConsumptionTrend()}
-            <UserConsumptionTab timeRange={timeRange} />
+            <UserConsumptionTab timeRange={effectiveTimeRange} />
           </TabPane>
 
           <TabPane
             tab={<span><IconCoinMoneyStroked className="mr-1" />余额分析</span>}
             itemKey="balance"
           >
-            <BalanceAnalysisTab timeRange={timeRange} />
+            <BalanceAnalysisTab timeRange={effectiveTimeRange} />
           </TabPane>
 
           <TabPane
             tab={<span><IconBox className="mr-1" />套餐分析</span>}
             itemKey="plan-usage"
           >
-            <PlanUsageTab timeRange={timeRange} />
+            <PlanUsageTab timeRange={effectiveTimeRange} />
           </TabPane>
 
           <TabPane
             tab={<span><IconPriceTag className="mr-1" />成本效益</span>}
             itemKey="cost-efficiency"
           >
-            <CostEfficiencyTab timeRange={timeRange} />
-          </TabPane>
-
-          <TabPane
-            tab={<span><IconServer className="mr-1" />渠道消耗</span>}
-            itemKey="channel-cost"
-          >
-            <ChannelCostTab timeRange={timeRange} refreshVersion={refreshVersion} />
+            <CostEfficiencyTab timeRange={effectiveTimeRange} />
           </TabPane>
 
           <TabPane

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -42,6 +43,23 @@ func ParseTimeRange(timeRange string) (startTime, endTime int64) {
 	}
 
 	now := time.Now().In(beijingLocation)
+
+	// Support custom range format: "custom:START_UNIX:END_UNIX"
+	if strings.HasPrefix(timeRange, "custom:") {
+		parts := strings.SplitN(timeRange, ":", 3)
+		if len(parts) == 3 {
+			if s, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+				startTime = s
+			}
+			if e, err := strconv.ParseInt(parts[2], 10, 64); err == nil {
+				endTime = e
+			}
+			if startTime > 0 && endTime > 0 {
+				return
+			}
+		}
+		// Fall through to default if parsing fails
+	}
 
 	// Special handling for "24h" - use rolling window for accurate "last 24 hours"
 	if timeRange == "24h" {
