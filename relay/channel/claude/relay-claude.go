@@ -695,6 +695,9 @@ type ClaudeResponseInfo struct {
 	Usage                  *dto.Usage
 	Done                   bool
 	CacheSimulationApplied bool
+	// TextToolCallConverter handles detection and conversion of text-based
+	// tool calls to proper tool_use content blocks (Claude format only).
+	TextToolCallConverter *TextToolCallConverter
 }
 
 func FormatClaudeResponseInfo(requestMode int, claudeResponse *dto.ClaudeResponse, oaiResponse *dto.ChatCompletionsStreamResponse, claudeInfo *ClaudeResponseInfo) bool {
@@ -790,6 +793,37 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			} else if claudeResponse.Type == "message_delta" {
 			}
 		}
+
+		// Text tool call conversion: intercept text content blocks that contain
+		// tool call patterns and convert them to proper tool_use content blocks.
+		if conv := claudeInfo.TextToolCallConverter; conv != nil && conv.enabled {
+			switch claudeResponse.Type {
+			case "content_block_start":
+				if conv.HandleContentBlockStart(&claudeResponse, data) {
+					return nil // suppress, held for detection
+				}
+			case "content_block_delta":
+				suppress, flushData := conv.HandleContentBlockDelta(&claudeResponse, data)
+				if flushData != "" {
+					// Flush the held content_block_start (determined to be normal text)
+					helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "content_block_start"}, flushData)
+				}
+				if suppress {
+					return nil // buffering tool call text
+				}
+			case "content_block_stop":
+				if conv.HandleContentBlockStop(c) {
+					return nil // tool_use events already emitted
+				}
+			case "message_delta":
+				// Rewrite stop_reason from "end_turn" to "tool_use" if we converted any block.
+				if rewritten := conv.ShouldRewriteStopReason(&claudeResponse, data); rewritten != "" {
+					data = rewritten
+					needsReMarshal = false // already re-marshalled
+				}
+			}
+		}
+
 		writeData := data
 		if needsReMarshal {
 			if b, merr := common.Marshal(claudeResponse); merr == nil {
@@ -865,11 +899,12 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 
 func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, requestMode int) (*dto.Usage, *types.NewAPIError) {
 	claudeInfo := &ClaudeResponseInfo{
-		ResponseId:   helper.GetResponseID(c),
-		Created:      common.GetTimestamp(),
-		Model:        info.UpstreamModelName,
-		ResponseText: strings.Builder{},
-		Usage:        &dto.Usage{},
+		ResponseId:            helper.GetResponseID(c),
+		Created:               common.GetTimestamp(),
+		Model:                 info.UpstreamModelName,
+		ResponseText:          strings.Builder{},
+		Usage:                 &dto.Usage{},
+		TextToolCallConverter: NewTextToolCallConverter(shouldConvertTextToolCalls(info)),
 	}
 	var err *types.NewAPIError
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
@@ -960,11 +995,12 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 	defer service.CloseResponseBodyGracefully(resp)
 
 	claudeInfo := &ClaudeResponseInfo{
-		ResponseId:   helper.GetResponseID(c),
-		Created:      common.GetTimestamp(),
-		Model:        info.UpstreamModelName,
-		ResponseText: strings.Builder{},
-		Usage:        &dto.Usage{},
+		ResponseId:            helper.GetResponseID(c),
+		Created:               common.GetTimestamp(),
+		Model:                 info.UpstreamModelName,
+		ResponseText:          strings.Builder{},
+		Usage:                 &dto.Usage{},
+		TextToolCallConverter: NewTextToolCallConverter(false), // non-streaming, not needed
 	}
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -1231,6 +1267,10 @@ func applySessionPrefixCacheSimulation(info *relaycommon.RelayInfo, usage *dto.U
 
 func shouldStripPlaceholders(info *relaycommon.RelayInfo) bool {
 	return info != nil && info.ChannelMeta != nil && info.ChannelMeta.ChannelSetting.StripPlaceholders
+}
+
+func shouldConvertTextToolCalls(info *relaycommon.RelayInfo) bool {
+	return info != nil && info.ChannelMeta != nil && info.ChannelMeta.ChannelSetting.TextToolCallConversion
 }
 
 func stripPlaceholderText(text string) (cleaned string, changed bool, suppress bool) {

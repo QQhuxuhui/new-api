@@ -82,6 +82,11 @@ type ChannelSettings struct {
 	// from response text deltas. Enable when the upstream (e.g. CLIProxyAPIPlus forwarding
 	// Kiro responses) may not strip Kiro protocol placeholder echoes before returning them.
 	StripPlaceholders bool `json:"strip_placeholders,omitempty"`
+	// TextToolCallConversion: when true, detects tool call patterns in text_delta events
+	// of Claude-format streaming responses and converts them to proper tool_use content blocks.
+	// Enable when the upstream (e.g. Gemini via sub2api) sometimes outputs tool calls as
+	// plain text instead of structured FunctionCall/tool_use blocks.
+	TextToolCallConversion bool `json:"text_tool_call_conversion,omitempty"`
 }
 
 type VertexKeyType string

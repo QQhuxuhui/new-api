@@ -241,6 +241,8 @@ const EditChannelModal = (props) => {
     cache_sim_shared_scope: false,
     // 占位符剥离
     strip_placeholders: false,
+    // 文本工具调用转换
+    text_tool_call_conversion: false,
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -630,6 +632,7 @@ const EditChannelModal = (props) => {
           data.cache_sim_min_input_tokens = cs.min_input_tokens || 0;
           data.cache_sim_shared_scope = cs.shared_scope || false;
           data.strip_placeholders = parsedSettings.strip_placeholders || false;
+          data.text_tool_call_conversion = parsedSettings.text_tool_call_conversion || false;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -646,6 +649,7 @@ const EditChannelModal = (props) => {
           data.cache_sim_min_input_tokens = 0;
           data.cache_sim_shared_scope = false;
           data.strip_placeholders = false;
+          data.text_tool_call_conversion = false;
         }
       } else {
         data.force_format = false;
@@ -662,6 +666,7 @@ const EditChannelModal = (props) => {
         data.cache_sim_min_input_tokens = 0;
         data.cache_sim_shared_scope = false;
         data.strip_placeholders = false;
+        data.text_tool_call_conversion = false;
       }
 
       if (data.settings) {
@@ -1438,6 +1443,7 @@ const EditChannelModal = (props) => {
       user_prompt: localInputs.user_prompt || '',
       ...(cacheSimulation ? { cache_simulation: cacheSimulation } : {}),
       ...(localInputs.strip_placeholders ? { strip_placeholders: true } : {}),
+      ...(localInputs.text_tool_call_conversion ? { text_tool_call_conversion: true } : {}),
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1508,6 +1514,8 @@ const EditChannelModal = (props) => {
     delete localInputs.cache_sim_shared_scope;
     // 清理占位符剥离的临时字段
     delete localInputs.strip_placeholders;
+    // 清理文本工具调用转换的临时字段
+    delete localInputs.text_tool_call_conversion;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -3767,6 +3775,18 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         '开启后自动剥离上游返回的零宽空格占位符（\\u200B），适用于上游为未修复的 CLIProxyAPIPlus 等 Kiro 代理',
+                      )}
+                    />
+                    <Form.Switch
+                      field='text_tool_call_conversion'
+                      label={t('文本工具调用转换')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('text_tool_call_conversion', value)
+                      }
+                      extraText={t(
+                        '开启后自动检测并转换文本中的工具调用为标准 tool_use 格式，适用于上游模型（如 Gemini）偶尔在文本中输出工具调用而非使用结构化 FunctionCall 的场景',
                       )}
                     />
 
