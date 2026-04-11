@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Toast } from '@douyinfe/semi-ui';
+import { useTranslation } from 'react-i18next';
 import { generateImage } from '../../services/drawFactory';
 import {
   getBatchJobs,
@@ -41,10 +43,12 @@ function demoteRunning(list) {
 }
 
 export function useBatchQueue() {
+  const { t } = useTranslation();
   const [jobs, setJobs] = useState(() => demoteRunning(getBatchJobs()));
   const [isRunning, setIsRunning] = useState(false);
   const pauseRef = useRef(false);
   const cancelRef = useRef(false);
+  const quotaNotifiedRef = useRef(false);
 
   // Keep a ref mirror of jobs so the executor always reads fresh state.
   const jobsRef = useRef(jobs);
@@ -54,8 +58,12 @@ export function useBatchQueue() {
 
   // Persist on every mutation.
   useEffect(() => {
-    saveBatchJobs(jobs);
-  }, [jobs]);
+    const result = saveBatchJobs(jobs);
+    if (result && result.ok === false && result.error === 'quota' && !quotaNotifiedRef.current) {
+      quotaNotifiedRef.current = true;
+      Toast.warning(t('draw_factory.error.storage_full'));
+    }
+  }, [jobs, t]);
 
   const seed = useCallback((pairs) => {
     const seeded = pairs.map((p, i) => ({

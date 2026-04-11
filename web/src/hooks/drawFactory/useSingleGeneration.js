@@ -18,10 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useCallback, useRef, useState } from 'react';
+import { Toast } from '@douyinfe/semi-ui';
+import { useTranslation } from 'react-i18next';
 import { generateImage } from '../../services/drawFactory';
 import { addHistory } from '../../helpers/drawFactoryStorage';
 
 export function useSingleGeneration() {
+  const { t } = useTranslation();
   const [state, setState] = useState({
     loading: false,
     image: null,
@@ -29,6 +32,12 @@ export function useSingleGeneration() {
     elapsed: null,
   });
   const abortRef = useRef(null);
+
+  const notifyIfQuotaFailed = (result) => {
+    if (result && result.ok === false && result.error === 'quota') {
+      Toast.warning(t('draw_factory.error.storage_full'));
+    }
+  };
 
   const run = useCallback(
     async ({ model, token, prompt, refs, size }) => {
@@ -52,7 +61,7 @@ export function useSingleGeneration() {
           throw new Error('no image in response');
         }
         setState({ loading: false, image, error: null, elapsed });
-        addHistory({
+        notifyIfQuotaFailed(addHistory({
           id: Date.now(),
           model: model.key,
           prompt,
@@ -60,7 +69,7 @@ export function useSingleGeneration() {
           image,
           elapsed,
           createdAt: Date.now(),
-        });
+        }));
         return { image, raw };
       } catch (e) {
         if (e.name === 'AbortError') {
@@ -73,14 +82,14 @@ export function useSingleGeneration() {
           error: e.message || 'failed',
           elapsed: null,
         });
-        addHistory({
+        notifyIfQuotaFailed(addHistory({
           id: Date.now(),
           model: model.key,
           prompt,
           size,
           error: e.message || 'failed',
           createdAt: Date.now(),
-        });
+        }));
       }
     },
     [],
