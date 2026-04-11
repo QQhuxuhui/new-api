@@ -3,42 +3,41 @@ Copyright (C) 2025 QuantumNous
 SPDX-License-Identifier: AGPL-3.0-or-later
 */
 
-import React, { useContext, useMemo } from 'react';
+import React from 'react';
+import { Tabs, TabPane, Empty } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
-import { Empty } from '@douyinfe/semi-ui';
-import { StatusContext } from '../../context/Status';
 import Forbidden from '../Forbidden';
-
-function parseSidebarModules(raw) {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch (_e) {
-    return null;
-  }
-}
+import { useDrawFactoryConfig } from '../../hooks/drawFactory/useDrawFactoryConfig';
+import SinglePanel from './SinglePanel';
+import BatchPanel from './BatchPanel';
 
 export default function DrawFactory() {
   const { t } = useTranslation();
-  const [statusState] = useContext(StatusContext);
+  const { enabled, models } = useDrawFactoryConfig();
 
-  const enabled = useMemo(() => {
-    const modules = parseSidebarModules(
-      statusState?.status?.SidebarModulesAdmin,
+  if (!enabled) return <Forbidden />;
+
+  if (models.length === 0) {
+    return (
+      <div style={{ padding: 24 }}>
+        <Empty
+          title={t('draw_factory.title')}
+          description={t('draw_factory.empty.no_models')}
+        />
+      </div>
     );
-    if (!modules) return true; // default on
-    const chat = modules.chat;
-    if (!chat || chat.enabled === false) return false;
-    return chat.drawFactory !== false;
-  }, [statusState?.status?.SidebarModulesAdmin]);
-
-  if (!enabled) {
-    return <Forbidden />;
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <Empty title={t('draw_factory.title')} description='coming soon' />
+    <div style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
+      <Tabs type='line'>
+        <TabPane tab={t('draw_factory.tab.single')} itemKey='single'>
+          <SinglePanel models={models} />
+        </TabPane>
+        <TabPane tab={t('draw_factory.tab.batch')} itemKey='batch'>
+          <BatchPanel models={models} />
+        </TabPane>
+      </Tabs>
     </div>
   );
 }
