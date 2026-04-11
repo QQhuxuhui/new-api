@@ -50,6 +50,7 @@ const routerMap = {
   task: '/console/task',
   models: '/console/models',
   playground: '/console/playground',
+  drawFactory: '/console/draw-factory',
   personal: '/console/personal',
   myplans: '/console/myplans',
   'my-orders': '/console/my-orders',
@@ -233,6 +234,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('操练场'),
         itemKey: 'playground',
         to: '/playground',
+      },
+      {
+        text: t('绘图工厂'),
+        itemKey: 'drawFactory',
+        to: '/console/draw-factory',
       },
       {
         text: t('聊天'),

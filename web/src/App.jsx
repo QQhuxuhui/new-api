@@ -45,6 +45,7 @@ import PlanPricing from './pages/PlanPricing';
 import Task from './pages/Task';
 import ModelPage from './pages/Model';
 import Playground from './pages/Playground';
+import DrawFactory from './pages/DrawFactory';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -152,6 +153,14 @@ function App() {
           element={
             <PrivateRoute>
               <Playground />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/draw-factory'
+          element={
+            <PrivateRoute>
+              <DrawFactory />
             </PrivateRoute>
           }
         />
