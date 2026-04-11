@@ -18,11 +18,25 @@ const STATUS = {
   FAILED: 'failed',
 };
 
+function demoteRunning(list) {
+  return list.map((j) =>
+    j.status === STATUS.RUNNING
+      ? { ...j, status: STATUS.PENDING, startedAt: undefined }
+      : j,
+  );
+}
+
 export function useBatchQueue() {
-  const [jobs, setJobs] = useState(() => getBatchJobs());
+  const [jobs, setJobs] = useState(() => demoteRunning(getBatchJobs()));
   const [isRunning, setIsRunning] = useState(false);
   const pauseRef = useRef(false);
   const cancelRef = useRef(false);
+
+  // Keep a ref mirror of jobs so the executor always reads fresh state.
+  const jobsRef = useRef(jobs);
+  useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
 
   // Persist on every mutation.
   useEffect(() => {
@@ -30,7 +44,6 @@ export function useBatchQueue() {
   }, [jobs]);
 
   const seed = useCallback((pairs) => {
-    // pairs: [{ refUrl, prodUrl }, ...]
     const seeded = pairs.map((p, i) => ({
       id: `${Date.now()}-${i}`,
       refUrl: p.refUrl,
@@ -45,28 +58,25 @@ export function useBatchQueue() {
     setJobs([]);
   }, []);
 
-  const run = useCallback(
-    async ({ model, token, prompt, size }) => {
-      if (!model || !token) return;
-      pauseRef.current = false;
-      cancelRef.current = false;
-      setIsRunning(true);
+  const run = useCallback(async ({ model, token, prompt, size }) => {
+    if (!model || !token) return;
+    pauseRef.current = false;
+    cancelRef.current = false;
+    setIsRunning(true);
 
-      // Work on a mutable snapshot; commit after each job.
-      let snapshot = jobs.slice();
+    try {
+      while (!pauseRef.current && !cancelRef.current) {
+        const current = jobsRef.current;
+        const job = current.find((j) => j.status === STATUS.PENDING);
+        if (!job) break;
 
-      for (let i = 0; i < snapshot.length; i += 1) {
-        if (pauseRef.current || cancelRef.current) break;
-        const job = snapshot[i];
-        if (job.status !== STATUS.PENDING) continue;
-
-        snapshot = snapshot.slice();
-        snapshot[i] = {
-          ...job,
-          status: STATUS.RUNNING,
-          startedAt: Date.now(),
-        };
-        setJobs(snapshot);
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.id === job.id
+              ? { ...j, status: STATUS.RUNNING, startedAt: Date.now() }
+              : j,
+          ),
+        );
 
         try {
           const { image } = await generateImage({
@@ -77,30 +87,38 @@ export function useBatchQueue() {
             refs: [job.refUrl, job.prodUrl].filter(Boolean),
             size,
           });
-          snapshot = snapshot.slice();
-          snapshot[i] = {
-            ...snapshot[i],
-            status: image ? STATUS.DONE : STATUS.FAILED,
-            image,
-            error: image ? undefined : 'no image in response',
-            finishedAt: Date.now(),
-          };
+          setJobs((prev) =>
+            prev.map((j) =>
+              j.id === job.id
+                ? {
+                    ...j,
+                    status: image ? STATUS.DONE : STATUS.FAILED,
+                    image,
+                    error: image ? undefined : 'no image in response',
+                    finishedAt: Date.now(),
+                  }
+                : j,
+            ),
+          );
         } catch (e) {
-          snapshot = snapshot.slice();
-          snapshot[i] = {
-            ...snapshot[i],
-            status: STATUS.FAILED,
-            error: e.message || 'failed',
-            finishedAt: Date.now(),
-          };
+          setJobs((prev) =>
+            prev.map((j) =>
+              j.id === job.id
+                ? {
+                    ...j,
+                    status: STATUS.FAILED,
+                    error: e.message || 'failed',
+                    finishedAt: Date.now(),
+                  }
+                : j,
+            ),
+          );
         }
-        setJobs(snapshot);
       }
-
+    } finally {
       setIsRunning(false);
-    },
-    [jobs],
-  );
+    }
+  }, []);
 
   const pause = useCallback(() => {
     pauseRef.current = true;
