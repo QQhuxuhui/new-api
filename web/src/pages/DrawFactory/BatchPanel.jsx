@@ -3,10 +3,11 @@ Copyright (C) 2025 QuantumNous
 SPDX-License-Identifier: AGPL-3.0-or-later
 */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Card,
+  Empty,
   Input,
   Space,
   TextArea,
@@ -58,6 +59,24 @@ export default function BatchPanel({ models }) {
     () => batchModels.find((m) => m.key === modelKey) || batchModels[0],
     [batchModels, modelKey],
   );
+
+  useEffect(() => {
+    if (!currentModel) return;
+    if (!currentModel.sizes.includes(size)) {
+      setSize(currentModel.defaultSize);
+    }
+  }, [currentModel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (batchModels.length === 0) {
+    return (
+      <div style={{ padding: 24 }}>
+        <Empty
+          title={t('draw_factory.tab.batch')}
+          description={t('draw_factory.empty.no_models')}
+        />
+      </div>
+    );
+  }
 
   function handleSeed() {
     const list = prodUrls
@@ -121,8 +140,8 @@ export default function BatchPanel({ models }) {
             autosize={{ minRows: 3, maxRows: 8 }}
           />
           <Space>
-            <Button onClick={handleSeed}>Load tasks</Button>
-            <Button onClick={clear}>{t('draw_factory.batch.cancel')}</Button>
+            <Button onClick={handleSeed} disabled={isRunning}>Load tasks</Button>
+            <Button onClick={clear} disabled={isRunning}>{t('draw_factory.batch.cancel')}</Button>
           </Space>
         </Space>
       </Card>
