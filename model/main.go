@@ -317,7 +317,7 @@ func clearMasqueradeLegacyFlags() error {
 	const optionKey = "MasqueradeLegacyFlagsCleared"
 
 	var existing Option
-	if err := DB.Where("`key` = ?", optionKey).First(&existing).Error; err == nil {
+	if err := DB.Where(commonKeyCol+" = ?", optionKey).First(&existing).Error; err == nil {
 		// Already ran.
 		return nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {

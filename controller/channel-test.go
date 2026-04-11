@@ -117,6 +117,12 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 
 	//c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
+	// Give channel-test a stable, honest User-Agent so the request path matches
+	// production traffic (which passes through the client UA via
+	// SetupApiRequestHeader). Without this, tests hit upstream as the stdlib
+	// default while real traffic carries the client's UA, producing
+	// false-positive/false-negative results for UA-sensitive upstreams.
+	c.Request.Header.Set("User-Agent", "new-api-channel-test/"+common.Version)
 
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
