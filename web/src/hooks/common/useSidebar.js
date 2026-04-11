@@ -42,6 +42,7 @@ export const useSidebar = () => {
     chat: {
       enabled: true,
       playground: true,
+      drawFactory: true,
       chat: true,
     },
     console: {

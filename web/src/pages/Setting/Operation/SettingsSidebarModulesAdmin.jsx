@@ -43,6 +43,7 @@ export default function SettingsSidebarModulesAdmin(props) {
     chat: {
       enabled: true,
       playground: true,
+      drawFactory: true,
       chat: true,
     },
     console: {
@@ -107,6 +108,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       chat: {
         enabled: true,
         playground: true,
+        drawFactory: true,
         chat: true,
       },
       console: {
@@ -194,7 +196,7 @@ export default function SettingsSidebarModulesAdmin(props) {
 
   // 默认配置
   const defaultModules = {
-    chat: { enabled: true, playground: true, chat: true },
+    chat: { enabled: true, playground: true, drawFactory: true, chat: true },
     console: {
       enabled: true,
       detail: true,
@@ -241,6 +243,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'playground',
           title: t('操练场'),
           description: t('AI模型测试环境'),
+        },
+        {
+          key: 'drawFactory',
+          title: t('绘图工厂'),
+          description: t('用户文生图工具'),
         },
         { key: 'chat', title: t('聊天'), description: t('聊天会话管理') },
       ],
