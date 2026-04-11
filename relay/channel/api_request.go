@@ -135,6 +135,12 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 		}
 	}
 
+	// Transparent proxy: forward the client's real User-Agent to upstream.
+	// If the client omits it we leave Go's default (Go-http-client/1.1) so the
+	// request clearly originates from new-api rather than spoofing an identity.
+	if ua := c.Request.Header.Get("User-Agent"); ua != "" {
+		req.Set("User-Agent", ua)
+	}
 }
 
 // processHeaderOverride 处理请求头覆盖，支持变量替换
