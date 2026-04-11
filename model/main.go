@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -297,6 +298,59 @@ func migrateDB() error {
 		common.SysLog("failed to migrate user plan snapshots: " + err.Error())
 		// Don't fail startup, migration can be retried
 	}
+	// Clear stale client-restriction / sticky-session / masquerade-hash flags left
+	// over from the removed identity-masquerade stack. Idempotent via options row.
+	if err := clearMasqueradeLegacyFlags(); err != nil {
+		common.SysLog("failed to clear masquerade legacy flags: " + err.Error())
+		// Don't fail startup, can be retried
+	}
+	return nil
+}
+
+// clearMasqueradeLegacyFlags zeroes DB columns that backed the removed
+// identity-masquerade features (client restriction, sticky session,
+// masquerade_hash). The schema fields are intentionally kept to avoid
+// migration churn, but leaving the values populated would silently change
+// the semantics of existing rows (access-control bypass, session drift).
+// Guarded by an options row so it only runs once.
+func clearMasqueradeLegacyFlags() error {
+	const optionKey = "MasqueradeLegacyFlagsCleared"
+
+	var existing Option
+	if err := DB.Where("`key` = ?", optionKey).First(&existing).Error; err == nil {
+		// Already ran.
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	common.SysLog("clearing stale masquerade config flags (one-time)")
+
+	if err := DB.Model(&Token{}).
+		Where("sticky_session = ? OR client_restriction_enabled = ? OR (allowed_clients IS NOT NULL AND allowed_clients != ?)", true, true, "").
+		Updates(map[string]interface{}{
+			"sticky_session":             false,
+			"sticky_session_ttl":         3600,
+			"client_restriction_enabled": false,
+			"allowed_clients":            "",
+		}).Error; err != nil {
+		return err
+	}
+
+	if err := DB.Model(&Channel{}).
+		Where("enable_client_restriction = ? OR (allowed_clients IS NOT NULL AND allowed_clients != ?) OR (masquerade_hash IS NOT NULL AND masquerade_hash != ?)", true, "", "").
+		Updates(map[string]interface{}{
+			"enable_client_restriction": false,
+			"allowed_clients":           "",
+			"masquerade_hash":           "",
+		}).Error; err != nil {
+		return err
+	}
+
+	if err := DB.Create(&Option{Key: optionKey, Value: "true"}).Error; err != nil {
+		return err
+	}
+	common.SysLog("masquerade legacy flags cleared")
 	return nil
 }
 
