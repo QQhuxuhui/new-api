@@ -1,10 +1,7 @@
 package model
 
 import (
-	crand "crypto/rand"
-	"crypto/sha256"
 	"database/sql/driver"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -83,93 +79,6 @@ type ChannelInfo struct {
 	MultiKeyDisabledTime   map[int]int64         `json:"multi_key_disabled_time,omitempty"`   // key禁用时间列表，key index -> time
 	MultiKeyPollingIndex   int                   `json:"multi_key_polling_index"`             // 多Key模式下轮询的key索引
 	MultiKeyMode           constant.MultiKeyMode `json:"multi_key_mode"`
-}
-
-var masqueradeHashCache = struct {
-	mu sync.RWMutex
-	db *gorm.DB
-	m  map[int]string
-}{
-	m: make(map[int]string),
-}
-
-func resetMasqueradeHashCacheIfDBChanged() {
-	masqueradeHashCache.mu.Lock()
-	defer masqueradeHashCache.mu.Unlock()
-	if masqueradeHashCache.db != DB {
-		masqueradeHashCache.db = DB
-		masqueradeHashCache.m = make(map[int]string)
-	}
-}
-
-func (channel *Channel) GetOrCreateMasqueradeHash() string {
-	if channel == nil || channel.Id == 0 {
-		return ""
-	}
-
-	resetMasqueradeHashCacheIfDBChanged()
-
-	if channel.MasqueradeHash != nil {
-		if v := strings.ToLower(strings.TrimSpace(*channel.MasqueradeHash)); v != "" {
-			masqueradeHashCache.mu.Lock()
-			masqueradeHashCache.m[channel.Id] = v
-			masqueradeHashCache.mu.Unlock()
-			return v
-		}
-		// Explicitly cleared: drop any cached value so it can be regenerated.
-		masqueradeHashCache.mu.Lock()
-		delete(masqueradeHashCache.m, channel.Id)
-		masqueradeHashCache.mu.Unlock()
-	}
-
-	masqueradeHashCache.mu.RLock()
-	if v, ok := masqueradeHashCache.m[channel.Id]; ok && v != "" {
-		masqueradeHashCache.mu.RUnlock()
-		return v
-	}
-	masqueradeHashCache.mu.RUnlock()
-
-	if DB != nil {
-		var persisted string
-		_ = DB.Model(&Channel{}).Select("masquerade_hash").Where("id = ?", channel.Id).Scan(&persisted).Error
-		if persisted = strings.ToLower(strings.TrimSpace(persisted)); persisted != "" {
-			masqueradeHashCache.mu.Lock()
-			masqueradeHashCache.m[channel.Id] = persisted
-			masqueradeHashCache.mu.Unlock()
-			return persisted
-		}
-	}
-
-	randomBytes := make([]byte, 32)
-	if _, err := crand.Read(randomBytes); err != nil {
-		// Extremely unlikely; fall back to current time only.
-		randomBytes = []byte(fmt.Sprintf("%d", time.Now().UnixNano()))
-	}
-
-	sum := sha256.Sum256([]byte(fmt.Sprintf("channel:%d|ts:%d|rand:%x", channel.Id, time.Now().UnixNano(), randomBytes)))
-	hash := hex.EncodeToString(sum[:])
-
-	// Best-effort persist with an atomic "set-if-empty" update to avoid races.
-	if DB != nil {
-		_ = DB.Model(&Channel{}).
-			Where("id = ? AND (masquerade_hash IS NULL OR masquerade_hash = ?)", channel.Id, "").
-			Update("masquerade_hash", hash).Error
-
-		var persisted string
-		_ = DB.Model(&Channel{}).Select("masquerade_hash").Where("id = ?", channel.Id).Scan(&persisted).Error
-		if persisted != "" {
-			persisted = strings.ToLower(strings.TrimSpace(persisted))
-			masqueradeHashCache.mu.Lock()
-			masqueradeHashCache.m[channel.Id] = persisted
-			masqueradeHashCache.mu.Unlock()
-			return persisted
-		}
-	}
-
-	masqueradeHashCache.mu.Lock()
-	masqueradeHashCache.m[channel.Id] = hash
-	masqueradeHashCache.mu.Unlock()
-	return hash
 }
 
 // Value implements driver.Valuer interface

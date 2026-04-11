@@ -11,7 +11,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
-	"github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -172,25 +171,6 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
-
-		// 如果开启了 PassThroughMetadataMasquerade，则在透传路径也覆写 metadata.user_id
-		if info.ChannelSetting.PassThroughMetadataMasquerade {
-			channelID := 0
-			channelHash := ""
-			maxSessions := 0
-			if info != nil && info.Channel != nil {
-				channelID = info.Channel.Id
-				channelHash = info.Channel.GetOrCreateMasqueradeHash()
-				if info.Channel.MaxConcurrentRequestsPerKey != nil {
-					maxSessions = *info.Channel.MaxConcurrentRequestsPerKey
-				}
-			}
-
-			maskedBody, originalUserID, maskedUserID := claude.MasqueradeMetadataInBody(body, channelID, channelHash, maxSessions, info.ApiKey)
-			body = maskedBody
-			logger.LogInfo(c, fmt.Sprintf("[Claude Native/PT] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, maskedUserID))
-		}
-
 		requestBody = bytes.NewBuffer(body)
 	} else {
 		convertedRequest, err := adaptor.ConvertClaudeRequest(c, info, request)

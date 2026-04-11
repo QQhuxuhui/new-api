@@ -211,13 +211,6 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *
 		header.Set("X-Title", "New API")
 	}
 
-	// ========================================
-	// Codex CLI 特征头伪装
-	// 使用固定值，模拟 Codex CLI (Rust) 客户端
-	// ========================================
-	header.Set("Originator", "codex_cli_rs")
-	header.Set("X-Accel-Buffering", "no")
-
 	return nil
 }
 

@@ -251,18 +251,6 @@ func AdminForceSwitch(c *gin.Context) {
 		return
 	}
 
-	// Clear sticky sessions to ensure new plan's channels are used immediately
-	// (same rationale as user-initiated plan switch)
-	sessionManager := &service.SessionManager{}
-	common.SysLog(fmt.Sprintf("[SessionClear] user=%d clearing sticky sessions on admin plan switch (user_plan_id=%d plan_id=%d)",
-		req.UserId, req.UserPlanId, req.PlanId))
-	if clearErr := sessionManager.UnbindAllUserSessionsByUserId(req.UserId); clearErr != nil {
-		common.SysLog(fmt.Sprintf("[SessionClear] user=%d failed to clear sessions: %v", req.UserId, clearErr))
-		// Don't fail the response - plan switch succeeded
-	} else {
-		common.SysLog(fmt.Sprintf("[SessionClear] user=%d cleared sessions successfully", req.UserId))
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "套餐切换成功",
@@ -567,17 +555,6 @@ func UserSwitchPlan(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
-	}
-
-	// Clear sticky sessions to ensure new plan's channels are used immediately
-	sessionManager := &service.SessionManager{}
-	common.SysLog(fmt.Sprintf("[SessionClear] user=%d clearing sticky sessions on plan switch to user_plan_id=%d", userId, req.UserPlanId))
-
-	if clearErr := sessionManager.UnbindAllUserSessionsByUserId(userId); clearErr != nil {
-		common.SysLog(fmt.Sprintf("[SessionClear] user=%d failed to clear sessions: %v", userId, clearErr))
-		// Don't fail the response - plan switch succeeded
-	} else {
-		common.SysLog(fmt.Sprintf("[SessionClear] user=%d cleared sessions successfully", userId))
 	}
 
 	c.JSON(http.StatusOK, gin.H{

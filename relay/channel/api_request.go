@@ -135,14 +135,6 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 		}
 	}
 
-	// Pass through User-Agent from client, or use default if not provided
-	userAgent := c.Request.Header.Get("User-Agent")
-	if userAgent == "" {
-		userAgent = common2.DefaultUserAgent
-	}
-	if userAgent != "" {
-		req.Set("User-Agent", userAgent)
-	}
 }
 
 // processHeaderOverride 处理请求头覆盖，支持变量替换
@@ -219,7 +211,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 	headers := req.Header
 
-	// Step 1: 适配器设置请求头（包括伪装头）
+	// Step 1: 适配器设置请求头
 	err = a.SetupRequestHeader(c, &headers, info)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
@@ -269,7 +261,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	headers := req.Header
 
-	// Step 1: 适配器设置请求头（包括伪装头）
+	// Step 1: 适配器设置请求头
 	err = a.SetupRequestHeader(c, &headers, info)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
@@ -307,7 +299,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 	targetHeader := http.Header{}
 
-	// Step 1: 适配器设置请求头（包括伪装头）
+	// Step 1: 适配器设置请求头
 	err = a.SetupRequestHeader(c, &targetHeader, info)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)

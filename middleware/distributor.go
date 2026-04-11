@@ -1,10 +1,8 @@
 package middleware
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -381,137 +379,39 @@ func Distribute() func(c *gin.Context) {
 					}
 				}
 
-				// Check if sticky session is enabled
-				stickySessionEnabled := common.GetContextKeyBool(c, constant.ContextKeyStickySession)
+				// Random selection with priority iteration
+				// Try each priority level until finding healthy channel
+				// Safety limit to prevent infinite loops
+				// Loop exits when: channel found, error occurs, or all priorities exhausted
+				const maxPriorityLevels = 1000
 
-				if stickySessionEnabled {
-					// Try to use sticky session
-					userId := getSessionUserId(c)
-					sessionManager := &service.SessionManager{}
+				for retry := 0; retry < maxPriorityLevels; retry++ {
+					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, retry)
 
-					// For multi-plan-groups, try to get bound channel from any group
-					if planGroups, exists := c.Get(string(constant.ContextKeyPlanGroups)); exists {
-						if groups, ok := planGroups.([]string); ok && len(groups) > 0 {
-							// Try all plan groups to find bound channel
-							for _, planGroup := range groups {
-								if channelId, exists := sessionManager.GetBoundChannel(userId, modelRequest.Model, planGroup); exists {
-									// Try to use bound channel
-									channel, err = model.GetChannelById(channelId, true)
-
-									if err == nil && channel.Status == common.ChannelStatusEnabled {
-										// Channel is healthy, use it
-										usingGroup = planGroup // Update to actual bound group
-										common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
-										common.SetContextKey(c, constant.ContextKeyStickySessionUsed, true)
-										setAutoGroupContext(c, usingGroup, channel)
-
-										// Update last used time (extend TTL)
-										ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
-										sessionManager.UpdateLastUsed(userId, modelRequest.Model, planGroup, channelId, time.Duration(ttl)*time.Second)
-										break
-									} else {
-										// Channel failed, unbind and continue checking other groups
-										sessionManager.UnbindChannel(userId, modelRequest.Model, planGroup)
-										channel = nil
-									}
-								}
-							}
-						}
-					} else {
-						// Single group or auto mode - use usingGroup
-						if channelId, exists := sessionManager.GetBoundChannel(userId, modelRequest.Model, usingGroup); exists {
-							// Use bound channel
-							channel, err = model.GetChannelById(channelId, true)
-
-							if err == nil && channel.Status == common.ChannelStatusEnabled {
-								// Channel is healthy, use it
-								common.SetContextKey(c, constant.ContextKeyStickySessionUsed, true)
-								setAutoGroupContext(c, usingGroup, channel)
-
-								// Update last used time (extend TTL)
-								ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
-								sessionManager.UpdateLastUsed(userId, modelRequest.Model, usingGroup, channelId, time.Duration(ttl)*time.Second)
-							} else {
-								// Channel failed, unbind and re-select
-								sessionManager.UnbindChannel(userId, modelRequest.Model, usingGroup)
-								channel = nil
-							}
-						}
+					// Sync usingGroup with actual selected group (critical for multi-plan-groups)
+					actualGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+					if actualGroup != "" {
+						usingGroup = actualGroup
 					}
 
-					// No binding or channel failed, select new channel with priority iteration
-					if channel == nil {
-						// Safety limit to prevent infinite loops
-						// Loop exits when: channel found, error occurs, or all priorities exhausted
-						const maxPriorityLevels = 1000
-
-						for retry := 0; retry < maxPriorityLevels; retry++ {
-							channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, retry)
-
-							// Sync usingGroup with actual selected group (critical for multi-plan-groups)
-							actualGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-							if actualGroup != "" {
-								usingGroup = actualGroup
-							}
-
-							// ErrPriorityExhausted is expected when all priorities are tried - clear it
-							if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
-								err = nil // Let channel == nil check handle the user message
-								break
-							}
-
-							if err != nil {
-								// System error, stop trying
-								break
-							}
-
-							if channel != nil {
-								// Found healthy channel, bind it to actual selected group
-								ttl := common.GetContextKeyInt(c, constant.ContextKeyStickySessionTTL)
-								sessionManager.BindChannel(userId, modelRequest.Model, usingGroup, channel.Id, time.Duration(ttl)*time.Second)
-								common.SetContextKey(c, constant.ContextKeyStickySessionNew, true)
-								// 记录选择渠道时的优先级索引，用于重试时继续遍历
-								common.SetContextKey(c, constant.ContextKeyChannelPriorityIndex, retry)
-								break
-							}
-							// channel == nil means no healthy channels at this priority, continue to next
-						}
+					// ErrPriorityExhausted is expected when all priorities are tried - clear it
+					if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
+						err = nil // Let channel == nil check handle the user message
+						break
 					}
-				} else {
-					// Original logic: random selection with priority iteration
-					// Try each priority level until finding healthy channel
-					// Safety limit to prevent infinite loops
-					// Loop exits when: channel found, error occurs, or all priorities exhausted
-					const maxPriorityLevels = 1000
 
-					for retry := 0; retry < maxPriorityLevels; retry++ {
-						channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(c, usingGroup, modelRequest.Model, retry)
-
-						// Sync usingGroup with actual selected group (critical for multi-plan-groups)
-						actualGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-						if actualGroup != "" {
-							usingGroup = actualGroup
-						}
-
-						// ErrPriorityExhausted is expected when all priorities are tried - clear it
-						if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
-							err = nil // Let channel == nil check handle the user message
-							break
-						}
-
-						if err != nil {
-							// System error, stop trying
-							break
-						}
-
-						if channel != nil {
-							// Found healthy channel
-							// 记录选择渠道时的优先级索引，用于重试时继续遍历
-							common.SetContextKey(c, constant.ContextKeyChannelPriorityIndex, retry)
-							break
-						}
-						// channel == nil means no healthy channels at this priority, continue to next
+					if err != nil {
+						// System error, stop trying
+						break
 					}
+
+					if channel != nil {
+						// Found healthy channel
+						// 记录选择渠道时的优先级索引，用于重试时继续遍历
+						common.SetContextKey(c, constant.ContextKeyChannelPriorityIndex, retry)
+						break
+					}
+					// channel == nil means no healthy channels at this priority, continue to next
 				}
 				if channel != nil {
 					setAutoGroupContext(c, usingGroup, channel)
@@ -762,7 +662,7 @@ func Distribute() func(c *gin.Context) {
 			// Note: This bypasses RetryTimes configuration (similar to controller's channel error handling)
 			// to ensure concurrency failover works even when RetryTimes=0
 
-			// First attempt: use the already-selected channel (respects sticky session, priority, etc.)
+			// First attempt: use the already-selected channel (respects priority, etc.)
 			newAPIError = SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 
 			// If first attempt hits concurrency limit, retry from highest priority
@@ -1120,51 +1020,6 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelAutoBan, channel.GetAutoBan())
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
-
-	// 检查客户端限制
-	if channel.EnableClientRestriction != nil && *channel.EnableClientRestriction {
-		userAgent := c.GetHeader("User-Agent")
-		if !isClientAllowed(userAgent, channel.AllowedClients) {
-			return types.NewErrorWithStatusCode(
-				errors.New("仅允许在客户端内调用"),
-				types.ErrorCodeAccessDenied,
-				http.StatusForbidden,
-				types.ErrOptionWithSkipRetry(),
-			)
-		}
-
-		// 对 Claude Code 客户端进行额外的 User ID 格式验证
-		// 仅对 JSON POST 请求进行验证，跳过 GET 和 multipart/form-data 请求
-		if isClaudeCodeClient(userAgent) && c.Request.Method == http.MethodPost {
-			contentType := strings.ToLower(c.GetHeader("Content-Type"))
-			if strings.HasPrefix(contentType, "application/json") {
-				requestBody, err := common.GetRequestBody(c)
-				if err != nil {
-					// fail-closed: 读取请求体失败时拒绝请求
-					return types.NewErrorWithStatusCode(
-						errors.New("读取请求体失败"),
-						types.ErrorCodeReadRequestBodyFailed,
-						http.StatusBadRequest,
-						types.ErrOptionWithSkipRetry(),
-					)
-				}
-				// 恢复请求体，避免后续处理读到空 body
-				c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
-
-				userID := extractUserIDFromBody(requestBody)
-				// 仅当 metadata.user_id 存在时才验证格式
-				// 某些请求可能不包含 metadata 字段
-				if userID != "" && !isValidClaudeCodeUserID(userID) {
-					return types.NewErrorWithStatusCode(
-						errors.New("无效的 User ID 格式"),
-						types.ErrorCodeAccessDenied,
-						http.StatusForbidden,
-						types.ErrOptionWithSkipRetry(),
-					)
-				}
-			}
-		}
-	}
 
 	key, index, newAPIError := channel.GetNextEnabledKey()
 	if newAPIError != nil {

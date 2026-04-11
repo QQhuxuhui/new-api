@@ -237,8 +237,6 @@ func InitResources() error {
 
 	service.InitTokenEncoders()
 
-	service.CleanupExpiredSessions()
-
 	// Initialize SQL Database
 	err = model.InitDB()
 	if err != nil {

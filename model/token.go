@@ -3,7 +3,6 @@ package model
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -247,75 +246,6 @@ func (token *Token) GetModelLimitsMap() map[string]bool {
 	return limitsMap
 }
 
-// GetAllowedClientsMap parses allowed_clients text field into list of patterns
-func (token *Token) GetAllowedClientsMap() []string {
-	if token.AllowedClients == nil || *token.AllowedClients == "" {
-		return []string{}
-	}
-
-	if strings.TrimSpace(*token.AllowedClients) == "" {
-		return []string{}
-	}
-
-	lines := strings.Split(*token.AllowedClients, "\n")
-	var result []string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		result = append(result, line)
-	}
-
-	return result
-}
-
-// IsClientAllowed checks if User-Agent matches any allowed pattern
-func (token *Token) IsClientAllowed(userAgent string) bool {
-	if !token.ClientRestrictionEnabled {
-		return true // Restriction disabled, allow all clients
-	}
-
-	allowedClients := token.GetAllowedClientsMap()
-	if len(allowedClients) == 0 {
-		return true // No restrictions configured, allow all clients
-	}
-
-	for _, pattern := range allowedClients {
-		if matchUserAgent(userAgent, pattern) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// matchUserAgent performs pattern matching (exact, wildcard, regex)
-func matchUserAgent(userAgent, pattern string) bool {
-	// Exact match
-	if userAgent == pattern {
-		return true
-	}
-
-	// Wildcard match: pattern ending with /*
-	// Example: "Claude-Code-CLI/*" matches "Claude-Code-CLI/1.0.0"
-	if strings.HasSuffix(pattern, "/*") {
-		prefix := strings.TrimSuffix(pattern, "/*")
-		return strings.HasPrefix(userAgent, prefix+"/")
-	}
-
-	// Regex match: pattern starting with "regex:"
-	// Example: "regex:^VSCode/.*" matches "VSCode/1.85.0"
-	if strings.HasPrefix(pattern, "regex:") {
-		regexPattern := strings.TrimPrefix(pattern, "regex:")
-		matched, err := regexp.MatchString(regexPattern, userAgent)
-		return err == nil && matched
-	}
-
-	return false
-}
 
 func DisableModelLimits(tokenId int) error {
 	token, err := GetTokenById(tokenId)

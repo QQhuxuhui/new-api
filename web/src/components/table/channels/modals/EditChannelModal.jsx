@@ -207,15 +207,11 @@ const EditChannelModal = (props) => {
     max_concurrent_requests_per_key: 0,
     tag: '',
     multi_key_mode: 'random',
-    // 客户端限制
-    enable_client_restriction: false,
-    allowed_clients: [],
     // 渠道额外设置的默认值
     force_format: false,
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
-    pass_through_metadata_masquerade: false,
     system_prompt: '',
     system_prompt_override: false,
     settings: '',
@@ -231,8 +227,6 @@ const EditChannelModal = (props) => {
     allow_service_tier: false,
     disable_store: false, // false = 允许透传（默认开启）
     allow_safety_identifier: false,
-    // Claude 渠道伪装标识
-    masquerade_hash: '',
     // 缓存模拟
     cache_simulation_enabled: false,
     cache_simulation_mode: 'session_prefix',
@@ -399,7 +393,6 @@ const EditChannelModal = (props) => {
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
-    pass_through_metadata_masquerade: false,
     system_prompt: '',
     user_prompt: '',
   });
@@ -587,8 +580,6 @@ const EditChannelModal = (props) => {
           data.proxy = parsedSettings.proxy || '';
           data.pass_through_body_enabled =
             parsedSettings.pass_through_body_enabled || false;
-          data.pass_through_metadata_masquerade =
-            parsedSettings.pass_through_metadata_masquerade || false;
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
@@ -639,7 +630,6 @@ const EditChannelModal = (props) => {
           data.thinking_to_content = false;
           data.proxy = '';
           data.pass_through_body_enabled = false;
-          data.pass_through_metadata_masquerade = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
           data.user_prompt = '';
@@ -656,7 +646,6 @@ const EditChannelModal = (props) => {
         data.thinking_to_content = false;
         data.proxy = '';
         data.pass_through_body_enabled = false;
-        data.pass_through_metadata_masquerade = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
         data.user_prompt = '';
@@ -717,28 +706,6 @@ const EditChannelModal = (props) => {
           (typeof data.base_url === 'string' && data.base_url.trim() === ''))
       ) {
         data.base_url = 'https://ark.cn-beijing.volces.com';
-      }
-
-      // 处理客户端限制字段
-      if (data.allowed_clients) {
-        try {
-          const parsed = JSON.parse(data.allowed_clients);
-          // 确保是数组且过滤空字符串
-          if (Array.isArray(parsed)) {
-            data.allowed_clients = parsed.filter(
-              (item) => typeof item === 'string' && item.trim() !== '',
-            );
-          } else {
-            console.error('allowed_clients 不是数组格式');
-            data.allowed_clients = [];
-          }
-        } catch (error) {
-          console.error('解析 allowed_clients 失败:', error);
-          // 解析失败时清空，但保留 enable_client_restriction 状态让用户知道需要重新配置
-          data.allowed_clients = [];
-        }
-      } else {
-        data.allowed_clients = [];
       }
 
       setInputs(data);
@@ -1043,7 +1010,6 @@ const EditChannelModal = (props) => {
       thinking_to_content: false,
       proxy: '',
       pass_through_body_enabled: false,
-      pass_through_metadata_masquerade: false,
       system_prompt: '',
       system_prompt_override: false,
       user_prompt: '',
@@ -1436,8 +1402,6 @@ const EditChannelModal = (props) => {
       thinking_to_content: localInputs.thinking_to_content || false,
       proxy: localInputs.proxy || '',
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
-      pass_through_metadata_masquerade:
-        localInputs.pass_through_metadata_masquerade || false,
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
       user_prompt: localInputs.user_prompt || '',
@@ -1491,7 +1455,6 @@ const EditChannelModal = (props) => {
     delete localInputs.thinking_to_content;
     delete localInputs.proxy;
     delete localInputs.pass_through_body_enabled;
-    delete localInputs.pass_through_metadata_masquerade;
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
     delete localInputs.user_prompt;
@@ -1521,21 +1484,6 @@ const EditChannelModal = (props) => {
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
     localInputs.models = localInputs.models.join(',');
     localInputs.group = (localInputs.groups || []).join(',');
-
-    // 处理客户端限制字段
-    if (Array.isArray(localInputs.allowed_clients)) {
-      // 过滤空字符串并 trim
-      const validClients = localInputs.allowed_clients
-        .filter((item) => typeof item === 'string' && item.trim() !== '')
-        .map((item) => item.trim());
-      if (validClients.length > 0) {
-        localInputs.allowed_clients = JSON.stringify(validClients);
-      } else {
-        localInputs.allowed_clients = '';
-      }
-    } else {
-      localInputs.allowed_clients = '';
-    }
 
     let mode = 'single';
     if (batch) {
@@ -3298,48 +3246,6 @@ const EditChannelModal = (props) => {
                     )}
 
                     <Form.Switch
-                      field='enable_client_restriction'
-                      label={t('启用客户端限制')}
-                      checkedText={t('开')}
-                      uncheckedText={t('关')}
-                      onChange={(value) =>
-                        handleInputChange('enable_client_restriction', value)
-                      }
-                      extraText={t('开启后，仅允许指定客户端访问此渠道')}
-                    />
-
-                    {inputs.enable_client_restriction && (
-                      <Form.Select
-                        field='allowed_clients'
-                        label={t('允许的客户端')}
-                        placeholder={t('选择或输入允许的客户端标识')}
-                        multiple
-                        filter
-                        allowCreate
-                        onChange={(value) =>
-                          handleInputChange('allowed_clients', value)
-                        }
-                        style={{ width: '100%' }}
-                        extraText={t(
-                          '选择预设客户端或输入自定义 User-Agent 标识（包含匹配）',
-                        )}
-                      >
-                        <Form.Select.Option value='claude-cli'>
-                          Claude Code (claude-cli)
-                        </Form.Select.Option>
-                        <Form.Select.Option value='cursor'>
-                          Cursor
-                        </Form.Select.Option>
-                        <Form.Select.Option value='cline'>
-                          Cline
-                        </Form.Select.Option>
-                        <Form.Select.Option value='continue'>
-                          Continue
-                        </Form.Select.Option>
-                      </Form.Select>
-                    )}
-
-                    <Form.Switch
                       field='auto_ban'
                       label={t('是否自动禁用')}
                       checkedText={t('开')}
@@ -3644,37 +3550,6 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t('启用请求体透传功能')}
                     />
-
-                    <Form.Switch
-                      field='pass_through_metadata_masquerade'
-                      label={t('透传仍伪装 metadata.user_id')}
-                      checkedText={t('开')}
-                      uncheckedText={t('关')}
-                      onChange={(value) =>
-                        handleChannelSettingsChange(
-                          'pass_through_metadata_masquerade',
-                          value,
-                        )
-                      }
-                      extraText={t(
-                        '透传模式下也覆写 metadata.user_id 以防泄露真实用户标识',
-                      )}
-                    />
-
-                    {inputs.type === 14 && isEdit && (
-                      <Form.Input
-                        field='masquerade_hash'
-                        label={t('伪装身份 Hash')}
-                        placeholder={t('留空则使用默认值，首次请求时自动学习')}
-                        showClear
-                        onChange={(value) =>
-                          handleInputChange('masquerade_hash', value)
-                        }
-                        extraText={t(
-                          '用于 metadata.user_id 伪装的渠道专属标识（64 字符 SHA256），修改后会话池将重置',
-                        )}
-                      />
-                    )}
 
                     <Form.Input
                       field='proxy'

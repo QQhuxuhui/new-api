@@ -70,11 +70,9 @@ type ChannelSettings struct {
 	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
 	Proxy                  string `json:"proxy"`
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
-	// PassThroughMetadataMasquerade: 透传模式下是否仍然伪装 metadata.user_id
-	PassThroughMetadataMasquerade bool   `json:"pass_through_metadata_masquerade,omitempty"`
-	SystemPrompt                  string `json:"system_prompt,omitempty"`
-	SystemPromptOverride          bool   `json:"system_prompt_override,omitempty"`
-	UserPrompt                    string `json:"user_prompt,omitempty"`
+	SystemPrompt           string `json:"system_prompt,omitempty"`
+	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	UserPrompt             string `json:"user_prompt,omitempty"`
 	// CacheSimulation: when non-nil and Enabled, simulates cache token data for channels
 	// whose upstream does not return cache statistics (e.g. Kiro).
 	CacheSimulation *CacheSimulationConfig `json:"cache_simulation,omitempty"`

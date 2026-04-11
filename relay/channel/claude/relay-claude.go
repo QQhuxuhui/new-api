@@ -470,58 +470,6 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, te
 	claudeRequest.Prompt = ""
 	claudeRequest.Messages = claudeMessages
 
-	// ========================================
-	// 注入 Claude Code 系统提示词
-	// 伪装成官方 Claude Code CLI 客户端
-	// ========================================
-	InjectClaudeCodeSystemPrompt(&claudeRequest, SystemPromptInjectModePrepend)
-
-	// ========================================
-	// 敏感词混淆
-	// 使用零宽空格混淆敏感词，绕过简单的关键词检测
-	// ========================================
-	if SensitiveWordObfuscationEnabled() {
-		ObfuscateSensitiveWordsInRequest(&claudeRequest, GetSensitiveWords(nil))
-	}
-
-	// ========================================
-	// 伪装固定的 metadata.user_id（保留其他字段）
-	// 避免上游检测多用户转售
-	// ========================================
-	channelID := 0
-	channelHash := ""
-	maxSessions := 0
-	apiKey := ""
-	if info != nil {
-		apiKey = info.ApiKey
-		if info.Channel != nil {
-			channelID = info.Channel.Id
-			channelHash = info.Channel.GetOrCreateMasqueradeHash()
-			if info.Channel.MaxConcurrentRequestsPerKey != nil {
-				maxSessions = *info.Channel.MaxConcurrentRequestsPerKey
-			}
-		}
-	}
-
-	masked, originalUserID, maskedUserID := masqueradeMetadata(claudeRequest.Metadata, channelID, channelHash, maxSessions, apiKey)
-	claudeRequest.Metadata = masked
-
-	// 记录追踪数据（headers 在 SetupRequestHeader 中采集）
-	if c != nil {
-		if originalBody, err := json.Marshal(textRequest); err == nil {
-			c.Set("masquerade_trace_original_body", string(originalBody))
-		}
-		if maskedBody, err := json.Marshal(claudeRequest); err == nil {
-			c.Set("masquerade_trace_masked_body", string(maskedBody))
-		}
-		c.Set("masquerade_trace_model", textRequest.Model)
-		c.Set("masquerade_trace_original_user_id", originalUserID)
-		c.Set("masquerade_trace_masked_user_id", maskedUserID)
-	}
-
-	// 打印日志（OpenAI 格式请求通常不携带 metadata，原始为空）
-	logger.LogInfo(c, fmt.Sprintf("[OpenAI->Claude] metadata.user_id 伪装: 下游=%s -> 上游=%s", originalUserID, maskedUserID))
-
 	return &claudeRequest, nil
 }
 

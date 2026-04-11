@@ -131,8 +131,6 @@ var GeminiSafetySetting string
 // https://docs.cohere.com/docs/safety-modes Type; NONE/CONTEXTUAL/STRICT
 var CohereSafetySetting string
 
-var DefaultUserAgent string // Default User-Agent header when client doesn't provide one
-
 // Warning-stage channel handling (probabilistic probe for recovery)
 var WarningProbePercent = 20 // probability (0-100) to use a warning-state channel for probing recovery
 var WarningTTLSeconds = 60   // warning flag TTL for degraded channels

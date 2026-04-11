@@ -52,15 +52,6 @@ const (
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"
 
-	/* sticky session keys */
-	ContextKeyStickySession     ContextKey = "sticky_session"      // bool: enabled for this token
-	ContextKeyStickySessionTTL  ContextKey = "sticky_session_ttl"  // int: TTL in seconds
-	ContextKeyStickySessionUsed ContextKey = "sticky_session_used" // bool: used existing binding
-	ContextKeyStickySessionNew  ContextKey = "sticky_session_new"  // bool: created new binding
-
-	/* client restriction keys */
-	ContextKeyUserAgent ContextKey = "user_agent" // string: client User-Agent
-
 	/* plan related keys */
 	ContextKeyPlanId         ContextKey = "plan_id"          // int: selected plan ID
 	ContextKeyUserPlanId     ContextKey = "user_plan_id"     // int: user plan assignment ID

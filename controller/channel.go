@@ -578,23 +578,6 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		return fmt.Errorf("每个Key的最大并发请求数不能为负数")
 	}
 
-	// Anthropic/Claude: 校验渠道级伪装身份 Hash（允许为空，非空必须是 64 字符 hex SHA256）
-	if channel.Type == constant.ChannelTypeAnthropic && channel.MasqueradeHash != nil {
-		v := strings.ToLower(strings.TrimSpace(*channel.MasqueradeHash))
-		if v != "" {
-			if len(v) != 64 {
-				return fmt.Errorf("伪装身份 Hash 必须是 64 字符 SHA256（十六进制）")
-			}
-			for _, ch := range v {
-				if (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') {
-					continue
-				}
-				return fmt.Errorf("伪装身份 Hash 必须是 64 字符 SHA256（十六进制）")
-			}
-		}
-		*channel.MasqueradeHash = v
-	}
-
 	// 校验渠道倍率配置
 	if channel.Ratio != nil {
 		ratio := *channel.Ratio
@@ -630,27 +613,6 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 
 		if regionMap["default"] == nil {
 			return fmt.Errorf("部署地区必须包含default字段")
-		}
-	}
-
-	// 校验客户端限制配置
-	if channel.EnableClientRestriction != nil && *channel.EnableClientRestriction {
-		if channel.AllowedClients == nil || *channel.AllowedClients == "" {
-			return fmt.Errorf("启用客户端限制时，必须配置允许的客户端列表")
-		}
-		var allowedClients []string
-		if err := json.Unmarshal([]byte(*channel.AllowedClients), &allowedClients); err != nil {
-			return fmt.Errorf("允许的客户端列表格式错误，必须是 JSON 数组")
-		}
-		// 过滤空字符串后检查是否有有效配置
-		validCount := 0
-		for _, client := range allowedClients {
-			if strings.TrimSpace(client) != "" {
-				validCount++
-			}
-		}
-		if validCount == 0 {
-			return fmt.Errorf("启用客户端限制时，必须至少配置一个有效的客户端标识")
 		}
 	}
 
