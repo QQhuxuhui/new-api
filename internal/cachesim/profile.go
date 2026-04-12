@@ -14,11 +14,11 @@ func ProfileFromTargetCostRatio(pct int) *SessionProfile {
 	if pct < 15 {
 		pct = 15
 	}
-	if pct > 90 {
-		pct = 90
+	if pct > 98 {
+		pct = 98
 	}
 
-	progress := float64(pct-15) / float64(90-15)
+	progress := float64(pct-15) / float64(98-15)
 	stable := lerp(0.62, 0.30, progress)
 	history := lerp(0.30, 0.12, progress)
 	tail := 1.0 - stable - history
