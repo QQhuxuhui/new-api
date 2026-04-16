@@ -540,6 +540,17 @@ func EpayPlanOrderNotify(c *gin.Context) {
 			return err
 		}
 
+		// Defense-in-depth: reject orders placed via non-Epay gateways.
+		// Currently PayPlanOrder only creates alipay/wechat orders, but the
+		// PlanOrder model also declares stripe/creem constants — guard here so
+		// a future cross-gateway code path can't be completed by this notify.
+		if order.PaymentMethod != model.PaymentMethodAlipay &&
+			order.PaymentMethod != model.PaymentMethodWechat {
+			log.Printf("plan order epay callback: payment method mismatch, got=%s, order_no=%s",
+				order.PaymentMethod, orderNo)
+			return errors.New("支付方式不匹配")
+		}
+
 		// Verify payment amount matches order (use tolerance for floating point comparison)
 		paymentAmount, _ := strconv.ParseFloat(verifyInfo.Money, 64)
 		// Allow 0.01 (1 cent) tolerance for floating point precision issues
