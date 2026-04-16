@@ -24,6 +24,8 @@ type TopUp struct {
 	Status        string  `json:"status"`
 }
 
+var ErrPaymentMethodMismatch = errors.New("payment method mismatch")
+
 func (topUp *TopUp) Insert() error {
 	var err error
 	err = DB.Create(topUp).Error
@@ -76,6 +78,10 @@ func Recharge(referenceId string, customerId string) (err error) {
 			return errors.New("充值订单不存在")
 		}
 
+		if topUp.PaymentMethod != "stripe" {
+			return ErrPaymentMethodMismatch
+		}
+
 		// 幂等处理：订单已成功则直接返回
 		if topUp.Status == common.TopUpStatusSuccess {
 			alreadyCompleted = true
@@ -103,6 +109,9 @@ func Recharge(referenceId string, customerId string) (err error) {
 	})
 
 	if err != nil {
+		if errors.Is(err, ErrPaymentMethodMismatch) {
+			return err
+		}
 		return errors.New("充值失败，" + err.Error())
 	}
 
@@ -361,6 +370,10 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			return errors.New("充值订单不存在")
 		}
 
+		if topUp.PaymentMethod != "creem" {
+			return ErrPaymentMethodMismatch
+		}
+
 		// 幂等处理：订单已成功则直接返回
 		if topUp.Status == common.TopUpStatusSuccess {
 			alreadyCompleted = true
@@ -410,6 +423,9 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	})
 
 	if err != nil {
+		if errors.Is(err, ErrPaymentMethodMismatch) {
+			return err
+		}
 		return errors.New("充值失败，" + err.Error())
 	}
 
@@ -452,6 +468,11 @@ func RechargeEpay(referenceId string) (err error) {
 			return errors.New("充值订单不存在")
 		}
 
+		// 拒绝跨网关补单：Stripe/Creem 订单不允许通过易支付回调完成
+		if topUp.PaymentMethod == "stripe" || topUp.PaymentMethod == "creem" {
+			return ErrPaymentMethodMismatch
+		}
+
 		// 幂等处理：订单已成功则直接返回
 		if topUp.Status == common.TopUpStatusSuccess {
 			alreadyCompleted = true
@@ -483,6 +504,9 @@ func RechargeEpay(referenceId string) (err error) {
 	})
 
 	if err != nil {
+		if errors.Is(err, ErrPaymentMethodMismatch) {
+			return err
+		}
 		return errors.New("充值失败，" + err.Error())
 	}
 
