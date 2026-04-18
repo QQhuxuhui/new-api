@@ -178,7 +178,7 @@ func PayPlanOrder(c *gin.Context) {
 
 	// Update order payment info
 	err = model.DB.Model(order).Updates(map[string]interface{}{
-		"payment_method":   req.PaymentMethod,
+		"payment_method":   epayPaymentMethod,
 		"payment_trade_no": order.OrderNo, // Use order_no as trade_no for Epay
 	}).Error
 

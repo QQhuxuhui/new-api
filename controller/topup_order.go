@@ -260,8 +260,8 @@ func PayTopupOrder(c *gin.Context) {
 		return
 	}
 
-	// Update order payment info
-	err = model.UpdateTopupOrderPaymentMethod(order.Id, req.PaymentMethod)
+	// Update order payment info (store Epay-normalized method, e.g. "wxpay" not "wechat")
+	err = model.UpdateTopupOrderPaymentMethod(order.Id, epayPaymentMethod)
 	if err != nil {
 		common.ApiError(c, errors.New("更新订单失败"))
 		return
