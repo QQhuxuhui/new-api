@@ -655,9 +655,15 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 		actualQuota := quota + preConsumedQuota
 
 		if actualQuota > 0 {
-			// Deduct daily pool quota based on actual consumption
+			// Deduct daily pool quota based on actual consumption.
+			// DecreaseDailyPoolQuota is atomic: on insufficient quota it returns an error
+			// WITHOUT partial deduction. Previously we silently swallowed that error,
+			// meaning the user was served the request for free. Fall back to the user's
+			// plan (and then wallet) so consumption is always billed somewhere.
 			if err := model.DecreaseDailyPoolQuota(relayInfo.UserId, int64(actualQuota)); err != nil {
-				common.SysLog(fmt.Sprintf("failed to consume daily pool quota for user %d: %v", relayInfo.UserId, err))
+				common.SysLog(fmt.Sprintf("daily pool insufficient for user %d amount=%d: %v — falling back to plan/wallet",
+					relayInfo.UserId, actualQuota, err))
+				billDailyPoolOverflow(relayInfo, int64(actualQuota))
 			}
 		} else if actualQuota < 0 {
 			// Refund to daily pool (only if there was actual consumption)

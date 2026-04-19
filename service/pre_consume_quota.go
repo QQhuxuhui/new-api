@@ -96,8 +96,13 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 	relayInfo.PlanPreConsumeQuota = 0
 
 	// Priority 1: Check Daily Pool
+	// Require requiredQuota > 0 AND a positive remaining. When pre-estimate is 0
+	// (cheap models whose int(tokens*ratio) truncates, see helper/price.go:105,111),
+	// post-consume will still bump actual cost to ≥1 (quota.go:364,
+	// compatible_handler.go:499), so we cannot verify the pool covers the request
+	// up front — defer to plan/wallet billing instead to avoid silent under-charging.
 	dailyPoolRemaining, err := model.GetDailyPoolRemaining(relayInfo.UserId)
-	if err == nil && dailyPoolRemaining >= requiredQuota {
+	if err == nil && requiredQuota > 0 && dailyPoolRemaining >= requiredQuota {
 		// Daily pool has sufficient quota
 		relayInfo.BillingSource = BillingSourceDailyPool
 		relayInfo.UserPlanId = 0
