@@ -186,6 +186,27 @@ func ThinkingAdaptor(geminiRequest *dto.GeminiChatRequest, info *relaycommon.Rel
 	}
 }
 
+// supportsCivicIntegrity reports whether the upstream model accepts HARM_CATEGORY_CIVIC_INTEGRITY.
+// Only Gemini 1.x and Gemini 2.0 non-lite families accept it; newer 2.5+/3.x and any -lite
+// variants reject the category with INVALID_ARGUMENT even though the Google error echoes it
+// as part of the enum list.
+func supportsCivicIntegrity(model string) bool {
+	if model == "" {
+		return false
+	}
+	name := strings.ToLower(model)
+	if strings.Contains(name, "-lite") {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(name, "gemini-1."):
+		return true
+	case strings.HasPrefix(name, "gemini-2.0"):
+		return true
+	}
+	return false
+}
+
 // Setting safety to the lowest possible values since Gemini is already powerless enough
 func CovertGemini2OpenAI(c *gin.Context, textRequest dto.GeneralOpenAIRequest, info *relaycommon.RelayInfo) (*dto.GeminiChatRequest, error) {
 
@@ -264,6 +285,9 @@ func CovertGemini2OpenAI(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 
 	safetySettings := make([]dto.GeminiChatSafetySettings, 0, len(SafetySettingList))
 	for _, category := range SafetySettingList {
+		if category == "HARM_CATEGORY_CIVIC_INTEGRITY" && !supportsCivicIntegrity(info.UpstreamModelName) {
+			continue
+		}
 		safetySettings = append(safetySettings, dto.GeminiChatSafetySettings{
 			Category:  category,
 			Threshold: model_setting.GetGeminiSafetySetting(category),
