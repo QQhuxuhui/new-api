@@ -68,7 +68,8 @@ const (
 // Payment method constants
 const (
 	PaymentMethodAlipay = "alipay"
-	PaymentMethodWechat = "wechat"
+	PaymentMethodWechat = "wechat" // legacy value stored before commit 2cf1261e
+	PaymentMethodWxpay  = "wxpay"  // Epay-normalized form stored since commit 2cf1261e
 	PaymentMethodStripe = "stripe"
 	PaymentMethodCreem  = "creem"
 )

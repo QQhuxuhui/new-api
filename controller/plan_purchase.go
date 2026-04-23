@@ -545,7 +545,8 @@ func EpayPlanOrderNotify(c *gin.Context) {
 		// PlanOrder model also declares stripe/creem constants — guard here so
 		// a future cross-gateway code path can't be completed by this notify.
 		if order.PaymentMethod != model.PaymentMethodAlipay &&
-			order.PaymentMethod != model.PaymentMethodWechat {
+			order.PaymentMethod != model.PaymentMethodWechat &&
+			order.PaymentMethod != model.PaymentMethodWxpay {
 			log.Printf("plan order epay callback: payment method mismatch, got=%s, order_no=%s",
 				order.PaymentMethod, orderNo)
 			return errors.New("支付方式不匹配")
