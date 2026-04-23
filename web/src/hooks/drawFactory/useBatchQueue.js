@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { generateImage } from '../../services/drawFactory';
@@ -26,6 +26,7 @@ import {
   saveBatchJobs,
   clearBatchJobs,
 } from '../../helpers/drawFactoryStorage';
+import { StatusContext } from '../../context/Status';
 
 const STATUS = {
   PENDING: 'pending',
@@ -44,6 +45,11 @@ function demoteRunning(list) {
 
 export function useBatchQueue() {
   const { t } = useTranslation();
+  const [statusState] = useContext(StatusContext);
+  const apiBaseRef = useRef('');
+  useEffect(() => {
+    apiBaseRef.current = statusState?.status?.DrawFactoryApiBase || '';
+  }, [statusState?.status?.DrawFactoryApiBase]);
   const [jobs, setJobs] = useState(() => demoteRunning(getBatchJobs()));
   const [isRunning, setIsRunning] = useState(false);
   const pauseRef = useRef(false);
@@ -108,6 +114,7 @@ export function useBatchQueue() {
             prompt,
             refs: [job.refUrl, job.prodUrl].filter(Boolean),
             size,
+            apiBase: apiBaseRef.current,
           });
           setJobs((prev) =>
             prev.map((j) =>

@@ -22,6 +22,7 @@ import { Card, Spin } from '@douyinfe/semi-ui';
 import SettingsGeneral from '../../pages/Setting/Operation/SettingsGeneral';
 import SettingsHeaderNavModules from '../../pages/Setting/Operation/SettingsHeaderNavModules';
 import SettingsDrawFactoryModels from '../../pages/Setting/Operation/SettingsDrawFactoryModels';
+import SettingsDrawFactoryApiBase from '../../pages/Setting/Operation/SettingsDrawFactoryApiBase';
 import SettingsSidebarModulesAdmin from '../../pages/Setting/Operation/SettingsSidebarModulesAdmin';
 import SettingsPlanCategories from '../../pages/Setting/Operation/SettingsPlanCategories';
 import SettingsSensitiveWords from '../../pages/Setting/Operation/SettingsSensitiveWords';
@@ -56,6 +57,7 @@ const OperationSetting = () => {
 
     /* 绘图工厂模型配置 */
     DrawFactoryModels: '',
+    DrawFactoryApiBase: '',
 
     /* 左侧边栏模块管理（管理员） */
     SidebarModulesAdmin: '',
@@ -131,6 +133,10 @@ const OperationSetting = () => {
         {/* 绘图工厂模型配置 */}
         <div style={{ marginTop: '10px' }}>
           <SettingsDrawFactoryModels options={inputs} refresh={onRefresh} />
+        </div>
+        {/* 绘图工厂 API 基地址 */}
+        <div style={{ marginTop: '10px' }}>
+          <SettingsDrawFactoryApiBase options={inputs} refresh={onRefresh} />
         </div>
         {/* 左侧边栏模块管理（管理员） */}
         <div style={{ marginTop: '10px' }}>

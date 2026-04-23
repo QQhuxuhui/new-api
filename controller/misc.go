@@ -109,6 +109,7 @@ func GetStatus(c *gin.Context) {
 		"HeaderNavModules":      common.OptionMap["HeaderNavModules"],
 		"SidebarModulesAdmin":   common.OptionMap["SidebarModulesAdmin"],
 		"DrawFactoryModels":     common.OptionMap["DrawFactoryModels"],
+		"DrawFactoryApiBase":    common.OptionMap["DrawFactoryApiBase"],
 		"PlanCategoriesConfig":  common.OptionMap["PlanCategoriesConfig"],
 		"PlanPricingConfig":     common.OptionMap["PlanPricingConfig"],
 

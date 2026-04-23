@@ -30,6 +30,14 @@ const ENDPOINTS = {
   [API_TYPE.IMAGES]: '/v1/images/generations',
 };
 
+// Normalize an admin-configured API base (e.g. https://api.sparkcode.top).
+// Empty / non-string input means "use relative path" so the request goes to
+// the same origin as the web UI — preserving the pre-config default.
+function normalizeApiBase(apiBase) {
+  if (typeof apiBase !== 'string' || apiBase === '') return '';
+  return apiBase.replace(/\/+$/, '');
+}
+
 const DEFAULT_MAX_TOKENS = 4096;
 
 export function buildChatCompletionsBody({ model, prompt, refs = [], size }) {
@@ -126,6 +134,7 @@ export async function generateImage({
   refs,
   size,
   signal,
+  apiBase,
 }) {
   const endpoint = ENDPOINTS[apiType];
   if (!endpoint) throw new Error(`unsupported apiType: ${apiType}`);
@@ -134,8 +143,9 @@ export async function generateImage({
       ? buildChatCompletionsBody({ model, prompt, refs, size })
       : buildImagesGenerationsBody({ model, prompt, size });
 
+  const url = `${normalizeApiBase(apiBase)}${endpoint}`;
   const start = Date.now();
-  const resp = await fetch(endpoint, {
+  const resp = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -2388,7 +2388,11 @@
     "draw_factory.admin.reset_default": "Reset to default",
     "draw_factory.admin.save": "Save",
     "draw_factory.admin.invalid_json": "Invalid JSON",
-    "draw_factory.admin.missing_field": "Model config missing required field: {{field}}"
+    "draw_factory.admin.missing_field": "Model config missing required field: {{field}}",
+    "draw_factory.admin.api_base_section": "Draw Factory API Base",
+    "draw_factory.admin.api_base_label": "API base URL",
+    "draw_factory.admin.api_base_hint": "Leave empty to use the current site origin. When set, single and batch image generation will send /v1/chat/completions and /v1/images/generations requests to this URL (e.g. https://api.sparkcode.top).",
+    "draw_factory.admin.api_base_invalid": "Enter a valid http(s) URL, or leave empty to use the current site"
   },
   "渠道故障转移规则": "Channel Failover Rules",
   "规则测试": "Rule Test",

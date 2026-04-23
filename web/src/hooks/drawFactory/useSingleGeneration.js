@@ -17,14 +17,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { generateImage } from '../../services/drawFactory';
 import { addHistory } from '../../helpers/drawFactoryStorage';
+import { StatusContext } from '../../context/Status';
 
 export function useSingleGeneration() {
   const { t } = useTranslation();
+  const [statusState] = useContext(StatusContext);
+  // Mirror live apiBase into a ref so in-session admin edits take effect
+  // without recreating `run` and without re-reading stale localStorage.
+  const apiBaseRef = useRef('');
+  useEffect(() => {
+    apiBaseRef.current = statusState?.status?.DrawFactoryApiBase || '';
+  }, [statusState?.status?.DrawFactoryApiBase]);
   const [state, setState] = useState({
     loading: false,
     image: null,
@@ -56,6 +64,7 @@ export function useSingleGeneration() {
           refs,
           size,
           signal: abortRef.current.signal,
+          apiBase: apiBaseRef.current,
         });
         if (!image) {
           throw new Error('no image in response');

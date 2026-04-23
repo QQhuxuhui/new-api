@@ -2318,7 +2318,11 @@
     "draw_factory.admin.reset_default": "恢复默认模板",
     "draw_factory.admin.save": "保存",
     "draw_factory.admin.invalid_json": "JSON 格式错误",
-    "draw_factory.admin.missing_field": "模型配置缺少必填字段：{{field}}"
+    "draw_factory.admin.missing_field": "模型配置缺少必填字段：{{field}}",
+    "draw_factory.admin.api_base_section": "绘图工厂 API 基地址",
+    "draw_factory.admin.api_base_label": "API 基地址",
+    "draw_factory.admin.api_base_hint": "留空则使用当前站点域名。填写后，单图生成与批量生成会将 /v1/chat/completions、/v1/images/generations 请求发送到此地址（例如 https://api.sparkcode.top）。",
+    "draw_factory.admin.api_base_invalid": "请填写合法的 http(s) URL，或留空以使用当前站点"
   },
   "渠道故障转移规则": "渠道故障转移规则",
   "规则测试": "规则测试",
