@@ -94,6 +94,8 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
         (values.error_type || 'server') === 'client'
           ? !!values.return_immediately
           : false,
+      retry_count: Number(values.retry_count) || 0,
+      retry_interval_ms: Number(values.retry_interval_ms) || 0,
     };
     onOk(payload);
   };
@@ -122,6 +124,8 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
           priority: 0,
           error_type: 'server',
           return_immediately: false,
+          retry_count: 0,
+          retry_interval_ms: 0,
           ...initial,
         }}
       >
@@ -184,6 +188,32 @@ const RuleModal = ({ visible, onCancel, onOk, initial }) => {
             </Text>
           </div>
         )}
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.InputNumber
+              field='retry_count'
+              label={t('同渠道重试次数')}
+              min={0}
+              max={10}
+              style={{ width: '100%' }}
+            />
+          </Col>
+          <Col span={12}>
+            <Form.InputNumber
+              field='retry_interval_ms'
+              label={t('重试间隔 (毫秒)')}
+              min={0}
+              max={30000}
+              step={100}
+              style={{ width: '100%' }}
+            />
+          </Col>
+        </Row>
+        <Text type='tertiary' size='small' style={{ display: 'block', marginBottom: 12 }}>
+          {t(
+            '命中规则时先在当前渠道原地重试；耗尽后再走跨渠道故障转移。重试次数为 0 表示不启用。',
+          )}
+        </Text>
         <Row gutter={16}>
           <Col span={12}>
             <Form.Switch field='enabled' label={t('启用')} />
@@ -579,6 +609,21 @@ const FailoverRules = () => {
             {type}
           </Tag>
         ),
+      },
+      {
+        title: t('同渠道重试'),
+        dataIndex: 'retry_count',
+        width: 140,
+        align: 'center',
+        render: (count, record) =>
+          count && count > 0 ? (
+            <Tag color='cyan' size='small' style={{ borderRadius: 4 }}>
+              {count}
+              {t('次')} / {record.retry_interval_ms || 0}ms
+            </Tag>
+          ) : (
+            <Text type='tertiary'>-</Text>
+          ),
       },
       {
         title: t('优先级'),

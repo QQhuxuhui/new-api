@@ -292,20 +292,30 @@ retryLoop:
 					channel.Id, channel.Name, maskedKey))
 			}
 
-			requestBody, _ := common.GetRequestBody(c)
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
-
-			// 实际发起一次上游调用，消耗一次尝试额度
-			switch relayFormat {
-			case types.RelayFormatOpenAIRealtime:
-				newAPIError = relay.WssHelper(c, relayInfo)
-			case types.RelayFormatClaude:
-				newAPIError = relay.ClaudeHelper(c, relayInfo)
-			case types.RelayFormatGemini:
-				newAPIError = geminiRelayHandler(c, relayInfo)
-			default:
-				newAPIError = relayHandler(c, relayInfo)
+			// doUpstreamCall rewinds the buffered request body and issues a
+			// single upstream call using the appropriate handler. It is reused
+			// by executeSameChannelRetry for rule-configured in-place retries.
+			doUpstreamCall := func() *types.NewAPIError {
+				requestBody, _ := common.GetRequestBody(c)
+				c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+				switch relayFormat {
+				case types.RelayFormatOpenAIRealtime:
+					return relay.WssHelper(c, relayInfo)
+				case types.RelayFormatClaude:
+					return relay.ClaudeHelper(c, relayInfo)
+				case types.RelayFormatGemini:
+					return geminiRelayHandler(c, relayInfo)
+				default:
+					return relayHandler(c, relayInfo)
+				}
 			}
+
+			// 实际发起一次上游调用，消耗一次尝试额度。
+			// executeSameChannelRetry 可能会在此基础上对命中故障转移规则
+			// (retry_count > 0) 的错误进行同渠道原地重试。重试期间不写健康
+			// 统计，仅最终结果（成功 / 最后一次失败）进入下面的健康统计与
+			// 故障转移流程，保持原有语义。
+			newAPIError = executeSameChannelRetry(c, defaultRetryRuleLookup, doUpstreamCall)
 			attempts++
 
 			// Record channel health based on result

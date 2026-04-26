@@ -21,6 +21,8 @@ type disableRuleRequest struct {
 	Priority          int      `json:"priority"`
 	ErrorType         *string  `json:"error_type"`
 	ReturnImmediately *bool    `json:"return_immediately"`
+	RetryCount        *int     `json:"retry_count"`
+	RetryIntervalMs   *int     `json:"retry_interval_ms"`
 }
 
 type testRuleRequest struct {
@@ -60,6 +62,8 @@ func CreateDisableRule(c *gin.Context) {
 		Priority:          req.Priority,
 		ErrorType:         normalizeDisableRuleErrorType(req.ErrorType),
 		ReturnImmediately: getDisableRuleReturnImmediately(req.ReturnImmediately, normalizeDisableRuleErrorType(req.ErrorType), false),
+		RetryCount:        normalizeRetryCount(req.RetryCount, 0),
+		RetryIntervalMs:   normalizeRetryIntervalMs(req.RetryIntervalMs, 0),
 	}
 	if err := model.CreateDisableRule(rule); err != nil {
 		common.ApiError(c, err)
@@ -103,6 +107,8 @@ func UpdateDisableRule(c *gin.Context) {
 		rule.ErrorType = normalizeDisableRuleErrorType(req.ErrorType)
 	}
 	rule.ReturnImmediately = getDisableRuleReturnImmediately(req.ReturnImmediately, rule.GetErrorType(), rule.ReturnImmediately)
+	rule.RetryCount = normalizeRetryCount(req.RetryCount, rule.RetryCount)
+	rule.RetryIntervalMs = normalizeRetryIntervalMs(req.RetryIntervalMs, rule.RetryIntervalMs)
 
 	if err := model.UpdateDisableRule(rule); err != nil {
 		common.ApiError(c, err)
@@ -189,7 +195,51 @@ func validateDisableRule(req disableRuleRequest) error {
 	if !isValidDisableRuleErrorType(req.ErrorType) {
 		return fmt.Errorf("error_type 无效")
 	}
+	if req.RetryCount != nil {
+		if *req.RetryCount < 0 {
+			return fmt.Errorf("retry_count 不能为负数")
+		}
+		if *req.RetryCount > model.MaxSameChannelRetryCount {
+			return fmt.Errorf("retry_count 不能超过 %d", model.MaxSameChannelRetryCount)
+		}
+	}
+	if req.RetryIntervalMs != nil {
+		if *req.RetryIntervalMs < 0 {
+			return fmt.Errorf("retry_interval_ms 不能为负数")
+		}
+		if *req.RetryIntervalMs > model.MaxSameChannelRetryIntervalMs {
+			return fmt.Errorf("retry_interval_ms 不能超过 %d", model.MaxSameChannelRetryIntervalMs)
+		}
+	}
 	return nil
+}
+
+func normalizeRetryCount(value *int, fallback int) int {
+	if value == nil {
+		return fallback
+	}
+	v := *value
+	if v < 0 {
+		return 0
+	}
+	if v > model.MaxSameChannelRetryCount {
+		return model.MaxSameChannelRetryCount
+	}
+	return v
+}
+
+func normalizeRetryIntervalMs(value *int, fallback int) int {
+	if value == nil {
+		return fallback
+	}
+	v := *value
+	if v < 0 {
+		return 0
+	}
+	if v > model.MaxSameChannelRetryIntervalMs {
+		return model.MaxSameChannelRetryIntervalMs
+	}
+	return v
 }
 
 func normalizeDisableRuleErrorType(errorType *string) string {

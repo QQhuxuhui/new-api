@@ -31,10 +31,23 @@ type ChannelDisableRule struct {
 	Priority    int      `json:"priority" gorm:"default:0"`
 	ErrorType   string   `json:"error_type" gorm:"type:varchar(10);not null;default:server"`
 	// ReturnImmediately only applies when ErrorType is client.
-	ReturnImmediately bool      `json:"return_immediately" gorm:"default:false"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ReturnImmediately bool `json:"return_immediately" gorm:"default:false"`
+	// RetryCount enables same-channel in-place retry when > 0.
+	// The current channel is retried up to this many times before falling through
+	// to the existing cross-channel failover logic.
+	RetryCount int `json:"retry_count" gorm:"not null;default:0"`
+	// RetryIntervalMs is the fixed sleep between in-place retries (milliseconds).
+	RetryIntervalMs int       `json:"retry_interval_ms" gorm:"not null;default:0"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
+
+// Safety caps for same-channel retry configuration.
+// Rule values exceeding these are clamped at read time.
+const (
+	MaxSameChannelRetryCount      = 10
+	MaxSameChannelRetryIntervalMs = 30_000
+)
 
 func (ChannelDisableRule) TableName() string {
 	return "channel_disable_rules"
@@ -135,6 +148,45 @@ func (r *ChannelDisableRule) MatchWithDetail(statusCode int, msg string) Disable
 func (r *ChannelDisableRule) Match(statusCode int, msg string) bool {
 	result := r.MatchWithDetail(statusCode, msg)
 	return result.Matched
+}
+
+// ClampedRetryBudget returns the effective retry_count / retry_interval_ms,
+// clamped to the configured safety caps. Values above the caps are logged once
+// per call so misconfiguration is visible.
+func (r *ChannelDisableRule) ClampedRetryBudget() (count int, intervalMs int) {
+	count = r.RetryCount
+	intervalMs = r.RetryIntervalMs
+	if count > MaxSameChannelRetryCount {
+		common.SysLog("channel_disable_rule " + r.Name + ": retry_count clamped to safety cap")
+		count = MaxSameChannelRetryCount
+	}
+	if intervalMs > MaxSameChannelRetryIntervalMs {
+		common.SysLog("channel_disable_rule " + r.Name + ": retry_interval_ms clamped to safety cap")
+		intervalMs = MaxSameChannelRetryIntervalMs
+	}
+	if count < 0 {
+		count = 0
+	}
+	if intervalMs < 0 {
+		intervalMs = 0
+	}
+	return
+}
+
+// MatchRetryRule returns the highest-priority enabled rule with a positive
+// RetryCount that matches the given (statusCode, message). Returns nil if no
+// such rule exists.
+func MatchRetryRule(statusCode int, message string) *ChannelDisableRule {
+	rules := GetEnabledDisableRules()
+	for _, rule := range rules {
+		if rule == nil || rule.RetryCount <= 0 {
+			continue
+		}
+		if rule.Match(statusCode, message) {
+			return rule
+		}
+	}
+	return nil
 }
 
 func (r *ChannelDisableRule) GetErrorType() string {
