@@ -935,3 +935,218 @@ func TestApplyCacheSimulationSessionPrefixUsesCapturedCompatibleClaudeRequest(t 
 		t.Fatalf("expected 5m cache creation > 0, got %d", usage.ClaudeCacheCreation5mTokens)
 	}
 }
+
+// --- response_format / structured output ---
+
+func TestRequestOpenAI2ClaudeMessageJSONSchemaSynthesizesTool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	req := dto.GeneralOpenAIRequest{
+		Model: "claude-3-7-sonnet-20250219",
+		Messages: []dto.Message{
+			{Role: "user", Content: "weather in Tokyo?"},
+		},
+		ResponseFormat: &dto.ResponseFormat{
+			Type: "json_schema",
+			JsonSchema: json.RawMessage(`{
+				"name":"weather_response",
+				"description":"weather report",
+				"schema":{
+					"type":"object",
+					"properties":{"city":{"type":"string"},"temp":{"type":"number"}},
+					"required":["city","temp"]
+				},
+				"strict":true
+			}`),
+		},
+	}
+
+	claudeReq, err := RequestOpenAI2ClaudeMessage(c, &relaycommon.RelayInfo{}, req)
+	if err != nil {
+		t.Fatalf("convert failed: %v", err)
+	}
+
+	tools := claudeReq.GetTools()
+	if len(tools) == 0 {
+		t.Fatalf("expected synthesized tool, got none")
+	}
+	var schemaTool *dto.Tool
+	for _, tool := range tools {
+		if tt, ok := tool.(*dto.Tool); ok && tt.Name == structuredOutputToolName {
+			schemaTool = tt
+			break
+		}
+	}
+	if schemaTool == nil {
+		t.Fatalf("expected tool name %q in tools, got %+v", structuredOutputToolName, tools)
+	}
+	if schemaTool.InputSchema["type"] != "object" {
+		t.Fatalf("expected input_schema.type=object, got %v", schemaTool.InputSchema)
+	}
+	if schemaTool.InputSchema["required"] == nil {
+		t.Fatalf("expected input_schema.required to carry over, got %v", schemaTool.InputSchema)
+	}
+
+	choice, ok := claudeReq.ToolChoice.(*dto.ClaudeToolChoice)
+	if !ok {
+		t.Fatalf("expected *ClaudeToolChoice, got %T (%+v)", claudeReq.ToolChoice, claudeReq.ToolChoice)
+	}
+	if choice.Type != "tool" || choice.Name != structuredOutputToolName {
+		t.Fatalf("expected tool_choice {type:tool, name:%s}, got %+v", structuredOutputToolName, choice)
+	}
+}
+
+func TestRequestOpenAI2ClaudeMessageJSONObjectAddsSystemInstruction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	req := dto.GeneralOpenAIRequest{
+		Model: "claude-3-7-sonnet-20250219",
+		Messages: []dto.Message{
+			{Role: "system", Content: "you are helpful"},
+			{Role: "user", Content: "give me a fact about Tokyo"},
+		},
+		ResponseFormat: &dto.ResponseFormat{Type: "json_object"},
+	}
+
+	claudeReq, err := RequestOpenAI2ClaudeMessage(c, &relaycommon.RelayInfo{}, req)
+	if err != nil {
+		t.Fatalf("convert failed: %v", err)
+	}
+
+	systems := claudeReq.ParseSystem()
+	combined := strings.Builder{}
+	for _, s := range systems {
+		if s.Text != nil {
+			combined.WriteString(*s.Text)
+			combined.WriteString("\n")
+		}
+	}
+	got := combined.String()
+	if !strings.Contains(strings.ToLower(got), "json") {
+		t.Fatalf("expected JSON instruction added to system, got %q", got)
+	}
+}
+
+func TestResponseClaude2OpenAIStructuredOutputSurfacesAsContent(t *testing.T) {
+	inputJSON := `{"city":"Tokyo","temp":21}`
+	var inputObj map[string]any
+	if err := json.Unmarshal([]byte(inputJSON), &inputObj); err != nil {
+		t.Fatalf("seed unmarshal: %v", err)
+	}
+
+	claudeResp := &dto.ClaudeResponse{
+		Id:    "msg_1",
+		Model: "claude-3-7-sonnet-20250219",
+		Content: []dto.ClaudeMediaMessage{
+			{
+				Type:  "tool_use",
+				Id:    "toolu_1",
+				Name:  structuredOutputToolName,
+				Input: inputObj,
+			},
+		},
+		StopReason: "tool_use",
+	}
+
+	openaiResp := ResponseClaude2OpenAI(RequestModeMessage, claudeResp)
+	if len(openaiResp.Choices) != 1 {
+		t.Fatalf("expected 1 choice, got %d", len(openaiResp.Choices))
+	}
+	choice := openaiResp.Choices[0]
+
+	if choice.FinishReason != "stop" {
+		t.Fatalf("expected finish_reason=stop, got %q", choice.FinishReason)
+	}
+	if len(choice.Message.ToolCalls) > 0 {
+		t.Fatalf("expected no tool_calls, got %d", len(choice.Message.ToolCalls))
+	}
+	got := choice.Message.StringContent()
+	var gotObj map[string]any
+	if err := json.Unmarshal([]byte(got), &gotObj); err != nil {
+		t.Fatalf("expected message.content to be valid JSON, got %q (err=%v)", got, err)
+	}
+	if gotObj["city"] != "Tokyo" {
+		t.Fatalf("expected city=Tokyo, got %v", gotObj["city"])
+	}
+}
+
+func TestHandleStreamResponseDataStructuredOutputEmitsContentDeltas(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatOpenAI,
+		OriginModelName: "claude-3-7-sonnet-20250219",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 100},
+	}
+	claudeInfo := &ClaudeResponseInfo{
+		ResponseId: "chatcmpl-1",
+		Created:    1,
+		Model:      "claude-3-7-sonnet-20250219",
+		Usage:      &dto.Usage{},
+	}
+
+	chunks := []string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude-3-7-sonnet-20250219","usage":{"input_tokens":10,"output_tokens":0}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"` + structuredOutputToolName + `","input":{}}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Tokyo\""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":",\"temp\":21}"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":10,"output_tokens":12}}`,
+	}
+	for _, chunk := range chunks {
+		if err := HandleStreamResponseData(c, info, claudeInfo, chunk, RequestModeMessage); err != nil {
+			t.Fatalf("HandleStreamResponseData err on %q: %v", chunk, err)
+		}
+	}
+
+	body := recorder.Body.String()
+
+	contentBuilder := strings.Builder{}
+	finishReason := ""
+	sawToolCallDelta := false
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "[DONE]" {
+			continue
+		}
+		var resp dto.ChatCompletionsStreamResponse
+		if err := json.Unmarshal([]byte(payload), &resp); err != nil {
+			continue
+		}
+		if len(resp.Choices) == 0 {
+			continue
+		}
+		choice := resp.Choices[0]
+		if choice.Delta.Content != nil {
+			contentBuilder.WriteString(*choice.Delta.Content)
+		}
+		if len(choice.Delta.ToolCalls) > 0 {
+			sawToolCallDelta = true
+		}
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			finishReason = *choice.FinishReason
+		}
+	}
+
+	if sawToolCallDelta {
+		t.Fatalf("expected no tool_calls in stream, body=%s", body)
+	}
+	gotJSON := contentBuilder.String()
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(gotJSON), &obj); err != nil {
+		t.Fatalf("reassembled content is not valid JSON: %q err=%v body=%s", gotJSON, err, body)
+	}
+	if obj["city"] != "Tokyo" {
+		t.Fatalf("expected city=Tokyo, got %v (full=%q)", obj["city"], gotJSON)
+	}
+	if finishReason != "stop" {
+		t.Fatalf("expected finish_reason=stop, got %q (body=%s)", finishReason, body)
+	}
+}

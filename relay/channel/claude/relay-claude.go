@@ -34,6 +34,13 @@ const (
 	// manages memory externally, and 1M-context models with per-message
 	// segments can produce 1000+ checkpoints in dense conversations.
 	redisStoreMaxCheckpoints = 2048
+
+	// structuredOutputToolName is the synthetic Claude tool name used to relay
+	// OpenAI response_format=json_schema requests through Anthropic's tool_use
+	// mechanism. Treated as private — clients must not depend on it.
+	structuredOutputToolName = "__newapi_structured_output__"
+
+	structuredOutputJSONObjectInstruction = "You must respond with a single valid JSON object and no other prose."
 )
 
 var (
@@ -462,6 +469,8 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, te
 		}
 	}
 
+	applyOpenAIResponseFormat(&claudeRequest, &systemMessages, textRequest.ResponseFormat)
+
 	// 设置累积的system消息
 	if len(systemMessages) > 0 {
 		claudeRequest.System = systemMessages
@@ -471,6 +480,84 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, info *relaycommon.RelayInfo, te
 	claudeRequest.Messages = claudeMessages
 
 	return &claudeRequest, nil
+}
+
+// applyOpenAIResponseFormat translates an OpenAI response_format hint into the
+// closest Claude equivalent: json_schema is realised by appending a synthetic
+// tool whose input_schema is the requested schema and forcing tool_choice to
+// that tool, while json_object is realised by prepending a system instruction.
+// When the schema cannot be parsed it falls back to json_object behaviour.
+func applyOpenAIResponseFormat(
+	claudeRequest *dto.ClaudeRequest,
+	systemMessages *[]dto.ClaudeMediaMessage,
+	rf *dto.ResponseFormat,
+) {
+	if rf == nil || rf.Type == "" {
+		return
+	}
+	prependSystem := func(text string) {
+		if systemMessages == nil {
+			return
+		}
+		*systemMessages = append([]dto.ClaudeMediaMessage{{
+			Type: "text",
+			Text: common.GetPointer[string](text),
+		}}, *systemMessages...)
+	}
+	switch rf.Type {
+	case "json_schema":
+		schemaMap, ok := extractJSONSchemaMap(rf.JsonSchema)
+		if !ok {
+			prependSystem(structuredOutputJSONObjectInstruction)
+			return
+		}
+		var fjs dto.FormatJsonSchema
+		_ = json.Unmarshal(rf.JsonSchema, &fjs)
+		description := strings.TrimSpace(fjs.Description)
+		if description == "" {
+			description = "Respond using this tool to provide structured output that matches the schema."
+		}
+		claudeRequest.AddTool(&dto.Tool{
+			Name:        structuredOutputToolName,
+			Description: description,
+			InputSchema: schemaMap,
+		})
+		claudeRequest.ToolChoice = &dto.ClaudeToolChoice{
+			Type:                   "tool",
+			Name:                   structuredOutputToolName,
+			DisableParallelToolUse: true,
+		}
+	case "json_object":
+		prependSystem(structuredOutputJSONObjectInstruction)
+	}
+}
+
+// extractJSONSchemaMap pulls the JSON Schema body out of an OpenAI
+// response_format.json_schema field. OpenAI nests it under "schema"; some
+// clients hand the schema in directly. Returns false if the input neither
+// contains a usable schema nor decodes to a JSON object.
+func extractJSONSchemaMap(raw json.RawMessage) (map[string]interface{}, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var wrapper struct {
+		Schema map[string]interface{} `json:"schema"`
+	}
+	if err := json.Unmarshal(raw, &wrapper); err == nil && len(wrapper.Schema) > 0 {
+		return wrapper.Schema, true
+	}
+	var direct map[string]interface{}
+	if err := json.Unmarshal(raw, &direct); err == nil && len(direct) > 0 {
+		// Heuristic: if it already looks like a JSON Schema (has "type" or
+		// "properties"), use it directly. Otherwise treat as unparseable.
+		if _, hasType := direct["type"]; hasType {
+			return direct, true
+		}
+		if _, hasProps := direct["properties"]; hasProps {
+			return direct, true
+		}
+	}
+	return nil, false
 }
 
 func StreamResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse) *dto.ChatCompletionsStreamResponse {
@@ -578,6 +665,7 @@ func ResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse) *dto
 	}
 	tools := make([]dto.ToolCallResponse, 0)
 	thinkingContent := ""
+	structuredOutputApplied := false
 
 	if reqMode == RequestModeCompletion {
 		choice := dto.OpenAITextResponseChoice{
@@ -595,6 +683,15 @@ func ResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse) *dto
 		for _, message := range claudeResponse.Content {
 			switch message.Type {
 			case "tool_use":
+				if message.Name == structuredOutputToolName {
+					// Synthetic structured-output tool: surface the JSON body
+					// as the assistant's plain message content instead of an
+					// OpenAI tool_call.
+					args, _ := json.Marshal(message.Input)
+					responseText = string(args)
+					structuredOutputApplied = true
+					continue
+				}
 				args, _ := json.Marshal(message.Input)
 				tools = append(tools, dto.ToolCallResponse{
 					ID:   message.Id,
@@ -614,12 +711,16 @@ func ResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse) *dto
 			}
 		}
 	}
+	finishReason := stopReasonClaude2OpenAI(claudeResponse.StopReason)
+	if structuredOutputApplied && finishReason == "tool_calls" {
+		finishReason = "stop"
+	}
 	choice := dto.OpenAITextResponseChoice{
 		Index: 0,
 		Message: dto.Message{
 			Role: "assistant",
 		},
-		FinishReason: stopReasonClaude2OpenAI(claudeResponse.StopReason),
+		FinishReason: finishReason,
 	}
 	choice.SetStringContent(responseText)
 	if len(responseThinking) > 0 {
@@ -646,6 +747,14 @@ type ClaudeResponseInfo struct {
 	// TextToolCallConverter handles detection and conversion of text-based
 	// tool calls to proper tool_use content blocks (Claude format only).
 	TextToolCallConverter *TextToolCallConverter
+	// StructuredOutputActive is true while the current content_block in flight
+	// is the synthetic structured-output tool, so input_json_delta payloads
+	// should be re-routed to OpenAI delta.content.
+	StructuredOutputActive bool
+	// StructuredOutputUsed is set once a structured-output tool_use was
+	// observed during the stream so the final message_delta finish_reason
+	// can be rewritten from tool_calls back to stop.
+	StructuredOutputUsed bool
 }
 
 func FormatClaudeResponseInfo(requestMode int, claudeResponse *dto.ClaudeResponse, oaiResponse *dto.ChatCompletionsStreamResponse, claudeInfo *ClaudeResponseInfo) bool {
@@ -793,11 +902,15 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 		helper.ClaudeChunkData(c, claudeResponse, writeData)
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
+		updateStructuredOutputState(claudeInfo, &claudeResponse)
+
 		response := StreamResponseClaude2OpenAI(requestMode, &claudeResponse)
 
 		if !FormatClaudeResponseInfo(requestMode, &claudeResponse, response, claudeInfo) {
 			return nil
 		}
+
+		applyStructuredOutputStreamFixup(claudeInfo, response)
 
 		err = helper.ObjectData(c, response)
 		if err != nil {
@@ -805,6 +918,53 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 	}
 	return nil
+}
+
+// updateStructuredOutputState toggles the structured-output flags on
+// ClaudeResponseInfo as the stream advances through content blocks.
+func updateStructuredOutputState(claudeInfo *ClaudeResponseInfo, claudeResponse *dto.ClaudeResponse) {
+	if claudeInfo == nil || claudeResponse == nil {
+		return
+	}
+	switch claudeResponse.Type {
+	case "content_block_start":
+		if claudeResponse.ContentBlock != nil &&
+			claudeResponse.ContentBlock.Type == "tool_use" &&
+			claudeResponse.ContentBlock.Name == structuredOutputToolName {
+			claudeInfo.StructuredOutputActive = true
+			claudeInfo.StructuredOutputUsed = true
+		}
+	case "content_block_stop":
+		claudeInfo.StructuredOutputActive = false
+	}
+}
+
+// applyStructuredOutputStreamFixup rewrites OpenAI-format stream chunks while a
+// structured-output tool block is in flight: input_json_delta arguments are
+// surfaced as delta.content and tool_calls are dropped, and the final
+// message_delta finish_reason is rewritten from tool_calls back to stop.
+func applyStructuredOutputStreamFixup(
+	claudeInfo *ClaudeResponseInfo,
+	response *dto.ChatCompletionsStreamResponse,
+) {
+	if claudeInfo == nil || response == nil || len(response.Choices) == 0 {
+		return
+	}
+	choice := &response.Choices[0]
+	if claudeInfo.StructuredOutputActive && len(choice.Delta.ToolCalls) > 0 {
+		var args strings.Builder
+		for _, call := range choice.Delta.ToolCalls {
+			args.WriteString(call.Function.Arguments)
+		}
+		choice.Delta.SetContentString(args.String())
+		choice.Delta.ToolCalls = nil
+	}
+	if claudeInfo.StructuredOutputUsed &&
+		choice.FinishReason != nil &&
+		*choice.FinishReason == "tool_calls" {
+		stop := "stop"
+		choice.FinishReason = &stop
+	}
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, requestMode int) {
