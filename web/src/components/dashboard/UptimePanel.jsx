@@ -28,6 +28,7 @@ import {
   Empty,
   Progress,
   Divider,
+  Tooltip,
 } from '@douyinfe/semi-ui';
 import { Gauge, RefreshCw } from 'lucide-react';
 import {
@@ -72,37 +73,66 @@ const UptimePanel = ({
       grouped[g].push(m);
     });
 
-    const renderItem = (monitor, idx) => (
-      <div key={idx} className='p-2 hover:bg-white rounded-lg transition-colors'>
-        <div className='flex items-center justify-between mb-1'>
-          <div className='flex items-center gap-2'>
-            <div
-              className='w-2 h-2 rounded-full flex-shrink-0'
-              style={{ backgroundColor: getUptimeStatusColor(monitor.status, UPTIME_STATUS_MAP) }}
-            />
-            <span className='text-sm font-medium text-gray-900'>
-              {monitor.name}
+    const renderItem = (monitor, idx) => {
+      const bars = Array.isArray(monitor.heartbeats)
+        ? [...monitor.heartbeats].reverse()
+        : [];
+
+      return (
+        <div key={idx} className='p-2 hover:bg-white rounded-lg transition-colors'>
+          <div className='flex items-center justify-between mb-1'>
+            <div className='flex items-center gap-2'>
+              <div
+                className='w-2 h-2 rounded-full flex-shrink-0'
+                style={{ backgroundColor: getUptimeStatusColor(monitor.status, UPTIME_STATUS_MAP) }}
+              />
+              <span className='text-sm font-medium text-gray-900'>
+                {monitor.name}
+              </span>
+            </div>
+            <span className='text-xs text-gray-500'>
+              {((monitor.uptime || 0) * 100).toFixed(2)}%
             </span>
           </div>
-          <span className='text-xs text-gray-500'>
-            {((monitor.uptime || 0) * 100).toFixed(2)}%
-          </span>
-        </div>
-        <div className='flex items-center gap-2'>
-          <span className='text-xs text-gray-500'>
-            {getUptimeStatusText(monitor.status, UPTIME_STATUS_MAP, t)}
-          </span>
-          <div className='flex-1'>
-            <Progress
-              percent={(monitor.uptime || 0) * 100}
-              showInfo={false}
-              aria-label={`${monitor.name} uptime`}
-              stroke={getUptimeStatusColor(monitor.status, UPTIME_STATUS_MAP)}
-            />
+          <div className='flex items-center gap-2'>
+            <span className='text-xs text-gray-500 whitespace-nowrap'>
+              {getUptimeStatusText(monitor.status, UPTIME_STATUS_MAP, t)}
+            </span>
+            <div className='flex-1'>
+              {bars.length > 0 ? (
+                <div className='flex items-stretch gap-[2px] h-5'>
+                  {bars.map((hb, i) => (
+                    <Tooltip
+                      key={i}
+                      content={
+                        <div className='text-xs leading-tight'>
+                          {hb.time && <div>{hb.time}</div>}
+                          <div>{getUptimeStatusText(hb.status, UPTIME_STATUS_MAP, t)}</div>
+                        </div>
+                      }
+                    >
+                      <div
+                        className='flex-1 min-w-[3px] rounded-sm cursor-pointer transition-opacity hover:opacity-70'
+                        style={{
+                          backgroundColor: getUptimeStatusColor(hb.status, UPTIME_STATUS_MAP),
+                        }}
+                      />
+                    </Tooltip>
+                  ))}
+                </div>
+              ) : (
+                <Progress
+                  percent={(monitor.uptime || 0) * 100}
+                  showInfo={false}
+                  aria-label={`${monitor.name} uptime`}
+                  stroke={getUptimeStatusColor(monitor.status, UPTIME_STATUS_MAP)}
+                />
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    );
+      );
+    };
 
     return Object.entries(grouped).map(([gname, list]) => (
       <div key={gname || 'default'} className='mb-2'>

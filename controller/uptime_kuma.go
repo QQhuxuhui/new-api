@@ -16,18 +16,25 @@ import (
 )
 
 const (
-	requestTimeout   = 30 * time.Second
-	httpTimeout      = 10 * time.Second
-	uptimeKeySuffix  = "_24"
-	apiStatusPath    = "/api/status-page/"
-	apiHeartbeatPath = "/api/status-page/heartbeat/"
+	requestTimeout    = 30 * time.Second
+	httpTimeout       = 10 * time.Second
+	uptimeKeySuffix   = "_24"
+	apiStatusPath     = "/api/status-page/"
+	apiHeartbeatPath  = "/api/status-page/heartbeat/"
+	maxHeartbeatBars  = 50
 )
 
+type Heartbeat struct {
+	Status int    `json:"status"`
+	Time   string `json:"time,omitempty"`
+}
+
 type Monitor struct {
-	Name   string  `json:"name"`
-	Uptime float64 `json:"uptime"`
-	Status int     `json:"status"`
-	Group  string  `json:"group,omitempty"`
+	Name       string      `json:"name"`
+	Uptime     float64     `json:"uptime"`
+	Status     int         `json:"status"`
+	Group      string      `json:"group,omitempty"`
+	Heartbeats []Heartbeat `json:"heartbeats"`
 }
 
 type UptimeGroupResult struct {
@@ -83,7 +90,8 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 
 	var heartbeatData struct {
 		HeartbeatList map[string][]struct {
-			Status int `json:"status"`
+			Status int    `json:"status"`
+			Time   string `json:"time"`
 		} `json:"heartbeatList"`
 		UptimeList map[string]float64 `json:"uptimeList"`
 	}
@@ -119,6 +127,16 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 
 			if heartbeats, exists := heartbeatData.HeartbeatList[monitorID]; exists && len(heartbeats) > 0 {
 				monitor.Status = heartbeats[0].Status
+
+				end := len(heartbeats)
+				if end > maxHeartbeatBars {
+					end = maxHeartbeatBars
+				}
+				bars := make([]Heartbeat, 0, end)
+				for _, h := range heartbeats[:end] {
+					bars = append(bars, Heartbeat{Status: h.Status, Time: h.Time})
+				}
+				monitor.Heartbeats = bars
 			}
 
 			result.Monitors = append(result.Monitors, monitor)
