@@ -436,6 +436,8 @@ func SetApiRouter(router *gin.Engine) {
 			userPlanRoute.GET("/", controller.GetMyPlans)
 			userPlanRoute.POST("/switch", controller.UserSwitchPlan)
 			userPlanRoute.PUT("/:id/auto_switch", controller.UserToggleAutoSwitch)
+			userPlanRoute.POST("/:id/lock", controller.UserLockPlan)
+			userPlanRoute.POST("/:id/unlock", controller.UserUnlockPlan)
 			userPlanRoute.GET("/quota-status", controller.GetCurrentPlanQuotaStatus)
 			userPlanRoute.GET("/queue", controller.UserGetQueuedPlans)
 			userPlanRoute.GET("/billing-status", controller.UserGetBillingStatus)

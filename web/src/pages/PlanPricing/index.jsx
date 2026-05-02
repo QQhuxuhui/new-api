@@ -250,7 +250,7 @@ const PlanPricing = () => {
     const typeConfig = {
       subscription: {
         color: 'blue',
-        label: t('订阅套餐'),
+        label: t('包月套餐'),
         icon: <IconCalendarClock />,
       },
       consumption: {
@@ -1146,7 +1146,7 @@ const PlanPricing = () => {
             className='text-[#475569] dark:text-slate-400 block max-w-xl mx-auto'
             style={{ fontSize: '1.25rem', lineHeight: 1.6, marginTop: '20px' }}
           >
-            {t('两种计费方式，灵活组合使用。先用订阅套餐，用完自动切换按量付费，无缝衔接。')}
+            {t('两种计费方式，灵活组合使用。先用包月套餐，用完自动切换按量付费，无缝衔接。')}
           </Text>
         </div>
       </section>
@@ -1193,7 +1193,7 @@ const PlanPricing = () => {
               }}
             >
               <IconBox size='large' />
-              <span>{t('订阅套餐')}</span>
+              <span>{t('包月套餐')}</span>
             </button>
             <button
               onClick={() => setActiveTab('payg')}
@@ -1236,7 +1236,7 @@ const PlanPricing = () => {
           <div className='animate-fadeIn'>
             <div className='text-center mb-12'>
               <Title heading={2} className='m-0 mb-4 text-slate-800 dark:text-white text-2xl font-semibold'>
-                {t('订阅套餐 - 限时特惠')}
+                {t('包月套餐 - 限时特惠')}
               </Title>
               <Text className='text-slate-500 dark:text-slate-400'>
                 {t('承诺使用时间，享受更低价格')}
@@ -1475,7 +1475,7 @@ const PlanPricing = () => {
                 className='inline-block px-3 py-1 rounded-xl text-xs font-semibold mb-3'
                 style={{ background: '#DBEAFE', color: '#1E40AF' }}
               >
-                {t('订阅套餐')}
+                {t('包月套餐')}
               </span>
               <Title
                 heading={4}
@@ -1557,15 +1557,15 @@ const PlanPricing = () => {
         <div className='space-y-4'>
           {[
             {
-              q: t('订阅套餐用完后会怎样？'),
+              q: t('包月套餐用完后会怎样？'),
               a: t('系统会自动切换到您的钱包余额继续计费（按¥0.50/美金），不会中断服务。建议钱包保持一定余额作为保底。'),
             },
             {
-              q: t('订阅套餐过期了，剩余额度还在吗？'),
-              a: t('订阅套餐过期后，剩余额度会清零。所以建议根据实际使用量选择合适的套餐，避免浪费。如果用不完，可以选择更小的套餐或直接用按量付费。'),
+              q: t('包月套餐过期了，剩余额度还在吗？'),
+              a: t('包月套餐过期后，剩余额度会清零。所以建议根据实际使用量选择合适的套餐，避免浪费。如果用不完，可以选择更小的套餐或直接用按量付费。'),
             },
             {
-              q: t('我同时购买了多个订阅套餐，怎么扣费？'),
+              q: t('我同时购买了多个包月套餐，怎么扣费？'),
               a: t('系统会优先使用即将过期的套餐，避免浪费。多个套餐的有效期是独立计算的，不会叠加。'),
             },
             {

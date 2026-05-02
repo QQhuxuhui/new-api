@@ -271,7 +271,7 @@ func AdminLockUserPlan(c *gin.Context) {
 	// Make reason optional - ignore bind error
 	_ = c.ShouldBindJSON(&req)
 
-	err = model.LockUserPlan(id, req.Reason)
+	err = model.LockUserPlan(id, req.Reason, "admin")
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -592,6 +592,51 @@ func UserToggleAutoSwitch(c *gin.Context) {
 	})
 }
 
+// UserLockPlan allows a user to lock one of their own non-current, non-queued plans
+func UserLockPlan(c *gin.Context) {
+	userId := c.GetInt("id")
+	userPlanId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&req) // body optional
+
+	if err := service.UserLockPlan(userId, userPlanId, req.Reason); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "套餐已锁定",
+	})
+}
+
+// UserUnlockPlan allows a user to clear a lock they themselves applied
+func UserUnlockPlan(c *gin.Context) {
+	userId := c.GetInt("id")
+	userPlanId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	if err := service.UserUnlockPlan(userId, userPlanId); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "套餐已解锁",
+	})
+}
+
 // UserPlanResponse is the response format for frontend (with mapped field names)
 type UserPlanResponse struct {
 	Id                      int         `json:"id"`
@@ -604,6 +649,7 @@ type UserPlanResponse struct {
 	CanSwitch               int         `json:"can_switch"`      // Mapped from AllowUserSwitch
 	CanToggleAuto           int         `json:"can_toggle_auto"` // Mapped from AllowUserToggle
 	Locked                  int         `json:"locked"`
+	LockedBy                string      `json:"locked_by"`
 	LockedReason            string      `json:"locked_reason"`
 	AdminNote               string      `json:"admin_note"`
 	StartedAt               int64       `json:"started_at"`
@@ -648,6 +694,7 @@ func convertToUserPlanResponse(up *model.UserPlan) *UserPlanResponse {
 		CanSwitch:               up.AllowUserSwitch, // Map field name
 		CanToggleAuto:           up.AllowUserToggle, // Map field name
 		Locked:                  up.Locked,
+		LockedBy:                up.LockedBy,
 		LockedReason:            up.LockedReason,
 		AdminNote:               up.AdminNote,
 		StartedAt:               up.StartedAt,

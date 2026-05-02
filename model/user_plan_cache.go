@@ -21,6 +21,7 @@ type UserPlanCacheEntry struct {
 	AllowUserSwitch int    `json:"allow_user_switch"`
 	AllowUserToggle int    `json:"allow_user_toggle"`
 	Locked          int    `json:"locked"`
+	LockedBy        string `json:"locked_by"`
 	LockedReason    string `json:"locked_reason"`
 	StartedAt       int64  `json:"started_at"`
 	ExpiresAt       int64  `json:"expires_at"`
@@ -56,6 +57,7 @@ func (e *UserPlanCacheEntry) ToUserPlan() *UserPlan {
 		AllowUserSwitch:         e.AllowUserSwitch,
 		AllowUserToggle:         e.AllowUserToggle,
 		Locked:                  e.Locked,
+		LockedBy:                e.LockedBy,
 		LockedReason:            e.LockedReason,
 		StartedAt:               e.StartedAt,
 		ExpiresAt:               e.ExpiresAt,
@@ -105,6 +107,7 @@ func FromUserPlan(up *UserPlan) *UserPlanCacheEntry {
 		AllowUserSwitch:         up.AllowUserSwitch,
 		AllowUserToggle:         up.AllowUserToggle,
 		Locked:                  up.Locked,
+		LockedBy:                up.LockedBy,
 		LockedReason:            up.LockedReason,
 		StartedAt:               up.StartedAt,
 		ExpiresAt:               up.ExpiresAt,

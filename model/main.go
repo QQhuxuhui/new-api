@@ -298,6 +298,11 @@ func migrateDB() error {
 		common.SysLog("failed to migrate user plan snapshots: " + err.Error())
 		// Don't fail startup, migration can be retried
 	}
+	// Backfill locked_by='admin' for historically locked rows (idempotent)
+	if err := migrateUserPlanLockedBy(); err != nil {
+		common.SysLog("failed to backfill user plan locked_by: " + err.Error())
+		// Don't fail startup, migration can be retried
+	}
 	// Clear stale client-restriction / sticky-session / masquerade-hash flags left
 	// over from the removed identity-masquerade stack. Idempotent via options row.
 	if err := clearMasqueradeLegacyFlags(); err != nil {
@@ -432,6 +437,21 @@ func migrateUserPlanSnapshots() error {
 		common.SysLog("user plan snapshot migration: no records to migrate")
 	}
 
+	return nil
+}
+
+// migrateUserPlanLockedBy backfills locked_by='admin' for rows that were locked
+// before the LockedBy field existed. Idempotent: only touches rows still missing the value.
+func migrateUserPlanLockedBy() error {
+	result := DB.Model(&UserPlan{}).
+		Where("locked = ? AND (locked_by IS NULL OR locked_by = ?)", 1, "").
+		Update("locked_by", "admin")
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		common.SysLog(fmt.Sprintf("user plan locked_by backfill: %d rows updated to 'admin'", result.RowsAffected))
+	}
 	return nil
 }
 

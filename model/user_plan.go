@@ -23,7 +23,8 @@ type UserPlan struct {
 	AutoSwitch        int    `json:"auto_switch" gorm:"default:1"`       // 1 = auto switch to higher priority when available
 	AllowUserSwitch   int    `json:"allow_user_switch" gorm:"default:0"` // Admin permission: allow user to manually switch
 	AllowUserToggle   int    `json:"allow_user_toggle" gorm:"default:1"` // Admin permission: allow user to toggle auto-switch
-	Locked            int    `json:"locked" gorm:"default:0"`            // 1 = locked by admin
+	Locked            int    `json:"locked" gorm:"default:0"`                                  // 1 = locked
+	LockedBy          string `json:"locked_by" gorm:"type:varchar(16);default:'';index"`       // "" / "admin" / "user"
 	LockedReason      string `json:"locked_reason" gorm:"type:varchar(255)"`
 	LockedAt          int64  `json:"locked_at" gorm:"default:0"`
 	AdminNote         string `json:"admin_note" gorm:"type:text"`
@@ -173,6 +174,17 @@ func (up *UserPlan) CanUserToggleAuto() bool {
 // IsLocked checks if the user plan is locked
 func (up *UserPlan) IsLocked() bool {
 	return up.Locked == 1
+}
+
+// IsAdminLocked reports whether the lock was applied by an admin.
+// Empty LockedBy on locked rows is treated as admin to preserve historical behavior.
+func (up *UserPlan) IsAdminLocked() bool {
+	return up.Locked == 1 && up.LockedBy != "user"
+}
+
+// IsUserLocked reports whether the lock was applied by the user themselves.
+func (up *UserPlan) IsUserLocked() bool {
+	return up.Locked == 1 && up.LockedBy == "user"
 }
 
 // IsExpired checks if the user plan has expired
@@ -706,8 +718,12 @@ func SetUserPlanQuota(userPlanId int, quota int64) error {
 		}).Error
 }
 
-// LockUserPlan locks a user plan with a reason
-func LockUserPlan(userPlanId int, reason string) error {
+// LockUserPlan locks a user plan with a reason. lockedBy must be "admin" or "user".
+func LockUserPlan(userPlanId int, reason string, lockedBy string) error {
+	if lockedBy != "admin" && lockedBy != "user" {
+		return fmt.Errorf("invalid lockedBy value: %q", lockedBy)
+	}
+
 	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
 	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
@@ -718,12 +734,66 @@ func LockUserPlan(userPlanId int, reason string) error {
 		Where("id = ?", userPlanId).
 		Updates(map[string]interface{}{
 			"locked":        1,
+			"locked_by":     lockedBy,
 			"locked_reason": reason,
+			"locked_at":     time.Now().UnixMilli(),
 			"updated_at":    time.Now().UnixMilli(),
 		}).Error
 }
 
-// UnlockUserPlan unlocks a user plan
+// LockUserPlanIfEligible atomically locks a user-owned plan with locked_by="user"
+// only when the row still satisfies all preconditions (active, not expired, not
+// current, not queued, not already locked). This closes the TOCTOU window between
+// service-level validation and the write.
+//
+// Returns RowsAffected so callers can distinguish a genuine race (0) from a successful
+// transition (1).
+func LockUserPlanIfEligible(userPlanId, userId int, reason string) (int64, error) {
+	now := time.Now().UnixMilli()
+	result := DB.Model(&UserPlan{}).
+		Where("id = ? AND user_id = ? AND locked = 0 AND is_current = 0 AND queue_position = 0 AND status = ? AND (expires_at = 0 OR expires_at > ?)",
+			userPlanId, userId, UserPlanStatusActive, now).
+		Updates(map[string]interface{}{
+			"locked":        1,
+			"locked_by":     "user",
+			"locked_reason": reason,
+			"locked_at":     now,
+			"updated_at":    now,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if result.RowsAffected > 0 {
+		_ = InvalidateUserPlanCache(userId)
+	}
+	return result.RowsAffected, nil
+}
+
+// UnlockUserPlanIfUserLocked atomically clears a lock only when the plan is still
+// owned by the user AND the lock was applied by the user. This prevents a stale
+// user unlock request from clearing a freshly applied admin lock.
+func UnlockUserPlanIfUserLocked(userPlanId, userId int) (int64, error) {
+	now := time.Now().UnixMilli()
+	result := DB.Model(&UserPlan{}).
+		Where("id = ? AND user_id = ? AND locked = 1 AND locked_by = ?",
+			userPlanId, userId, "user").
+		Updates(map[string]interface{}{
+			"locked":        0,
+			"locked_by":     "",
+			"locked_reason": "",
+			"updated_at":    now,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if result.RowsAffected > 0 {
+		_ = InvalidateUserPlanCache(userId)
+	}
+	return result.RowsAffected, nil
+}
+
+// UnlockUserPlan unlocks a user plan, regardless of who locked it.
+// Service-layer callers must enforce who is allowed to invoke this.
 func UnlockUserPlan(userPlanId int) error {
 	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
@@ -735,6 +805,7 @@ func UnlockUserPlan(userPlanId int) error {
 		Where("id = ?", userPlanId).
 		Updates(map[string]interface{}{
 			"locked":        0,
+			"locked_by":     "",
 			"locked_reason": "",
 			"updated_at":    time.Now().UnixMilli(),
 		}).Error

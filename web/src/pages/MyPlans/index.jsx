@@ -169,6 +169,42 @@ const MyPlans = () => {
     setLoading(false);
   };
 
+  // Lock a non-current plan (user-initiated)
+  const handleLockPlan = async (userPlanId) => {
+    setLoading(true);
+    try {
+      const res = await API.post(`/api/my_plans/${userPlanId}/lock`, {});
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('套餐已锁定'));
+        loadMyPlans();
+      } else {
+        showError(message);
+      }
+    } catch (e) {
+      showError(e.message);
+    }
+    setLoading(false);
+  };
+
+  // Unlock a plan the user previously locked
+  const handleUnlockPlan = async (userPlanId) => {
+    setLoading(true);
+    try {
+      const res = await API.post(`/api/my_plans/${userPlanId}/unlock`, {});
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('套餐已解锁'));
+        loadMyPlans();
+      } else {
+        showError(message);
+      }
+    } catch (e) {
+      showError(e.message);
+    }
+    setLoading(false);
+  };
+
   // Request refund for a queued plan
   const handleRequestRefund = async () => {
     if (!refundPlan) return;
@@ -586,10 +622,14 @@ const MyPlans = () => {
   const renderPlanCard = (userPlan) => {
     const isCurrent = userPlan.is_current === 1;
     const isLocked = userPlan.locked === 1;
+    const lockedBy = userPlan.locked_by || '';
+    const isUserLocked = isLocked && lockedBy === 'user';
+    const isAdminLocked = isLocked && lockedBy !== 'user';
     const canSwitch = userPlan.can_switch === 1;
     const canToggleAuto = userPlan.can_toggle_auto === 1;
     const autoSwitchEnabled = userPlan.auto_switch === 1;
     const isQueued = (userPlan.queue_position || 0) > 0; // 在排队中
+    const canUserLock = !isCurrent && !isLocked && !isQueued; // user can lock idle non-current active plans
     const plan = userPlan.plan || {};
 
     return (
@@ -633,10 +673,16 @@ const MyPlans = () => {
                       {t('当前使用')}
                     </Tag>
                   )}
-                  {isLocked && (
+                  {isAdminLocked && (
                     <Tag color='red' size='small' shape='circle' type='solid'>
                       <IconLock size='small' className='mr-1' />
                       {t('已锁定')}
+                    </Tag>
+                  )}
+                  {isUserLocked && (
+                    <Tag color='blue' size='small' shape='circle' type='solid'>
+                      <IconLock size='small' className='mr-1' />
+                      {t('你已锁定')}
                     </Tag>
                   )}
                 </div>
@@ -650,26 +696,55 @@ const MyPlans = () => {
               </div>
             </div>
 
-            {/* Switch Action (Top Right for Desktop) */}
-            {!isCurrent && canSwitch && !isLocked && !isQueued && (
-              <Popconfirm
-                title={t('确认切换到此套餐？')}
-                content={t('切换后将使用此套餐的额度和渠道配置')}
-                onConfirm={() => handleSwitchPlan(userPlan.id)}
-                okType="primary"
-              >
+            {/* Switch / Lock Actions (Top Right for Desktop) */}
+            <div className='hidden md:flex items-center gap-2'>
+              {!isCurrent && canSwitch && !isLocked && !isQueued && (
+                <Popconfirm
+                  title={t('确认切换到此套餐？')}
+                  content={t('切换后将使用此套餐的额度和渠道配置')}
+                  onConfirm={() => handleSwitchPlan(userPlan.id)}
+                  okType="primary"
+                >
+                  <Button
+                    theme='light'
+                    type='primary'
+                    icon={<IconArrowRight />}
+                    iconPosition="right"
+                    className='bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200'
+                    style={{ borderRadius: '12px' }}
+                  >
+                    {t('切换到此套餐')}
+                  </Button>
+                </Popconfirm>
+              )}
+              {canUserLock && (
+                <Popconfirm
+                  title={t('确认锁定此套餐？')}
+                  content={t('锁定期间将不会消费此套餐的额度，也不会被自动切换')}
+                  onConfirm={() => handleLockPlan(userPlan.id)}
+                  okType="primary"
+                >
+                  <Button
+                    theme='light'
+                    icon={<IconLock />}
+                    style={{ borderRadius: '12px' }}
+                  >
+                    {t('锁定')}
+                  </Button>
+                </Popconfirm>
+              )}
+              {isUserLocked && (
                 <Button
                   theme='light'
                   type='primary'
-                  icon={<IconArrowRight />}
-                  iconPosition="right"
-                  className='hidden md:flex bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200'
+                  icon={<IconUndo />}
+                  onClick={() => handleUnlockPlan(userPlan.id)}
                   style={{ borderRadius: '12px' }}
                 >
-                  {t('切换到此套餐')}
+                  {t('解锁')}
                 </Button>
-              </Popconfirm>
-            )}
+              )}
+            </div>
           </div>
 
           <Divider className='mb-6 opacity-50' />
@@ -727,7 +802,7 @@ const MyPlans = () => {
               )}
             </div>
 
-            <div className='w-full sm:w-auto flex justify-end'>
+            <div className='w-full sm:w-auto flex flex-wrap justify-end gap-2'>
                {/* Mobile Switch Button */}
               {!isCurrent && canSwitch && !isLocked && !isQueued && (
                 <Popconfirm
@@ -744,6 +819,26 @@ const MyPlans = () => {
                     style={{ borderRadius: '12px', height: '40px' }}
                   >
                     {t('切换到此套餐')}
+                  </Button>
+                </Popconfirm>
+              )}
+
+              {/* Mobile Lock Button */}
+              {canUserLock && (
+                <Popconfirm
+                  title={t('确认锁定此套餐？')}
+                  content={t('锁定期间将不会消费此套餐的额度，也不会被自动切换')}
+                  onConfirm={() => handleLockPlan(userPlan.id)}
+                  okType="primary"
+                >
+                  <Button
+                    theme='light'
+                    icon={<IconLock />}
+                    block
+                    className='md:hidden w-full'
+                    style={{ borderRadius: '12px', height: '40px' }}
+                  >
+                    {t('锁定')}
                   </Button>
                 </Popconfirm>
               )}
@@ -765,10 +860,28 @@ const MyPlans = () => {
                 </Tooltip>
               )}
 
-              {isLocked && (
-                <Tag color='red' style={{ borderRadius: '8px', padding: '6px 12px' }}>
-                  {t('套餐锁定中')}
-                </Tag>
+              {isAdminLocked && (
+                <Tooltip content={userPlan.locked_reason || t('该套餐由管理员锁定，无法自行解锁')}>
+                  <Tag color='grey' style={{ borderRadius: '8px', padding: '6px 12px' }}>
+                    <IconLock className='mr-1' />
+                    {t('管理员锁定')}
+                  </Tag>
+                </Tooltip>
+              )}
+
+              {/* Mobile Unlock Button */}
+              {isUserLocked && (
+                <Button
+                  theme='light'
+                  type='primary'
+                  icon={<IconUndo />}
+                  block
+                  className='md:hidden w-full'
+                  onClick={() => handleUnlockPlan(userPlan.id)}
+                  style={{ borderRadius: '12px', height: '40px' }}
+                >
+                  {t('解锁')}
+                </Button>
               )}
             </div>
           </div>
