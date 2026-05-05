@@ -2,50 +2,384 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>对话生图 · Sparkcode</title>
+  <title>SparkCode · 对话生图</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
+    /* ===========================================
+       宋韵 · 朱砂 × 宣纸
+       Song Dynasty refined — rice paper + cinnabar
+       =========================================== */
     :root {
-      --bg: #030303; --panel: #0a0a0a; --border: rgba(255,255,255,0.08);
-      --text: #e8e8e8; --muted: rgba(255,255,255,0.45); --accent: #d9ff00;
-      --error: #ff4d4f; --warn: #faad14;
+      /* Surfaces */
+      --bg:           #faf6ee;   /* 宣纸底 */
+      --bg-2:         #f5efde;   /* 略深 */
+      --paper:        #ffffff;   /* 纯白卡 */
+      --paper-warm:   #fdfaf3;   /* 微暖白 */
+
+      /* Ink */
+      --ink:          #1a1814;   /* 墨黑 */
+      --ink-soft:     #4a4338;   /* 淡墨 */
+      --muted:        #7a7268;   /* 灰墨 */
+      --faint:        #b3a99a;   /* 淡灰 */
+
+      /* Borders */
+      --border:       #e6dec8;   /* 暖边 */
+      --border-soft:  #f0e9d5;
+      --border-strong:#cfc4a5;
+
+      /* 朱砂 cinnabar — the one signature color */
+      --accent:       #a82828;
+      --accent-2:     #c0392b;
+      --accent-deep:  #7a1c1c;
+      --accent-tint:  rgba(168,40,40,0.06);
+      --accent-tint-2:rgba(168,40,40,0.14);
+
+      /* Status */
+      --success:      #5a7a3a;
+      --warn:         #b8860b;
+      --error:        #a82828;
+
+      /* Aliases for legacy `var(--text)` / `var(--panel)` references */
+      --text:         var(--ink);
+      --panel:        var(--paper);
+
+      /* Typography */
+      --font-display: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "STZhongsong", "SimSun", serif;
+      --font-body:    -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+      --font-mono:    "SF Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+
+      /* Shadows (warm, soft — never neutral grey) */
+      --shadow-paper: 0 1px 0 rgba(80,50,20,0.04), 0 8px 24px rgba(80,50,20,0.06);
+      --shadow-modal: 0 4px 12px rgba(80,50,20,0.10), 0 24px 64px rgba(80,50,20,0.14);
+      --shadow-img:   0 1px 2px rgba(80,50,20,0.06), 0 4px 12px rgba(80,50,20,0.08);
     }
+
     * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif; height: 100%; }
-    .app { display: grid; grid-template-rows: 56px 1fr; height: 100vh; }
-    .header { display: flex; align-items: center; gap: 12px; padding: 0 16px;
-      border-bottom: 1px solid var(--border); }
-    .main  { display: grid; grid-template-columns: 420px 1fr; min-height: 0; }
-    .chat-pane { display: flex; flex-direction: column; border-right: 1px solid var(--border); min-height: 0; }
-    .chat-stream { flex: 1; overflow-y: auto; padding: 16px; }
-    .input-area  { border-top: 1px solid var(--border); padding: 12px; }
-    .workspace { display: flex; flex-direction: column; min-height: 0; }
-    .tab-bar { display: flex; gap: 8px; border-bottom: 1px solid var(--border); padding: 8px 16px; }
-    .tab { padding: 6px 14px; border-radius: 6px; background: rgba(255,255,255,0.04);
-      cursor: pointer; font-size: 13px; }
-    .tab.active { background: var(--accent); color: #000; font-weight: 600; }
-    .tab-content { flex: 1; overflow: auto; padding: 16px; }
-    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-      background: #1a1a1a; border: 1px solid var(--border); padding: 10px 16px;
-      border-radius: 8px; font-size: 13px; z-index: 9999; opacity: 0; transition: opacity .2s; }
-    .toast.show { opacity: 1; }
+
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-body);
+      height: 100%;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: "palt" 1;
+    }
+
+    /* 宣纸纹理：极细噪点 + 朱砂角光晕 */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background-image:
+        radial-gradient(at 0% 0%, rgba(168,40,40,0.025) 0%, transparent 45%),
+        radial-gradient(at 100% 100%, rgba(80,50,20,0.025) 0%, transparent 55%),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.42  0 0 0 0 0.34  0 0 0 0 0.18  0 0 0 0.06 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+      background-size: auto, auto, 180px 180px;
+    }
+
+    /* Layout shell */
+    .app { display: grid; grid-template-rows: 64px 1fr; height: 100vh; position: relative; z-index: 1; }
+    .main { display: grid; grid-template-columns: 440px 1fr; min-height: 0; }
+
+    /* === 题首 (header) === */
+    .header {
+      display: flex; align-items: center; gap: 14px;
+      padding: 0 24px;
+      background: var(--paper-warm);
+      border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+    /* 朱砂装订线 */
+    .header::after {
+      content: '';
+      position: absolute; bottom: -1px; left: 24px; right: 24px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent 0%, var(--accent) 18%, var(--accent) 82%, transparent 100%);
+      opacity: 0.45;
+    }
+
+    .brand {
+      display: inline-flex; align-items: center; gap: 12px;
+      font-family: var(--font-body);
+      font-size: 19px; font-weight: 600;
+      color: var(--ink);
+      letter-spacing: -0.2px;
+    }
+    /* "Spark" 和 "Code" 一暖一冷，强化品牌辨识度 */
+    .brand::after {
+      content: '';
+      display: inline-block;
+      width: 4px; height: 4px;
+      background: var(--accent);
+      border-radius: 50%;
+      margin-left: 2px;
+      transform: translateY(6px);
+    }
+    /* 印章式 logo —「图」字朱砂方印，略向左倾 */
+    .brand-seal {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px;
+      background: var(--accent);
+      color: #fff;
+      font-family: var(--font-display);
+      font-size: 16px; font-weight: 700;
+      border-radius: 4px;
+      box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.18), 0 1px 2px rgba(120,20,20,0.25);
+      transform: rotate(-4deg);
+      letter-spacing: 0;
+    }
+
+    .brand-status {
+      font-family: var(--font-body);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0;
+      font-weight: 400;
+    }
+
+    /* Header buttons (toolbar, all unified) */
+    .header button {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      color: var(--ink-soft);
+      font-family: var(--font-body);
+      font-size: 12.5px;
+      padding: 7px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      letter-spacing: 0.5px;
+    }
+    .header button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--paper-warm);
+    }
+    .header select {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: 12.5px;
+      padding: 7px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      min-width: 200px;
+    }
+    .header select:hover { border-color: var(--accent); }
+
+    /* === Chat 左栏 === */
+    .chat-pane {
+      display: flex; flex-direction: column;
+      border-right: 1px solid var(--border);
+      min-height: 0;
+      background: var(--paper-warm);
+    }
+    .chat-stream { flex: 1; overflow-y: auto; padding: 24px 20px; }
+
+    /* Composer toolbar (model picker + new-chat — sits between stream and input) */
+    .composer-toolbar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 20px;
+      background: var(--paper-warm);
+      border-top: 1px solid var(--border);
+    }
+    .composer-toolbar-label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      font-weight: 500;
+    }
+    .composer-toolbar select {
+      flex: 0 1 auto;
+      min-width: 220px;
+      background: var(--paper);
+      border: 1px solid var(--border);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: 13px;
+      padding: 7px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: border-color 0.15s ease;
+    }
+    .composer-toolbar select:hover { border-color: var(--accent); }
+    .composer-newchat {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      color: var(--ink-soft);
+      font-family: var(--font-body);
+      font-size: 12.5px;
+      padding: 7px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      letter-spacing: 0.5px;
+    }
+    .composer-newchat:hover { border-color: var(--accent); color: var(--accent); }
+
+    .input-area {
+      border-top: 1px solid var(--border);
+      padding: 14px 20px 18px;
+      background: var(--paper);
+    }
+
+    /* === Workspace 右栏 === */
+    .workspace {
+      display: flex; flex-direction: column;
+      min-height: 0;
+      background: var(--bg);
+    }
+
+    /* Tabs — 装订线式 (no pill, just a baseline) */
+    .tab-bar {
+      display: flex; gap: 0;
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      background: var(--paper-warm);
+    }
+    .tab {
+      padding: 14px 22px;
+      background: transparent;
+      cursor: pointer;
+      font-size: 14px;
+      font-family: var(--font-display);
+      color: var(--muted);
+      letter-spacing: 2px;
+      position: relative;
+      transition: color 0.15s ease;
+    }
+    .tab:hover { color: var(--ink); }
+    .tab.active {
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .tab.active::after {
+      content: '';
+      position: absolute; left: 14px; right: 14px; bottom: -1px;
+      height: 2px;
+      background: var(--accent);
+      border-radius: 1px;
+    }
+    .tab-content { flex: 1; overflow: auto; padding: 24px; }
+
+    /* === Toast 便签 === */
+    .toast {
+      position: fixed; bottom: 32px; left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      padding: 12px 18px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: var(--ink);
+      z-index: 9999; opacity: 0;
+      box-shadow: var(--shadow-paper);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* === Scrollbar (warm, thin) === */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+    /* Common reusable classes (used by JS-rendered content) */
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      font-family: var(--font-body);
+      padding: 9px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 500;
+      letter-spacing: 1px;
+      box-shadow: 0 1px 2px rgba(120,20,20,0.18);
+      transition: background 0.15s ease, transform 0.05s ease;
+    }
+    .btn-primary:hover { background: var(--accent-deep); }
+    .btn-primary:active { transform: translateY(1px); }
+    .btn-primary:disabled { background: var(--faint); cursor: not-allowed; box-shadow: none; }
+
+    .btn-ghost {
+      background: var(--paper);
+      color: var(--ink-soft);
+      border: 1px solid var(--border);
+      font-family: var(--font-body);
+      padding: 8px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Upload button — visually inviting, dashed border to read as a "drop zone" */
+    .btn-upload {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--accent-tint);
+      color: var(--accent);
+      border: 1.5px dashed var(--accent-tint-2);
+      font-family: var(--font-body);
+      font-size: 12.5px;
+      font-weight: 500;
+      padding: 7px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      letter-spacing: 0.5px;
+    }
+    .btn-upload:hover {
+      background: var(--accent-tint-2);
+      border-color: var(--accent);
+      border-style: solid;
+    }
+
+    /* Form controls when used in modals */
+    .field-input, .field-select, .field-textarea {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: 13px;
+      padding: 9px 12px;
+      border-radius: 4px;
+      transition: border-color 0.15s ease;
+    }
+    .field-input:focus, .field-select:focus, .field-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-tint);
+    }
   </style>
 </head>
 <body>
   <div class="app">
     <header class="header">
-      <span style="font-weight:600">对话生图</span>
-      <span style="color:var(--muted);font-size:12px" id="header-status">init…</span>
+      <span class="brand">
+        <span class="brand-seal">图</span>
+        SparkCode
+      </span>
+      <span class="brand-status" id="header-status">初始化…</span>
       <span style="margin-left:auto"></span>
-      <select id="model-select"></select>
-      <button id="new-chat-btn">+ 新对话</button>
+      <button id="settings-btn" title="管理 API Key">⚙ 令牌</button>
       <button id="export-btn">⬇ 导出</button>
       <button id="import-btn">⬆ 导入</button>
     </header>
     <main class="main">
       <section class="chat-pane">
         <div class="chat-stream" id="chat-stream"></div>
+        <div class="composer-toolbar">
+          <label class="composer-toolbar-label">模型</label>
+          <select id="model-select"></select>
+          <span style="margin-left:auto"></span>
+          <button id="new-chat-btn" class="composer-newchat">+ 新对话</button>
+        </div>
         <div class="input-area" id="input-area"></div>
       </section>
       <section class="workspace">
@@ -181,15 +515,71 @@
     async function listNodes() { return db.getAll('nodes'); }
 
     // === Key store (shared with gpt文生图+图生图.html) ===
-    const APIKEY_STORE = 'gpt_image_apikeys';  // { [model]: 'sk-...' }
-    function getKeyForModel(model) {
-      try { return JSON.parse(localStorage.getItem(APIKEY_STORE) || '{}')[model] || ''; }
-      catch { return ''; }
+    // Sparkcode 中转平台分组：每个 group 对应一个 new-api 渠道分组的令牌。
+    // 一个 key 服务一个分组下所有模型，避免逐模型填多次。
+    const KEY_GROUPS = [
+      {
+        id: 'codex',
+        label: 'codex 分组',
+        hint: 'GPT 系列：gpt-image-2 出图、gpt-5.5 ✨ 润色',
+        models: ['gpt-image-2', 'gpt-5.5'],
+      },
+      {
+        id: 'banana',
+        label: '大香蕉 分组',
+        hint: 'Gemini 绘图：gemini-3.x-flash/pro-image-preview',
+        models: ['gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview'],
+        // Pattern fallback so future Gemini image variants resolve here without code edits.
+        pattern: /(gemini[-.\d]*.*image|nano-banana)/i,
+      },
+    ];
+    const GROUP_KEY_STORE  = 'conv_image_group_keys';   // { [groupId]: 'sk-...' }
+    const LEGACY_KEY_STORE = 'gpt_image_apikeys';       // sibling per-model store (sole migration source)
+
+    function getGroupForModel(model) {
+      if (!model) return null;
+      for (const g of KEY_GROUPS) {
+        if (g.models.includes(model)) return g;
+      }
+      // Fallback: pattern match (covers future variants the explicit list missed).
+      for (const g of KEY_GROUPS) {
+        if (g.pattern && g.pattern.test(model)) return g;
+      }
+      return null;
     }
-    function saveKeyForModel(model, key) {
-      const all = JSON.parse(localStorage.getItem(APIKEY_STORE) || '{}');
-      if (key) all[model] = key; else delete all[model];
-      localStorage.setItem(APIKEY_STORE, JSON.stringify(all));
+    function loadGroupKeys() {
+      try { return JSON.parse(localStorage.getItem(GROUP_KEY_STORE) || '{}'); }
+      catch { return {}; }
+    }
+    function getKeyForModel(model) {
+      const g = getGroupForModel(model);
+      if (!g) return '';
+      return loadGroupKeys()[g.id] || '';
+    }
+    function saveKeyForGroup(groupId, key) {
+      const all = loadGroupKeys();
+      if (key) all[groupId] = key; else delete all[groupId];
+      localStorage.setItem(GROUP_KEY_STORE, JSON.stringify(all));
+    }
+    // One-shot migration: if the user already has per-model keys in the sibling
+    // file's store and our group store is empty, lift them into group keys so
+    // returning users don't have to re-enter anything.
+    function migrateLegacyKeys() {
+      const cur = loadGroupKeys();
+      if (Object.keys(cur).length > 0) return;
+      let legacy;
+      try { legacy = JSON.parse(localStorage.getItem(LEGACY_KEY_STORE) || '{}'); }
+      catch { return; }
+      if (!legacy || Object.keys(legacy).length === 0) return;
+      const migrated = {};
+      for (const [model, key] of Object.entries(legacy)) {
+        if (!key) continue;
+        const g = getGroupForModel(model);
+        if (g && !migrated[g.id]) migrated[g.id] = key;
+      }
+      if (Object.keys(migrated).length > 0) {
+        localStorage.setItem(GROUP_KEY_STORE, JSON.stringify(migrated));
+      }
     }
 
     // === Model helpers ===
@@ -213,6 +603,10 @@
       { id: 'gemini-3-pro-image-preview',     label: 'Gemini 3 Pro Image',     supportsMask: false },
     ];
     function modelById(id) { return MODELS.find(m => m.id === id); }
+
+    function hasAnyKey() {
+      return Object.values(loadGroupKeys()).some(v => v);
+    }
 
     function renderModelSelect() {
       const sel = $('model-select');
@@ -361,7 +755,7 @@
     }
 
     async function callPolishPrompt(originalPrompt) {
-      const POLISH_MODEL = 'gpt-4o-mini';
+      const POLISH_MODEL = 'gpt-5.5';
       const body = {
         model: POLISH_MODEL,
         messages: [
@@ -405,7 +799,7 @@
       { id: 'big',     label: '大图' },
       { id: 'tree',    label: '分支树' },
       { id: 'library', label: '图库' },
-      { id: 'mask',    label: 'Mask',   modelGated: true },
+      { id: 'mask',    label: '区域编辑', modelGated: true },
     ];
     let activeTab     = 'big';
     let activeImageId = null;
@@ -420,13 +814,13 @@
       if (refState.imageIds.length === 0) { bar.innerHTML = ''; return; }
       const imgs = await Promise.all(refState.imageIds.map(getImage));
       bar.innerHTML = imgs.filter(Boolean).map(img => `
-        <div style="display:flex;align-items:center;gap:6px;background:rgba(217,255,0,0.1);
-                    border:1px solid rgba(217,255,0,0.3);border-radius:6px;padding:4px 8px;">
-          <img src="${img.dataUrl}" style="width:24px;height:24px;object-fit:cover;border-radius:3px;">
-          <span style="font-size:11px;color:var(--accent);">${img.shortId}</span>
-          <span data-remove-ref="${img.id}" style="cursor:pointer;color:var(--muted);">✕</span>
+        <div style="display:inline-flex;align-items:center;gap:6px;background:var(--accent-tint);
+                    border:1px solid var(--accent-tint-2);border-radius:4px;padding:4px 8px 4px 4px;">
+          <img src="${img.dataUrl}" style="width:22px;height:22px;object-fit:cover;border-radius:2px;">
+          <span style="font-size:11px;color:var(--accent);font-weight:600;letter-spacing:0.5px;">${img.shortId}</span>
+          <span data-remove-ref="${img.id}" style="cursor:pointer;color:var(--accent);opacity:0.6;font-size:13px;line-height:1;padding:0 2px;">✕</span>
         </div>
-      `).join('') + `<span data-clear-refs style="cursor:pointer;color:var(--muted);font-size:11px;align-self:center;">清空</span>`;
+      `).join('') + `<span data-clear-refs style="cursor:pointer;color:var(--muted);font-size:11px;align-self:center;margin-left:4px;text-decoration:underline;">清空全部</span>`;
       bar.querySelectorAll('[data-remove-ref]').forEach(el =>
         el.addEventListener('click', () => {
           refState.imageIds = refState.imageIds.filter(id => id !== el.dataset.removeRef);
@@ -464,12 +858,14 @@
         activeImageId = all.length ? all[all.length - 1].id : null;
       }
       if (!activeImageId) {
-        tc.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">尚无图像</div>';
+        tc.innerHTML = `<div style="color:var(--muted);text-align:center;padding:80px 24px;font-size:13px;">
+          <div style="font-family:var(--font-display);font-size:22px;color:var(--faint);margin-bottom:12px;">尚无图像</div>
+          在左侧输入提示词后开始生成</div>`;
         return;
       }
       const img = await getImage(activeImageId);
-      tc.innerHTML = `<div style="display:flex;justify-content:center;align-items:center;height:100%;">
-        <img src="${img.dataUrl}" style="max-width:100%;max-height:100%;border-radius:8px;">
+      tc.innerHTML = `<div style="display:flex;justify-content:center;align-items:center;height:100%;padding:8px;">
+        <img src="${img.dataUrl}" style="max-width:100%;max-height:100%;border-radius:3px;box-shadow:var(--shadow-modal);background:var(--paper);">
       </div>`;
     }
 
@@ -480,7 +876,9 @@
       const imgMap = new Map(imgs.map(i => [i.id, i]));
       const tc = $('tab-content');
       if (nodes.length === 0) {
-        tc.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">尚无分支</div>';
+        tc.innerHTML = `<div style="color:var(--muted);text-align:center;padding:80px 24px;font-size:13px;">
+          <div style="font-family:var(--font-display);font-size:22px;color:var(--faint);margin-bottom:12px;">尚无分支</div>
+          生成第一张图后会自动出现分支</div>`;
         return;
       }
 
@@ -518,34 +916,45 @@
       const maxX = Math.max(...[...positions.values()].map(p => p.x)) + NODE_W + 20;
       const maxY = Math.max(...[...positions.values()].map(p => p.y)) + NODE_H + 20;
 
+      // 笔触风连线：父→子，curved Bezier
       const lines = nodes.filter(n => n.parentNodeId && positions.has(n.parentNodeId)).map(n => {
         const p = positions.get(n.parentNodeId), c = positions.get(n.id);
-        return `<line x1="${p.x + NODE_W}" y1="${p.y + NODE_H/2}" x2="${c.x}" y2="${c.y + NODE_H/2}"
-                stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>`;
+        const x1 = p.x + NODE_W, y1 = p.y + NODE_H/2;
+        const x2 = c.x,           y2 = c.y + NODE_H/2;
+        const cx = (x1 + x2) / 2;
+        return `<path d="M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}"
+                fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-opacity="0.55" stroke-linecap="round"/>`;
       }).join('');
 
       const cards = nodes.map(n => {
         const p = positions.get(n.id);
         const firstImg = imgMap.get(n.imageIds[0]);
-        const sel = selectedNodeIds.includes(n.id) ? 'stroke="var(--accent)" stroke-width="3"' : 'stroke="rgba(255,255,255,0.15)" stroke-width="1"';
-        const kindBadge = { root: 'R', edit: 'E', reroll: '🎲', gen: 'G' }[n.kind] || '?';
+        const isSelected = selectedNodeIds.includes(n.id);
+        const sel = isSelected
+          ? 'stroke="var(--accent)" stroke-width="2.5"'
+          : 'stroke="var(--border-strong)" stroke-width="1"';
+        const kindBadge = { root: '原', edit: '编', reroll: '重', gen: '生' }[n.kind] || '?';
+        const childCount = (byParent.get(n.id) || []).length;
         return `
           <g data-node-id="${n.id}" style="cursor:pointer;">
-            <rect x="${p.x}" y="${p.y}" width="${NODE_W}" height="${NODE_H}" rx="6" fill="#0a0a0a" ${sel}/>
+            <rect x="${p.x}" y="${p.y}" width="${NODE_W}" height="${NODE_H}" rx="3" fill="var(--paper)" ${sel}/>
             ${firstImg ? `<image href="${firstImg.dataUrl}" x="${p.x+4}" y="${p.y+4}" width="${NODE_W-8}" height="${NODE_H-8}" preserveAspectRatio="xMidYMid slice"/>` : ''}
-            <text x="${p.x + 6}" y="${p.y + 16}" fill="#fff" font-size="11" style="text-shadow:0 0 2px #000;">${kindBadge}</text>
-            <text x="${p.x + NODE_W - 6}" y="${p.y + NODE_H - 6}" text-anchor="end" fill="#fff" font-size="10" style="text-shadow:0 0 2px #000;">${(byParent.get(n.id) || []).length || ''}</text>
+            <rect x="${p.x+4}" y="${p.y+4}" width="20" height="20" rx="2" fill="${isSelected ? 'var(--accent)' : 'rgba(168,40,40,0.85)'}"/>
+            <text x="${p.x + 14}" y="${p.y + 18}" fill="#fff" font-size="11" font-family="'Noto Serif SC',serif" font-weight="600" text-anchor="middle">${kindBadge}</text>
+            ${childCount ? `<text x="${p.x + NODE_W - 6}" y="${p.y + NODE_H - 6}" text-anchor="end" fill="#fff" font-size="10" font-weight="700" style="text-shadow:0 0 3px rgba(0,0,0,0.8);">${childCount}</text>` : ''}
           </g>`;
       }).join('');
 
       const compareBtn = selectedNodeIds.length >= 2
-        ? `<button id="compare-btn" style="margin-bottom:8px;background:var(--accent);color:#000;border:0;padding:6px 14px;border-radius:6px;cursor:pointer;">▣ 并排对比 (${selectedNodeIds.length})</button>`
+        ? `<button id="compare-btn" class="btn-primary" style="margin-bottom:14px;padding:7px 18px;">▣ 并排对比 (${selectedNodeIds.length})</button>`
         : '';
 
       tc.innerHTML = `
-        <div style="margin-bottom:8px;color:var(--muted);font-size:11px;">click 单选 · shift+click 多选 (最多 4) · 右键 Re-roll</div>
+        <div style="margin-bottom:14px;color:var(--muted);font-size:11px;letter-spacing:0.5px;">
+          单击选中 · <span style="color:var(--ink-soft);">Shift+单击</span> 多选（最多 4 张） · <span style="color:var(--ink-soft);">右键</span> 重新生成
+        </div>
         ${compareBtn}
-        <svg width="${maxX}" height="${maxY}" style="background:#050505;border-radius:6px;">${lines}${cards}</svg>
+        <svg width="${maxX}" height="${maxY}" style="background:var(--paper-warm);border:1px solid var(--border);border-radius:4px;">${lines}${cards}</svg>
       `;
 
       tc.querySelectorAll('g[data-node-id]').forEach(g => {
@@ -638,13 +1047,13 @@
 
     function openCompareModal(nodeIds) {
       const modal = document.createElement('div');
-      modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:1000;
-                             display:flex;flex-direction:column;padding:32px;`;
-      modal.innerHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:16px;">
-        <span style="font-size:14px;color:var(--text);">并排对比 ${nodeIds.length} 个分支</span>
-        <button data-close style="background:transparent;border:0;color:var(--text);font-size:18px;cursor:pointer;">✕</button>
+      modal.style.cssText = `position:fixed;inset:0;background:rgba(28,20,12,0.55);z-index:1000;
+                             display:flex;flex-direction:column;padding:40px;backdrop-filter:blur(2px);`;
+      modal.innerHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:18px;align-items:baseline;">
+        <span style="font-family:var(--font-display);font-size:18px;color:#fff;letter-spacing:1px;">并排对比 · ${nodeIds.length} 张</span>
+        <button data-close style="background:transparent;border:0;color:rgba(255,255,255,0.7);font-size:22px;cursor:pointer;line-height:1;">✕</button>
       </div>
-      <div data-grid style="flex:1;display:grid;gap:12px;overflow:auto;
+      <div data-grid style="flex:1;display:grid;gap:14px;overflow:auto;
                            grid-template-columns:repeat(${nodeIds.length},1fr);"></div>`;
       document.body.appendChild(modal);
       const close = attachModalDismiss(modal, () => modal.remove());
@@ -660,12 +1069,12 @@
           const msg = allMsgs.find(m => m.id === node.messageId);
           const userMsg = allMsgs.slice(0, allMsgs.indexOf(msg)).reverse().find(m => m.role === 'user');
           const cell = document.createElement('div');
-          cell.style.cssText = 'display:flex;flex-direction:column;background:#0a0a0a;border-radius:8px;padding:12px;';
+          cell.style.cssText = 'display:flex;flex-direction:column;background:var(--paper);border:1px solid var(--border);border-radius:4px;padding:14px;box-shadow:var(--shadow-modal);';
           cell.innerHTML = `
-            <img src="${img?.dataUrl || ''}" style="width:100%;height:60vh;object-fit:contain;border-radius:6px;background:#000;">
-            <div style="margin-top:8px;font-size:11px;color:var(--muted);">
-              <div>${node.kind} · ${img?.shortId || ''} · ${msg?.model || ''}</div>
-              <div style="margin-top:4px;color:var(--text);">${escapeHtml(userMsg?.text || '')}</div>
+            <img src="${img?.dataUrl || ''}" style="width:100%;height:60vh;object-fit:contain;border-radius:3px;background:var(--bg-2);">
+            <div style="margin-top:10px;font-size:11px;color:var(--muted);letter-spacing:0.5px;">
+              <div><span style="color:var(--accent);font-weight:600;">${node.kind}</span> · <span style="font-family:var(--font-mono);">${img?.shortId || ''}</span> · ${escapeHtml(msg?.model || '')}</div>
+              <div style="margin-top:6px;color:var(--ink);font-size:13px;line-height:1.5;">${escapeHtml(userMsg?.text || '')}</div>
             </div>`;
           grid.appendChild(cell);
         }
@@ -693,35 +1102,38 @@
       });
 
       const usedModels = [...new Set(all.map(i => i.model))];
+      const chipStyle = (active) => active
+        ? 'cursor:pointer;padding:4px 12px;border-radius:2px;font-size:11px;background:var(--accent);color:#fff;letter-spacing:0.5px;font-weight:500;'
+        : 'cursor:pointer;padding:4px 12px;border-radius:2px;font-size:11px;background:var(--paper);color:var(--ink-soft);border:1px solid var(--border);letter-spacing:0.5px;';
       const filterUI = `
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
-          <span style="color:var(--muted);font-size:11px;">来源：</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;align-items:center;padding-bottom:14px;border-bottom:1px solid var(--border-soft);">
+          <span style="color:var(--muted);font-size:11px;letter-spacing:1px;">来源</span>
           ${['all','generated','uploads'].map(v =>
-            `<span data-filter-source="${v}" class="chip ${libraryFilter.source===v?'on':''}" style="cursor:pointer;padding:2px 10px;border-radius:10px;font-size:11px;background:${libraryFilter.source===v?'var(--accent)':'rgba(255,255,255,0.05)'};color:${libraryFilter.source===v?'#000':'var(--text)'};">${v==='all'?'全部':v==='generated'?'生成':'上传'}</span>`
+            `<span data-filter-source="${v}" style="${chipStyle(libraryFilter.source===v)}">${v==='all'?'全部':v==='generated'?'生成':'上传'}</span>`
           ).join('')}
-          <span style="margin-left:12px;color:var(--muted);font-size:11px;">模型：</span>
+          <span style="margin-left:14px;color:var(--muted);font-size:11px;letter-spacing:1px;">模型</span>
           ${['all', ...usedModels].map(v =>
-            `<span data-filter-model="${v}" class="chip" style="cursor:pointer;padding:2px 10px;border-radius:10px;font-size:11px;background:${libraryFilter.model===v?'var(--accent)':'rgba(255,255,255,0.05)'};color:${libraryFilter.model===v?'#000':'var(--text)'};">${v==='all'?'全部':v}</span>`
+            `<span data-filter-model="${v}" style="${chipStyle(libraryFilter.model===v)}">${v==='all'?'全部':escapeHtml(v)}</span>`
           ).join('')}
-          <span style="margin-left:12px;color:var(--muted);font-size:11px;">分支：</span>
+          <span style="margin-left:14px;color:var(--muted);font-size:11px;letter-spacing:1px;">分支</span>
           ${['all','with-children'].map(v =>
-            `<span data-filter-branch="${v}" style="cursor:pointer;padding:2px 10px;border-radius:10px;font-size:11px;background:${libraryFilter.branch===v?'var(--accent)':'rgba(255,255,255,0.05)'};color:${libraryFilter.branch===v?'#000':'var(--text)'};">${v==='all'?'全部':'有子分支'}</span>`
+            `<span data-filter-branch="${v}" style="${chipStyle(libraryFilter.branch===v)}">${v==='all'?'全部':'有子分支'}</span>`
           ).join('')}
-          <span style="margin-left:auto;color:var(--muted);font-size:11px;">${all.length} / ${IMAGE_CAPACITY} 张</span>
+          <span style="margin-left:auto;color:var(--muted);font-size:11px;font-family:var(--font-mono);">${all.length} / ${IMAGE_CAPACITY}</span>
         </div>
       `;
 
       const grid = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:10px;">
           ${filtered.map(img => `
-            <div data-image-id="${img.id}" draggable="true" style="position:relative;background:#0a0a0a;border-radius:6px;overflow:hidden;aspect-ratio:1;">
+            <div data-image-id="${img.id}" draggable="true" style="position:relative;background:var(--paper);border:1px solid var(--border);border-radius:3px;overflow:hidden;aspect-ratio:1;box-shadow:var(--shadow-img);transition:border-color 0.15s ease;">
               <img src="${img.dataUrl}" draggable="false" style="width:100%;height:100%;object-fit:cover;">
-              <span style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.7);color:#fff;font-size:10px;padding:1px 4px;border-radius:3px;">${img.shortId}</span>
-              <div class="lib-actions" style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;gap:6px;">
-                <button data-action="ref"  title="引用"      style="background:var(--accent);color:#000;border:0;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">↩</button>
-                <button data-action="dl"   title="下载"      style="background:rgba(255,255,255,0.2);color:#fff;border:0;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">⬇</button>
-                <button data-action="tree" title="在树中查看" style="background:rgba(255,255,255,0.2);color:#fff;border:0;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">🌳</button>
-                <button data-action="del"  title="删除"      style="background:rgba(255,77,79,0.6);color:#fff;border:0;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">🗑</button>
+              <span style="position:absolute;bottom:4px;left:4px;background:rgba(20,15,10,0.72);color:#fff;font-size:10px;padding:1px 5px;border-radius:2px;font-weight:500;letter-spacing:0.5px;">${img.shortId}</span>
+              <div class="lib-actions" style="position:absolute;inset:0;background:rgba(28,20,12,0.55);display:none;align-items:center;justify-content:center;gap:4px;backdrop-filter:blur(1px);">
+                <button data-action="ref"  title="引用"       style="background:var(--accent);color:#fff;border:0;padding:5px 9px;border-radius:2px;cursor:pointer;font-size:11px;">↩</button>
+                <button data-action="dl"   title="下载"       style="background:rgba(255,255,255,0.2);color:#fff;border:0;padding:5px 9px;border-radius:2px;cursor:pointer;font-size:11px;">⬇</button>
+                <button data-action="tree" title="在树中查看" style="background:rgba(255,255,255,0.2);color:#fff;border:0;padding:5px 9px;border-radius:2px;cursor:pointer;font-size:11px;">🌳</button>
+                <button data-action="del"  title="删除"       style="background:rgba(168,40,40,0.85);color:#fff;border:0;padding:5px 9px;border-radius:2px;cursor:pointer;font-size:11px;">🗑</button>
               </div>
             </div>
           `).join('')}
@@ -770,42 +1182,45 @@
       const model = $('model-select').value;
       const tc = $('tab-content');
       if (!modelById(model)?.supportsMask) {
-        tc.innerHTML = `<div style="color:var(--muted);text-align:center;padding:40px;">
-          Gemini 模型不支持 mask 区域编辑，请在提示词中描述要修改的位置。</div>`;
+        tc.innerHTML = `<div style="color:var(--muted);text-align:center;padding:60px 24px;font-size:13px;line-height:1.8;">
+          <div style="font-family:var(--font-display);font-size:16px;color:var(--ink-soft);margin-bottom:8px;">当前模型不支持区域编辑</div>
+          Gemini 系列没有 mask 接口，请在提示词中描述要修改的位置。</div>`;
         return;
       }
 
       if (!maskState.sourceImageId) {
         const all = (await listImages()).filter(i => !isGeminiImageModel(i.model)).sort((a,b)=>b.createdAt-a.createdAt);
-        tc.innerHTML = `<div style="color:var(--muted);margin-bottom:12px;">从图库选择源图：</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;">
+        tc.innerHTML = `<div style="color:var(--muted);margin-bottom:14px;font-size:12px;">从图库选择一张作为源图</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;">
             ${all.slice(0, 30).map(img => `
-              <img src="${img.dataUrl}" data-pick="${img.id}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:pointer;">
+              <img src="${img.dataUrl}" data-pick="${img.id}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:3px;cursor:pointer;border:1px solid var(--border);box-shadow:var(--shadow-img);transition:border-color 0.15s ease;">
             `).join('')}
           </div>`;
-        tc.querySelectorAll('[data-pick]').forEach(el =>
-          el.addEventListener('click', () => { maskState.sourceImageId = el.dataset.pick; renderMask(); }));
+        tc.querySelectorAll('[data-pick]').forEach(el => {
+          el.addEventListener('click', () => { maskState.sourceImageId = el.dataset.pick; renderMask(); });
+          el.addEventListener('mouseenter', () => el.style.borderColor = 'var(--accent)');
+          el.addEventListener('mouseleave', () => el.style.borderColor = 'var(--border)');
+        });
         return;
       }
 
       const src = await getImage(maskState.sourceImageId);
       tc.innerHTML = `
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-          <label style="font-size:12px;color:var(--muted);">笔刷
-            <input id="brush-size" type="range" min="5" max="100" value="${maskState.brushSize}" style="vertical-align:middle;"></label>
-          <button id="eraser-btn"  style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;cursor:pointer;">橡皮</button>
-          <button id="undo-btn"    style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;cursor:pointer;">撤销</button>
-          <button id="clear-btn"   style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;cursor:pointer;">清空</button>
-          <button id="repick-btn"  style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;cursor:pointer;margin-left:auto;">换源图</button>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border-soft);">
+          <label style="font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:6px;">笔刷
+            <input id="brush-size" type="range" min="5" max="100" value="${maskState.brushSize}" style="vertical-align:middle;accent-color:var(--accent);"></label>
+          <button id="eraser-btn" class="btn-ghost" style="padding:5px 12px;font-size:12px;">橡皮</button>
+          <button id="undo-btn"   class="btn-ghost" style="padding:5px 12px;font-size:12px;">撤销</button>
+          <button id="clear-btn"  class="btn-ghost" style="padding:5px 12px;font-size:12px;">清空</button>
+          <button id="repick-btn" class="btn-ghost" style="padding:5px 12px;font-size:12px;margin-left:auto;">换源图</button>
         </div>
-        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;display:inline-block;">
+        <div style="position:relative;background:var(--bg-2);border:1px solid var(--border);border-radius:3px;overflow:hidden;display:inline-block;box-shadow:var(--shadow-img);">
           <img id="mask-base" src="${src.dataUrl}" style="display:block;max-width:100%;max-height:60vh;">
           <canvas id="mask-overlay" style="position:absolute;inset:0;cursor:crosshair;touch-action:none;"></canvas>
         </div>
-        <div style="margin-top:12px;display:flex;gap:8px;">
-          <input id="mask-prompt" placeholder="描述要修改的内容（如：换成花瓶）"
-                 style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px;">
-          <button id="apply-mask-btn" style="background:var(--accent);color:#000;border:0;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">🎨 应用编辑</button>
+        <div style="margin-top:14px;display:flex;gap:10px;">
+          <input id="mask-prompt" class="field-input" placeholder="描述要修改的内容（如：换成花瓶）" style="flex:1;">
+          <button id="apply-mask-btn" class="btn-primary">🎨 应用编辑</button>
         </div>
       `;
 
@@ -944,23 +1359,27 @@
 
     function openPolishModal(original, polished) {
       const modal = document.createElement('div');
-      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:1000;display:flex;align-items:center;justify-content:center;padding:32px;';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(28,20,12,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:32px;backdrop-filter:blur(2px);';
       modal.innerHTML = `
-        <div style="background:#0a0a0a;border:1px solid var(--border);border-radius:12px;padding:24px;width:min(800px,95vw);">
-          <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
-            <span style="font-size:14px;font-weight:600;">✨ Prompt 润色</span>
-            <button data-close style="background:transparent;border:0;color:var(--text);cursor:pointer;font-size:18px;">✕</button>
+        <div style="background:var(--paper);border:1px solid var(--border);border-radius:6px;padding:28px;width:min(820px,95vw);box-shadow:var(--shadow-modal);">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border-soft);">
+            <span style="font-family:var(--font-display);font-size:18px;font-weight:600;color:var(--ink);letter-spacing:1px;">✨ 提示词润色</span>
+            <button data-close style="background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:20px;line-height:1;">✕</button>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-            <div><div style="font-size:11px;color:var(--muted);margin-bottom:6px;">原 prompt</div>
-                 <div style="background:#000;border:1px solid var(--border);padding:12px;border-radius:6px;min-height:120px;font-size:13px;white-space:pre-wrap;">${escapeHtml(original)}</div></div>
-            <div><div style="font-size:11px;color:var(--accent);margin-bottom:6px;">优化后</div>
-                 <textarea id="polished-text" style="width:100%;background:#000;border:1px solid rgba(217,255,0,0.3);color:var(--text);padding:12px;border-radius:6px;min-height:120px;font:inherit;font-size:13px;">${escapeHtml(polished)}</textarea></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:20px;">
+            <div>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px;letter-spacing:1px;">原文</div>
+              <div style="background:var(--bg);border:1px solid var(--border);padding:14px;border-radius:3px;min-height:140px;font-size:13px;white-space:pre-wrap;line-height:1.7;color:var(--ink-soft);">${escapeHtml(original)}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--accent);margin-bottom:8px;letter-spacing:1px;font-weight:600;">润色后 · 可编辑</div>
+              <textarea id="polished-text" class="field-textarea" style="width:100%;min-height:140px;font-size:13px;line-height:1.7;border-color:var(--accent-tint-2);">${escapeHtml(polished)}</textarea>
+            </div>
           </div>
-          <div style="display:flex;gap:8px;justify-content:flex-end;">
-            <button data-action="cancel" style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:6px;cursor:pointer;">取消</button>
-            <button data-action="adopt-edit" style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:6px;cursor:pointer;">编辑后采纳</button>
-            <button data-action="adopt" style="background:var(--accent);color:#000;border:0;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;">采纳并替换</button>
+          <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button data-action="cancel" class="btn-ghost">取 消</button>
+            <button data-action="adopt-edit" class="btn-ghost">编辑后采纳</button>
+            <button data-action="adopt" class="btn-primary">采纳并替换</button>
           </div>
         </div>`;
       document.body.appendChild(modal);
@@ -980,15 +1399,89 @@
 
     function showSimpleAlert(title, body) {
       const m = document.createElement('div');
-      m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:1000;display:flex;align-items:center;justify-content:center;';
-      m.innerHTML = `<div style="background:#0a0a0a;border:1px solid var(--border);border-radius:8px;padding:24px;max-width:480px;">
-        <div style="font-weight:600;margin-bottom:12px;">${escapeHtml(title)}</div>
-        <div style="font-size:13px;color:var(--muted);white-space:pre-wrap;margin-bottom:16px;">${escapeHtml(body)}</div>
-        <div style="text-align:right;"><button data-ok style="background:var(--accent);color:#000;border:0;padding:6px 14px;border-radius:6px;cursor:pointer;">好的</button></div>
+      m.style.cssText = 'position:fixed;inset:0;background:rgba(28,20,12,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
+      m.innerHTML = `<div style="background:var(--paper);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:4px;padding:24px 28px;max-width:480px;box-shadow:var(--shadow-modal);">
+        <div style="font-family:var(--font-display);font-weight:600;font-size:16px;color:var(--ink);margin-bottom:12px;letter-spacing:2px;">${escapeHtml(title)}</div>
+        <div style="font-size:13px;color:var(--ink-soft);white-space:pre-wrap;margin-bottom:18px;line-height:1.7;">${escapeHtml(body)}</div>
+        <div style="text-align:right;"><button data-ok class="btn-primary" style="padding:7px 18px;">好的</button></div>
       </div>`;
       document.body.appendChild(m);
       const close = attachModalDismiss(m, () => m.remove());
       m.querySelector('[data-ok]').addEventListener('click', close);
+    }
+
+    // === Key Manager modal ===
+    // 中转平台分组制：填写每个分组的令牌，组内所有模型自动共用。
+    function openKeyManagerModal({ firstRun = false } = {}) {
+      const modal = document.createElement('div');
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(28,20,12,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:32px;backdrop-filter:blur(2px);';
+      const stored = loadGroupKeys();
+      const rows = KEY_GROUPS.map(g => {
+        const cur = stored[g.id] || '';
+        const modelChips = g.models
+          .map(m => `<code style="background:var(--bg-2);padding:2px 7px;border-radius:2px;font-size:10.5px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(m)}</code>`)
+          .join(' ');
+        return `
+          <div style="background:var(--paper-warm);border:1px solid var(--border);border-radius:4px;padding:16px;margin-bottom:12px;">
+            <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">
+              <span style="font-family:var(--font-display);font-size:15px;font-weight:600;color:var(--ink);letter-spacing:1.5px;">${escapeHtml(g.label)}</span>
+              <span style="font-size:11px;color:${cur ? 'var(--success)' : 'var(--warn)'};letter-spacing:0.5px;">${cur ? '● 已配置' : '○ 未配置'}</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">${escapeHtml(g.hint)}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px;">${modelChips}</div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input type="password" data-key-for="${g.id}" value="${escapeHtml(cur)}"
+                     placeholder="sk-..." spellcheck="false" autocomplete="off"
+                     class="field-input" style="flex:1;font-family:var(--font-mono);font-size:12px;">
+              <button data-toggle-show="${g.id}" type="button" title="显示/隐藏" class="btn-ghost" style="padding:7px 11px;">👁</button>
+            </div>
+          </div>`;
+      }).join('');
+      modal.innerHTML = `
+        <div style="background:var(--paper);border:1px solid var(--border);border-radius:6px;padding:28px;width:min(640px,95vw);max-height:90vh;overflow:auto;box-shadow:var(--shadow-modal);">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;padding-bottom:14px;border-bottom:1px solid var(--border-soft);">
+            <span style="font-family:var(--font-display);font-size:18px;font-weight:600;color:var(--ink);letter-spacing:1px;">⚙ 令牌管理</span>
+            ${firstRun
+              ? '<span style="font-size:11px;color:var(--accent);letter-spacing:0.5px;font-weight:600;">首次配置</span>'
+              : '<button data-close type="button" style="background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:20px;line-height:1;">✕</button>'}
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin:14px 0 18px;line-height:1.7;">
+            后端：<code style="color:var(--ink-soft);font-family:var(--font-mono);background:var(--bg-2);padding:1px 6px;border-radius:2px;">${escapeHtml(API_BASE)}</code>
+            ${firstRun ? '<br>请至少填写一个分组的令牌才能开始使用。两个都填则可同时调用 GPT 和 Gemini 模型。' : ''}
+          </div>
+          ${rows}
+          <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
+            ${firstRun ? '' : '<button data-action="cancel" class="btn-ghost">取消</button>'}
+            <button data-action="save" class="btn-primary">保 存</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+      // First-run modal cannot be dismissed without saving (keeps the "must configure" guarantee).
+      const close = firstRun
+        ? () => modal.remove()
+        : attachModalDismiss(modal, () => modal.remove());
+      modal.querySelector('[data-close]')?.addEventListener('click', close);
+      modal.querySelector('[data-action="cancel"]')?.addEventListener('click', close);
+      modal.querySelectorAll('[data-toggle-show]').forEach(btn =>
+        btn.addEventListener('click', () => {
+          const inp = modal.querySelector(`input[data-key-for="${btn.dataset.toggleShow}"]`);
+          inp.type = inp.type === 'password' ? 'text' : 'password';
+        }));
+      modal.querySelector('[data-action="save"]').addEventListener('click', () => {
+        let savedAny = false;
+        for (const g of KEY_GROUPS) {
+          const inp = modal.querySelector(`input[data-key-for="${g.id}"]`);
+          const v = (inp?.value || '').trim();
+          saveKeyForGroup(g.id, v);
+          if (v) savedAny = true;
+        }
+        if (firstRun && !savedAny) {
+          toast('请至少填写一个分组的令牌');
+          return;
+        }
+        close();
+        toast('令牌已保存');
+      });
     }
 
     // === Input area ===
@@ -1000,38 +1493,39 @@
       const prevPrompt = $('prompt-input')?.value || '';
       const prevCount  = $('count-input')?.value  || '1';
       $('input-area').innerHTML = `
-        <div id="ref-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
+        <div id="ref-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
         <div style="position:relative;">
           <textarea id="prompt-input" rows="3" placeholder="描述你想要的图像，Cmd/Ctrl+Enter 发送；@ 提及图像"
-            style="width:100%;background:rgba(255,255,255,0.05);border:1px solid var(--border);
-                   border-radius:8px;padding:8px;color:var(--text);font:inherit;resize:vertical;"></textarea>
-          <div id="mention-popover" style="display:none;position:fixed;background:#1a1a1a;
-               border:1px solid var(--border);border-radius:6px;padding:4px;z-index:50;max-height:240px;overflow:auto;"></div>
+            class="field-textarea"
+            style="width:100%;resize:vertical;line-height:1.65;"></textarea>
+          <div id="mention-popover" style="display:none;position:fixed;background:var(--paper);
+               border:1px solid var(--border);border-radius:6px;padding:6px;z-index:50;max-height:240px;overflow:auto;
+               box-shadow:var(--shadow-modal);"></div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
-          <button id="polish-btn" title="润色提示词"
-                  style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;cursor:pointer;">✨</button>
-          <select id="preset-select" style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px;">
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+          <button id="polish-btn" title="润色提示词" class="btn-ghost" style="padding:7px 12px;">✨ 润色</button>
+          <select id="preset-select" class="field-select" style="padding:7px 10px;font-size:12.5px;">
             <option value="">🎨 风格预设</option>
             ${STYLE_PRESETS.map(p => `<option>${p}</option>`).join('')}
           </select>
-          <label style="font-size:12px;color:var(--muted)">数量
-            <input id="count-input" type="number" min="1" max="4" value="1" style="width:48px;margin-left:4px"></label>
+          <label style="font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;">数量
+            <input id="count-input" type="number" min="1" max="4" value="1"
+                   class="field-input" style="width:54px;padding:5px 8px;font-size:12.5px;"></label>
           ${isGem
-            ? `<label style="font-size:12px;color:var(--muted)">比例
-                <select id="aspect-input"><option>1:1</option><option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option></select></label>
-              <label style="font-size:12px;color:var(--muted)">分辨率
-                <select id="resolution-input"><option>1K</option><option>2K</option><option>4K</option></select></label>`
-            : `<label style="font-size:12px;color:var(--muted)">尺寸
-                <select id="size-input"><option>1024x1024</option><option>1536x1024</option><option>1024x1536</option></select></label>`
+            ? `<label style="font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;">比例
+                <select id="aspect-input" class="field-select" style="padding:5px 8px;font-size:12.5px;"><option>1:1</option><option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option></select></label>
+              <label style="font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;">分辨率
+                <select id="resolution-input" class="field-select" style="padding:5px 8px;font-size:12.5px;"><option>1K</option><option>2K</option><option>4K</option></select></label>`
+            : `<label style="font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;">尺寸
+                <select id="size-input" class="field-select" style="padding:5px 8px;font-size:12.5px;"><option>1024x1024</option><option>1536x1024</option><option>1024x1536</option></select></label>`
           }
           <span style="margin-left:auto"></span>
-          <button id="upload-btn" title="上传参考图"
-            style="background:rgba(255,255,255,0.05);border:1px solid var(--border);
-                   color:var(--text);padding:6px 12px;border-radius:6px;cursor:pointer;">📎</button>
+          <button id="upload-btn" title="上传参考图（也可以拖拽到输入框）" class="btn-upload">
+            <span style="font-size:14px;">📎</span>
+            <span>上传图片</span>
+          </button>
           <input id="upload-input" type="file" accept="image/*" multiple style="display:none;">
-          <button id="send-btn" style="background:var(--accent);color:#000;border:0;
-                  padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">发送</button>
+          <button id="send-btn" class="btn-primary" style="padding:8px 24px;">发送</button>
         </div>
       `;
       // Restore snapshot values (size/aspect/resolution legitimately change per model)
@@ -1295,9 +1789,11 @@
       stream.innerHTML = msgs.map(m => {
         if (m.role === 'user') {
           return `
-            <div style="margin-bottom:12px;">
-              <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">USER · ${fmtTime(m.createdAt)}</div>
-              <div style="background:rgba(255,255,255,0.05);padding:10px;border-radius:8px;">${escapeHtml(m.text)}</div>
+            <div style="margin-bottom:18px;">
+              <div style="font-size:10px;color:var(--muted);margin-bottom:5px;letter-spacing:0.5px;font-weight:500;">你 · ${fmtTime(m.createdAt)}</div>
+              <div style="background:var(--paper);border:1px solid var(--border);border-left:3px solid var(--accent);
+                          padding:11px 14px;border-radius:3px;line-height:1.65;color:var(--ink);
+                          box-shadow:0 1px 0 rgba(80,50,20,0.03);">${escapeHtml(m.text)}</div>
             </div>`;
         }
         // assistant
@@ -1305,29 +1801,35 @@
           const img = imgMap.get(id);
           if (!img) return '';
           const isGptImage = !isGeminiImageModel(m.model);
-          return `<div style="position:relative;display:inline-block;margin:2px;" class="img-card">
+          return `<div style="position:relative;display:inline-block;margin:3px;" class="img-card">
             <img src="${img.dataUrl}" data-img-id="${id}" data-action="zoom"
-                 style="width:80px;height:80px;object-fit:cover;border-radius:6px;cursor:zoom-in;">
-            <span style="position:absolute;bottom:2px;left:2px;background:rgba(0,0,0,0.7);
-                  color:#fff;font-size:10px;padding:1px 4px;border-radius:3px;">${img.shortId}</span>
+                 style="width:84px;height:84px;object-fit:cover;border-radius:3px;cursor:zoom-in;
+                        box-shadow:var(--shadow-img);border:1px solid var(--border);">
+            <span style="position:absolute;bottom:3px;left:3px;background:rgba(20,15,10,0.72);
+                  color:#fff;font-size:10px;padding:1px 5px;border-radius:2px;font-weight:500;letter-spacing:0.5px;">${img.shortId}</span>
             <button data-engage-ref="${id}" title="作为引用"
-                    style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);
-                           color:#fff;border:0;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:11px;">↩</button>
+                    style="position:absolute;top:3px;right:3px;background:rgba(20,15,10,0.7);
+                           color:#fff;border:0;border-radius:2px;padding:2px 6px;cursor:pointer;font-size:11px;line-height:1;">↩</button>
             ${isGptImage
               ? `<button data-engage-mask="${id}" title="编辑此图"
-                        style="position:absolute;top:2px;right:32px;background:rgba(0,0,0,0.6);
-                               color:#fff;border:0;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:11px;">🖌</button>`
+                        style="position:absolute;top:3px;right:33px;background:rgba(20,15,10,0.7);
+                               color:#fff;border:0;border-radius:2px;padding:2px 6px;cursor:pointer;font-size:11px;line-height:1;">🖌</button>`
               : ''}
           </div>`;
         }).join('');
         const errHtml = m.error
-          ? `<div style="color:var(--error);font-size:12px;margin-top:6px;">⚠ ${escapeHtml(m.error)}
-               <button data-retry-msg="${m.id}" style="margin-left:8px;background:rgba(255,77,79,0.15);border:1px solid rgba(255,77,79,0.3);color:var(--error);padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;">↻ 重试</button>
+          ? `<div style="color:var(--error);font-size:12px;margin-top:8px;display:inline-flex;align-items:center;gap:8px;
+                        background:var(--accent-tint);border:1px solid var(--accent-tint-2);padding:6px 10px;border-radius:3px;">
+               ⚠ ${escapeHtml(m.error)}
+               <button data-retry-msg="${m.id}"
+                       style="background:var(--accent);color:#fff;border:0;padding:3px 10px;border-radius:2px;cursor:pointer;font-size:11px;letter-spacing:1px;">↻ 重试</button>
              </div>`
           : '';
         return `
-          <div style="margin-bottom:12px;">
-            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">${escapeHtml(m.model)} · ${fmtTime(m.createdAt)}</div>
+          <div style="margin-bottom:18px;">
+            <div style="font-size:10px;color:var(--muted);margin-bottom:5px;letter-spacing:0.5px;font-weight:500;">
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--ink-soft);">${escapeHtml(m.model)}</span> · ${fmtTime(m.createdAt)}
+            </div>
             <div>${imgsHtml || (m.error ? '' : '<span style="color:var(--muted);font-size:12px;">生成中…</span>')}</div>
             ${errHtml}
           </div>`;
@@ -1527,6 +2029,19 @@
           inp.addEventListener('change', e => { if (e.target.files[0]) importBundle(e.target.files[0]); });
           inp.click();
         });
+
+        $('settings-btn').addEventListener('click', () => openKeyManagerModal());
+
+        // Lift any per-model keys from the sibling file's store into the new
+        // group store so returning users don't have to re-enter anything.
+        migrateLegacyKeys();
+
+        // First-run prompt: if no group token is configured, open the manager
+        // modal so the user lands on a clear "configure to begin" surface
+        // instead of hitting an opaque "未找到 API Key" toast on first send.
+        if (!hasAnyKey()) {
+          openKeyManagerModal({ firstRun: true });
+        }
       } catch (e) {
         $('header-status').textContent = `IDB error: ${e.message}`;
         toast('本地存储不可用');
