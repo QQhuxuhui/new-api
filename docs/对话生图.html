@@ -119,6 +119,172 @@
     async function listImages()  { return db.getAll('images'); }
     async function deleteImage(id) { return db.delete('images', id); }
 
+    // === Key store (shared with gpt文生图+图生图.html) ===
+    const APIKEY_STORE = 'gpt_image_apikeys';  // { [model]: 'sk-...' }
+    function getKeyForModel(model) {
+      try { return JSON.parse(localStorage.getItem(APIKEY_STORE) || '{}')[model] || ''; }
+      catch { return ''; }
+    }
+    function saveKeyForModel(model, key) {
+      const all = JSON.parse(localStorage.getItem(APIKEY_STORE) || '{}');
+      if (key) all[model] = key; else delete all[model];
+      localStorage.setItem(APIKEY_STORE, JSON.stringify(all));
+    }
+
+    // === Model helpers ===
+    function isGeminiImageModel(model) {
+      if (!model) return false;
+      const m = String(model).toLowerCase();
+      if (m.includes('nano-banana')) return true;
+      return /gemini[-.\d]*.*image/.test(m);
+    }
+
+    function apiAuth(model) {
+      const key = getKeyForModel(model);
+      if (!key) throw new Error(`未找到 ${model} 的 API Key，请在顶栏配置`);
+      return { Authorization: `Bearer ${key}` };
+    }
+
+    // === API client ===
+    async function callGptImageGen({ model, prompt, n = 1, size = '1024x1024',
+                                     quality = 'high', background = 'auto', format = 'png' }) {
+      const body = { model, prompt, n, size, quality, background, response_format: 'b64_json',
+                     output_format: format };
+      const res = await fetch(`${API_BASE}/images/generations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...apiAuth(model) },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 240)}`);
+      }
+      const data = await res.json();
+      if (!data.data?.length) throw new Error('API 未返回图像数据');
+      return {
+        images: data.data.map(d => ({
+          dataUrl: `data:image/${format};base64,${d.b64_json}`,
+          format,
+        })),
+      };
+    }
+
+    function dataUrlToBlob(dataUrl) {
+      const [head, b64] = dataUrl.split(',');
+      const mime = head.match(/data:([^;]+)/)?.[1] || 'image/png';
+      const bin  = atob(b64);
+      const arr  = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      return new Blob([arr], { type: mime });
+    }
+
+    async function callGptImageEdit({ model, prompt, sourceImages /* [dataUrl] */,
+                                      maskDataUrl = null, n = 1, size = '1024x1024' }) {
+      const fd = new FormData();
+      fd.append('model', model);
+      fd.append('prompt', prompt);
+      fd.append('n', String(n));
+      fd.append('size', size);
+      fd.append('response_format', 'b64_json');
+      // OpenAI: 'image' for single, 'image[]' for multi
+      if (sourceImages.length === 1) {
+        fd.append('image', dataUrlToBlob(sourceImages[0]), 'source.png');
+      } else {
+        sourceImages.forEach((u, i) => fd.append('image[]', dataUrlToBlob(u), `source_${i}.png`));
+      }
+      if (maskDataUrl) fd.append('mask', dataUrlToBlob(maskDataUrl), 'mask.png');
+
+      const res = await fetch(`${API_BASE}/images/edits`, {
+        method: 'POST',
+        headers: { ...apiAuth(model) },  // do NOT set Content-Type — browser sets boundary
+        body: fd,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 240)}`);
+      }
+      const data = await res.json();
+      if (!data.data?.length) throw new Error('API 未返回图像数据');
+      return {
+        images: data.data.map(d => ({ dataUrl: `data:image/png;base64,${d.b64_json}`, format: 'png' })),
+      };
+    }
+
+    async function callGeminiChatImage({ model, prompt, refDataUrls = [],
+                                         aspectRatio = '1:1', resolution = '1K' }) {
+      let content;
+      if (refDataUrls.length > 0) {
+        content = [];
+        if (prompt) content.push({ type: 'text', text: prompt });
+        for (const url of refDataUrls) content.push({ type: 'image_url', image_url: { url } });
+      } else {
+        content = prompt;
+      }
+      const body = {
+        model, messages: [{ role: 'user', content }],
+        modalities: ['image', 'text'], stream: false,
+        extra_body: {
+          generationConfig: {
+            imageConfig: { aspectRatio, imageSize: resolution },
+            image_config: { aspect_ratio: aspectRatio, image_size: resolution },
+          },
+        },
+      };
+      const res = await fetch(`${API_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...apiAuth(model) },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 240)}`);
+      }
+      const data = await res.json();
+      const choice = data.choices?.[0];
+      if (!choice) throw new Error('chat 响应无 choices（上游可能余额不足或限流）');
+      const dataUrl = extractGeminiImage(choice.message);
+      if (!dataUrl) throw new Error('chat 响应未携带图像');
+      return { images: [{ dataUrl, format: 'png' }] };
+    }
+
+    function extractGeminiImage(message) {
+      // 1) Direct multipart-like content
+      if (Array.isArray(message?.content)) {
+        for (const part of message.content) {
+          if (part?.type === 'image_url' && part.image_url?.url) return part.image_url.url;
+          if (part?.image_url?.url) return part.image_url.url;
+        }
+      }
+      // 2) Markdown ![image](data:image/png;base64,...)
+      if (typeof message?.content === 'string') {
+        const m = message.content.match(/!\[[^\]]*\]\((data:image\/[^;]+;base64,[^)]+)\)/);
+        if (m) return m[1];
+      }
+      return null;
+    }
+
+    async function callPolishPrompt(originalPrompt) {
+      const POLISH_MODEL = 'gpt-4o-mini';
+      const body = {
+        model: POLISH_MODEL,
+        messages: [
+          { role: 'system', content: '你是 image generation prompt 优化助手。优化用户给的 prompt：增加视觉细节、保持原意、保持简洁。仅输出优化后的 prompt，不要加任何说明、引号或前缀。' },
+          { role: 'user',   content: originalPrompt },
+        ],
+        temperature: 0.6,
+      };
+      const res = await fetch(`${API_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...apiAuth(POLISH_MODEL) },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const data = await res.json();
+      const out = data.choices?.[0]?.message?.content?.trim();
+      if (!out) throw new Error('润色 LLM 无返回');
+      return out;
+    }
+
     // === Bootstrap ===
     window.addEventListener('DOMContentLoaded', async () => {
       try {
