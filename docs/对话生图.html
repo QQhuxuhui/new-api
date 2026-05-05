@@ -533,7 +533,13 @@
         const refDataUrls = [];
         for (const id of refIds) {
           const img = await getImage(id);
-          if (!img) { toast(`引用图 ${id} 已被清理`); return; }
+          if (!img) {
+            // Prune dead ref so user isn't trapped in toast loop
+            refState.imageIds = refState.imageIds.filter(x => x !== id);
+            await renderRefPills();
+            toast(`引用图已被清理，已自动移除`);
+            return;
+          }
           refDataUrls.push(img.dataUrl);
         }
 
@@ -694,7 +700,7 @@
       try {
         await initDB();
         renderModelSelect();
-        renderInputArea();
+        await renderInputArea();
         refreshTabs();
         await renderChat();
         $('header-status').textContent = `IDB ready · ${(await listMessages()).length} 条历史`;
