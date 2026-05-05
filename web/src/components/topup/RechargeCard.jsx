@@ -109,10 +109,13 @@ const RechargeCard = ({
         if (cancelled) return;
         const { success, data } = res.data || {};
         if (!success || !Array.isArray(data)) return;
+        // Backend categories: daily / weekly / biweekly / monthly / payg.
+        // Anything that's not payg is a recurring/subscription-style plan.
         const subPlans = data.filter(
           (p) =>
             p &&
-            p.category === 'subscription' &&
+            p.category &&
+            p.category !== 'payg' &&
             p.original_price > 0 &&
             p.price >= 0 &&
             p.original_price > p.price,
