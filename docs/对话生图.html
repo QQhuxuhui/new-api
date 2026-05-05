@@ -57,14 +57,11 @@
   <div class="toast" id="toast"></div>
 
   <script type="module">
-    // ============================================================
-    // Bootstrap entry — fills out below tasks
-    // ============================================================
     import { openDB } from 'https://cdn.jsdelivr.net/npm/idb@8/+esm';
 
     // === Constants ===
-    const API_BASE = 'https://api.sparkcode.top/v1';
-    const DB_NAME  = 'convImageStudio';
+    const API_BASE   = 'https://api.sparkcode.top/v1';
+    const DB_NAME    = 'convImageStudio';
     const DB_VERSION = 1;
 
     // === IndexedDB layer ===
@@ -91,7 +88,6 @@
 
     // === Short-ID allocator (g1/g2.../u1/u2... per type) ===
     async function nextShortId(prefix) {
-      // Highest existing index for that prefix; persists across reloads
       const tx = db.transaction('images', 'readonly');
       let max = 0;
       for await (const cursor of tx.store) {
@@ -115,9 +111,32 @@
       return rec;
     }
 
-    async function getImage(id)  { return db.get('images', id); }
-    async function listImages()  { return db.getAll('images'); }
+    async function getImage(id)    { return db.get('images', id); }
+    async function listImages()    { return db.getAll('images'); }
     async function deleteImage(id) { return db.delete('images', id); }
+
+    // === Message + Node storage helpers ===
+    async function putMessage({ role, text = '', imageIds = [], refImageIds = [],
+                                nodeId = null, model = '', error = null }) {
+      const id = uuid();
+      const rec = { id, role, text, imageIds, refImageIds, nodeId, model, error, createdAt: now() };
+      await db.put('messages', rec);
+      return rec;
+    }
+
+    async function listMessages() {
+      const all = await db.getAll('messages');
+      return all.sort((a, b) => a.createdAt - b.createdAt);
+    }
+
+    async function putNode({ parentNodeId = null, kind, messageId, imageIds = [], label = '' }) {
+      const id = uuid();
+      const rec = { id, parentNodeId, kind, messageId, imageIds, label, createdAt: now() };
+      await db.put('nodes', rec);
+      return rec;
+    }
+
+    async function listNodes() { return db.getAll('nodes'); }
 
     // === Key store (shared with gpt文生图+图生图.html) ===
     const APIKEY_STORE = 'gpt_image_apikeys';  // { [model]: 'sk-...' }
@@ -143,6 +162,25 @@
       const key = getKeyForModel(model);
       if (!key) throw new Error(`未找到 ${model} 的 API Key，请在顶栏配置`);
       return { Authorization: `Bearer ${key}` };
+    }
+
+    // Model list + picker
+    const MODELS = [
+      { id: 'gpt-image-2',                    label: 'GPT Image 2',            supportsMask: true  },
+      { id: 'gemini-3.1-flash-image-preview', label: 'Gemini 3.1 Flash Image', supportsMask: false },
+      { id: 'gemini-3-pro-image-preview',     label: 'Gemini 3 Pro Image',     supportsMask: false },
+    ];
+    function modelById(id) { return MODELS.find(m => m.id === id); }
+
+    function renderModelSelect() {
+      const sel = $('model-select');
+      sel.innerHTML = MODELS.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+      const saved = localStorage.getItem('conv_image_settings_model');
+      if (saved && MODELS.some(m => m.id === saved)) sel.value = saved;
+      sel.addEventListener('change', () => {
+        localStorage.setItem('conv_image_settings_model', sel.value);
+        refreshTabs();  // hides Mask tab on Gemini (Task 7)
+      });
     }
 
     // === API client ===
@@ -186,7 +224,6 @@
       fd.append('n', String(n));
       fd.append('size', size);
       fd.append('response_format', 'b64_json');
-      // OpenAI: 'image' for single, 'image[]' for multi
       if (sourceImages.length === 1) {
         fd.append('image', dataUrlToBlob(sourceImages[0]), 'source.png');
       } else {
@@ -248,18 +285,13 @@
     }
 
     function extractGeminiImage(message) {
-      // Permissive regex matches bare data URLs AND markdown-wrapped ones
-      // (data:image/...;base64,... is a substring of ![alt](data:image/...;base64,...))
       const DATA_URL_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/;
       const content = message?.content;
 
-      // 1) Array content: walk each part
       if (Array.isArray(content)) {
         for (const part of content) {
-          // 1a) image_url part
           if (part?.type === 'image_url' && part.image_url?.url) return part.image_url.url;
           if (part?.image_url?.url) return part.image_url.url;
-          // 1b) text part — scan for bare or markdown-embedded data URL
           if (typeof part?.text === 'string') {
             const m = DATA_URL_RE.exec(part.text);
             if (m) return m[0];
@@ -267,7 +299,6 @@
         }
       }
 
-      // 2) String content — scan for bare or markdown-embedded data URL
       if (typeof content === 'string') {
         const m = DATA_URL_RE.exec(content);
         if (m) return m[0];
@@ -277,10 +308,6 @@
     }
 
     async function callPolishPrompt(originalPrompt) {
-      // NOTE: gpt-4o-mini requires its own API key stored in the shared `gpt_image_apikeys`
-      // localStorage entry (same store used by gpt-image-1). If the user has not added a key
-      // that covers gpt-4o-mini, callPolishPrompt will throw "未找到 gpt-4o-mini 的 API Key".
-      // Task 8 will surface this failure message in the polish modal so the user can recover.
       const POLISH_MODEL = 'gpt-4o-mini';
       const body = {
         model: POLISH_MODEL,
@@ -302,14 +329,221 @@
       return out;
     }
 
+    // === UI helpers ===
+    function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function fmtTime(ts)   { return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); }
+
+    // === Tabs + workspace ===
+    const TABS = [
+      { id: 'big',     label: '大图' },
+      { id: 'tree',    label: '分支树' },
+      { id: 'library', label: '图库' },
+      { id: 'mask',    label: 'Mask',   modelGated: true },
+    ];
+    let activeTab     = 'big';
+    let activeImageId = null;
+
+    function refreshTabs() {
+      const model = modelById($('model-select').value);
+      const supportsMask  = model?.supportsMask;
+      const visibleTabs   = TABS.filter(t => !t.modelGated || supportsMask);
+      $('tab-bar').innerHTML = visibleTabs.map(t =>
+        `<div class="tab ${t.id === activeTab ? 'active' : ''}" data-tab="${t.id}">${t.label}</div>`
+      ).join('');
+      $('tab-bar').querySelectorAll('.tab').forEach(el =>
+        el.addEventListener('click', () => { activeTab = el.dataset.tab; refreshTabs(); renderActiveTab(); }));
+      if (!visibleTabs.some(t => t.id === activeTab)) { activeTab = 'big'; refreshTabs(); return; }
+      renderActiveTab();
+    }
+
+    async function renderActiveTab() {
+      if (activeTab === 'big')     return renderActiveImage();
+      if (activeTab === 'tree')    return renderTree();
+      if (activeTab === 'library') return renderLibrary();
+      if (activeTab === 'mask')    return renderMask();
+    }
+
+    async function renderActiveImage() {
+      const tc = $('tab-content');
+      if (!activeImageId) {
+        const all = await listImages();
+        activeImageId = all.length ? all[all.length - 1].id : null;
+      }
+      if (!activeImageId) {
+        tc.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">尚无图像</div>';
+        return;
+      }
+      const img = await getImage(activeImageId);
+      tc.innerHTML = `<div style="display:flex;justify-content:center;align-items:center;height:100%;">
+        <img src="${img.dataUrl}" style="max-width:100%;max-height:100%;border-radius:8px;">
+      </div>`;
+    }
+
+    // Stubs filled by later tasks
+    async function renderTree()    { $('tab-content').innerHTML = '<div style="color:var(--muted);">[Task 5 实现]</div>'; }
+    async function renderLibrary() { $('tab-content').innerHTML = '<div style="color:var(--muted);">[Task 6 实现]</div>'; }
+    async function renderMask()    { $('tab-content').innerHTML = '<div style="color:var(--muted);">[Task 7 实现]</div>'; }
+
+    // === Input area ===
+    function renderInputArea() {
+      const model = modelById($('model-select').value);
+      const isGem = isGeminiImageModel(model.id);
+      $('input-area').innerHTML = `
+        <div id="ref-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
+        <textarea id="prompt-input" rows="3" placeholder="描述你想要的图像，Cmd/Ctrl+Enter 发送"
+          style="width:100%;background:rgba(255,255,255,0.05);border:1px solid var(--border);
+                 border-radius:8px;padding:8px;color:var(--text);font:inherit;resize:vertical;"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+          <label style="font-size:12px;color:var(--muted)">数量
+            <input id="count-input" type="number" min="1" max="4" value="1" style="width:48px;margin-left:4px"></label>
+          ${isGem
+            ? `<label style="font-size:12px;color:var(--muted)">比例
+                <select id="aspect-input"><option>1:1</option><option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option></select></label>
+              <label style="font-size:12px;color:var(--muted)">分辨率
+                <select id="resolution-input"><option>1K</option><option>2K</option><option>4K</option></select></label>`
+            : `<label style="font-size:12px;color:var(--muted)">尺寸
+                <select id="size-input"><option>1024x1024</option><option>1536x1024</option><option>1024x1536</option></select></label>`
+          }
+          <span style="margin-left:auto"></span>
+          <button id="send-btn" style="background:var(--accent);color:#000;border:0;
+                  padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">发送</button>
+        </div>
+      `;
+      $('send-btn').addEventListener('click', onSend);
+      $('prompt-input').addEventListener('keydown', e => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); onSend(); }
+      });
+    }
+
+    // === Send handler ===
+    async function onSend() {
+      const prompt = $('prompt-input').value.trim();
+      if (!prompt) { toast('请输入提示词'); return; }
+      const model = $('model-select').value;
+      const n = parseInt($('count-input').value, 10) || 1;
+
+      // Persist user message
+      const userMsg = await putMessage({ role: 'user', text: prompt, model });
+      // Persist placeholder assistant message
+      const aMsg = await putMessage({ role: 'assistant', text: '', model });
+      await renderChat();
+
+      try {
+        let result;
+        if (isGeminiImageModel(model)) {
+          const aspectRatio = $('aspect-input')?.value || '1:1';
+          const resolution  = $('resolution-input')?.value || '1K';
+          const calls = Array.from({ length: n }, () =>
+            callGeminiChatImage({ model, prompt, aspectRatio, resolution }));
+          const settled = await Promise.all(calls.map(p => p.catch(e => ({ error: e }))));
+          const ok = settled.filter(s => !s.error);
+          if (ok.length === 0) throw settled[0].error || new Error('全部失败');
+          result = { images: ok.flatMap(s => s.images) };
+        } else {
+          const size = $('size-input')?.value || '1024x1024';
+          result = await callGptImageGen({ model, prompt, n, size });
+        }
+
+        // Save images
+        const imageRecs = await Promise.all(result.images.map(img =>
+          putImage({ dataUrl: img.dataUrl, model, prompt, format: img.format })
+        ));
+        const imageIds = imageRecs.map(r => r.id);
+        aMsg.imageIds = imageIds;
+        await db.put('messages', aMsg);
+
+        // Create root node (no parent yet — Task 5 wires branching)
+        const node = await putNode({ kind: 'root', messageId: aMsg.id, imageIds });
+        aMsg.nodeId = node.id;
+        await db.put('messages', aMsg);
+        for (const r of imageRecs) { r.nodeId = node.id; await db.put('images', r); }
+
+        $('prompt-input').value = '';
+      } catch (e) {
+        aMsg.error = e.message;
+        await db.put('messages', aMsg);
+        toast(`生成失败：${e.message}`);
+      }
+      await renderChat();
+      await renderActiveImage();
+    }
+
+    // === Chat renderer ===
+    async function renderChat() {
+      const msgs    = await listMessages();
+      const stream  = $('chat-stream');
+      const imgCache = await listImages();
+      const imgMap  = new Map(imgCache.map(i => [i.id, i]));
+
+      stream.innerHTML = msgs.map(m => {
+        if (m.role === 'user') {
+          return `
+            <div style="margin-bottom:12px;">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">USER · ${fmtTime(m.createdAt)}</div>
+              <div style="background:rgba(255,255,255,0.05);padding:10px;border-radius:8px;">${escapeHtml(m.text)}</div>
+            </div>`;
+        }
+        // assistant
+        const imgsHtml = (m.imageIds || []).map(id => {
+          const img = imgMap.get(id);
+          if (!img) return '';
+          return `<div style="position:relative;display:inline-block;margin:2px;">
+            <img src="${img.dataUrl}" data-img-id="${id}" data-action="zoom"
+                 style="width:80px;height:80px;object-fit:cover;border-radius:6px;cursor:zoom-in;">
+            <span style="position:absolute;bottom:2px;left:2px;background:rgba(0,0,0,0.7);
+                  color:#fff;font-size:10px;padding:1px 4px;border-radius:3px;">${img.shortId}</span>
+          </div>`;
+        }).join('');
+        const errHtml = m.error
+          ? `<div style="color:var(--error);font-size:12px;margin-top:6px;">⚠ ${escapeHtml(m.error)}</div>`
+          : '';
+        return `
+          <div style="margin-bottom:12px;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">${escapeHtml(m.model)} · ${fmtTime(m.createdAt)}</div>
+            <div>${imgsHtml || (m.error ? '' : '<span style="color:var(--muted);font-size:12px;">生成中…</span>')}</div>
+            ${errHtml}
+          </div>`;
+      }).join('');
+
+      // Wire thumbnail clicks → activate image in 大图 tab
+      stream.querySelectorAll('img[data-action="zoom"]').forEach(el => {
+        el.addEventListener('click', () => {
+          activeImageId = el.dataset.imgId;
+          activeTab = 'big';
+          refreshTabs();
+        });
+      });
+
+      stream.scrollTop = stream.scrollHeight;
+    }
+
     // === Bootstrap ===
     window.addEventListener('DOMContentLoaded', async () => {
       try {
         await initDB();
-        $('header-status').textContent = 'IDB ready · 0 sessions';
+        renderModelSelect();
+        renderInputArea();
+        refreshTabs();
+        await renderChat();
+        $('header-status').textContent = `IDB ready · ${(await listMessages()).length} 条历史`;
+
+        // Re-render input area whenever the model changes (e.g. Gemini vs GPT controls differ)
+        $('model-select').addEventListener('change', renderInputArea);
+
+        // New chat: wired here so db is guaranteed ready
+        $('new-chat-btn').addEventListener('click', async () => {
+          if (!confirm('开新对话会清空当前所有图像、消息和分支树（已存的不会自动备份）。继续？')) return;
+          await db.clear('images');
+          await db.clear('messages');
+          await db.clear('nodes');
+          activeImageId = null;
+          await renderChat();
+          refreshTabs();
+          toast('已开新对话');
+        });
       } catch (e) {
         $('header-status').textContent = `IDB error: ${e.message}`;
-        toast('本地存储不可用，本会话不会被保存');
+        toast('本地存储不可用');
       }
     });
   </script>
