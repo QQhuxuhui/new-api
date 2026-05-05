@@ -344,6 +344,7 @@
     let activeImageId = null;
     const refState = { imageIds: [] };  // currently engaged refs
     let selectedNodeIds = [];
+    const rerollingNodes = new Set();
 
     async function renderRefPills() {
       const bar = $('ref-pills');
@@ -441,11 +442,15 @@
         }
       }
       for (const root of (byParent.get('__root__') || [])) place(root, 0);
+      // Anchor any orphan nodes (parentNodeId points to deleted node — happens after LRU eviction)
+      for (const n of nodes) {
+        if (!positions.has(n.id)) place(n, 0);
+      }
 
       const maxX = Math.max(...[...positions.values()].map(p => p.x)) + NODE_W + 20;
       const maxY = Math.max(...[...positions.values()].map(p => p.y)) + NODE_H + 20;
 
-      const lines = nodes.filter(n => n.parentNodeId).map(n => {
+      const lines = nodes.filter(n => n.parentNodeId && positions.has(n.parentNodeId)).map(n => {
         const p = positions.get(n.parentNodeId), c = positions.get(n.id);
         return `<line x1="${p.x + NODE_W}" y1="${p.y + NODE_H/2}" x2="${c.x}" y2="${c.y + NODE_H/2}"
                 stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>`;
@@ -486,8 +491,13 @@
           } else {
             selectedNodeIds = [nid];
             const node = nodes.find(x => x.id === nid);
-            if (node?.imageIds[0]) { activeImageId = node.imageIds[0]; }
-            renderTree();
+            if (node?.imageIds[0]) {
+              activeImageId = node.imageIds[0];
+              activeTab = 'big';
+              refreshTabs();   // also re-paints the tree if user comes back; no separate renderTree() needed
+              return;
+            }
+            renderTree();  // fallback: still re-render selection if node has no images
           }
         });
         g.addEventListener('contextmenu', e => {
@@ -499,44 +509,62 @@
     }
 
     async function onReroll(nodeId) {
-      const node = (await listNodes()).find(n => n.id === nodeId);
-      if (!node) return;
-      const msg = (await listMessages()).find(m => m.id === node.messageId);
-      if (!msg) return;
-      // Find the user message that triggered this assistant message (immediately preceding)
-      const allMsgs = await listMessages();
-      const idx = allMsgs.findIndex(m => m.id === msg.id);
-      const userMsg = allMsgs.slice(0, idx).reverse().find(m => m.role === 'user');
-      if (!userMsg) { toast('找不到原始 prompt'); return; }
-      // Replay
-      const refDataUrls = [];
-      for (const id of (userMsg.refImageIds || [])) {
-        const img = await getImage(id);
-        if (img) refDataUrls.push(img.dataUrl);
+      if (rerollingNodes.has(nodeId)) {
+        toast('该节点正在 Re-roll 中…');
+        return;
       }
-      const aMsg = await putMessage({ role: 'assistant', text: '', model: msg.model });
-      await renderChat();
+      rerollingNodes.add(nodeId);
       try {
-        const result = isGeminiImageModel(msg.model)
-          ? await callGeminiChatImage({ model: msg.model, prompt: userMsg.text, refDataUrls })
-          : refDataUrls.length > 0
-            ? await callGptImageEdit({ model: msg.model, prompt: userMsg.text, sourceImages: refDataUrls })
-            : await callGptImageGen({ model: msg.model, prompt: userMsg.text });
-        const recs = await Promise.all(result.images.map(img =>
-          putImage({ dataUrl: img.dataUrl, model: msg.model, prompt: userMsg.text, format: img.format })));
-        const ids = recs.map(r => r.id);
-        aMsg.imageIds = ids;
-        const newNode = await putNode({ parentNodeId: node.parentNodeId, kind: 'reroll', messageId: aMsg.id, imageIds: ids });
-        aMsg.nodeId = newNode.id;
-        await db.put('messages', aMsg);
-        for (const r of recs) { r.nodeId = newNode.id; r.parentId = node.parentNodeId; await db.put('images', r); }
+        const [allNodes, allMsgs] = await Promise.all([listNodes(), listMessages()]);
+        const node = allNodes.find(n => n.id === nodeId);
+        if (!node) return;
+        const msg = allMsgs.find(m => m.id === node.messageId);
+        if (!msg) return;
+        // Find the user message that triggered this assistant message (immediately preceding)
+        const idx = allMsgs.indexOf(msg);
+        const userMsg = allMsgs.slice(0, idx).reverse().find(m => m.role === 'user');
+        if (!userMsg) { toast('找不到原始 prompt'); return; }
+        // Replay — warn if any reference images were deleted
+        const expectedRefs = (userMsg.refImageIds || []).length;
+        const refDataUrls = [];
+        for (const id of (userMsg.refImageIds || [])) {
+          const img = await getImage(id);
+          if (img) refDataUrls.push(img.dataUrl);
+        }
+        const missingCount = expectedRefs - refDataUrls.length;
+        if (missingCount > 0) {
+          if (refDataUrls.length === 0) {
+            toast(`原始引用 ${expectedRefs} 张全部已被清理，无法 Re-roll`);
+            return;
+          }
+          toast(`警告：${missingCount} 张原始引用已丢失，Re-roll 结果可能不一致`);
+        }
+        const aMsg = await putMessage({ role: 'assistant', text: '', model: msg.model });
         await renderChat();
-        if (activeTab === 'tree') renderTree();
-        toast('Re-roll 完成');
-      } catch (e) {
-        aMsg.error = e.message;
-        await db.put('messages', aMsg);
-        await renderChat();
+        try {
+          const result = isGeminiImageModel(msg.model)
+            ? await callGeminiChatImage({ model: msg.model, prompt: userMsg.text, refDataUrls })
+            : refDataUrls.length > 0
+              ? await callGptImageEdit({ model: msg.model, prompt: userMsg.text, sourceImages: refDataUrls })
+              : await callGptImageGen({ model: msg.model, prompt: userMsg.text });
+          const recs = await Promise.all(result.images.map(img =>
+            putImage({ dataUrl: img.dataUrl, model: msg.model, prompt: userMsg.text, format: img.format })));
+          const ids = recs.map(r => r.id);
+          aMsg.imageIds = ids;
+          const newNode = await putNode({ parentNodeId: node.parentNodeId, kind: 'reroll', messageId: aMsg.id, imageIds: ids });
+          aMsg.nodeId = newNode.id;
+          await db.put('messages', aMsg);
+          for (const r of recs) { r.nodeId = newNode.id; r.parentId = node.parentNodeId; await db.put('images', r); }
+          await renderChat();
+          if (activeTab === 'tree') renderTree();
+          toast('Re-roll 完成');
+        } catch (e) {
+          aMsg.error = e.message;
+          await db.put('messages', aMsg);
+          await renderChat();
+        }
+      } finally {
+        rerollingNodes.delete(nodeId);
       }
     }
 
@@ -555,9 +583,9 @@
 
       (async () => {
         const grid = modal.querySelector('[data-grid]');
-        const allMsgs = await listMessages();
+        const [allNodes, allMsgs] = await Promise.all([listNodes(), listMessages()]);
         for (const nid of nodeIds) {
-          const node = (await listNodes()).find(n => n.id === nid);
+          const node = allNodes.find(n => n.id === nid);
           if (!node) continue;
           const img = await getImage(node.imageIds[0]);
           const msg = allMsgs.find(m => m.id === node.messageId);
