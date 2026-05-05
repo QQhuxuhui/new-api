@@ -39,6 +39,28 @@ import ScrollableContainer from '../common/ui/ScrollableContainer';
 import { getUptimeStatusColor, getUptimeStatusText } from '../../helpers/dashboard';
 import { UPTIME_STATUS_MAP } from '../../constants/dashboard.constants';
 
+const beijingTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
+const formatBeijingTime = (timeStr) => {
+  if (!timeStr) return '';
+  const hasTimezone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(timeStr);
+  const isoCandidate = hasTimezone
+    ? timeStr.replace(' ', 'T')
+    : timeStr.replace(' ', 'T') + 'Z';
+  const d = new Date(isoCandidate);
+  if (Number.isNaN(d.getTime())) return timeStr;
+  return beijingTimeFormatter.format(d).replace(/\//g, '-');
+};
+
 const UptimePanel = ({
   uptimeData,
   uptimeLoading,
@@ -74,9 +96,7 @@ const UptimePanel = ({
     });
 
     const renderItem = (monitor, idx) => {
-      const bars = Array.isArray(monitor.heartbeats)
-        ? [...monitor.heartbeats].reverse()
-        : [];
+      const bars = Array.isArray(monitor.heartbeats) ? monitor.heartbeats : [];
 
       return (
         <div key={idx} className='p-2 hover:bg-white rounded-lg transition-colors'>
@@ -106,7 +126,7 @@ const UptimePanel = ({
                       key={i}
                       content={
                         <div className='text-xs leading-tight'>
-                          {hb.time && <div>{hb.time}</div>}
+                          {hb.time && <div>{formatBeijingTime(hb.time)}</div>}
                           <div>{getUptimeStatusText(hb.status, UPTIME_STATUS_MAP, t)}</div>
                         </div>
                       }
