@@ -1311,9 +1311,82 @@
       e.preventDefault();
       if (!e.dataTransfer.files?.length) return;
       for (const file of e.dataTransfer.files) {
+        if (file.type === 'application/json' || file.name.endsWith('.json')) {
+          await importBundle(file);
+          return;  // single JSON drop = full import; don't also process other files
+        }
         if (file.type.startsWith('image/')) await ingestUserFile(file);
       }
     });
+
+    // === Export / Import ===
+    async function exportSession() {
+      const images   = await listImages();
+      const messages = await listMessages();
+      const nodes    = await listNodes();
+      const settings = {
+        model: $('model-select').value,
+        presets: STYLE_PRESETS,  // captured for parity if user customized later
+      };
+      const bundle = { version: 1, exportedAt: now(), settings, images, messages, nodes };
+      const blob = new Blob([JSON.stringify(bundle)], { type: 'application/json' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0,16).replace(/[-:T]/g, '').replace(/(\d{8})(\d{4})/, '$1-$2');
+      a.href = url; a.download = `conv-image-${stamp}-${nodes.length}nodes.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast('已导出会话');
+    }
+
+    async function backupCurrent() {
+      const ts = now();
+      const backup = {
+        ts,
+        images:   await listImages(),
+        messages: await listMessages(),
+        nodes:    await listNodes(),
+      };
+      try {
+        localStorage.setItem(`conv_image_backup_${ts}`, JSON.stringify(backup));
+      } catch (e) {
+        console.warn('backup failed (storage full?)', e);
+        toast('备份失败（localStorage 已满），导入仍会继续');
+      }
+      // Clean expired backups (>7d)
+      const cutoff = ts - 7 * 86400_000;
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (!k?.startsWith('conv_image_backup_')) continue;
+        const t = parseInt(k.slice('conv_image_backup_'.length), 10);
+        if (Number.isFinite(t) && t < cutoff) localStorage.removeItem(k);
+      }
+    }
+
+    async function importBundle(file) {
+      let bundle;
+      try { bundle = JSON.parse(await file.text()); }
+      catch { toast('文件格式错误（不是 JSON）'); return; }
+      if (bundle.version !== 1) { toast('版本不匹配（期望 v1）'); return; }
+      const counts = `${bundle.images?.length || 0} 张图、${bundle.messages?.length || 0} 条消息、${bundle.nodes?.length || 0} 个分支`;
+      if (!confirm(`将导入 ${counts}。当前会话会被清空（已自动备份到本地，7 天后过期）。继续？`)) return;
+
+      // Backup current state to a versioned store
+      await backupCurrent();
+
+      // Replace
+      await db.clear('images');
+      await db.clear('messages');
+      await db.clear('nodes');
+      for (const img of bundle.images   || []) await db.put('images', img);
+      for (const msg of bundle.messages || []) await db.put('messages', msg);
+      for (const nd  of bundle.nodes    || []) await db.put('nodes', nd);
+
+      activeImageId = null;
+      await renderChat();
+      refreshTabs();
+      toast('导入完成');
+    }
 
     // === Bootstrap ===
     window.addEventListener('DOMContentLoaded', async () => {
@@ -1347,6 +1420,15 @@
           await renderChat();
           refreshTabs();
           toast('已开新对话');
+        });
+
+        $('export-btn').addEventListener('click', exportSession);
+
+        $('import-btn').addEventListener('click', () => {
+          const inp = document.createElement('input');
+          inp.type = 'file'; inp.accept = '.json,application/json';
+          inp.addEventListener('change', e => { if (e.target.files[0]) importBundle(e.target.files[0]); });
+          inp.click();
         });
       } catch (e) {
         $('header-status').textContent = `IDB error: ${e.message}`;
