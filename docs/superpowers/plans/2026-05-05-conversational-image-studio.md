@@ -14,7 +14,9 @@
 
 ## Deviations From Spec
 
-None as of plan-writing. Any deviations discovered during execution should be documented here before being applied.
+1. **Skip the `window.__dev` exposure in Task 1 Step 4 (and the corresponding removal in Task 3 Step 8).** Reason: the verification this enables is "open browser console, run helpers, observe output" — we have no browser in the implementer subagent's environment, so the temporary exposure + later removal is pure churn with zero verification benefit. Net state matches the post-Task-3 spec.
+
+2. **`<script type="module">` + jsDelivr CDN ESM import works in Chrome (the user's primary browser on WSL2/Windows) but breaks Safari and Firefox under `file://` by default.** Original sibling file `docs/gpt文生图+图生图.html` uses classic `<script>` tags so it double-clicks anywhere. Mitigation deferred to **Task 10 polish**: inline-vendor `idb`'s UMD build (`https://cdn.jsdelivr.net/npm/idb@8/build/umd.js`, ~5.7 KB) and drop `type="module"`, restoring cross-browser `file://` support.
 
 ---
 
@@ -2115,6 +2117,18 @@ if (missingRefIds.length > 0) {
   return;
 }
 ```
+
+- [ ] **Step 3.5: Inline-vendor `idb` UMD to restore cross-browser file:// double-click**
+
+Currently the file uses `<script type="module">` + `import { openDB } from 'https://cdn.jsdelivr.net/npm/idb@8/+esm'`. This works in Chrome but Safari/Firefox block ES modules under `file://` by default. To restore the "double-click anywhere" promise:
+
+1. Fetch `https://cdn.jsdelivr.net/npm/idb@8/build/umd.js` (~5.7 KB), save its contents
+2. Inline it inside a classic `<script>` block BEFORE the main script (the UMD attaches `idb` to `window`)
+3. Change the main script tag from `<script type="module">` to plain `<script>`
+4. Replace `import { openDB } from '...';` with `const { openDB } = window.idb;`
+5. All other code stays the same — `openDB`'s API is identical
+
+Verify after change: open in Chrome (still works), open in Firefox (now works). No console errors.
 
 - [ ] **Step 4: Run the full manual checklist from the spec**
 
