@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useRef } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Avatar,
@@ -42,8 +42,11 @@ import {
   BarChart2,
   TrendingUp,
   Receipt,
+  Sparkles,
+  ArrowRight,
 } from 'lucide-react';
 import { IconGift } from '@douyinfe/semi-icons';
+import { API } from '../../helpers';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
 import { getCurrencyConfig } from '../../helpers/render';
 
@@ -95,6 +98,44 @@ const RechargeCard = ({
     ' products ?',
     creemProducts,
   );
+
+  // Best subscription plan for the upsell hero — null if no qualified plan
+  const [bestSubPlan, setBestSubPlan] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    API.get('/api/plan/enabled?purchasable=true')
+      .then((res) => {
+        if (cancelled) return;
+        const { success, data } = res.data || {};
+        if (!success || !Array.isArray(data)) return;
+        const subPlans = data.filter(
+          (p) =>
+            p &&
+            p.category === 'subscription' &&
+            p.original_price > 0 &&
+            p.price >= 0 &&
+            p.original_price > p.price,
+        );
+        if (subPlans.length === 0) return;
+        const best = subPlans.reduce((acc, p) => {
+          const pct = 1 - p.price / p.original_price;
+          const accPct = acc ? 1 - acc.price / acc.original_price : -1;
+          return pct > accPct ? p : acc;
+        }, null);
+        setBestSubPlan(best);
+      })
+      .catch(() => {
+        /* silent — banner just won't show */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const bestDiscountPercent = bestSubPlan
+    ? Math.round((1 - bestSubPlan.price / bestSubPlan.original_price) * 100)
+    : 0;
   return (
     <Card className='!rounded-2xl shadow-sm border-0'>
       {/* 卡片头部 */}
@@ -119,25 +160,124 @@ const RechargeCard = ({
         </Button>
       </div>
 
-      {/* 套餐购买引导提示 */}
-      <Banner
-        type='info'
-        icon={null}
-        className='!rounded-xl mb-4'
-        closeIcon={null}
-        description={
-          <div className='flex items-center justify-between flex-wrap gap-2'>
-            <span>{t('需要包月套餐？享受更优惠的价格和更多权益')}</span>
-            <Button
-              size='small'
-              theme='solid'
-              onClick={() => navigate('/plans')}
+      {/* 套餐购买引导 — 渐变 Hero（仅在有可购买的折扣订阅套餐时显示） */}
+      {bestSubPlan && bestDiscountPercent > 0 && (
+        <button
+          type='button'
+          onClick={() => navigate('/plans')}
+          className='upsell-hero group relative w-full overflow-hidden rounded-2xl mb-4 text-left cursor-pointer'
+          style={{
+            background: 'linear-gradient(135deg, #1D4ED8 0%, #6D28D9 60%, #7C3AED 100%)',
+            border: 'none',
+            padding: 0,
+            boxShadow:
+              '0 1px 2px rgba(15,23,42,0.04), 0 16px 36px -14px rgba(124,58,237,0.45)',
+          }}
+        >
+          {/* Decorative aurora */}
+          <div
+            aria-hidden
+            className='pointer-events-none absolute -top-16 -right-12 w-56 h-56 rounded-full'
+            style={{
+              background:
+                'radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 70%)',
+            }}
+          />
+          <div
+            aria-hidden
+            className='pointer-events-none absolute -bottom-10 left-[40%] w-40 h-40 rounded-full'
+            style={{
+              background:
+                'radial-gradient(circle, rgba(251,191,36,0.30) 0%, transparent 70%)',
+            }}
+          />
+          {/* Subtle grain via repeating gradient */}
+          <div
+            aria-hidden
+            className='pointer-events-none absolute inset-0 opacity-[0.04]'
+            style={{
+              backgroundImage:
+                'repeating-linear-gradient(45deg, #fff 0 1px, transparent 1px 4px)',
+            }}
+          />
+
+          <div className='relative flex items-center gap-4 px-5 py-4 sm:px-6 sm:py-5'>
+            <div className='flex-1 min-w-0'>
+              <div
+                className='inline-flex items-center gap-1.5 mb-2 px-2.5 py-0.5 rounded-full text-[11px] font-semibold'
+                style={{
+                  background: 'rgba(255,255,255,0.22)',
+                  color: '#fff',
+                  backdropFilter: 'blur(4px)',
+                }}
+              >
+                <Sparkles size={12} strokeWidth={2.5} />
+                <span>{t('包月更划算')}</span>
+              </div>
+              <div
+                className='text-white font-bold leading-tight'
+                style={{
+                  fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+                  fontSize: 'clamp(15px, 1.6vw, 18px)',
+                  letterSpacing: '-0.2px',
+                }}
+              >
+                {t('同样金额，')}
+                <span style={{ color: '#FBBF24' }}>
+                  {t('多 {{percent}}% 额度', { percent: bestDiscountPercent })}
+                </span>
+              </div>
+              <div
+                className='mt-1 text-[12.5px] leading-snug'
+                style={{ color: 'rgba(255,255,255,0.85)' }}
+              >
+                {t(
+                  '包月套餐每月固定到账 · 最高省 {{percent}}% · 适合稳定使用',
+                  { percent: bestDiscountPercent },
+                )}
+              </div>
+            </div>
+
+            <div
+              className='upsell-cta hidden sm:inline-flex items-center gap-1.5 flex-shrink-0 px-4 py-2.5 rounded-xl text-[13px] font-semibold transition-transform'
+              style={{
+                background: '#fff',
+                color: '#1D4ED8',
+                fontFamily: "'Poppins', 'Inter', system-ui, sans-serif",
+                boxShadow: '0 4px 12px -2px rgba(0,0,0,0.15)',
+              }}
             >
-              {t('查看套餐')}
-            </Button>
+              <span>{t('查看套餐')}</span>
+              <ArrowRight
+                size={15}
+                strokeWidth={2.5}
+                className='upsell-arrow transition-transform'
+              />
+            </div>
+            {/* Mobile: arrow chevron only */}
+            <div
+              className='sm:hidden flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center'
+              style={{
+                background: 'rgba(255,255,255,0.18)',
+                color: '#fff',
+              }}
+            >
+              <ArrowRight size={16} strokeWidth={2.5} />
+            </div>
           </div>
-        }
-      />
+
+          <style>{`
+            .upsell-hero:hover {
+              transform: translateY(-1px);
+              box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 22px 44px -14px rgba(124,58,237,0.55);
+            }
+            .upsell-hero:hover .upsell-arrow {
+              transform: translateX(3px);
+            }
+            .upsell-hero { transition: transform 0.2s, box-shadow 0.2s; }
+          `}</style>
+        </button>
+      )}
 
       <Space vertical style={{ width: '100%' }}>
         {/* 统计数据 */}
