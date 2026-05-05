@@ -387,7 +387,11 @@
     // === Input area ===
     function renderInputArea() {
       const model = modelById($('model-select').value);
+      if (!model) return;
       const isGem = isGeminiImageModel(model.id);
+      // Snapshot current values before rebuilding the DOM
+      const prevPrompt = $('prompt-input')?.value || '';
+      const prevCount  = $('count-input')?.value  || '1';
       $('input-area').innerHTML = `
         <div id="ref-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
         <textarea id="prompt-input" rows="3" placeholder="描述你想要的图像，Cmd/Ctrl+Enter 发送"
@@ -409,6 +413,9 @@
                   padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">发送</button>
         </div>
       `;
+      // Restore snapshot values (size/aspect/resolution legitimately change per model)
+      $('prompt-input').value = prevPrompt;
+      $('count-input').value  = prevCount;
       $('send-btn').addEventListener('click', onSend);
       $('prompt-input').addEventListener('keydown', e => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); onSend(); }
@@ -419,53 +426,73 @@
     async function onSend() {
       const prompt = $('prompt-input').value.trim();
       if (!prompt) { toast('请输入提示词'); return; }
-      const model = $('model-select').value;
-      const n = parseInt($('count-input').value, 10) || 1;
 
-      // Persist user message
-      const userMsg = await putMessage({ role: 'user', text: prompt, model });
-      // Persist placeholder assistant message
-      const aMsg = await putMessage({ role: 'assistant', text: '', model });
-      await renderChat();
+      const sendBtn    = $('send-btn');
+      const newChatBtn = $('new-chat-btn');
+      const ta         = $('prompt-input');
+
+      // Guard against re-entry (double-click, Ctrl+Enter race)
+      if (sendBtn.disabled) return;
+      sendBtn.disabled    = true;
+      newChatBtn.disabled = true;
+      ta.disabled         = true;
 
       try {
-        let result;
-        if (isGeminiImageModel(model)) {
-          const aspectRatio = $('aspect-input')?.value || '1:1';
-          const resolution  = $('resolution-input')?.value || '1K';
-          const calls = Array.from({ length: n }, () =>
-            callGeminiChatImage({ model, prompt, aspectRatio, resolution }));
-          const settled = await Promise.all(calls.map(p => p.catch(e => ({ error: e }))));
-          const ok = settled.filter(s => !s.error);
-          if (ok.length === 0) throw settled[0].error || new Error('全部失败');
-          result = { images: ok.flatMap(s => s.images) };
-        } else {
-          const size = $('size-input')?.value || '1024x1024';
-          result = await callGptImageGen({ model, prompt, n, size });
+        const model = $('model-select').value;
+        const n = parseInt($('count-input').value, 10) || 1;
+
+        // Persist user message
+        await putMessage({ role: 'user', text: prompt, model });
+        // Persist placeholder assistant message
+        const aMsg = await putMessage({ role: 'assistant', text: '', model });
+        await renderChat();
+
+        try {
+          let result;
+          if (isGeminiImageModel(model)) {
+            const aspectRatio = $('aspect-input')?.value || '1:1';
+            const resolution  = $('resolution-input')?.value || '1K';
+            const calls = Array.from({ length: n }, () =>
+              callGeminiChatImage({ model, prompt, aspectRatio, resolution }));
+            const settled = await Promise.all(calls.map(p => p.catch(e => ({ error: e }))));
+            const ok = settled.filter(s => !s.error);
+            if (ok.length === 0) throw settled[0].error || new Error('全部失败');
+            result = { images: ok.flatMap(s => s.images) };
+          } else {
+            const size = $('size-input')?.value || '1024x1024';
+            result = await callGptImageGen({ model, prompt, n, size });
+          }
+
+          // Save images
+          const imageRecs = await Promise.all(result.images.map(img =>
+            putImage({ dataUrl: img.dataUrl, model, prompt, format: img.format })
+          ));
+
+          // Create root node then write aMsg exactly once (collapsed from 3 writes → 1 + 1-tx)
+          const imageIds = imageRecs.map(r => r.id);
+          const node = await putNode({ kind: 'root', messageId: aMsg.id, imageIds });
+          aMsg.imageIds = imageIds;
+          aMsg.nodeId   = node.id;
+          await db.put('messages', aMsg);
+
+          // Batch image nodeId update in one transaction
+          const tx = db.transaction('images', 'readwrite');
+          await Promise.all(imageRecs.map(r => { r.nodeId = node.id; return tx.store.put(r); }));
+          await tx.done;
+
+          ta.value = '';
+        } catch (e) {
+          aMsg.error = e.message;
+          await db.put('messages', aMsg);
+          toast(`生成失败：${e.message}`);
         }
-
-        // Save images
-        const imageRecs = await Promise.all(result.images.map(img =>
-          putImage({ dataUrl: img.dataUrl, model, prompt, format: img.format })
-        ));
-        const imageIds = imageRecs.map(r => r.id);
-        aMsg.imageIds = imageIds;
-        await db.put('messages', aMsg);
-
-        // Create root node (no parent yet — Task 5 wires branching)
-        const node = await putNode({ kind: 'root', messageId: aMsg.id, imageIds });
-        aMsg.nodeId = node.id;
-        await db.put('messages', aMsg);
-        for (const r of imageRecs) { r.nodeId = node.id; await db.put('images', r); }
-
-        $('prompt-input').value = '';
-      } catch (e) {
-        aMsg.error = e.message;
-        await db.put('messages', aMsg);
-        toast(`生成失败：${e.message}`);
+        await renderChat();
+        await renderActiveImage();
+      } finally {
+        sendBtn.disabled    = false;
+        newChatBtn.disabled = false;
+        ta.disabled         = false;
       }
-      await renderChat();
-      await renderActiveImage();
     }
 
     // === Chat renderer ===
