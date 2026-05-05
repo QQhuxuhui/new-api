@@ -248,22 +248,39 @@
     }
 
     function extractGeminiImage(message) {
-      // 1) Direct multipart-like content
-      if (Array.isArray(message?.content)) {
-        for (const part of message.content) {
+      // Permissive regex matches bare data URLs AND markdown-wrapped ones
+      // (data:image/...;base64,... is a substring of ![alt](data:image/...;base64,...))
+      const DATA_URL_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/;
+      const content = message?.content;
+
+      // 1) Array content: walk each part
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          // 1a) image_url part
           if (part?.type === 'image_url' && part.image_url?.url) return part.image_url.url;
           if (part?.image_url?.url) return part.image_url.url;
+          // 1b) text part — scan for bare or markdown-embedded data URL
+          if (typeof part?.text === 'string') {
+            const m = DATA_URL_RE.exec(part.text);
+            if (m) return m[0];
+          }
         }
       }
-      // 2) Markdown ![image](data:image/png;base64,...)
-      if (typeof message?.content === 'string') {
-        const m = message.content.match(/!\[[^\]]*\]\((data:image\/[^;]+;base64,[^)]+)\)/);
-        if (m) return m[1];
+
+      // 2) String content — scan for bare or markdown-embedded data URL
+      if (typeof content === 'string') {
+        const m = DATA_URL_RE.exec(content);
+        if (m) return m[0];
       }
+
       return null;
     }
 
     async function callPolishPrompt(originalPrompt) {
+      // NOTE: gpt-4o-mini requires its own API key stored in the shared `gpt_image_apikeys`
+      // localStorage entry (same store used by gpt-image-1). If the user has not added a key
+      // that covers gpt-4o-mini, callPolishPrompt will throw "未找到 gpt-4o-mini 的 API Key".
+      // Task 8 will surface this failure message in the polish modal so the user can recover.
       const POLISH_MODEL = 'gpt-4o-mini';
       const body = {
         model: POLISH_MODEL,
