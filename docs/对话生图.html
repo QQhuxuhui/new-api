@@ -1341,6 +1341,7 @@
 
     async function backupCurrent() {
       const ts = now();
+      const key = `conv_image_backup_${ts}`;
       const backup = {
         ts,
         images:   await listImages(),
@@ -1348,7 +1349,7 @@
         nodes:    await listNodes(),
       };
       try {
-        localStorage.setItem(`conv_image_backup_${ts}`, JSON.stringify(backup));
+        localStorage.setItem(key, JSON.stringify(backup));
       } catch (e) {
         console.warn('backup failed (storage full?)', e);
         toast('备份失败（localStorage 已满），导入仍会继续');
@@ -1361,6 +1362,7 @@
         const t = parseInt(k.slice('conv_image_backup_'.length), 10);
         if (Number.isFinite(t) && t < cutoff) localStorage.removeItem(k);
       }
+      return key;
     }
 
     async function importBundle(file) {
@@ -1372,20 +1374,27 @@
       if (!confirm(`将导入 ${counts}。当前会话会被清空（已自动备份到本地，7 天后过期）。继续？`)) return;
 
       // Backup current state to a versioned store
-      await backupCurrent();
+      const backupKey = await backupCurrent();
 
       // Replace
-      await db.clear('images');
-      await db.clear('messages');
-      await db.clear('nodes');
-      for (const img of bundle.images   || []) await db.put('images', img);
-      for (const msg of bundle.messages || []) await db.put('messages', msg);
-      for (const nd  of bundle.nodes    || []) await db.put('nodes', nd);
+      try {
+        await db.clear('images');
+        await db.clear('messages');
+        await db.clear('nodes');
+        for (const img of bundle.images   || []) await db.put('images', img);
+        for (const msg of bundle.messages || []) await db.put('messages', msg);
+        for (const nd  of bundle.nodes    || []) await db.put('nodes', nd);
+      } catch (e) {
+        toast(`导入失败：${e.message}。备份保留在 localStorage[${backupKey}]，可手动恢复`);
+        console.error('Import failed mid-write. Backup key:', backupKey, e);
+        return;
+      }
 
       activeImageId = null;
       await renderChat();
       refreshTabs();
       toast('导入完成');
+      console.log('[conv-image] Import complete. Previous session backed up at localStorage[' + backupKey + ']');
     }
 
     // === Bootstrap ===
