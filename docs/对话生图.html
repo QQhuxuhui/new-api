@@ -112,7 +112,7 @@
       // Async eviction (don't block the insert)
       queueMicrotask(async () => {
         const evicted = await evictLRU();
-        if (evicted > 0) toast(`清理了 ${evicted} 张旧图（不在当前分支主干上）`);
+        if (evicted > 0) toast(`清理了 ${evicted} 张未被分支引用的旧图`);
       });
       return rec;
     }
@@ -134,11 +134,16 @@
       const protectedNodes = new Set();
       for (const leaf of leaves) {
         let cur = leaf;
-        while (cur) { protectedNodes.add(cur.id); cur = cur.parentNodeId ? byId.get(cur.parentNodeId) : null; }
+        while (cur && !protectedNodes.has(cur.id)) {
+          protectedNodes.add(cur.id);
+          cur = cur.parentNodeId ? byId.get(cur.parentNodeId) : null;
+        }
       }
       const protectedImageIds = new Set(nodes.filter(n => protectedNodes.has(n.id)).flatMap(n => n.imageIds));
 
-      const removable = all.filter(img => !protectedImageIds.has(img.id));
+      const graceMs = 5000;
+      const cutoff = now() - graceMs;
+      const removable = all.filter(img => !protectedImageIds.has(img.id) && img.createdAt < cutoff);
       const toRemove = removable.slice(0, all.length - IMAGE_CAPACITY);
       for (const img of toRemove) await deleteImage(img.id);
       return toRemove.length;
@@ -639,13 +644,14 @@
       const nodes = await listNodes();
       const childCount = new Map();
       for (const n of nodes) if (n.parentNodeId) childCount.set(n.parentNodeId, (childCount.get(n.parentNodeId) || 0) + 1);
+      const byImageNodeId = new Map(nodes.map(n => [n.id, n]));
 
       const filtered = all.filter(img => {
         if (libraryFilter.model !== 'all' && img.model !== libraryFilter.model) return false;
         if (libraryFilter.source === 'uploads' && !img.shortId.startsWith('u')) return false;
         if (libraryFilter.source === 'generated' && !img.shortId.startsWith('g')) return false;
         if (libraryFilter.branch === 'with-children') {
-          const node = nodes.find(n => n.id === img.nodeId);
+          const node = byImageNodeId.get(img.nodeId);
           if (!node || !childCount.has(node.id)) return false;
         }
         return true;
@@ -674,7 +680,7 @@
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;">
           ${filtered.map(img => `
             <div data-image-id="${img.id}" draggable="true" style="position:relative;background:#0a0a0a;border-radius:6px;overflow:hidden;aspect-ratio:1;">
-              <img src="${img.dataUrl}" style="width:100%;height:100%;object-fit:cover;">
+              <img src="${img.dataUrl}" draggable="false" style="width:100%;height:100%;object-fit:cover;">
               <span style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.7);color:#fff;font-size:10px;padding:1px 4px;border-radius:3px;">${img.shortId}</span>
               <div class="lib-actions" style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;gap:6px;">
                 <button data-action="ref"  title="引用"      style="background:var(--accent);color:#000;border:0;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">↩</button>
@@ -718,7 +724,8 @@
           if (img?.nodeId) { selectedNodeIds = [img.nodeId]; activeTab = 'tree'; refreshTabs(); }
         });
         tile.querySelector('[data-action="del"]').addEventListener('click', async () => {
-          if (!confirm(`删除 ${id.slice(0,8)}？该操作不可撤销`)) return;
+          const img = await getImage(id);
+          if (!confirm(`删除 ${img?.shortId || id.slice(0,8)}？该操作不可撤销`)) return;
           await deleteImage(id);
           renderLibrary();
         });
