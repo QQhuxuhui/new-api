@@ -241,6 +241,13 @@
       };
     }
 
+    function nearestEditSize(w, h) {
+      const ratio = w / h;
+      if (ratio > 1.2)  return '1536x1024';   // landscape
+      if (ratio < 0.83) return '1024x1536';   // portrait
+      return '1024x1024';                     // square-ish
+    }
+
     function dataUrlToBlob(dataUrl) {
       const [head, b64] = dataUrl.split(',');
       const mime = head.match(/data:([^;]+)/)?.[1] || 'image/png';
@@ -766,7 +773,7 @@
         </div>
         <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;display:inline-block;">
           <img id="mask-base" src="${src.dataUrl}" style="display:block;max-width:100%;max-height:60vh;">
-          <canvas id="mask-overlay" style="position:absolute;inset:0;cursor:crosshair;"></canvas>
+          <canvas id="mask-overlay" style="position:absolute;inset:0;cursor:crosshair;touch-action:none;"></canvas>
         </div>
         <div style="margin-top:12px;display:flex;gap:8px;">
           <input id="mask-prompt" placeholder="描述要修改的内容（如：换成花瓶）"
@@ -859,13 +866,15 @@
       const maskDataUrl = maskCanvas.toDataURL('image/png');
 
       const model = $('model-select').value;
-      const aMsg = await putMessage({ role: 'assistant', text: '', model });
       const userMsg = await putMessage({ role: 'user', text: `[mask] ${prompt}`, model, refImageIds: [src.id] });
+      const aMsg    = await putMessage({ role: 'assistant', text: '', model });
       await renderChat();
 
+      const btn = $('apply-mask-btn');
+      btn.disabled = true; btn.textContent = '生成中…';
       try {
         const result = await callGptImageEdit({
-          model, prompt, sourceImages: [src.dataUrl], maskDataUrl, n: 1, size: `${w}x${h}`,
+          model, prompt, sourceImages: [src.dataUrl], maskDataUrl, n: 1, size: nearestEditSize(w, h),
         });
         const recs = await Promise.all(result.images.map(img =>
           putImage({ dataUrl: img.dataUrl, model, prompt, format: img.format })));
@@ -884,6 +893,8 @@
         await db.put('messages', aMsg);
         await renderChat();
         toast(`编辑失败：${e.message}`);
+      } finally {
+        btn.disabled = false; btn.textContent = '🎨 应用编辑';
       }
     }
 
