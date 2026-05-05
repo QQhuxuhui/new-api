@@ -343,6 +343,7 @@
     let activeTab     = 'big';
     let activeImageId = null;
     const refState = { imageIds: [] };  // currently engaged refs
+    let selectedNodeIds = [];
 
     async function renderRefPills() {
       const bar = $('ref-pills');
@@ -404,7 +405,176 @@
     }
 
     // Stubs filled by later tasks
-    async function renderTree()    { $('tab-content').innerHTML = '<div style="color:var(--muted);">[Task 5 实现]</div>'; }
+    async function renderTree() {
+      const nodes = await listNodes();
+      const imgs  = await listImages();
+      const imgMap = new Map(imgs.map(i => [i.id, i]));
+      const tc = $('tab-content');
+      if (nodes.length === 0) {
+        tc.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">尚无分支</div>';
+        return;
+      }
+
+      // Layout: assign columns by depth, rows by sibling order
+      const byParent = new Map();
+      for (const n of nodes) {
+        const k = n.parentNodeId || '__root__';
+        if (!byParent.has(k)) byParent.set(k, []);
+        byParent.get(k).push(n);
+      }
+      for (const arr of byParent.values()) arr.sort((a, b) => a.createdAt - b.createdAt);
+
+      const NODE_W = 100, NODE_H = 100, GAP_X = 60, GAP_Y = 30;
+      const positions = new Map();  // nodeId → {x, y}
+      let nextRow = 0;
+      function place(node, depth) {
+        const children = byParent.get(node.id) || [];
+        if (children.length === 0) {
+          positions.set(node.id, { x: depth * (NODE_W + GAP_X), y: nextRow * (NODE_H + GAP_Y) });
+          nextRow++;
+        } else {
+          const childRowsStart = nextRow;
+          children.forEach(c => place(c, depth + 1));
+          const childRowsEnd = nextRow - 1;
+          const midY = ((childRowsStart + childRowsEnd) / 2) * (NODE_H + GAP_Y);
+          positions.set(node.id, { x: depth * (NODE_W + GAP_X), y: midY });
+        }
+      }
+      for (const root of (byParent.get('__root__') || [])) place(root, 0);
+
+      const maxX = Math.max(...[...positions.values()].map(p => p.x)) + NODE_W + 20;
+      const maxY = Math.max(...[...positions.values()].map(p => p.y)) + NODE_H + 20;
+
+      const lines = nodes.filter(n => n.parentNodeId).map(n => {
+        const p = positions.get(n.parentNodeId), c = positions.get(n.id);
+        return `<line x1="${p.x + NODE_W}" y1="${p.y + NODE_H/2}" x2="${c.x}" y2="${c.y + NODE_H/2}"
+                stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>`;
+      }).join('');
+
+      const cards = nodes.map(n => {
+        const p = positions.get(n.id);
+        const firstImg = imgMap.get(n.imageIds[0]);
+        const sel = selectedNodeIds.includes(n.id) ? 'stroke="var(--accent)" stroke-width="3"' : 'stroke="rgba(255,255,255,0.15)" stroke-width="1"';
+        const kindBadge = { root: 'R', edit: 'E', reroll: '🎲', gen: 'G' }[n.kind] || '?';
+        return `
+          <g data-node-id="${n.id}" style="cursor:pointer;">
+            <rect x="${p.x}" y="${p.y}" width="${NODE_W}" height="${NODE_H}" rx="6" fill="#0a0a0a" ${sel}/>
+            ${firstImg ? `<image href="${firstImg.dataUrl}" x="${p.x+4}" y="${p.y+4}" width="${NODE_W-8}" height="${NODE_H-8}" preserveAspectRatio="xMidYMid slice"/>` : ''}
+            <text x="${p.x + 6}" y="${p.y + 16}" fill="#fff" font-size="11" style="text-shadow:0 0 2px #000;">${kindBadge}</text>
+            <text x="${p.x + NODE_W - 6}" y="${p.y + NODE_H - 6}" text-anchor="end" fill="#fff" font-size="10" style="text-shadow:0 0 2px #000;">${(byParent.get(n.id) || []).length || ''}</text>
+          </g>`;
+      }).join('');
+
+      const compareBtn = selectedNodeIds.length >= 2
+        ? `<button id="compare-btn" style="margin-bottom:8px;background:var(--accent);color:#000;border:0;padding:6px 14px;border-radius:6px;cursor:pointer;">▣ 并排对比 (${selectedNodeIds.length})</button>`
+        : '';
+
+      tc.innerHTML = `
+        <div style="margin-bottom:8px;color:var(--muted);font-size:11px;">click 单选 · shift+click 多选 (最多 4) · 右键 Re-roll</div>
+        ${compareBtn}
+        <svg width="${maxX}" height="${maxY}" style="background:#050505;border-radius:6px;">${lines}${cards}</svg>
+      `;
+
+      tc.querySelectorAll('g[data-node-id]').forEach(g => {
+        g.addEventListener('click', e => {
+          const nid = g.dataset.nodeId;
+          if (e.shiftKey) {
+            if (selectedNodeIds.includes(nid)) selectedNodeIds = selectedNodeIds.filter(x => x !== nid);
+            else if (selectedNodeIds.length < 4) selectedNodeIds.push(nid);
+            else toast('最多对比 4 张');
+            renderTree();
+          } else {
+            selectedNodeIds = [nid];
+            const node = nodes.find(x => x.id === nid);
+            if (node?.imageIds[0]) { activeImageId = node.imageIds[0]; }
+            renderTree();
+          }
+        });
+        g.addEventListener('contextmenu', e => {
+          e.preventDefault();
+          onReroll(g.dataset.nodeId);
+        });
+      });
+      tc.querySelector('#compare-btn')?.addEventListener('click', () => openCompareModal(selectedNodeIds));
+    }
+
+    async function onReroll(nodeId) {
+      const node = (await listNodes()).find(n => n.id === nodeId);
+      if (!node) return;
+      const msg = (await listMessages()).find(m => m.id === node.messageId);
+      if (!msg) return;
+      // Find the user message that triggered this assistant message (immediately preceding)
+      const allMsgs = await listMessages();
+      const idx = allMsgs.findIndex(m => m.id === msg.id);
+      const userMsg = allMsgs.slice(0, idx).reverse().find(m => m.role === 'user');
+      if (!userMsg) { toast('找不到原始 prompt'); return; }
+      // Replay
+      const refDataUrls = [];
+      for (const id of (userMsg.refImageIds || [])) {
+        const img = await getImage(id);
+        if (img) refDataUrls.push(img.dataUrl);
+      }
+      const aMsg = await putMessage({ role: 'assistant', text: '', model: msg.model });
+      await renderChat();
+      try {
+        const result = isGeminiImageModel(msg.model)
+          ? await callGeminiChatImage({ model: msg.model, prompt: userMsg.text, refDataUrls })
+          : refDataUrls.length > 0
+            ? await callGptImageEdit({ model: msg.model, prompt: userMsg.text, sourceImages: refDataUrls })
+            : await callGptImageGen({ model: msg.model, prompt: userMsg.text });
+        const recs = await Promise.all(result.images.map(img =>
+          putImage({ dataUrl: img.dataUrl, model: msg.model, prompt: userMsg.text, format: img.format })));
+        const ids = recs.map(r => r.id);
+        aMsg.imageIds = ids;
+        const newNode = await putNode({ parentNodeId: node.parentNodeId, kind: 'reroll', messageId: aMsg.id, imageIds: ids });
+        aMsg.nodeId = newNode.id;
+        await db.put('messages', aMsg);
+        for (const r of recs) { r.nodeId = newNode.id; r.parentId = node.parentNodeId; await db.put('images', r); }
+        await renderChat();
+        if (activeTab === 'tree') renderTree();
+        toast('Re-roll 完成');
+      } catch (e) {
+        aMsg.error = e.message;
+        await db.put('messages', aMsg);
+        await renderChat();
+      }
+    }
+
+    function openCompareModal(nodeIds) {
+      const modal = document.createElement('div');
+      modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:1000;
+                             display:flex;flex-direction:column;padding:32px;`;
+      modal.innerHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:16px;">
+        <span style="font-size:14px;color:var(--text);">并排对比 ${nodeIds.length} 个分支</span>
+        <button data-close style="background:transparent;border:0;color:var(--text);font-size:18px;cursor:pointer;">✕</button>
+      </div>
+      <div data-grid style="flex:1;display:grid;gap:12px;overflow:auto;
+                           grid-template-columns:repeat(${nodeIds.length},1fr);"></div>`;
+      document.body.appendChild(modal);
+      modal.querySelector('[data-close]').addEventListener('click', () => modal.remove());
+
+      (async () => {
+        const grid = modal.querySelector('[data-grid]');
+        const allMsgs = await listMessages();
+        for (const nid of nodeIds) {
+          const node = (await listNodes()).find(n => n.id === nid);
+          if (!node) continue;
+          const img = await getImage(node.imageIds[0]);
+          const msg = allMsgs.find(m => m.id === node.messageId);
+          const userMsg = allMsgs.slice(0, allMsgs.indexOf(msg)).reverse().find(m => m.role === 'user');
+          const cell = document.createElement('div');
+          cell.style.cssText = 'display:flex;flex-direction:column;background:#0a0a0a;border-radius:8px;padding:12px;';
+          cell.innerHTML = `
+            <img src="${img?.dataUrl || ''}" style="width:100%;height:60vh;object-fit:contain;border-radius:6px;background:#000;">
+            <div style="margin-top:8px;font-size:11px;color:var(--muted);">
+              <div>${node.kind} · ${img?.shortId || ''} · ${msg?.model || ''}</div>
+              <div style="margin-top:4px;color:var(--text);">${escapeHtml(userMsg?.text || '')}</div>
+            </div>`;
+          grid.appendChild(cell);
+        }
+      })();
+    }
+
     async function renderLibrary() { $('tab-content').innerHTML = '<div style="color:var(--muted);">[Task 6 实现]</div>'; }
     async function renderMask()    { $('tab-content').innerHTML = '<div style="color:var(--muted);">[Task 7 实现]</div>'; }
 
@@ -575,16 +745,29 @@
             putImage({ dataUrl: img.dataUrl, model, prompt, format: img.format })
           ));
 
-          // Create root node then write aMsg exactly once (collapsed from 3 writes → 1 + 1-tx)
+          // Branching rules:
+          // - no refs ⇒ new root
+          // - has refs ⇒ child of the node that contains the FIRST referenced image
+          let parentNodeId = null;
+          let kind = 'root';
+          if (refIds.length > 0) {
+            const firstRef = await getImage(refIds[0]);
+            if (firstRef?.nodeId) { parentNodeId = firstRef.nodeId; kind = 'edit'; }
+          }
           const imageIds = imageRecs.map(r => r.id);
-          const node = await putNode({ kind: 'root', messageId: aMsg.id, imageIds });
+          const node = await putNode({ parentNodeId, kind, messageId: aMsg.id, imageIds });
           aMsg.imageIds = imageIds;
           aMsg.nodeId   = node.id;
+          // keep the existing single-write of aMsg — don't double-write here
           await db.put('messages', aMsg);
 
-          // Batch image nodeId update in one transaction
+          // Batch image nodeId + parentId update in one transaction
           const tx = db.transaction('images', 'readwrite');
-          await Promise.all(imageRecs.map(r => { r.nodeId = node.id; return tx.store.put(r); }));
+          await Promise.all(imageRecs.map(r => {
+            r.nodeId   = node.id;
+            r.parentId = parentNodeId;
+            return tx.store.put(r);
+          }));
           await tx.done;
 
           ta.value = '';
@@ -715,6 +898,7 @@
           await db.clear('messages');
           await db.clear('nodes');
           activeImageId = null;
+          selectedNodeIds = [];
           await renderChat();
           refreshTabs();
           toast('已开新对话');
