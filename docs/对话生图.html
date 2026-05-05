@@ -64,6 +64,10 @@
     const DB_NAME       = 'convImageStudio';
     const DB_VERSION    = 1;
     const IMAGE_CAPACITY = 200;
+    const STYLE_PRESETS = [
+      '写实摄影','日漫风','赛博朋克','极简线稿','油画质感','国风水墨',
+      'Pixar 3D','霓虹噪点','雾面胶片','等距插画','金属反光','黏土玩偶',
+    ];
 
     // === IndexedDB layer ===
     let db;
@@ -898,6 +902,70 @@
       }
     }
 
+    // === Prompt polish (Task 8) ===
+    async function onPolish() {
+      const original = $('prompt-input').value.trim();
+      if (!original) { toast('请先输入要润色的提示词'); return; }
+      const btn = $('polish-btn');
+      btn.disabled = true; btn.textContent = '✨ 润色中…';
+
+      try {
+        const polished = await callPolishPrompt(original);
+        openPolishModal(original, polished);
+      } catch (e) {
+        showSimpleAlert('润色失败', `${e.message}\n\n原 prompt 未改动`);
+      } finally {
+        btn.disabled = false; btn.textContent = '✨';
+      }
+    }
+
+    function openPolishModal(original, polished) {
+      const modal = document.createElement('div');
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:1000;display:flex;align-items:center;justify-content:center;padding:32px;';
+      modal.innerHTML = `
+        <div style="background:#0a0a0a;border:1px solid var(--border);border-radius:12px;padding:24px;width:min(800px,95vw);">
+          <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
+            <span style="font-size:14px;font-weight:600;">✨ Prompt 润色</span>
+            <button data-close style="background:transparent;border:0;color:var(--text);cursor:pointer;font-size:18px;">✕</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+            <div><div style="font-size:11px;color:var(--muted);margin-bottom:6px;">原 prompt</div>
+                 <div style="background:#000;border:1px solid var(--border);padding:12px;border-radius:6px;min-height:120px;font-size:13px;white-space:pre-wrap;">${escapeHtml(original)}</div></div>
+            <div><div style="font-size:11px;color:var(--accent);margin-bottom:6px;">优化后</div>
+                 <textarea id="polished-text" style="width:100%;background:#000;border:1px solid rgba(217,255,0,0.3);color:var(--text);padding:12px;border-radius:6px;min-height:120px;font:inherit;font-size:13px;">${escapeHtml(polished)}</textarea></div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button data-action="cancel" style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:6px;cursor:pointer;">取消</button>
+            <button data-action="adopt-edit" style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:6px;cursor:pointer;">编辑后采纳</button>
+            <button data-action="adopt" style="background:var(--accent);color:#000;border:0;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;">采纳并替换</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+      modal.querySelector('[data-close]').addEventListener('click', () => modal.remove());
+      modal.querySelector('[data-action="cancel"]').addEventListener('click', () => modal.remove());
+      modal.querySelector('[data-action="adopt"]').addEventListener('click', () => {
+        $('prompt-input').value = modal.querySelector('#polished-text').value;
+        modal.remove();
+      });
+      modal.querySelector('[data-action="adopt-edit"]').addEventListener('click', () => {
+        $('prompt-input').value = modal.querySelector('#polished-text').value;
+        $('prompt-input').focus();
+        modal.remove();
+      });
+    }
+
+    function showSimpleAlert(title, body) {
+      const m = document.createElement('div');
+      m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:1000;display:flex;align-items:center;justify-content:center;';
+      m.innerHTML = `<div style="background:#0a0a0a;border:1px solid var(--border);border-radius:8px;padding:24px;max-width:480px;">
+        <div style="font-weight:600;margin-bottom:12px;">${escapeHtml(title)}</div>
+        <div style="font-size:13px;color:var(--muted);white-space:pre-wrap;margin-bottom:16px;">${escapeHtml(body)}</div>
+        <div style="text-align:right;"><button data-ok style="background:var(--accent);color:#000;border:0;padding:6px 14px;border-radius:6px;cursor:pointer;">好的</button></div>
+      </div>`;
+      document.body.appendChild(m);
+      m.querySelector('[data-ok]').addEventListener('click', () => m.remove());
+    }
+
     // === Input area ===
     async function renderInputArea() {
       const model = modelById($('model-select').value);
@@ -916,6 +984,12 @@
                border:1px solid var(--border);border-radius:6px;padding:4px;z-index:50;max-height:240px;overflow:auto;"></div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+          <button id="polish-btn" title="润色提示词"
+                  style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;cursor:pointer;">✨</button>
+          <select id="preset-select" style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px;">
+            <option value="">🎨 风格预设</option>
+            ${STYLE_PRESETS.map(p => `<option>${p}</option>`).join('')}
+          </select>
           <label style="font-size:12px;color:var(--muted)">数量
             <input id="count-input" type="number" min="1" max="4" value="1" style="width:48px;margin-left:4px"></label>
           ${isGem
@@ -1010,6 +1084,15 @@
       });
       ta.addEventListener('dragover', e => {
         if ([...e.dataTransfer.types].includes('text/conv-image-ref')) e.preventDefault();
+      });
+
+      $('polish-btn').addEventListener('click', onPolish);
+      $('preset-select').addEventListener('change', e => {
+        if (!e.target.value) return;
+        const ta = $('prompt-input');
+        const cur = ta.value.trim();
+        ta.value = cur ? `${cur} · ${e.target.value}` : e.target.value;
+        e.target.value = '';
       });
     }
 
