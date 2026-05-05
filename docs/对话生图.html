@@ -342,6 +342,30 @@
     ];
     let activeTab     = 'big';
     let activeImageId = null;
+    const refState = { imageIds: [] };  // currently engaged refs
+
+    async function renderRefPills() {
+      const bar = $('ref-pills');
+      if (!bar) return;
+      if (refState.imageIds.length === 0) { bar.innerHTML = ''; return; }
+      const imgs = await Promise.all(refState.imageIds.map(getImage));
+      bar.innerHTML = imgs.filter(Boolean).map(img => `
+        <div style="display:flex;align-items:center;gap:6px;background:rgba(217,255,0,0.1);
+                    border:1px solid rgba(217,255,0,0.3);border-radius:6px;padding:4px 8px;">
+          <img src="${img.dataUrl}" style="width:24px;height:24px;object-fit:cover;border-radius:3px;">
+          <span style="font-size:11px;color:var(--accent);">${img.shortId}</span>
+          <span data-remove-ref="${img.id}" style="cursor:pointer;color:var(--muted);">✕</span>
+        </div>
+      `).join('') + `<span data-clear-refs style="cursor:pointer;color:var(--muted);font-size:11px;align-self:center;">清空</span>`;
+      bar.querySelectorAll('[data-remove-ref]').forEach(el =>
+        el.addEventListener('click', () => {
+          refState.imageIds = refState.imageIds.filter(id => id !== el.dataset.removeRef);
+          renderRefPills();
+        }));
+      bar.querySelector('[data-clear-refs]')?.addEventListener('click', () => {
+        refState.imageIds = []; renderRefPills();
+      });
+    }
 
     function refreshTabs() {
       const model = modelById($('model-select').value);
@@ -385,7 +409,7 @@
     async function renderMask()    { $('tab-content').innerHTML = '<div style="color:var(--muted);">[Task 7 实现]</div>'; }
 
     // === Input area ===
-    function renderInputArea() {
+    async function renderInputArea() {
       const model = modelById($('model-select').value);
       if (!model) return;
       const isGem = isGeminiImageModel(model.id);
@@ -394,9 +418,13 @@
       const prevCount  = $('count-input')?.value  || '1';
       $('input-area').innerHTML = `
         <div id="ref-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
-        <textarea id="prompt-input" rows="3" placeholder="描述你想要的图像，Cmd/Ctrl+Enter 发送"
-          style="width:100%;background:rgba(255,255,255,0.05);border:1px solid var(--border);
-                 border-radius:8px;padding:8px;color:var(--text);font:inherit;resize:vertical;"></textarea>
+        <div style="position:relative;">
+          <textarea id="prompt-input" rows="3" placeholder="描述你想要的图像，Cmd/Ctrl+Enter 发送；@ 提及图像"
+            style="width:100%;background:rgba(255,255,255,0.05);border:1px solid var(--border);
+                   border-radius:8px;padding:8px;color:var(--text);font:inherit;resize:vertical;"></textarea>
+          <div id="mention-popover" style="display:none;position:fixed;background:#1a1a1a;
+               border:1px solid var(--border);border-radius:6px;padding:4px;z-index:50;max-height:240px;overflow:auto;"></div>
+        </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
           <label style="font-size:12px;color:var(--muted)">数量
             <input id="count-input" type="number" min="1" max="4" value="1" style="width:48px;margin-left:4px"></label>
@@ -409,6 +437,10 @@
                 <select id="size-input"><option>1024x1024</option><option>1536x1024</option><option>1024x1536</option></select></label>`
           }
           <span style="margin-left:auto"></span>
+          <button id="upload-btn" title="上传参考图"
+            style="background:rgba(255,255,255,0.05);border:1px solid var(--border);
+                   color:var(--text);padding:6px 12px;border-radius:6px;cursor:pointer;">📎</button>
+          <input id="upload-input" type="file" accept="image/*" multiple style="display:none;">
           <button id="send-btn" style="background:var(--accent);color:#000;border:0;
                   padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">发送</button>
         </div>
@@ -420,6 +452,61 @@
       $('prompt-input').addEventListener('keydown', e => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); onSend(); }
       });
+
+      // Upload button wiring
+      $('upload-btn').addEventListener('click', () => $('upload-input').click());
+      $('upload-input').addEventListener('change', async e => {
+        for (const file of e.target.files) await ingestUserFile(file);
+        e.target.value = '';
+      });
+
+      // Re-render ref pills into the newly created #ref-pills element
+      await renderRefPills();
+
+      // @ mention popover
+      const ta = $('prompt-input');
+      ta.addEventListener('input', async () => {
+        const v = ta.value;
+        const cursor = ta.selectionStart;
+        const before = v.slice(0, cursor);
+        const m = before.match(/@(\w*)$/);
+        const pop = $('mention-popover');
+        if (!m) { pop.style.display = 'none'; return; }
+        const filter = m[1].toLowerCase();
+        const all = (await listImages()).slice(-30).reverse();
+        const matched = all.filter(img => img.shortId.toLowerCase().startsWith(filter));
+        if (matched.length === 0) { pop.style.display = 'none'; return; }
+        pop.innerHTML = matched.slice(0, 12).map(img => `
+          <div data-mention="${img.shortId}" data-image-id="${img.id}"
+               style="display:flex;align-items:center;gap:8px;padding:4px;cursor:pointer;border-radius:4px;">
+            <img src="${img.dataUrl}" style="width:32px;height:32px;object-fit:cover;border-radius:3px;">
+            <span style="font-size:12px;">${img.shortId}</span>
+          </div>
+        `).join('');
+        // Position popover near cursor (below textarea)
+        const r = ta.getBoundingClientRect();
+        pop.style.top  = (r.bottom + 4) + 'px';
+        pop.style.left = r.left + 'px';
+        pop.style.display = 'block';
+        pop.querySelectorAll('[data-mention]').forEach(el =>
+          el.addEventListener('click', () => {
+            // Replace @xxx (the in-progress token) with the chosen short ID
+            const replaced = before.replace(/@\w*$/, '@' + el.dataset.mention) + v.slice(cursor);
+            ta.value = replaced;
+            pop.style.display = 'none';
+            // Implicit ref: add the mentioned image to refs
+            if (!refState.imageIds.includes(el.dataset.imageId)) {
+              refState.imageIds.push(el.dataset.imageId);
+              renderRefPills();
+            }
+            ta.focus();
+          }));
+      });
+
+      ta.addEventListener('blur', () => setTimeout(() => {
+        const pop = $('mention-popover');
+        if (pop) pop.style.display = 'none';
+      }, 200));
     }
 
     // === Send handler ===
@@ -441,8 +528,17 @@
         const model = $('model-select').value;
         const n = parseInt($('count-input').value, 10) || 1;
 
-        // Persist user message
-        await putMessage({ role: 'user', text: prompt, model });
+        // Resolve refs before disabling UI so we can fail-fast with a clear message
+        const refIds = [...refState.imageIds];
+        const refDataUrls = [];
+        for (const id of refIds) {
+          const img = await getImage(id);
+          if (!img) { toast(`引用图 ${id} 已被清理`); return; }
+          refDataUrls.push(img.dataUrl);
+        }
+
+        // Persist user message (with refImageIds)
+        await putMessage({ role: 'user', text: prompt, model, refImageIds: refIds });
         // Persist placeholder assistant message
         const aMsg = await putMessage({ role: 'assistant', text: '', model });
         await renderChat();
@@ -453,14 +549,19 @@
             const aspectRatio = $('aspect-input')?.value || '1:1';
             const resolution  = $('resolution-input')?.value || '1K';
             const calls = Array.from({ length: n }, () =>
-              callGeminiChatImage({ model, prompt, aspectRatio, resolution }));
+              callGeminiChatImage({ model, prompt, refDataUrls, aspectRatio, resolution }));
             const settled = await Promise.all(calls.map(p => p.catch(e => ({ error: e }))));
             const ok = settled.filter(s => !s.error);
             if (ok.length === 0) throw settled[0].error || new Error('全部失败');
             result = { images: ok.flatMap(s => s.images) };
           } else {
+            // gpt-image-2: refs ⇒ /v1/images/edits, no refs ⇒ /v1/images/generations
             const size = $('size-input')?.value || '1024x1024';
-            result = await callGptImageGen({ model, prompt, n, size });
+            if (refDataUrls.length > 0) {
+              result = await callGptImageEdit({ model, prompt, sourceImages: refDataUrls, n, size });
+            } else {
+              result = await callGptImageGen({ model, prompt, n, size });
+            }
           }
 
           // Save images
@@ -481,6 +582,10 @@
           await tx.done;
 
           ta.value = '';
+
+          // Clear refs after successful persistence chain
+          refState.imageIds = [];
+          await renderRefPills();
         } catch (e) {
           aMsg.error = e.message;
           await db.put('messages', aMsg);
@@ -514,11 +619,14 @@
         const imgsHtml = (m.imageIds || []).map(id => {
           const img = imgMap.get(id);
           if (!img) return '';
-          return `<div style="position:relative;display:inline-block;margin:2px;">
+          return `<div style="position:relative;display:inline-block;margin:2px;" class="img-card">
             <img src="${img.dataUrl}" data-img-id="${id}" data-action="zoom"
                  style="width:80px;height:80px;object-fit:cover;border-radius:6px;cursor:zoom-in;">
             <span style="position:absolute;bottom:2px;left:2px;background:rgba(0,0,0,0.7);
                   color:#fff;font-size:10px;padding:1px 4px;border-radius:3px;">${img.shortId}</span>
+            <button data-engage-ref="${id}" title="作为引用"
+                    style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);
+                           color:#fff;border:0;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:11px;">↩</button>
           </div>`;
         }).join('');
         const errHtml = m.error
@@ -541,8 +649,45 @@
         });
       });
 
+      // Wire ↩ ref-engagement buttons
+      stream.querySelectorAll('button[data-engage-ref]').forEach(el =>
+        el.addEventListener('click', () => {
+          const id = el.dataset.engageRef;
+          if (!refState.imageIds.includes(id)) refState.imageIds.push(id);
+          renderRefPills();
+          toast(`引用了 ${(imgMap.get(id) || {}).shortId || ''}`);
+        }));
+
       stream.scrollTop = stream.scrollHeight;
     }
+
+    // === User file ingestion + drag & drop ===
+    function fileToDataUrl(file) {
+      return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload  = () => res(r.result);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+    }
+
+    async function ingestUserFile(file) {
+      const dataUrl = await fileToDataUrl(file);
+      const rec = await putImage({ dataUrl, model: '(uploaded)', prompt: '', isUserUpload: true,
+                                   format: file.type.split('/')[1] || 'png' });
+      if (!refState.imageIds.includes(rec.id)) refState.imageIds.push(rec.id);
+      await renderRefPills();
+      toast(`已上传 ${rec.shortId}`);
+    }
+
+    document.addEventListener('dragover', e => { e.preventDefault(); });
+    document.addEventListener('drop', async e => {
+      e.preventDefault();
+      if (!e.dataTransfer.files?.length) return;
+      for (const file of e.dataTransfer.files) {
+        if (file.type.startsWith('image/')) await ingestUserFile(file);
+      }
+    });
 
     // === Bootstrap ===
     window.addEventListener('DOMContentLoaded', async () => {
