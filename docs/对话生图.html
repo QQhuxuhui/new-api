@@ -379,6 +379,7 @@
     const refState = { imageIds: [] };  // currently engaged refs
     let selectedNodeIds = [];
     const rerollingNodes = new Set();
+    const maskState = { sourceImageId: null, brushSize: 30, history: [] };
 
     async function renderRefPills() {
       const bar = $('ref-pills');
@@ -731,7 +732,160 @@
         });
       });
     }
-    async function renderMask()    { $('tab-content').innerHTML = '<div style="color:var(--muted);">[Task 7 实现]</div>'; }
+    async function renderMask() {
+      const model = $('model-select').value;
+      const tc = $('tab-content');
+      if (!modelById(model)?.supportsMask) {
+        tc.innerHTML = `<div style="color:var(--muted);text-align:center;padding:40px;">
+          Gemini 模型不支持 mask 区域编辑，请在提示词中描述要修改的位置。</div>`;
+        return;
+      }
+
+      if (!maskState.sourceImageId) {
+        const all = (await listImages()).filter(i => !isGeminiImageModel(i.model)).sort((a,b)=>b.createdAt-a.createdAt);
+        tc.innerHTML = `<div style="color:var(--muted);margin-bottom:12px;">从图库选择源图：</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;">
+            ${all.slice(0, 30).map(img => `
+              <img src="${img.dataUrl}" data-pick="${img.id}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:pointer;">
+            `).join('')}
+          </div>`;
+        tc.querySelectorAll('[data-pick]').forEach(el =>
+          el.addEventListener('click', () => { maskState.sourceImageId = el.dataset.pick; renderMask(); }));
+        return;
+      }
+
+      const src = await getImage(maskState.sourceImageId);
+      tc.innerHTML = `
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+          <label style="font-size:12px;color:var(--muted);">笔刷
+            <input id="brush-size" type="range" min="5" max="100" value="${maskState.brushSize}" style="vertical-align:middle;"></label>
+          <button id="eraser-btn"  style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;cursor:pointer;">橡皮</button>
+          <button id="undo-btn"    style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;cursor:pointer;">撤销</button>
+          <button id="clear-btn"   style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;cursor:pointer;">清空</button>
+          <button id="repick-btn"  style="background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;cursor:pointer;margin-left:auto;">换源图</button>
+        </div>
+        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;display:inline-block;">
+          <img id="mask-base" src="${src.dataUrl}" style="display:block;max-width:100%;max-height:60vh;">
+          <canvas id="mask-overlay" style="position:absolute;inset:0;cursor:crosshair;"></canvas>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;">
+          <input id="mask-prompt" placeholder="描述要修改的内容（如：换成花瓶）"
+                 style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px;">
+          <button id="apply-mask-btn" style="background:var(--accent);color:#000;border:0;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">🎨 应用编辑</button>
+        </div>
+      `;
+
+      const baseImg = $('mask-base');
+      const canvas  = $('mask-overlay');
+      await new Promise(r => baseImg.complete ? r() : baseImg.onload = r);
+      canvas.width  = baseImg.naturalWidth;
+      canvas.height = baseImg.naturalHeight;
+      canvas.style.width  = baseImg.width + 'px';
+      canvas.style.height = baseImg.height + 'px';
+      const ctx = canvas.getContext('2d');
+
+      // Restore history (if revisiting)
+      for (const stroke of maskState.history) drawStroke(ctx, stroke, canvas.width, baseImg.width);
+
+      let drawing = false; let mode = 'paint';
+      function pointerPos(e) {
+        const r = canvas.getBoundingClientRect();
+        const sx = canvas.width / r.width;
+        const sy = canvas.height / r.height;
+        return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
+      }
+      let stroke = null;
+      canvas.addEventListener('pointerdown', e => {
+        drawing = true;
+        stroke = { mode, brush: maskState.brushSize * (canvas.width / baseImg.width), points: [] };
+        const p = pointerPos(e); stroke.points.push(p); paint(p);
+      });
+      canvas.addEventListener('pointermove', e => {
+        if (!drawing) return;
+        const p = pointerPos(e); stroke.points.push(p); paint(p);
+      });
+      ['pointerup','pointerleave','pointercancel'].forEach(ev => canvas.addEventListener(ev, () => {
+        if (drawing && stroke?.points.length) maskState.history.push(stroke);
+        drawing = false; stroke = null;
+      }));
+      function paint(p) {
+        ctx.globalCompositeOperation = mode === 'erase' ? 'destination-out' : 'source-over';
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, (stroke?.brush || maskState.brushSize) / 2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+
+      $('brush-size').addEventListener('input', e => { maskState.brushSize = parseInt(e.target.value, 10); });
+      $('eraser-btn').addEventListener('click', () => { mode = mode === 'erase' ? 'paint' : 'erase'; toast(`模式：${mode}`); });
+      $('undo-btn').addEventListener('click',  () => { maskState.history.pop(); renderMask(); });
+      $('clear-btn').addEventListener('click', () => { maskState.history = []; renderMask(); });
+      $('repick-btn').addEventListener('click', () => { maskState.sourceImageId = null; maskState.history = []; renderMask(); });
+      $('apply-mask-btn').addEventListener('click', () => onApplyMask(canvas, baseImg, src));
+    }
+
+    function drawStroke(ctx, stroke, canvasW, baseW) {
+      ctx.globalCompositeOperation = stroke.mode === 'erase' ? 'destination-out' : 'source-over';
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+      for (const p of stroke.points) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, stroke.brush / 2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+
+    async function onApplyMask(canvas, baseImg, src) {
+      const prompt = $('mask-prompt').value.trim();
+      if (!prompt) { toast('请输入修改描述'); return; }
+      if (maskState.history.length === 0) { toast('请先涂出要修改的区域'); return; }
+
+      // Build mask PNG: same size as source, alpha=0 in painted area, alpha=255 elsewhere
+      const w = canvas.width, h = canvas.height;
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = w; maskCanvas.height = h;
+      const mctx = maskCanvas.getContext('2d');
+      mctx.fillStyle = 'rgb(0,0,0)';
+      mctx.fillRect(0, 0, w, h);  // start opaque
+      // Now subtract the painted regions (where overlay has any color) → make alpha=0
+      const overlayData = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+      const maskImg = mctx.getImageData(0, 0, w, h);
+      for (let i = 0; i < overlayData.length; i += 4) {
+        if (overlayData[i + 3] > 0) {
+          // Painted: punch transparent into mask
+          maskImg.data[i + 3] = 0;
+        }
+      }
+      mctx.putImageData(maskImg, 0, 0);
+      const maskDataUrl = maskCanvas.toDataURL('image/png');
+
+      const model = $('model-select').value;
+      const aMsg = await putMessage({ role: 'assistant', text: '', model });
+      const userMsg = await putMessage({ role: 'user', text: `[mask] ${prompt}`, model, refImageIds: [src.id] });
+      await renderChat();
+
+      try {
+        const result = await callGptImageEdit({
+          model, prompt, sourceImages: [src.dataUrl], maskDataUrl, n: 1, size: `${w}x${h}`,
+        });
+        const recs = await Promise.all(result.images.map(img =>
+          putImage({ dataUrl: img.dataUrl, model, prompt, format: img.format })));
+        const ids = recs.map(r => r.id);
+        aMsg.imageIds = ids;
+        const node = await putNode({ parentNodeId: src.nodeId, kind: 'edit', messageId: aMsg.id, imageIds: ids });
+        aMsg.nodeId = node.id;
+        await db.put('messages', aMsg);
+        for (const r of recs) { r.nodeId = node.id; r.parentId = src.nodeId; await db.put('images', r); }
+        maskState.history = [];
+        activeImageId = ids[0]; activeTab = 'big'; refreshTabs();
+        await renderChat();
+        toast('编辑完成');
+      } catch (e) {
+        aMsg.error = e.message;
+        await db.put('messages', aMsg);
+        await renderChat();
+        toast(`编辑失败：${e.message}`);
+      }
+    }
 
     // === Input area ===
     async function renderInputArea() {
@@ -977,6 +1131,7 @@
         const imgsHtml = (m.imageIds || []).map(id => {
           const img = imgMap.get(id);
           if (!img) return '';
+          const isGptImage = !isGeminiImageModel(m.model);
           return `<div style="position:relative;display:inline-block;margin:2px;" class="img-card">
             <img src="${img.dataUrl}" data-img-id="${id}" data-action="zoom"
                  style="width:80px;height:80px;object-fit:cover;border-radius:6px;cursor:zoom-in;">
@@ -985,6 +1140,11 @@
             <button data-engage-ref="${id}" title="作为引用"
                     style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);
                            color:#fff;border:0;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:11px;">↩</button>
+            ${isGptImage
+              ? `<button data-engage-mask="${id}" title="编辑此图"
+                        style="position:absolute;top:2px;right:32px;background:rgba(0,0,0,0.6);
+                               color:#fff;border:0;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:11px;">🖌</button>`
+              : ''}
           </div>`;
         }).join('');
         const errHtml = m.error
@@ -1014,6 +1174,20 @@
           if (!refState.imageIds.includes(id)) refState.imageIds.push(id);
           renderRefPills();
           toast(`引用了 ${(imgMap.get(id) || {}).shortId || ''}`);
+        }));
+
+      // Wire 🖌 mask-entry buttons
+      stream.querySelectorAll('button[data-engage-mask]').forEach(el =>
+        el.addEventListener('click', () => {
+          const model = $('model-select').value;
+          if (!modelById(model)?.supportsMask) {
+            toast('当前模型不支持 mask，请切到 gpt-image-2');
+            return;
+          }
+          maskState.sourceImageId = el.dataset.engageMask;
+          maskState.history = [];
+          activeTab = 'mask';
+          refreshTabs();
         }));
 
       stream.scrollTop = stream.scrollHeight;
@@ -1058,7 +1232,15 @@
         $('header-status').textContent = `IDB ready · ${(await listMessages()).length} 条历史`;
 
         // Re-render input area whenever the model changes (e.g. Gemini vs GPT controls differ)
-        $('model-select').addEventListener('change', renderInputArea);
+        // Also auto-switch off Mask tab when user switches to a model that doesn't support mask
+        $('model-select').addEventListener('change', () => {
+          renderInputArea();
+          if (activeTab === 'mask' && !modelById($('model-select').value)?.supportsMask) {
+            activeTab = 'big';
+            toast('已切换到大图 tab（Gemini 不支持 mask）');
+          }
+          refreshTabs();
+        });
 
         // New chat: wired here so db is guaranteed ready
         $('new-chat-btn').addEventListener('click', async () => {
