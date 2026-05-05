@@ -128,6 +128,12 @@ type RelayInfo struct {
 
 	Request                dto.Request
 	CacheSimulationRequest *dto.ClaudeRequest
+	// CacheSimulationApplied is set to true by applyCacheSimulation when it
+	// actually normalizes usage (i.e. PromptTokens has been rewritten to the
+	// total input count). Quota code MUST read this — not the channel-level
+	// CacheSimulation.Enabled flag — before subtracting cache tokens, because
+	// enabled=true with an unsupported mode leaves upstream usage untouched.
+	CacheSimulationApplied bool
 
 	ThinkingContentInfo
 	*ClaudeConvertInfo

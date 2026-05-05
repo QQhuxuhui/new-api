@@ -160,6 +160,81 @@ func TestPatchCacheUsageFieldsPreservesUnknownUsageFields(t *testing.T) {
 	}
 }
 
+// Regression: when cache_simulation.enabled=true but mode is empty (legacy data
+// not yet migrated), simulation does not run and the upstream Claude response —
+// including any real cache stats — must reach the client unchanged. Patching
+// based purely on the Enabled flag would corrupt input_tokens for these channels.
+func TestHandleClaudeResponseDataPreservesUpstreamUsageWhenSimulationModeUnsupported(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sessionPrefixSimulationStore = cachesim.NewMemoryStore(16, 16)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	responseBody := []byte(`{
+		"id":"msg_1",
+		"type":"message",
+		"model":"claude-3-7-sonnet-20250219",
+		"content":[{"type":"text","text":"hello"}],
+		"usage":{
+			"input_tokens":200,
+			"cache_read_input_tokens":50,
+			"cache_creation_input_tokens":20,
+			"output_tokens":20
+		}
+	}`)
+	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
+		UserId:          1,
+		TokenId:         10,
+		OriginModelName: "claude-3-7-sonnet-20250219",
+		PromptTokens:    200,
+		StartTime:       time.Date(2026, 3, 19, 10, 0, 0, 0, time.UTC),
+		Request: &dto.ClaudeRequest{
+			Model: "claude-3-7-sonnet-20250219",
+			Messages: []dto.ClaudeMessage{
+				{Role: "user", Content: "hi"},
+			},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 200,
+			ChannelSetting: dto.ChannelSettings{
+				CacheSimulation: &dto.CacheSimulationConfig{
+					Enabled:        true,
+					Mode:           "", // legacy / unsupported — simulation must NOT run
+					MinInputTokens: 1,
+				},
+			},
+		},
+	}
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+	httpResp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(bytes.NewReader(nil)),
+	}
+
+	if err := HandleClaudeResponseData(c, info, claudeInfo, httpResp, responseBody, RequestModeMessage); err != nil {
+		t.Fatalf("HandleClaudeResponseData returned error: %v", err)
+	}
+
+	var got dto.ClaudeResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response failed: %v", err)
+	}
+	if got.Usage == nil {
+		t.Fatalf("expected usage in response")
+	}
+	if got.Usage.InputTokens != 200 {
+		t.Fatalf("input_tokens must remain at upstream value 200, got %d (patch fired despite simulation not running)", got.Usage.InputTokens)
+	}
+	if got.Usage.CacheReadInputTokens != 50 {
+		t.Fatalf("cache_read_input_tokens must remain at upstream value 50, got %d", got.Usage.CacheReadInputTokens)
+	}
+	if got.Usage.CacheCreationInputTokens != 20 {
+		t.Fatalf("cache_creation_input_tokens must remain at upstream value 20, got %d", got.Usage.CacheCreationInputTokens)
+	}
+}
+
 func TestHandleClaudeResponseDataPatchesSplitCacheUsageFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	sessionPrefixSimulationStore = cachesim.NewMemoryStore(16, 16)
@@ -370,188 +445,85 @@ func extractClaudeStreamPayload(body string) (*dto.ClaudeResponse, bool) {
 	return nil, false
 }
 
-func TestApplyCacheSimulationSupportsLegacyRatioKeys(t *testing.T) {
-	var cfg dto.CacheSimulationConfig
-	if err := json.Unmarshal([]byte(`{
-		"enabled": true,
-		"read_ratio_min": 0.24,
-		"read_ratio_max": 0.24,
-		"creation_ratio_min": 0.06,
-		"creation_ratio_max": 0.06,
-		"min_input_tokens": 1
-	}`), &cfg); err != nil {
-		t.Fatalf("unmarshal config failed: %v", err)
+func TestApplyCacheSimulationSkipsWhenModeIsNotSessionPrefix(t *testing.T) {
+	cases := []struct {
+		name string
+		mode dto.CacheSimulationMode
+	}{
+		{name: "empty mode (legacy data)", mode: ""},
+		{name: "deprecated ratio mode", mode: "ratio"},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelSetting: dto.ChannelSettings{
+						CacheSimulation: &dto.CacheSimulationConfig{
+							Enabled:        true,
+							Mode:           tc.mode,
+							MinInputTokens: 1,
+						},
+					},
+				},
+			}
+			usage := &dto.Usage{PromptTokens: 4096, CompletionTokens: 500, TotalTokens: 4596}
+			if applyCacheSimulation(info, usage) {
+				t.Fatalf("expected applyCacheSimulation to return false when mode=%q", tc.mode)
+			}
+			if info.CacheSimulationApplied {
+				t.Fatalf("expected info.CacheSimulationApplied to stay false when mode=%q (quota path relies on this)", tc.mode)
+			}
 
-	info := &relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelSetting: dto.ChannelSettings{
-				CacheSimulation: &cfg,
-			},
-		},
-	}
-	usage := &dto.Usage{PromptTokens: 2000}
-
-	applyCacheSimulation(info, usage)
-
-	if usage.PromptTokensDetails.CachedTokens != 480 {
-		t.Fatalf("cached read tokens mismatch: got %d want %d", usage.PromptTokensDetails.CachedTokens, 480)
-	}
-	if usage.PromptTokensDetails.CachedCreationTokens != 120 {
-		t.Fatalf("cached creation tokens mismatch: got %d want %d", usage.PromptTokensDetails.CachedCreationTokens, 120)
+			if usage.PromptTokens != 4096 ||
+				usage.PromptTokensDetails.CachedTokens != 0 ||
+				usage.PromptTokensDetails.CachedCreationTokens != 0 {
+				t.Fatalf("expected usage untouched when mode=%q, got prompt=%d read=%d create=%d",
+					tc.mode,
+					usage.PromptTokens,
+					usage.PromptTokensDetails.CachedTokens,
+					usage.PromptTokensDetails.CachedCreationTokens,
+				)
+			}
+		})
 	}
 }
 
-func TestApplyCacheSimulationAppliesAtMinInputTokensBoundary(t *testing.T) {
-	cfg := &dto.CacheSimulationConfig{
-		Enabled:            true,
-		TotalCacheRatioMin: 0.8,
-		TotalCacheRatioMax: 0.8,
-		ReadFractionMin:    0.9,
-		ReadFractionMax:    0.9,
-		MinInputTokens:     1024,
-	}
-
+func TestApplyCacheSimulationSessionPrefixSkipsWhenRequestMissing(t *testing.T) {
+	sessionPrefixSimulationStore = cachesim.NewMemoryStore(16, 16)
 	info := &relaycommon.RelayInfo{
+		UserId:          1,
+		TokenId:         10,
+		OriginModelName: "claude-3-7-sonnet-20250219",
+		PromptTokens:    4096,
+		StartTime:       time.Date(2026, 3, 19, 10, 0, 0, 0, time.UTC),
+		// Request and CacheSimulationRequest intentionally nil — simulates a relay path
+		// that forgot to populate the Claude request.
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 100,
 			ChannelSetting: dto.ChannelSettings{
-				CacheSimulation: cfg,
+				CacheSimulation: &dto.CacheSimulationConfig{
+					Enabled:        true,
+					Mode:           dto.CacheSimulationModeSessionPrefix,
+					MinInputTokens: 1,
+				},
 			},
 		},
 	}
-	usage := &dto.Usage{PromptTokens: 1024}
+	usage := &dto.Usage{PromptTokens: 4096, CompletionTokens: 500, TotalTokens: 4596}
+	if applyCacheSimulation(info, usage) {
+		t.Fatalf("expected applyCacheSimulation to return false when CacheSimulationRequest is nil")
+	}
+	if info.CacheSimulationApplied {
+		t.Fatalf("expected info.CacheSimulationApplied to stay false when simulation skipped (quota path relies on this)")
+	}
 
-	applyCacheSimulation(info, usage)
-
-	if usage.PromptTokensDetails.CachedTokens == 0 && usage.PromptTokensDetails.CachedCreationTokens == 0 {
-		t.Fatalf("expected simulation to apply at threshold, got cachedTokens=%d cachedCreationTokens=%d",
+	if usage.PromptTokens != 4096 ||
+		usage.PromptTokensDetails.CachedTokens != 0 ||
+		usage.PromptTokensDetails.CachedCreationTokens != 0 {
+		t.Fatalf("expected usage untouched when request is nil, got prompt=%d read=%d create=%d",
+			usage.PromptTokens,
 			usage.PromptTokensDetails.CachedTokens,
 			usage.PromptTokensDetails.CachedCreationTokens,
-		)
-	}
-}
-
-func TestApplyCacheSimulationPreservesPromptAndCompletionTokens(t *testing.T) {
-	cfg := &dto.CacheSimulationConfig{
-		Enabled:            true,
-		TotalCacheRatioMin: 0.8,
-		TotalCacheRatioMax: 0.8,
-		ReadFractionMin:    0.9,
-		ReadFractionMax:    0.9,
-		MinInputTokens:     1024,
-	}
-
-	info := &relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelSetting: dto.ChannelSettings{
-				CacheSimulation: cfg,
-			},
-		},
-	}
-	usage := &dto.Usage{
-		PromptTokens:     2000,
-		CompletionTokens: 500,
-		TotalTokens:      2500,
-	}
-
-	applyCacheSimulation(info, usage)
-
-	// Based on sourceTotalInputTokens = 2000 (no upstream cache tokens)
-	// totalCached = 2000 * 0.8 = 1600
-	// cachedTokens = 1600 * 0.9 = 1440
-	// cachedCreationTokens = 1600 - 1440 = 160
-	wantRead := 1440
-	wantCreate := 160
-
-	if usage.PromptTokens != 2000 {
-		t.Fatalf("simulation should not modify prompt tokens, got %d want %d", usage.PromptTokens, 2000)
-	}
-	if usage.CompletionTokens != 500 {
-		t.Fatalf("simulation should not modify completion tokens, got %d want %d", usage.CompletionTokens, 500)
-	}
-	if usage.TotalTokens != 2500 {
-		t.Fatalf("simulation should not modify total tokens, got %d want %d", usage.TotalTokens, 2500)
-	}
-
-	if usage.PromptTokensDetails.CachedTokens != wantRead ||
-		usage.PromptTokensDetails.CachedCreationTokens != wantCreate {
-		t.Fatalf("simulation should only update cache fields, got read=%d create=%d want read=%d create=%d",
-			usage.PromptTokensDetails.CachedTokens,
-			usage.PromptTokensDetails.CachedCreationTokens,
-			wantRead,
-			wantCreate,
-		)
-	}
-	if usage.ClaudeCacheCreation5mTokens != 0 || usage.ClaudeCacheCreation1hTokens != 0 {
-		t.Fatalf("simulation should reset split cache creation fields, got 5m=%d 1h=%d",
-			usage.ClaudeCacheCreation5mTokens,
-			usage.ClaudeCacheCreation1hTokens,
-		)
-	}
-}
-
-func TestApplyCacheSimulationUsesTotalInputForThresholdAndOverridesUpstreamStats(t *testing.T) {
-	cfg := &dto.CacheSimulationConfig{
-		Enabled:            true,
-		TotalCacheRatioMin: 0.8,
-		TotalCacheRatioMax: 0.8,
-		ReadFractionMin:    0.9,
-		ReadFractionMax:    0.9,
-		MinInputTokens:     1024,
-	}
-
-	info := &relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelSetting: dto.ChannelSettings{
-				CacheSimulation: cfg,
-			},
-		},
-	}
-	usage := &dto.Usage{
-		PromptTokens:     0, // Claude /v1/messages input_tokens often represents non-cached remainder.
-		CompletionTokens: 500,
-		TotalTokens:      500,
-		PromptTokensDetails: dto.InputTokenDetails{
-			CachedTokens:         30361,
-			CachedCreationTokens: 127772,
-		},
-		ClaudeCacheCreation5mTokens: 127772,
-		ClaudeCacheCreation1hTokens: 0,
-	}
-
-	applyCacheSimulation(info, usage)
-
-	totalInputTokens := 0 + 30361 + 127772
-	// Large-context bonus applies when total input > 50000: +0.05 on total cache ratio.
-	totalCached := int(float64(totalInputTokens) * 0.85)
-	wantRead := int(float64(totalCached) * 0.9)
-	wantCreate := totalCached - wantRead
-
-	// PromptTokens is normalized to reconstructed total input tokens so downstream
-	// can derive the non-cached remainder from cache fields.
-	if usage.PromptTokens != totalInputTokens {
-		t.Fatalf("simulation should normalize prompt tokens to total input, got %d want %d", usage.PromptTokens, totalInputTokens)
-	}
-	if usage.CompletionTokens != 500 {
-		t.Fatalf("simulation should not modify completion tokens, got %d want %d", usage.CompletionTokens, 500)
-	}
-	if usage.TotalTokens != totalInputTokens+500 {
-		t.Fatalf("simulation should update total tokens, got %d want %d", usage.TotalTokens, totalInputTokens+500)
-	}
-
-	if usage.PromptTokensDetails.CachedTokens != wantRead ||
-		usage.PromptTokensDetails.CachedCreationTokens != wantCreate {
-		t.Fatalf("simulation should overwrite upstream stats using total input, got read=%d create=%d want read=%d create=%d",
-			usage.PromptTokensDetails.CachedTokens,
-			usage.PromptTokensDetails.CachedCreationTokens,
-			wantRead,
-			wantCreate,
-		)
-	}
-	if usage.ClaudeCacheCreation5mTokens != 0 || usage.ClaudeCacheCreation1hTokens != 0 {
-		t.Fatalf("simulation should reset split cache creation fields, got 5m=%d 1h=%d",
-			usage.ClaudeCacheCreation5mTokens,
-			usage.ClaudeCacheCreation1hTokens,
 		)
 	}
 }
@@ -591,7 +563,12 @@ func TestApplyCacheSimulationSessionPrefixCreatesSplitCacheLayers(t *testing.T) 
 		TotalTokens:      50,
 	}
 
-	applyCacheSimulation(info, usage)
+	if !applyCacheSimulation(info, usage) {
+		t.Fatalf("expected applyCacheSimulation to return true on session_prefix happy path")
+	}
+	if !info.CacheSimulationApplied {
+		t.Fatalf("expected info.CacheSimulationApplied = true so quota path subtracts cache tokens")
+	}
 
 	if usage.PromptTokens != 200 {
 		t.Fatalf("expected prompt tokens normalized to total input, got %d", usage.PromptTokens)

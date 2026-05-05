@@ -327,15 +327,19 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		promptTokens -= cacheCreationTokens
 	}
 
-	// When cache simulation is active the simulated cached tokens are derived FROM
-	// promptTokens (which equals the total input when no real caching occurred).
-	// Subtract them to get the non-cached remainder so we do not double-bill:
-	// promptTokens already contains what cacheTokens covers.
+	// When cache simulation actually ran, the simulator rewrote promptTokens to
+	// the total input count (so cacheTokens/cacheCreationTokens it just produced
+	// are a subset of promptTokens). Subtract them to get the non-cached
+	// remainder so we do not double-bill.
 	// Skip for OpenRouter channels — the block above already adjusted promptTokens.
+	// IMPORTANT: gate on relayInfo.CacheSimulationApplied — NOT on the channel-level
+	// CacheSimulation.Enabled flag. When the channel is "enabled" but the
+	// configured mode is empty/legacy/unsupported, applyCacheSimulation skips
+	// and leaves upstream usage intact (where PromptTokens already equals the
+	// non-cached remainder per Anthropic's usage semantics). Subtracting again
+	// would zero out billable input.
 	if relayInfo.ChannelType != constant.ChannelTypeOpenRouter &&
-		relayInfo.ChannelMeta != nil &&
-		relayInfo.ChannelMeta.ChannelSetting.CacheSimulation != nil &&
-		relayInfo.ChannelMeta.ChannelSetting.CacheSimulation.Enabled {
+		relayInfo.CacheSimulationApplied {
 		simAdj := cacheTokens + cacheCreationTokens
 		if simAdj > promptTokens {
 			simAdj = promptTokens

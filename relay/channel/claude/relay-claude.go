@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -894,10 +893,11 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			info.ChannelMeta != nil &&
 			info.ChannelMeta.ChannelSetting.CacheSimulation != nil &&
 			info.ChannelMeta.ChannelSetting.CacheSimulation.Enabled {
-			applyCacheSimulation(info, claudeInfo.Usage)
-			claudeInfo.CacheSimulationApplied = true
-			if patched, ok := patchClaudeResponseUsagePayload([]byte(writeData), claudeInfo.Usage); ok {
-				writeData = string(patched)
+			if applyCacheSimulation(info, claudeInfo.Usage) {
+				claudeInfo.CacheSimulationApplied = true
+				if patched, ok := patchClaudeResponseUsagePayload([]byte(writeData), claudeInfo.Usage); ok {
+					writeData = string(patched)
+				}
 			}
 		}
 		helper.ClaudeChunkData(c, claudeResponse, writeData)
@@ -988,7 +988,9 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 
 	// Cache simulation overwrites any upstream cache statistics when enabled.
 	if !claudeInfo.CacheSimulationApplied || recomputedUsage {
-		applyCacheSimulation(info, claudeInfo.Usage)
+		if applyCacheSimulation(info, claudeInfo.Usage) {
+			claudeInfo.CacheSimulationApplied = true
+		}
 	}
 
 	if info.RelayFormat == types.RelayFormatClaude {
@@ -1062,7 +1064,9 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 	}
 	// Cache simulation overwrites any upstream cache statistics when enabled.
-	applyCacheSimulation(info, claudeInfo.Usage)
+	if applyCacheSimulation(info, claudeInfo.Usage) {
+		claudeInfo.CacheSimulationApplied = true
+	}
 	var responseData []byte
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
@@ -1073,16 +1077,16 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
 	case types.RelayFormatClaude:
-		simulationActive := info.ChannelMeta != nil &&
-			info.ChannelMeta.ChannelSetting.CacheSimulation != nil &&
-			info.ChannelMeta.ChannelSetting.CacheSimulation.Enabled
 		responseData = data
 		if stripEnabled && stripChanged {
 			if patched, ok := patchNonStreamStrippedContent(responseData, requestMode); ok {
 				responseData = patched
 			}
 		}
-		if simulationActive && claudeResponse.Usage != nil &&
+		// Only patch when simulation actually ran — gating on the channel-level
+		// Enabled flag would corrupt input_tokens for legacy/unsupported modes
+		// that leave PromptTokens at the upstream non-cached remainder.
+		if claudeInfo.CacheSimulationApplied && claudeResponse.Usage != nil &&
 			(claudeInfo.Usage.PromptTokensDetails.CachedTokens > 0 ||
 				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens > 0) {
 			if patched, ok := patchClaudeResponseUsagePayload(responseData, claudeInfo.Usage); ok {
@@ -1125,163 +1129,56 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 }
 
 // applyCacheSimulation fills cached token usage with simulated values when the
-// channel has cache simulation enabled. It unconditionally overwrites any cache
-// statistics already populated from upstream, so simulated values always take
-// effect on channels where simulation is configured.
-// It must be called after all upstream usage events have been processed.
+// channel has cache simulation enabled. It must be called after all upstream
+// usage events have been processed. Only the session_prefix mode is supported;
+// channels with the simulation enabled but no (or a non-session_prefix) mode
+// configured produce a one-time WARN log and leave usage untouched.
 //
-// Algorithm (two-level decomposition):
+// Returns true only when usage was actually modified by the simulation engine,
+// and in that case also sets info.CacheSimulationApplied so downstream code
+// (notably service.PostClaudeConsumeQuota) can tell apart "enabled but not
+// applied" (legacy/unsupported mode → upstream usage preserved) from "enabled
+// and applied" (PromptTokens normalized to the total input count).
 //
-//  1. totalCacheRatio  ∈ [TotalCacheRatioMin, TotalCacheRatioMax]
-//     Fraction of prompt tokens attributed to any caching activity.
-//     totalCached = floor(promptTokens × totalCacheRatio)
-//
-//  2. readFraction ∈ [ReadFractionMin, ReadFractionMax]
-//     Of those cached tokens, the fraction that came from cache reads.
-//     cachedTokens     = floor(totalCached × readFraction)
-//     cachedCreation   = totalCached − cachedTokens   (integer subtraction, no float error)
-//
-// This guarantees:
-//
-//	cachedTokens + cachedCreation == totalCached ≤ promptTokens
-//	nonCached = promptTokens − totalCached > 0  (as long as totalCacheRatio < 1)
-//
-// The function normalizes PromptTokens to total input tokens
-// (non-cached + cache-read + cache-creation) so downstream billing and logs
-// can derive the non-cached remainder from simulated cache fields.
-func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) {
-	if usage == nil || info.ChannelMeta == nil {
-		return
+// Callers must use the return value (not the channel-level Enabled flag) to
+// decide whether to patch downstream payloads, since patching assumes the
+// PromptTokens field has been normalized to the total input token count.
+func applyCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) bool {
+	if usage == nil || info == nil || info.ChannelMeta == nil {
+		return false
 	}
 	cfg := info.ChannelMeta.ChannelSetting.CacheSimulation
 	if cfg == nil || !cfg.Enabled {
-		return
+		return false
+	}
+	if cfg.Mode != dto.CacheSimulationModeSessionPrefix {
+		warnUnsupportedCacheSimulationMode(info, cfg.Mode)
+		return false
 	}
 	if applySessionPrefixCacheSimulation(info, usage) {
+		info.CacheSimulationApplied = true
+		return true
+	}
+	return false
+}
+
+var (
+	unsupportedCacheSimulationModeOnce sync.Map // key: channelID|mode → struct{}
+)
+
+func warnUnsupportedCacheSimulationMode(info *relaycommon.RelayInfo, mode dto.CacheSimulationMode) {
+	channelID := 0
+	if info != nil && info.ChannelMeta != nil {
+		channelID = info.ChannelMeta.ChannelId
+	}
+	key := fmt.Sprintf("%d|%s", channelID, mode)
+	if _, loaded := unsupportedCacheSimulationModeOnce.LoadOrStore(key, struct{}{}); loaded {
 		return
 	}
-
-	// Claude /v1/messages input_tokens may represent only the non-cached remainder.
-	// Reconstruct source total input from all available components before simulation.
-	sourcePromptTokens := usage.PromptTokens
-	sourceCachedTokens := usage.PromptTokensDetails.CachedTokens
-	sourceCachedCreationTokens := usage.PromptTokensDetails.CachedCreationTokens
-	if sourceCachedCreationTokens <= 0 {
-		splitCreation := usage.ClaudeCacheCreation5mTokens + usage.ClaudeCacheCreation1hTokens
-		if splitCreation > 0 {
-			sourceCachedCreationTokens = splitCreation
-		}
-	}
-	sourceTotalInputTokens := sourcePromptTokens + sourceCachedTokens + sourceCachedCreationTokens
-	if sourceTotalInputTokens < sourcePromptTokens {
-		// Overflow guard: keep a sane lower bound.
-		sourceTotalInputTokens = sourcePromptTokens
-	}
-	minTokens := cfg.MinInputTokens
-	if minTokens <= 0 {
-		minTokens = dto.DefaultCacheSimMinInputTokens
-	}
-	if sourceTotalInputTokens < minTokens {
-		return
-	}
-
-	// Backward compatibility: if the new two-level fields are absent, derive them
-	// from legacy read/creation ratios used by older channel settings.
-	newFieldsConfigured := cfg.TotalCacheRatioMin > 0 || cfg.TotalCacheRatioMax > 0 ||
-		cfg.ReadFractionMin > 0 || cfg.ReadFractionMax > 0
-	legacyFieldsConfigured := cfg.LegacyReadRatioMin > 0 || cfg.LegacyReadRatioMax > 0 ||
-		cfg.LegacyCreationRatioMin > 0 || cfg.LegacyCreationRatioMax > 0
-	if !newFieldsConfigured && legacyFieldsConfigured {
-		totalMinLegacy := cfg.LegacyReadRatioMin + cfg.LegacyCreationRatioMin
-		totalMaxLegacy := cfg.LegacyReadRatioMax + cfg.LegacyCreationRatioMax
-		cfg.TotalCacheRatioMin = totalMinLegacy
-		cfg.TotalCacheRatioMax = totalMaxLegacy
-		if totalMinLegacy > 0 {
-			cfg.ReadFractionMin = cfg.LegacyReadRatioMin / totalMinLegacy
-		}
-		if totalMaxLegacy > 0 {
-			cfg.ReadFractionMax = cfg.LegacyReadRatioMax / totalMaxLegacy
-		}
-	}
-
-	// ── Level 1: total cache involvement ratio ─────────────────────────────
-	totalMin := cfg.TotalCacheRatioMin
-	if totalMin <= 0 {
-		totalMin = dto.DefaultCacheSimTotalCacheRatioMin
-	}
-	totalMax := cfg.TotalCacheRatioMax
-	if totalMax <= 0 {
-		totalMax = dto.DefaultCacheSimTotalCacheRatioMax
-	}
-	if totalMax > 1.0 {
-		totalMax = 1.0
-	}
-	if totalMin > totalMax {
-		totalMin, totalMax = totalMax, totalMin
-	}
-
-	totalCacheRatio := totalMin + rand.Float64()*(totalMax-totalMin)
-	// Large context bonus: long conversations have higher overall cache engagement.
-	if sourceTotalInputTokens > 50000 {
-		totalCacheRatio += 0.05
-	}
-	if totalCacheRatio > 0.95 {
-		totalCacheRatio = 0.95
-	}
-	if totalCacheRatio < 0 {
-		totalCacheRatio = 0
-	}
-
-	// ── Level 2: read vs creation split within the cached portion ──────────
-	readFracMin := cfg.ReadFractionMin
-	if readFracMin <= 0 {
-		readFracMin = dto.DefaultCacheSimReadFractionMin
-	}
-	readFracMax := cfg.ReadFractionMax
-	if readFracMax <= 0 {
-		readFracMax = dto.DefaultCacheSimReadFractionMax
-	}
-	if readFracMax > 1.0 {
-		readFracMax = 1.0
-	}
-	if readFracMin > readFracMax {
-		readFracMin, readFracMax = readFracMax, readFracMin
-	}
-
-	readFraction := readFracMin + rand.Float64()*(readFracMax-readFracMin)
-	if readFraction < 0 {
-		readFraction = 0
-	} else if readFraction > 1 {
-		readFraction = 1
-	}
-
-	// ── Compute token counts ───────────────────────────────────────────────
-	// Use sourceTotalInputTokens (reconstructed total) as the base for cache simulation
-	// to handle cases where upstream input_tokens represents only non-cached remainder.
-	totalCached := int(float64(sourceTotalInputTokens) * totalCacheRatio)
-	if totalCached > sourceTotalInputTokens {
-		totalCached = sourceTotalInputTokens
-	}
-
-	cachedTokens := int(float64(totalCached) * readFraction)
-	if cachedTokens > totalCached {
-		cachedTokens = totalCached
-	}
-	// Integer subtraction: cachedTokens + cachedCreationTokens == totalCached exactly.
-	cachedCreationTokens := totalCached - cachedTokens
-
-	// Normalize PromptTokens to reconstructed total input tokens so downstream
-	// billing and response patching can derive the non-cached remainder from
-	// the simulated cache fields.
-
-	// Zero out Claude-specific cache creation sub-fields so they don't contradict
-	// the simulated CachedCreationTokens written below.
-	usage.PromptTokens = sourceTotalInputTokens
-	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-	usage.ClaudeCacheCreation5mTokens = 0
-	usage.ClaudeCacheCreation1hTokens = 0
-	usage.PromptTokensDetails.CachedTokens = cachedTokens
-	usage.PromptTokensDetails.CachedCreationTokens = cachedCreationTokens
+	logger.LogWarn(context.Background(), fmt.Sprintf(
+		"[Claude] cache simulation enabled on channel #%d but mode=%q is not supported (only %q is active); re-save the channel to migrate",
+		channelID, mode, dto.CacheSimulationModeSessionPrefix,
+	))
 }
 
 func applySessionPrefixCacheSimulation(info *relaycommon.RelayInfo, usage *dto.Usage) bool {
@@ -1300,6 +1197,7 @@ func applySessionPrefixCacheSimulation(info *relaycommon.RelayInfo, usage *dto.U
 		}
 	}
 	if request == nil {
+		warnSessionPrefixMissingRequest(info)
 		return false
 	}
 
@@ -1359,18 +1257,34 @@ func applySessionPrefixCacheSimulation(info *relaycommon.RelayInfo, usage *dto.U
 		)
 	}
 	if err != nil {
-		logger.LogDebug(context.Background(), fmt.Sprintf("[Claude] build session-prefix snapshot failed: %v", err))
+		logger.LogWarn(context.Background(), fmt.Sprintf("[Claude] build session-prefix snapshot failed on channel #%d: %v", info.ChannelMeta.ChannelId, err))
 		return false
 	}
 
 	engine := cachesim.NewSessionPrefixEngine(getSessionPrefixStore())
 	result, err := engine.Simulate(snapshot)
 	if err != nil {
-		logger.LogDebug(context.Background(), fmt.Sprintf("[Claude] session-prefix simulation failed: %v", err))
+		logger.LogWarn(context.Background(), fmt.Sprintf("[Claude] session-prefix simulation failed on channel #%d: %v", info.ChannelMeta.ChannelId, err))
 		return false
 	}
 	cachesim.ProjectClaudeUsage(usage, result)
 	return true
+}
+
+var sessionPrefixMissingRequestOnce sync.Map // key: channelID → struct{}
+
+func warnSessionPrefixMissingRequest(info *relaycommon.RelayInfo) {
+	channelID := 0
+	if info != nil && info.ChannelMeta != nil {
+		channelID = info.ChannelMeta.ChannelId
+	}
+	if _, loaded := sessionPrefixMissingRequestOnce.LoadOrStore(channelID, struct{}{}); loaded {
+		return
+	}
+	logger.LogWarn(context.Background(), fmt.Sprintf(
+		"[Claude] session-prefix simulation skipped on channel #%d: no Claude request captured (CacheSimulationRequest is nil); check the relay path that initialized this request",
+		channelID,
+	))
 }
 
 func shouldStripPlaceholders(info *relaycommon.RelayInfo) bool {

@@ -9,6 +9,10 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+// redisOpTimeout caps each Redis round-trip so a slow or stalled Redis
+// instance cannot wedge a Claude request on the cache-simulation hot path.
+const redisOpTimeout = 2 * time.Second
+
 // RedisStore implements Store using Redis for checkpoint persistence.
 // Each scope is stored as a single JSON value with a TTL that refreshes
 // on every access, so inactive scopes are automatically evicted by Redis.
@@ -33,7 +37,8 @@ func (s *RedisStore) scopeKey(scope ScopeKey) string {
 }
 
 func (s *RedisStore) Load(scope ScopeKey) (State, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
+	defer cancel()
 	key := s.scopeKey(scope)
 
 	data, err := s.client.Get(ctx, key).Bytes()
@@ -61,7 +66,8 @@ func (s *RedisStore) Save(scope ScopeKey, state State) error {
 		return fmt.Errorf("redis marshal: %w", err)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
+	defer cancel()
 	key := s.scopeKey(scope)
 	return s.client.Set(ctx, key, data, s.scopeTTL).Err()
 }
