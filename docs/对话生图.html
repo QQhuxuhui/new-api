@@ -387,15 +387,17 @@
     function fmtTime(ts)   { return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); }
 
     function attachModalDismiss(modalEl, onClose) {
-      // Click outside the inner card → close
-      modalEl.addEventListener('click', e => {
-        if (e.target === modalEl) onClose();
-      });
-      // Esc → close
-      const escHandler = e => {
-        if (e.key === 'Escape') { onClose(); document.removeEventListener('keydown', escHandler); }
-      };
+      let closed = false;
+      const escHandler = e => { if (e.key === 'Escape') close(); };
+      function close() {
+        if (closed) return;
+        closed = true;
+        document.removeEventListener('keydown', escHandler);
+        onClose();
+      }
+      modalEl.addEventListener('click', e => { if (e.target === modalEl) close(); });
       document.addEventListener('keydown', escHandler);
+      return close;
     }
 
     // === Tabs + workspace ===
@@ -645,8 +647,8 @@
       <div data-grid style="flex:1;display:grid;gap:12px;overflow:auto;
                            grid-template-columns:repeat(${nodeIds.length},1fr);"></div>`;
       document.body.appendChild(modal);
-      modal.querySelector('[data-close]').addEventListener('click', () => modal.remove());
-      attachModalDismiss(modal, () => modal.remove());
+      const close = attachModalDismiss(modal, () => modal.remove());
+      modal.querySelector('[data-close]').addEventListener('click', close);
 
       (async () => {
         const grid = modal.querySelector('[data-grid]');
@@ -962,17 +964,17 @@
           </div>
         </div>`;
       document.body.appendChild(modal);
-      modal.querySelector('[data-close]').addEventListener('click', () => modal.remove());
-      modal.querySelector('[data-action="cancel"]').addEventListener('click', () => modal.remove());
-      attachModalDismiss(modal, () => modal.remove());
+      const close = attachModalDismiss(modal, () => modal.remove());
+      modal.querySelector('[data-close]').addEventListener('click', close);
+      modal.querySelector('[data-action="cancel"]').addEventListener('click', close);
       modal.querySelector('[data-action="adopt"]').addEventListener('click', () => {
         $('prompt-input').value = modal.querySelector('#polished-text').value;
-        modal.remove();
+        close();
       });
       modal.querySelector('[data-action="adopt-edit"]').addEventListener('click', () => {
         $('prompt-input').value = modal.querySelector('#polished-text').value;
         $('prompt-input').focus();
-        modal.remove();
+        close();
       });
     }
 
@@ -985,8 +987,8 @@
         <div style="text-align:right;"><button data-ok style="background:var(--accent);color:#000;border:0;padding:6px 14px;border-radius:6px;cursor:pointer;">好的</button></div>
       </div>`;
       document.body.appendChild(m);
-      m.querySelector('[data-ok]').addEventListener('click', () => m.remove());
-      attachModalDismiss(m, () => m.remove());
+      const close = attachModalDismiss(m, () => m.remove());
+      m.querySelector('[data-ok]').addEventListener('click', close);
     }
 
     // === Input area ===
@@ -1121,6 +1123,9 @@
 
     // === Retry handler (replays the generation for a failed assistant message) ===
     async function onRetry(failedMsgId) {
+      const btn = document.querySelector(`button[data-retry-msg="${failedMsgId}"]`);
+      if (btn?.disabled) return;
+      if (btn) { btn.disabled = true; btn.textContent = '重试中…'; }
       const allMsgs = await listMessages();
       const failed = allMsgs.find(m => m.id === failedMsgId);
       if (!failed) return;
