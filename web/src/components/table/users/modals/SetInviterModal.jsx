@@ -45,6 +45,14 @@ const SetInviterModal = ({ visible, user, onClose, refresh }) => {
     }
   }, [visible]);
 
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, []);
+
   const doSearch = async (keyword) => {
     if (!keyword) {
       setOptions([]);
