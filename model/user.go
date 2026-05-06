@@ -337,6 +337,41 @@ func inviteUser(inviterId int) (err error) {
 	return DB.Save(user).Error
 }
 
+// detectInviterCycle walks up the inviter chain starting from newInviterId.
+// Returns an error if targetUserId would appear in that chain (forming a cycle),
+// if the chain itself is corrupted (visited set hits), or if it exceeds 50 hops.
+// Pass tx = DB outside a transaction.
+func detectInviterCycle(targetUserId, newInviterId int, tx *gorm.DB) error {
+	if newInviterId == 0 {
+		return nil
+	}
+	if newInviterId == targetUserId {
+		return errors.New("不能将用户自己设为邀请人")
+	}
+	visited := make(map[int]bool)
+	cur := newInviterId
+	for depth := 0; depth < 50; depth++ {
+		if cur == 0 {
+			return nil
+		}
+		if cur == targetUserId {
+			return errors.New("检测到邀请关系环路：目标邀请人的上线链中已包含该用户")
+		}
+		if visited[cur] {
+			return errors.New("检测到已存在的邀请关系环路（数据异常），请联系开发处理")
+		}
+		visited[cur] = true
+
+		var next int
+		if err := tx.Model(&User{}).Select("inviter_id").
+			Where("id = ?", cur).Scan(&next).Error; err != nil {
+			return err
+		}
+		cur = next
+	}
+	return errors.New("邀请关系链路过深（>50），疑似数据异常")
+}
+
 func (user *User) TransferAffQuotaToQuota(quota int) error {
 	// 检查quota是否小于最小额度
 	if float64(quota) < common.QuotaPerUnit {
