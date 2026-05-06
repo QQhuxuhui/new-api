@@ -271,10 +271,9 @@ export const setUserInviter = (userId, inviterId) =>
 
 ## 并发与一致性
 
-- 在事务内对 A 行 `SELECT … FOR UPDATE`，避免并发改 A 的 `inviter_id` 时检测旧链而写新值
-- 环路检测使用同一个事务句柄读取上线链，看到的是事务隔离级别下的一致快照
-- B 不需要加锁：B 的 `inviter_id` 改动不会影响"以 B 为根的上线链是否包含 A"这一判定的正确性（如果在校验后 B 的链发生变更，最坏情况是后续操作中再次触发环路检测拒绝；不会产生死锁循环写入）
-- 提交事务后调用 `invalidateUserCache(userId)` 让用户缓存失效
+- 事务内对 A 行 `SELECT … FOR UPDATE`，序列化对 A 自身 `inviter_id` 的并发写入
+- 事务提交后调用 `RecordLog`（独立 `LOG_DB`）和 `invalidateUserCache`，与 `controller/user.go:659` 的"管理员修改额度"日志写入时机一致
+- **已知限制（TOCTOU）**：环路检测沿 B 的上线链遍历但只对 A 加锁。若两位管理员同时操作互相关联的用户对（admin1: A→B；admin2: B→A），admin1 的环路检测可能基于事务快照看不到 admin2 的提交，导致两次提交后数据库中真的形成环。`detectInviterCycle` 的 `visited` 双保险会在下一次涉及该环的 `SetUserInviter` 调用上抛出「数据异常」错误，运维可介入手工修复。该窗口在实际运营中极少触发（要求两位管理员同一时间操作同一对用户），暂作为已知限制；若未来观测到，可在 inviter 查询上追加 `FOR UPDATE`（注意死锁可能）或对整条链路加锁
 
 ## 测试要点
 

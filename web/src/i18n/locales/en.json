@@ -1995,6 +1995,7 @@
     "搜索用户（用户名/邮箱/ID）": "Search user (username / email / ID)",
     "留空则解除当前邀请人绑定": "Leave empty to remove the current inviter binding",
     "确认替换该用户的邀请人？此操作会写入审计日志，不可撤销。": "Confirm replacing this user's inviter? This action is logged and cannot be undone.",
+    "确认解除该用户的邀请人绑定？此操作会写入审计日志，不可撤销。": "Confirm removing this user's inviter binding? This action is logged and cannot be undone.",
     "邀请人设置成功": "Inviter updated successfully",
     "邀请信息": "Invitation information",
     "邀请奖励": "Invite reward",

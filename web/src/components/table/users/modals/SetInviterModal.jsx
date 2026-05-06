@@ -122,9 +122,12 @@ const SetInviterModal = ({ visible, user, onClose, refresh }) => {
       return;
     }
     if (user?.inviter_id && user.inviter_id !== 0) {
+      const isUnbind = newId === 0;
       Modal.warning({
         title: t('设置邀请人'),
-        content: t('确认替换该用户的邀请人？此操作会写入审计日志，不可撤销。'),
+        content: isUnbind
+          ? t('确认解除该用户的邀请人绑定？此操作会写入审计日志，不可撤销。')
+          : t('确认替换该用户的邀请人？此操作会写入审计日志，不可撤销。'),
         okText: t('确认'),
         cancelText: t('取消'),
         onOk: submit,
