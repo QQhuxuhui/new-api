@@ -126,3 +126,29 @@ func TestDetectInviterCycle_ExceedsMaxDepth(t *testing.T) {
 		t.Fatalf("expected depth-exceeded error, got %v", err)
 	}
 }
+
+func TestBuildInviterChangeLog_SetFromZero(t *testing.T) {
+	got := buildInviterChangeLog(99, 0, 5, "alice")
+	if !strings.Contains(got, "管理员") || !strings.Contains(got, "99") ||
+		!strings.Contains(got, "5") || !strings.Contains(got, "alice") {
+		t.Fatalf("missing fields in: %s", got)
+	}
+	if !strings.Contains(got, "设为") {
+		t.Fatalf("expected 设为 wording, got: %s", got)
+	}
+}
+
+func TestBuildInviterChangeLog_Replace(t *testing.T) {
+	got := buildInviterChangeLog(99, 3, 5, "alice")
+	if !strings.Contains(got, "由") || !strings.Contains(got, "3") ||
+		!strings.Contains(got, "5") || !strings.Contains(got, "alice") {
+		t.Fatalf("missing fields in: %s", got)
+	}
+}
+
+func TestBuildInviterChangeLog_Unbind(t *testing.T) {
+	got := buildInviterChangeLog(99, 7, 0, "")
+	if !strings.Contains(got, "解除") || !strings.Contains(got, "7") {
+		t.Fatalf("expected 解除 wording with previous id, got: %s", got)
+	}
+}

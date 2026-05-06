@@ -381,6 +381,19 @@ func detectInviterCycle(targetUserId, newInviterId int, tx *gorm.DB) error {
 	return errors.New("邀请关系链路过深（>50），疑似数据异常")
 }
 
+// buildInviterChangeLog returns the audit-log line for a successful inviter change.
+// Caller guarantees previous != newId (the equality case is handled upstream).
+func buildInviterChangeLog(operatorId, previous, newId int, newName string) string {
+	switch {
+	case previous == 0 && newId != 0:
+		return fmt.Sprintf("管理员（#%d）将邀请人设为 用户 #%d（%s）", operatorId, newId, newName)
+	case previous != 0 && newId == 0:
+		return fmt.Sprintf("管理员（#%d）解除了邀请人绑定（原邀请人 #%d）", operatorId, previous)
+	default:
+		return fmt.Sprintf("管理员（#%d）将邀请人由 用户 #%d 修改为 用户 #%d（%s）", operatorId, previous, newId, newName)
+	}
+}
+
 func (user *User) TransferAffQuotaToQuota(quota int) error {
 	// 检查quota是否小于最小额度
 	if float64(quota) < common.QuotaPerUnit {
