@@ -456,9 +456,7 @@ func SetUserInviter(userId, inviterId, operatorId int) (previous int, err error)
 	committed = true
 
 	content := buildInviterChangeLog(operatorId, previous, inviterId, newInviterName)
-	if LOG_DB != nil {
-		RecordLog(userId, LogTypeManage, content)
-	}
+	RecordLog(userId, LogTypeManage, content)
 	_ = invalidateUserCache(userId)
 	return previous, nil
 }

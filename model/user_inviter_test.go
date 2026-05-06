@@ -22,6 +22,7 @@ func setupInviterTestDB(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	DB = db
+	LOG_DB = db
 	if err := DB.AutoMigrate(&User{}, &Log{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
