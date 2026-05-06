@@ -394,6 +394,75 @@ func buildInviterChangeLog(operatorId, previous, newId int, newName string) stri
 	}
 }
 
+// SetUserInviter rebinds userId's inviter to inviterId (0 = unbind).
+// Runs in a transaction with FOR UPDATE on the target row, validates the
+// inviter exists, runs cycle detection, then commits and writes a
+// LogTypeManage audit log on the target user. Returns the previous inviter id.
+// operatorId is the admin user id used in the audit log.
+func SetUserInviter(userId, inviterId, operatorId int) (previous int, err error) {
+	if userId == 0 {
+		return 0, errors.New("用户ID为空")
+	}
+	if inviterId != 0 && inviterId == userId {
+		return 0, errors.New("不能将用户自己设为邀请人")
+	}
+
+	var newInviterName string
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
+
+	var a User
+	if err = tx.Set("gorm:query_option", "FOR UPDATE").
+		First(&a, userId).Error; err != nil {
+		return 0, fmt.Errorf("用户不存在: %w", err)
+	}
+	previous = a.InviterId
+
+	if previous == inviterId {
+		if err = tx.Commit().Error; err != nil {
+			return previous, err
+		}
+		committed = true
+		return previous, nil
+	}
+
+	if inviterId != 0 {
+		var b User
+		if err = tx.Select("id, username").First(&b, inviterId).Error; err != nil {
+			return previous, fmt.Errorf("邀请人用户不存在: %w", err)
+		}
+		newInviterName = b.Username
+		if err = detectInviterCycle(userId, inviterId, tx); err != nil {
+			return previous, err
+		}
+	}
+
+	if err = tx.Model(&User{}).Where("id = ?", userId).
+		Update("inviter_id", inviterId).Error; err != nil {
+		return previous, err
+	}
+
+	if err = tx.Commit().Error; err != nil {
+		return previous, err
+	}
+	committed = true
+
+	content := buildInviterChangeLog(operatorId, previous, inviterId, newInviterName)
+	if LOG_DB != nil {
+		RecordLog(userId, LogTypeManage, content)
+	}
+	_ = invalidateUserCache(userId)
+	return previous, nil
+}
+
 func (user *User) TransferAffQuotaToQuota(quota int) error {
 	// 检查quota是否小于最小额度
 	if float64(quota) < common.QuotaPerUnit {

@@ -152,3 +152,123 @@ func TestBuildInviterChangeLog_Unbind(t *testing.T) {
 		t.Fatalf("expected 解除 wording with previous id, got: %s", got)
 	}
 }
+
+func TestSetUserInviter_BindFromZero(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+
+	prev, err := SetUserInviter(a.Id, b.Id, 99)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prev != 0 {
+		t.Fatalf("prev = %d, want 0", prev)
+	}
+
+	var refreshed User
+	if err := DB.First(&refreshed, a.Id).Error; err != nil {
+		t.Fatalf("reload a: %v", err)
+	}
+	if refreshed.InviterId != b.Id {
+		t.Fatalf("inviter_id = %d, want %d", refreshed.InviterId, b.Id)
+	}
+}
+
+func TestSetUserInviter_Replace(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+	c := mkUser(t, "c", 0)
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("first set: %v", err)
+	}
+
+	prev, err := SetUserInviter(a.Id, c.Id, 99)
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if prev != b.Id {
+		t.Fatalf("prev = %d, want %d", prev, b.Id)
+	}
+}
+
+func TestSetUserInviter_Unbind(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("first set: %v", err)
+	}
+
+	prev, err := SetUserInviter(a.Id, 0, 99)
+	if err != nil {
+		t.Fatalf("unbind: %v", err)
+	}
+	if prev != b.Id {
+		t.Fatalf("prev = %d, want %d", prev, b.Id)
+	}
+
+	var refreshed User
+	if err := DB.First(&refreshed, a.Id).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if refreshed.InviterId != 0 {
+		t.Fatalf("inviter_id = %d, want 0", refreshed.InviterId)
+	}
+}
+
+func TestSetUserInviter_Idempotent(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("first set: %v", err)
+	}
+
+	prev, err := SetUserInviter(a.Id, b.Id, 99)
+	if err != nil {
+		t.Fatalf("idempotent set: %v", err)
+	}
+	if prev != b.Id {
+		t.Fatalf("prev = %d, want %d", prev, b.Id)
+	}
+}
+
+func TestSetUserInviter_SelfBindRejected(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	_, err := SetUserInviter(a.Id, a.Id, 99)
+	if err == nil || !strings.Contains(err.Error(), "自己") {
+		t.Fatalf("expected self-bind error, got %v", err)
+	}
+}
+
+func TestSetUserInviter_InviterMissing(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	_, err := SetUserInviter(a.Id, 9999, 99)
+	if err == nil || !strings.Contains(err.Error(), "邀请人") {
+		t.Fatalf("expected missing-inviter error, got %v", err)
+	}
+}
+
+func TestSetUserInviter_TargetMissing(t *testing.T) {
+	setupInviterTestDB(t)
+	b := mkUser(t, "b", 0)
+	_, err := SetUserInviter(9999, b.Id, 99)
+	if err == nil {
+		t.Fatalf("expected error when target missing")
+	}
+}
+
+func TestSetUserInviter_CycleRejected(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", a.Id) // B's inviter is A
+	// Setting A.inviter = B would form a cycle A <- B <- A
+	_, err := SetUserInviter(a.Id, b.Id, 99)
+	if err == nil || !strings.Contains(err.Error(), "环路") {
+		t.Fatalf("expected cycle error, got %v", err)
+	}
+}
