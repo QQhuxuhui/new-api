@@ -225,6 +225,7 @@ const renderOperations = (
     showResetPasskeyModal,
     showResetTwoFAModal,
     showUserPlansModal,
+    showSetInviterModal,
     t,
   },
 ) => {
@@ -237,6 +238,14 @@ const renderOperations = (
       node: 'item',
       name: t('套餐管理'),
       onClick: () => showUserPlansModal(record),
+    },
+    {
+      node: 'divider',
+    },
+    {
+      node: 'item',
+      name: t('设置邀请人'),
+      onClick: () => showSetInviterModal(record),
     },
     {
       node: 'divider',
@@ -325,6 +334,7 @@ export const getUsersColumns = ({
   showResetPasskeyModal,
   showResetTwoFAModal,
   showUserPlansModal,
+  showSetInviterModal,
   showUserDetailModal,
 }) => {
   return [
@@ -383,6 +393,7 @@ export const getUsersColumns = ({
           showResetPasskeyModal,
           showResetTwoFAModal,
           showUserPlansModal,
+          showSetInviterModal,
           t,
         }),
     },

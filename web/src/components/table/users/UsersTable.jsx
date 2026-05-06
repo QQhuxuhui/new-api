@@ -32,6 +32,7 @@ import DeleteUserModal from './modals/DeleteUserModal';
 import ResetPasskeyModal from './modals/ResetPasskeyModal';
 import ResetTwoFAModal from './modals/ResetTwoFAModal';
 import UserPlansModal from './modals/UserPlansModal';
+import SetInviterModal from './modals/SetInviterModal';
 import UserDetailModal from './modals/UserDetailModal';
 
 const UsersTable = (usersData) => {
@@ -65,6 +66,7 @@ const UsersTable = (usersData) => {
   const [showResetTwoFAModal, setShowResetTwoFAModal] = useState(false);
   const [showUserPlansModal, setShowUserPlansModal] = useState(false);
   const [showUserDetailModal, setShowUserDetailModal] = useState(false);
+  const [showSetInviterModal, setShowSetInviterModal] = useState(false);
 
   // Modal handlers
   const showPromoteUserModal = (user) => {
@@ -108,6 +110,11 @@ const UsersTable = (usersData) => {
     setShowUserDetailModal(true);
   };
 
+  const showSetInviterUserModal = (user) => {
+    setModalUser(user);
+    setShowSetInviterModal(true);
+  };
+
   // Modal confirm handlers
   const handlePromoteConfirm = () => {
     manageUser(modalUser.id, 'promote', modalUser);
@@ -147,6 +154,7 @@ const UsersTable = (usersData) => {
       showResetPasskeyModal: showResetPasskeyUserModal,
       showResetTwoFAModal: showResetTwoFAUserModal,
       showUserPlansModal: showUserPlansUserModal,
+      showSetInviterModal: showSetInviterUserModal,
       showUserDetailModal: showUserDetailUserModal,
     });
   }, [
@@ -160,6 +168,7 @@ const UsersTable = (usersData) => {
     showResetPasskeyUserModal,
     showResetTwoFAUserModal,
     showUserPlansUserModal,
+    showSetInviterUserModal,
     showUserDetailUserModal,
   ]);
 
@@ -265,6 +274,13 @@ const UsersTable = (usersData) => {
         visible={showUserPlansModal}
         user={modalUser}
         onClose={() => setShowUserPlansModal(false)}
+        refresh={refresh}
+      />
+
+      <SetInviterModal
+        visible={showSetInviterModal}
+        user={modalUser}
+        onClose={() => setShowSetInviterModal(false)}
         refresh={refresh}
       />
 
