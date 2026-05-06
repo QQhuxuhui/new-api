@@ -422,7 +422,10 @@ func SetUserInviter(userId, inviterId, operatorId int) (previous int, err error)
 	var a User
 	if err = tx.Set("gorm:query_option", "FOR UPDATE").
 		First(&a, userId).Error; err != nil {
-		return 0, fmt.Errorf("用户不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, errors.New("用户不存在")
+		}
+		return 0, err
 	}
 	previous = a.InviterId
 
@@ -437,7 +440,10 @@ func SetUserInviter(userId, inviterId, operatorId int) (previous int, err error)
 	if inviterId != 0 {
 		var b User
 		if err = tx.Select("id, username").First(&b, inviterId).Error; err != nil {
-			return previous, fmt.Errorf("邀请人用户不存在: %w", err)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return previous, errors.New("邀请人用户不存在")
+			}
+			return previous, err
 		}
 		newInviterName = b.Username
 		if err = detectInviterCycle(userId, inviterId, tx); err != nil {

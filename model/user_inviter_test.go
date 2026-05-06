@@ -273,3 +273,46 @@ func TestSetUserInviter_CycleRejected(t *testing.T) {
 		t.Fatalf("expected cycle error, got %v", err)
 	}
 }
+
+func TestSetUserInviter_WritesAuditLog(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+
+	var log Log
+	if err := LOG_DB.Where("user_id = ? AND type = ?", a.Id, LogTypeManage).
+		Order("id desc").First(&log).Error; err != nil {
+		t.Fatalf("expected audit log row, got: %v", err)
+	}
+	if !strings.Contains(log.Content, "管理员") || !strings.Contains(log.Content, "99") {
+		t.Fatalf("unexpected log content: %s", log.Content)
+	}
+}
+
+func TestSetUserInviter_IdempotentSkipsAuditLog(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("first set: %v", err)
+	}
+	// Second call with same inviter — should not write a new log row.
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("second set: %v", err)
+	}
+
+	var count int64
+	if err := LOG_DB.Model(&Log{}).
+		Where("user_id = ? AND type = ?", a.Id, LogTypeManage).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count logs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 audit log row, got %d", count)
+	}
+}
