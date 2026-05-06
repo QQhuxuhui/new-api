@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -107,5 +108,21 @@ func TestDetectInviterCycle_PreexistingCycleVisited(t *testing.T) {
 	err := detectInviterCycle(z.Id, x.Id, DB)
 	if err == nil || !strings.Contains(err.Error(), "数据异常") {
 		t.Fatalf("expected pre-existing cycle error, got %v", err)
+	}
+}
+
+func TestDetectInviterCycle_ExceedsMaxDepth(t *testing.T) {
+	setupInviterTestDB(t)
+	// Build a 51-node chain: u0 (no inviter) ← u1 ← u2 ← ... ← u50
+	users := make([]*User, 51)
+	users[0] = mkUser(t, "u0", 0)
+	for i := 1; i <= 50; i++ {
+		users[i] = mkUser(t, "u"+strconv.Itoa(i), users[i-1].Id)
+	}
+	target := mkUser(t, "target", 0)
+	// Walking up from u50 traverses 51 nodes (u50, u49, ..., u0) — exceeds the 50-hop loop bound.
+	err := detectInviterCycle(target.Id, users[50].Id, DB)
+	if err == nil || !strings.Contains(err.Error(), "过深") {
+		t.Fatalf("expected depth-exceeded error, got %v", err)
 	}
 }

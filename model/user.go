@@ -337,10 +337,19 @@ func inviteUser(inviterId int) (err error) {
 	return DB.Save(user).Error
 }
 
+const maxInviterChainDepth = 50
+
 // detectInviterCycle walks up the inviter chain starting from newInviterId.
 // Returns an error if targetUserId would appear in that chain (forming a cycle),
-// if the chain itself is corrupted (visited set hits), or if it exceeds 50 hops.
-// Pass tx = DB outside a transaction.
+// if the chain itself is corrupted (visited set hits), or if it exceeds
+// maxInviterChainDepth hops.
+//
+// The caller MUST validate that newInviterId exists separately. This function
+// reads next-hop ids via a scalar Scan, which returns no error for a missing
+// row (next stays 0 and the chain appears to terminate cleanly). Existence
+// validation is the caller's responsibility.
+//
+// Pass DB directly when not inside an existing transaction.
 func detectInviterCycle(targetUserId, newInviterId int, tx *gorm.DB) error {
 	if newInviterId == 0 {
 		return nil
@@ -350,7 +359,7 @@ func detectInviterCycle(targetUserId, newInviterId int, tx *gorm.DB) error {
 	}
 	visited := make(map[int]bool)
 	cur := newInviterId
-	for depth := 0; depth < 50; depth++ {
+	for depth := 0; depth < maxInviterChainDepth; depth++ {
 		if cur == 0 {
 			return nil
 		}
