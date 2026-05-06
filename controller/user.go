@@ -1318,3 +1318,53 @@ func UpdateUserSetting(c *gin.Context) {
 		"message": "设置已更新",
 	})
 }
+
+type SetUserInviterRequest struct {
+	UserId    int `json:"user_id"`
+	InviterId int `json:"inviter_id"`
+}
+
+// SetUserInviter — admin-only manual inviter rebind.
+// POST /api/user/manage/inviter  body: { user_id, inviter_id (0 = unbind) }
+func SetUserInviter(c *gin.Context) {
+	var req SetUserInviterRequest
+	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+	if req.UserId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户ID")
+		return
+	}
+	if req.InviterId < 0 {
+		common.ApiErrorMsg(c, "无效的邀请人ID")
+		return
+	}
+	if req.InviterId != 0 && req.InviterId == req.UserId {
+		common.ApiErrorMsg(c, "不能将用户自己设为邀请人")
+		return
+	}
+
+	targetUser, err := model.GetUserById(req.UserId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	myRole := c.GetInt("role")
+	if myRole <= targetUser.Role && myRole != common.RoleRootUser {
+		common.ApiErrorMsg(c, "无权操作权限等级大于等于自己的用户")
+		return
+	}
+
+	previous, err := model.SetUserInviter(req.UserId, req.InviterId, c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"previous_inviter_id": previous,
+		"new_inviter_id":      req.InviterId,
+	})
+}
