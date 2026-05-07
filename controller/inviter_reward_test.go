@@ -3,8 +3,10 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +51,7 @@ func newRouterWithAdmin() *gin.Engine {
 	})
 	r.GET("/api/user/manage/:id/invitee-recharges", GetInviteeRecharges)
 	r.GET("/api/user/manage/:id/inviter-reward-payouts", GetInviterRewardPayouts)
+	r.POST("/api/user/manage/:id/inviter-reward-payouts", CreateInviterRewardPayoutHandler)
 	return r
 }
 
@@ -152,3 +155,76 @@ func TestGetInviterRewardPayouts_History(t *testing.T) {
 		t.Fatalf("total want 3, got %v", pg["total"])
 	}
 }
+
+func TestCreateInviterRewardPayoutHandler_Happy(t *testing.T) {
+	setupInviterRewardCtlTestDB(t)
+	inviterId := seedTwoInviteesWithTopups(t)
+	r := newRouterWithAdmin()
+
+	body := `{"payout_amount_usd": 6.20, "note": "first batch"}`
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("/api/user/manage/%d/inviter-reward-payouts", inviterId),
+		bytesReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+	}
+	var env apiEnvelope
+	json.Unmarshal(w.Body.Bytes(), &env)
+	if !env.Success {
+		t.Fatalf("success=false: %s", env.Message)
+	}
+	if env.Data["payout_amount_usd"].(float64) != 6.20 {
+		t.Fatalf("payout_amount mismatch: %v", env.Data["payout_amount_usd"])
+	}
+	if env.Data["recharge_total_usd"].(float64) != 62 {
+		t.Fatalf("recharge_total want 62, got %v", env.Data["recharge_total_usd"])
+	}
+}
+
+func TestCreateInviterRewardPayoutHandler_NoPending(t *testing.T) {
+	setupInviterRewardCtlTestDB(t)
+	inviter := &model.User{Username: "lonely", Password: "x", AffCode: fmt.Sprintf("aff-lonely-%d", time.Now().UnixNano())}
+	model.DB.Create(inviter)
+	r := newRouterWithAdmin()
+	body := `{"payout_amount_usd": 1, "note": ""}`
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("/api/user/manage/%d/inviter-reward-payouts", inviter.Id),
+		bytesReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+	}
+	var env apiEnvelope
+	json.Unmarshal(w.Body.Bytes(), &env)
+	if env.Success {
+		t.Fatalf("expected failure, got success")
+	}
+	if env.Message != "暂无待激励充值" {
+		t.Fatalf("message want '暂无待激励充值', got %q", env.Message)
+	}
+}
+
+func TestCreateInviterRewardPayoutHandler_BadAmount(t *testing.T) {
+	setupInviterRewardCtlTestDB(t)
+	inviterId := seedTwoInviteesWithTopups(t)
+	r := newRouterWithAdmin()
+	body := `{"payout_amount_usd": 0}`
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("/api/user/manage/%d/inviter-reward-payouts", inviterId),
+		bytesReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var env apiEnvelope
+	json.Unmarshal(w.Body.Bytes(), &env)
+	if env.Success {
+		t.Fatalf("expected failure")
+	}
+	if env.Message != "奖励金额必须大于 0" {
+		t.Fatalf("got %q", env.Message)
+	}
+}
+
+func bytesReader(s string) io.Reader { return strings.NewReader(s) }

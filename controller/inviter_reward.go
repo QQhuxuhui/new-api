@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
@@ -86,4 +87,36 @@ func GetInviterRewardPayouts(c *gin.Context) {
 			"total":     total,
 		},
 	})
+}
+
+type createInviterRewardPayoutRequest struct {
+	PayoutAmountUsd float64 `json:"payout_amount_usd"`
+	Note            string  `json:"note"`
+}
+
+// POST /api/user/manage/:id/inviter-reward-payouts
+func CreateInviterRewardPayoutHandler(c *gin.Context) {
+	inviterId, ok := parseInviterIdParam(c)
+	if !ok {
+		return
+	}
+	var req createInviterRewardPayoutRequest
+	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+	operatorId := c.GetInt("id")
+
+	payout, err := model.CreateInviterRewardPayout(
+		inviterId,
+		req.PayoutAmountUsd,
+		req.Note,
+		common.InviterRewardDefaultPercent,
+		operatorId,
+	)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	common.ApiSuccess(c, payout)
 }
