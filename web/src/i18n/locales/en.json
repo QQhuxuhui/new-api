@@ -2493,5 +2493,10 @@
   "备注（可选）": "Note (optional)",
   "如：微信转账 流水号 xxx": "e.g. WeChat transfer ref xxx",
   "确认发放": "Confirm Payout",
-  "已发放 {{amount}}，覆盖 {{count}} 笔充值": "Paid out {{amount}}, covering {{count}} recharges"
+  "已发放 {{amount}}，覆盖 {{count}} 笔充值": "Paid out {{amount}}, covering {{count}} recharges",
+  "完成时间": "Completed At",
+  "金额": "Amount",
+  "钱包充值": "Wallet Recharge",
+  "月卡订单": "Plan Order",
+  "按量订单": "Topup Order"
 }

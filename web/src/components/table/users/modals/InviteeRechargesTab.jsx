@@ -106,11 +106,22 @@ const InviteeRechargesTab = ({ visible, inviterId }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, inviterId]);
 
+  const SOURCE_TYPE_LABELS = {
+    topup: t('钱包充值'),
+    plan_order: t('月卡订单'),
+    topup_order: t('按量订单'),
+  };
+
   const detailColumns = [
     { title: t('被邀请人'), dataIndex: 'invitee_username' },
     {
+      title: t('类型'),
+      dataIndex: 'source_type',
+      render: (v) => SOURCE_TYPE_LABELS[v] || v,
+    },
+    {
       title: t('完成时间'),
-      dataIndex: 'complete_time',
+      dataIndex: 'paid_at_ms',
       render: (v) => {
         const n = Number(v);
         if (!n) return '-';
@@ -119,8 +130,8 @@ const InviteeRechargesTab = ({ visible, inviterId }) => {
       },
     },
     { title: t('金额'), dataIndex: 'money_usd', render: (v) => formatUSDAmount(v) },
-    { title: t('支付方式'), dataIndex: 'payment_method' },
-    { title: t('订单号'), dataIndex: 'trade_no' },
+    { title: t('支付方式'), dataIndex: 'payment_method', render: (v) => v || '-' },
+    { title: t('订单号'), dataIndex: 'order_no', render: (v) => v || '-' },
     {
       title: t('激励状态'),
       dataIndex: 'payout_id',
@@ -191,7 +202,7 @@ const InviteeRechargesTab = ({ visible, inviterId }) => {
           columns={detailColumns}
           dataSource={items}
           loading={loading}
-          rowKey="topup_id"
+          rowKey={(row) => `${row.source_type}-${row.record_id}`}
           size="small"
           pagination={{
             currentPage: pagination.currentPage,
