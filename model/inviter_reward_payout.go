@@ -32,6 +32,10 @@ type InviteeRechargeSummary struct {
 
 func GetInviteeRechargeSummary(inviterUserId int) (*InviteeRechargeSummary, error) {
 	s := &InviteeRechargeSummary{}
+	// NOTE: the four reads below are not wrapped in a single transaction;
+	// the summary is advisory and may be momentarily inconsistent under concurrent
+	// writes. This is a deliberate trade-off — the dashboard reload picks up the
+	// post-write state on the next click.
 
 	// invitee_count
 	var c int64
@@ -136,12 +140,17 @@ var (
 	ErrInvalidPayoutAmount = errors.New("奖励金额必须大于 0")
 )
 
-// CreateInviterRewardPayout 在事务中：
-//  1. FOR UPDATE 锁定该 inviter 下所有未发放 (status=success, payout_id=0) 的 top_ups
-//  2. 校验金额 > 0、行数 > 0
-//  3. 插入一条 InviterRewardPayout
-//  4. 把锁定的 top_ups 全部 UPDATE 为新 payout_id
-//  5. 写一条 LogTypeManage 日志
+// CreateInviterRewardPayout 在事务中把当前所有"未发放"的下级 success 充值打包成
+// 一次激励发放批次，并写一条审计日志。
+//
+// 流程：
+//   * 事务前：校验 payoutAmountUsd > 0
+//   * 事务内：
+//       1) FOR UPDATE 锁定该 inviter 下所有未发放 (status=success, payout_id=0) 的 top_ups
+//       2) 若锁到 0 行返回 ErrNoPendingRecharges（事务回滚）
+//       3) 插入一条 InviterRewardPayout
+//       4) 把锁定的 top_ups 全部 UPDATE 为新 payout_id
+//   * 事务后：写一条 LogTypeManage 日志（fire-and-forget，失败不回滚业务）
 func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note string, defaultPctUsed float64, operatorAdminId int) (*InviterRewardPayout, error) {
 	if payoutAmountUsd <= 0 {
 		return nil, ErrInvalidPayoutAmount
@@ -174,7 +183,7 @@ func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note 
 			ids = append(ids, r.Id)
 		}
 
-		// 2) 插入 payout
+		// 3) 插入 payout
 		p := &InviterRewardPayout{
 			InviterUserId:    inviterUserId,
 			RechargeTotalUsd: rechargeTotal,
@@ -187,7 +196,7 @@ func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note 
 			return err
 		}
 
-		// 3) 更新 top_ups
+		// 4) 更新 top_ups
 		if err := tx.Model(&TopUp{}).Where("id IN ?", ids).Update("inviter_reward_payout_id", p.Id).Error; err != nil {
 			return err
 		}

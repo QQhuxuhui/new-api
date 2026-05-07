@@ -136,6 +136,9 @@ func TestGetInviterRewardPayoutHistory(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("page items want 2, got %d", len(items))
 	}
+	if items[0].Id <= items[1].Id {
+		t.Fatalf("expected id-desc order: items[0].Id=%d should be > items[1].Id=%d", items[0].Id, items[1].Id)
+	}
 }
 
 func TestCreateInviterRewardPayout_Happy(t *testing.T) {
@@ -156,7 +159,9 @@ func TestCreateInviterRewardPayout_Happy(t *testing.T) {
 		t.Fatalf("metadata mismatch: %+v", payout)
 	}
 
-	// 第二次发放应该返回 ErrNoPendingRecharges（已无 pending），等价于"防双发"
+	// 第二次发放返回 ErrNoPendingRecharges（顺序幂等性）。
+	// 注意：真正的并发安全由 MySQL/Postgres 的 FOR UPDATE 在生产环境保证，
+	// SQLite in-memory 不支持 FOR UPDATE 语义，无法在 unit test 层验证。
 	_, err = CreateInviterRewardPayout(inviterId, 5, "again", 10.0, 999)
 	if !errors.Is(err, ErrNoPendingRecharges) {
 		t.Fatalf("second call want ErrNoPendingRecharges, got %v", err)
