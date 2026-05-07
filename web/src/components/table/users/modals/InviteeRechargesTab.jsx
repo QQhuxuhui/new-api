@@ -122,8 +122,13 @@ const InviteeRechargesTab = ({ visible, inviterId }) => {
     { title: t('批次'), dataIndex: 'id', render: (v) => `#${v}` },
     { title: t('发放金额'), dataIndex: 'payout_amount_usd', render: (v) => formatUSDAmount(v) },
     { title: t('涉及充值'), dataIndex: 'recharge_total_usd', render: (v) => formatUSDAmount(v) },
+    { title: t('涉及笔数'), dataIndex: 'topup_count', render: (v) => `${v || 0}` },
     { title: t('备注'), dataIndex: 'note', render: (v) => v || '-' },
-    { title: t('操作管理员'), dataIndex: 'operator_admin_id', render: (v) => `#${v}` },
+    {
+      title: t('操作管理员'),
+      dataIndex: 'operator_admin_username',
+      render: (v, row) => v || `#${row.operator_admin_id}`,
+    },
     {
       title: t('时间'),
       dataIndex: 'created_at',

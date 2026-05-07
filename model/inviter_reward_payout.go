@@ -122,14 +122,44 @@ func GetInviteeRechargeItems(inviterUserId int, p *common.PageInfo) ([]*InviteeR
 	return items, total, nil
 }
 
-func GetInviterRewardPayoutHistory(inviterUserId int, p *common.PageInfo) ([]*InviterRewardPayout, int64, error) {
+type InviterRewardPayoutHistoryItem struct {
+	Id                    int     `json:"id"`
+	InviterUserId         int     `json:"inviter_user_id"`
+	RechargeTotalUsd      float64 `json:"recharge_total_usd"`
+	PayoutAmountUsd       float64 `json:"payout_amount_usd"`
+	DefaultPctUsed        float64 `json:"default_pct_used"`
+	Note                  string  `json:"note"`
+	OperatorAdminId       int     `json:"operator_admin_id"`
+	OperatorAdminUsername string  `json:"operator_admin_username"`
+	CreatedAt             int64   `json:"created_at"`
+	TopupCount            int     `json:"topup_count"`
+}
+
+func GetInviterRewardPayoutHistory(inviterUserId int, p *common.PageInfo) ([]*InviterRewardPayoutHistoryItem, int64, error) {
 	var total int64
-	q := DB.Model(&InviterRewardPayout{}).Where("inviter_user_id = ?", inviterUserId)
-	if err := q.Count(&total).Error; err != nil {
+	if err := DB.Model(&InviterRewardPayout{}).Where("inviter_user_id = ?", inviterUserId).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var items []*InviterRewardPayout
-	if err := q.Order("id DESC").Limit(p.GetPageSize()).Offset(p.GetStartIdx()).Find(&items).Error; err != nil {
+
+	var items []*InviterRewardPayoutHistoryItem
+	err := DB.Table("inviter_reward_payouts AS p").
+		Select(`p.id,
+                p.inviter_user_id,
+                p.recharge_total_usd,
+                p.payout_amount_usd,
+                p.default_pct_used,
+                p.note,
+                p.operator_admin_id,
+                COALESCE(u.username, '') AS operator_admin_username,
+                p.created_at,
+                COALESCE((SELECT COUNT(*) FROM top_ups WHERE inviter_reward_payout_id = p.id), 0) AS topup_count`).
+		Joins("LEFT JOIN users u ON u.id = p.operator_admin_id").
+		Where("p.inviter_user_id = ?", inviterUserId).
+		Order("p.id DESC").
+		Limit(p.GetPageSize()).
+		Offset(p.GetStartIdx()).
+		Scan(&items).Error
+	if err != nil {
 		return nil, 0, err
 	}
 	return items, total, nil
@@ -151,12 +181,13 @@ var (
 //       3) 插入一条 InviterRewardPayout
 //       4) 把锁定的 top_ups 全部 UPDATE 为新 payout_id
 //   * 事务后：写一条 LogTypeManage 日志（fire-and-forget，失败不回滚业务）
-func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note string, defaultPctUsed float64, operatorAdminId int) (*InviterRewardPayout, error) {
+func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note string, defaultPctUsed float64, operatorAdminId int) (*InviterRewardPayout, int, error) {
 	if payoutAmountUsd <= 0 {
-		return nil, ErrInvalidPayoutAmount
+		return nil, 0, ErrInvalidPayoutAmount
 	}
 
 	var created *InviterRewardPayout
+	var topupCount int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		// 1) 锁定未发放的 top_ups
 		var rows []struct {
@@ -202,10 +233,11 @@ func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note 
 		}
 
 		created = p
+		topupCount = len(ids)
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	// 事务外写日志（非关键，失败不回滚业务）
@@ -213,5 +245,5 @@ func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note 
 		fmt.Sprintf("管理员 #%d 为该用户发放邀请激励 $%.2f，覆盖充值 $%.2f，批次 #%d",
 			operatorAdminId, created.PayoutAmountUsd, created.RechargeTotalUsd, created.Id))
 
-	return created, nil
+	return created, topupCount, nil
 }

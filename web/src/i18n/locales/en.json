@@ -2480,6 +2480,7 @@
   "待激励": "Pending",
   "发放金额": "Payout Amount",
   "涉及充值": "Recharge Covered",
+  "涉及笔数": "Topups Covered",
   "操作管理员": "Operator Admin",
   "暂无下级充值记录": "No invitee recharge records",
   "暂无激励发放记录": "No payout records",
@@ -2492,5 +2493,5 @@
   "备注（可选）": "Note (optional)",
   "如：微信转账 流水号 xxx": "e.g. WeChat transfer ref xxx",
   "确认发放": "Confirm Payout",
-  "已发放 {{amount}}，覆盖充值 {{recharge}}": "Paid out {{amount}}, covering {{recharge}} of recharges"
+  "已发放 {{amount}}，覆盖 {{count}} 笔充值": "Paid out {{amount}}, covering {{count}} recharges"
 }

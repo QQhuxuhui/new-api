@@ -56,9 +56,9 @@ const PayoutInviterRewardModal = ({
         note,
       });
       showSuccess(
-        t('已发放 {{amount}}，覆盖充值 {{recharge}}', {
+        t('已发放 {{amount}}，覆盖 {{count}} 笔充值', {
           amount: formatUSDAmount(created.payout_amount_usd),
-          recharge: formatUSDAmount(created.recharge_total_usd),
+          count: created.topup_count ?? 0,
         })
       );
       onSuccess && onSuccess(created);

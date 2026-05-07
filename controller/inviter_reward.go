@@ -107,7 +107,7 @@ func CreateInviterRewardPayoutHandler(c *gin.Context) {
 	}
 	operatorId := c.GetInt("id")
 
-	payout, err := model.CreateInviterRewardPayout(
+	payout, topupCount, err := model.CreateInviterRewardPayout(
 		inviterId,
 		req.PayoutAmountUsd,
 		req.Note,
@@ -118,5 +118,15 @@ func CreateInviterRewardPayoutHandler(c *gin.Context) {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
-	common.ApiSuccess(c, payout)
+	common.ApiSuccess(c, gin.H{
+		"id":                 payout.Id,
+		"inviter_user_id":    payout.InviterUserId,
+		"recharge_total_usd": payout.RechargeTotalUsd,
+		"payout_amount_usd":  payout.PayoutAmountUsd,
+		"default_pct_used":   payout.DefaultPctUsed,
+		"note":               payout.Note,
+		"operator_admin_id":  payout.OperatorAdminId,
+		"created_at":         payout.CreatedAt,
+		"topup_count":        topupCount,
+	})
 }

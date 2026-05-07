@@ -181,6 +181,9 @@ func TestCreateInviterRewardPayoutHandler_Happy(t *testing.T) {
 	if env.Data["recharge_total_usd"].(float64) != 62 {
 		t.Fatalf("recharge_total want 62, got %v", env.Data["recharge_total_usd"])
 	}
+	if env.Data["topup_count"].(float64) != 4 {
+		t.Fatalf("topup_count want 4, got %v", env.Data["topup_count"])
+	}
 }
 
 func TestCreateInviterRewardPayoutHandler_NoPending(t *testing.T) {

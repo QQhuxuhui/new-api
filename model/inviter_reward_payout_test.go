@@ -121,7 +121,7 @@ func TestGetInviterRewardPayoutHistory(t *testing.T) {
 			InviterUserId:    inviterId,
 			RechargeTotalUsd: 100,
 			PayoutAmountUsd:  10,
-			OperatorAdminId:  1,
+			OperatorAdminId:  999999, // no such user in test db ⇒ LEFT JOIN yields empty username
 		}).Error; err != nil {
 			t.Fatalf("create payout: %v", err)
 		}
@@ -139,13 +139,24 @@ func TestGetInviterRewardPayoutHistory(t *testing.T) {
 	if items[0].Id <= items[1].Id {
 		t.Fatalf("expected id-desc order: items[0].Id=%d should be > items[1].Id=%d", items[0].Id, items[1].Id)
 	}
+	// new fields are populated
+	if items[0].PayoutAmountUsd != 10 {
+		t.Fatalf("payout amount want 10, got %v", items[0].PayoutAmountUsd)
+	}
+	if items[0].TopupCount != 0 {
+		t.Fatalf("topup_count want 0 (no topups linked in this seed), got %d", items[0].TopupCount)
+	}
+	// operator_admin_id=1 doesn't exist as a User; LEFT JOIN ⇒ empty username
+	if items[0].OperatorAdminUsername != "" {
+		t.Fatalf("operator_admin_username want empty (no such user), got %q", items[0].OperatorAdminUsername)
+	}
 }
 
 func TestCreateInviterRewardPayout_Happy(t *testing.T) {
 	setupInviterRewardTestDB(t)
 	inviterId, _ := seedInviterAndTopups(t, []float64{30, 70}, []float64{50})
 
-	payout, err := CreateInviterRewardPayout(inviterId, 25.50, "test note", 10.0, 999)
+	payout, count, err := CreateInviterRewardPayout(inviterId, 25.50, "test note", 10.0, 999)
 	if err != nil {
 		t.Fatalf("create err: %v", err)
 	}
@@ -158,11 +169,15 @@ func TestCreateInviterRewardPayout_Happy(t *testing.T) {
 	if payout.Note != "test note" || payout.OperatorAdminId != 999 || payout.DefaultPctUsed != 10.0 {
 		t.Fatalf("metadata mismatch: %+v", payout)
 	}
+	// 2 success topups are covered (the third was pending and excluded)
+	if count != 2 {
+		t.Fatalf("topup count want 2, got %d", count)
+	}
 
 	// 第二次发放返回 ErrNoPendingRecharges（顺序幂等性）。
 	// 注意：真正的并发安全由 MySQL/Postgres 的 FOR UPDATE 在生产环境保证，
 	// SQLite in-memory 不支持 FOR UPDATE 语义，无法在 unit test 层验证。
-	_, err = CreateInviterRewardPayout(inviterId, 5, "again", 10.0, 999)
+	_, _, err = CreateInviterRewardPayout(inviterId, 5, "again", 10.0, 999)
 	if !errors.Is(err, ErrNoPendingRecharges) {
 		t.Fatalf("second call want ErrNoPendingRecharges, got %v", err)
 	}
@@ -185,18 +200,86 @@ func TestCreateInviterRewardPayout_Happy(t *testing.T) {
 func TestCreateInviterRewardPayout_RejectsNonPositive(t *testing.T) {
 	setupInviterRewardTestDB(t)
 	inviterId, _ := seedInviterAndTopups(t, []float64{10}, nil)
-	if _, err := CreateInviterRewardPayout(inviterId, 0, "", 10.0, 1); !errors.Is(err, ErrInvalidPayoutAmount) {
-		t.Fatalf("zero amount want ErrInvalidPayoutAmount, got %v", err)
+	if _, count, err := CreateInviterRewardPayout(inviterId, 0, "", 10.0, 1); !errors.Is(err, ErrInvalidPayoutAmount) || count != 0 {
+		t.Fatalf("zero amount want ErrInvalidPayoutAmount with count=0, got err=%v count=%d", err, count)
 	}
-	if _, err := CreateInviterRewardPayout(inviterId, -5, "", 10.0, 1); !errors.Is(err, ErrInvalidPayoutAmount) {
-		t.Fatalf("negative amount want ErrInvalidPayoutAmount, got %v", err)
+	if _, count, err := CreateInviterRewardPayout(inviterId, -5, "", 10.0, 1); !errors.Is(err, ErrInvalidPayoutAmount) || count != 0 {
+		t.Fatalf("negative amount want ErrInvalidPayoutAmount with count=0, got err=%v count=%d", err, count)
 	}
 }
 
 func TestCreateInviterRewardPayout_RejectsWhenNoPending(t *testing.T) {
 	setupInviterRewardTestDB(t)
 	inviterId, _ := seedInviterAndTopups(t, nil, []float64{99}) // pending only
-	if _, err := CreateInviterRewardPayout(inviterId, 10, "", 10.0, 1); !errors.Is(err, ErrNoPendingRecharges) {
+	if _, _, err := CreateInviterRewardPayout(inviterId, 10, "", 10.0, 1); !errors.Is(err, ErrNoPendingRecharges) {
 		t.Fatalf("want ErrNoPendingRecharges, got %v", err)
+	}
+}
+
+// TestRebindAfterPayout verifies that when an invitee is rebound from inviter A to inviter B:
+//   - Topups already covered by A's payout stay attributed to A's payout (don't show up in B's pending or A's pending).
+//   - Topups not yet covered now appear in B's pending list.
+func TestRebindAfterPayout(t *testing.T) {
+	setupInviterRewardTestDB(t)
+
+	// Create inviter A and inviter B
+	inviterA := &User{Username: fmt.Sprintf("a-%d", time.Now().UnixNano()), Password: "x", AffCode: fmt.Sprintf("aff-a-%d", time.Now().UnixNano())}
+	if err := DB.Create(inviterA).Error; err != nil {
+		t.Fatalf("create inviterA: %v", err)
+	}
+	inviterB := &User{Username: fmt.Sprintf("b-%d", time.Now().UnixNano()), Password: "x", AffCode: fmt.Sprintf("aff-b-%d", time.Now().UnixNano())}
+	if err := DB.Create(inviterB).Error; err != nil {
+		t.Fatalf("create inviterB: %v", err)
+	}
+
+	// Invitee starts under A
+	invitee := &User{Username: fmt.Sprintf("ee-%d", time.Now().UnixNano()), Password: "x", AffCode: fmt.Sprintf("aff-ee-%d", time.Now().UnixNano()), InviterId: inviterA.Id}
+	if err := DB.Create(invitee).Error; err != nil {
+		t.Fatalf("create invitee: %v", err)
+	}
+
+	// First topup ($30) — will be covered by A's payout
+	t1 := &TopUp{UserId: invitee.Id, Money: 30, Status: common.TopUpStatusSuccess, TradeNo: fmt.Sprintf("t1-%d", time.Now().UnixNano())}
+	if err := DB.Create(t1).Error; err != nil {
+		t.Fatalf("create t1: %v", err)
+	}
+
+	// A pays out
+	if _, _, err := CreateInviterRewardPayout(inviterA.Id, 3, "A's payout", 10.0, 1); err != nil {
+		t.Fatalf("A payout: %v", err)
+	}
+
+	// Second topup ($70) — happens after A's payout, still under A
+	t2 := &TopUp{UserId: invitee.Id, Money: 70, Status: common.TopUpStatusSuccess, TradeNo: fmt.Sprintf("t2-%d", time.Now().UnixNano())}
+	if err := DB.Create(t2).Error; err != nil {
+		t.Fatalf("create t2: %v", err)
+	}
+
+	// Rebind invitee to B
+	if err := DB.Model(&User{}).Where("id = ?", invitee.Id).Update("inviter_id", inviterB.Id).Error; err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+
+	// A's pending should be 0 (t1 covered, t2 belongs to B now)
+	sumA, err := GetInviteeRechargeSummary(inviterA.Id)
+	if err != nil {
+		t.Fatalf("summary A: %v", err)
+	}
+	if sumA.PendingTotalUsd != 0 {
+		t.Fatalf("A pending want 0, got %v", sumA.PendingTotalUsd)
+	}
+
+	// B's pending should be 70 (t2 only — t1 was already covered by A)
+	sumB, err := GetInviteeRechargeSummary(inviterB.Id)
+	if err != nil {
+		t.Fatalf("summary B: %v", err)
+	}
+	if sumB.PendingTotalUsd != 70 {
+		t.Fatalf("B pending want 70, got %v", sumB.PendingTotalUsd)
+	}
+
+	// B's recharge_total_usd is 100 (both t1 and t2 since invitee.inviter_id is now B)
+	if sumB.RechargeTotalUsd != 100 {
+		t.Fatalf("B recharge total want 100, got %v", sumB.RechargeTotalUsd)
 	}
 }
