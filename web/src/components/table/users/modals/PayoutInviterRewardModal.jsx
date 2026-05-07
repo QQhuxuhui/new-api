@@ -91,6 +91,7 @@ const PayoutInviterRewardModal = ({
         <div>
           <Text type="tertiary">
             {t('系统默认比例')}：{defaultPercent}%
+            <br />
             {t('建议奖励金额')}：{formatUSDAmount(suggested)}
           </Text>
         </div>
