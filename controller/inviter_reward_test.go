@@ -167,7 +167,7 @@ func TestCreateInviterRewardPayoutHandler_Happy(t *testing.T) {
 		bytesReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if w.Code != 200 {
+	if w.Code != http.StatusOK {
 		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
 	}
 	var env apiEnvelope
@@ -197,8 +197,8 @@ func TestCreateInviterRewardPayoutHandler_NoPending(t *testing.T) {
 		bytesReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if w.Code != 200 {
-		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status want 422, got %d body=%s", w.Code, w.Body.String())
 	}
 	var env apiEnvelope
 	json.Unmarshal(w.Body.Bytes(), &env)
@@ -220,6 +220,9 @@ func TestCreateInviterRewardPayoutHandler_BadAmount(t *testing.T) {
 		bytesReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status want 422, got %d body=%s", w.Code, w.Body.String())
+	}
 	var env apiEnvelope
 	json.Unmarshal(w.Body.Bytes(), &env)
 	if env.Success {

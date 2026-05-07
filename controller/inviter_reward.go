@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
@@ -94,6 +95,13 @@ type createInviterRewardPayoutRequest struct {
 	Note            string  `json:"note"`
 }
 
+func apiUnprocessableEntityMsg(c *gin.Context, msg string) {
+	c.JSON(http.StatusUnprocessableEntity, gin.H{
+		"success": false,
+		"message": msg,
+	})
+}
+
 // POST /api/user/manage/:id/inviter-reward-payouts
 func CreateInviterRewardPayoutHandler(c *gin.Context) {
 	inviterId, ok := parseInviterIdParam(c)
@@ -115,7 +123,7 @@ func CreateInviterRewardPayoutHandler(c *gin.Context) {
 		operatorId,
 	)
 	if err != nil {
-		common.ApiErrorMsg(c, err.Error())
+		apiUnprocessableEntityMsg(c, err.Error())
 		return
 	}
 	common.ApiSuccess(c, gin.H{

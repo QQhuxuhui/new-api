@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // InviterRewardPayout 记录管理员一次"线下激励发放"的批次台账。
@@ -170,17 +171,31 @@ var (
 	ErrInvalidPayoutAmount = errors.New("奖励金额必须大于 0")
 )
 
+type pendingInviteeTopupRow struct {
+	Id    int
+	Money float64
+}
+
+func pendingInviteeTopupsQuery(tx *gorm.DB, inviterUserId int) *gorm.DB {
+	return tx.Table("top_ups").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Joins("JOIN users u ON u.id = top_ups.user_id").
+		Where("u.inviter_id = ? AND top_ups.status = ? AND top_ups.inviter_reward_payout_id = ?",
+			inviterUserId, common.TopUpStatusSuccess, 0).
+		Select("top_ups.id AS id, top_ups.money AS money")
+}
+
 // CreateInviterRewardPayout 在事务中把当前所有"未发放"的下级 success 充值打包成
 // 一次激励发放批次，并写一条审计日志。
 //
 // 流程：
-//   * 事务前：校验 payoutAmountUsd > 0
-//   * 事务内：
-//       1) FOR UPDATE 锁定该 inviter 下所有未发放 (status=success, payout_id=0) 的 top_ups
-//       2) 若锁到 0 行返回 ErrNoPendingRecharges（事务回滚）
-//       3) 插入一条 InviterRewardPayout
-//       4) 把锁定的 top_ups 全部 UPDATE 为新 payout_id
-//   * 事务后：写一条 LogTypeManage 日志（fire-and-forget，失败不回滚业务）
+//   - 事务前：校验 payoutAmountUsd > 0
+//   - 事务内：
+//     1) FOR UPDATE 锁定该 inviter 下所有未发放 (status=success, payout_id=0) 的 top_ups
+//     2) 若锁到 0 行返回 ErrNoPendingRecharges（事务回滚）
+//     3) 插入一条 InviterRewardPayout
+//     4) 把锁定的 top_ups 全部 UPDATE 为新 payout_id
+//   - 事务后：写一条 LogTypeManage 日志（fire-and-forget，失败不回滚业务）
 func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note string, defaultPctUsed float64, operatorAdminId int) (*InviterRewardPayout, int, error) {
 	if payoutAmountUsd <= 0 {
 		return nil, 0, ErrInvalidPayoutAmount
@@ -190,17 +205,8 @@ func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note 
 	var topupCount int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		// 1) 锁定未发放的 top_ups
-		var rows []struct {
-			Id    int
-			Money float64
-		}
-		if err := tx.Table("top_ups").
-			Set("gorm:query_option", "FOR UPDATE").
-			Joins("JOIN users u ON u.id = top_ups.user_id").
-			Where("u.inviter_id = ? AND top_ups.status = ? AND top_ups.inviter_reward_payout_id = ?",
-				inviterUserId, common.TopUpStatusSuccess, 0).
-			Select("top_ups.id AS id, top_ups.money AS money").
-			Scan(&rows).Error; err != nil {
+		var rows []pendingInviteeTopupRow
+		if err := pendingInviteeTopupsQuery(tx, inviterUserId).Scan(&rows).Error; err != nil {
 			return err
 		}
 		if len(rows) == 0 {
@@ -228,8 +234,14 @@ func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note 
 		}
 
 		// 4) 更新 top_ups
-		if err := tx.Model(&TopUp{}).Where("id IN ?", ids).Update("inviter_reward_payout_id", p.Id).Error; err != nil {
-			return err
+		result := tx.Model(&TopUp{}).
+			Where("id IN ? AND inviter_reward_payout_id = ?", ids, 0).
+			Update("inviter_reward_payout_id", p.Id)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != int64(len(ids)) {
+			return ErrNoPendingRecharges
 		}
 
 		created = p

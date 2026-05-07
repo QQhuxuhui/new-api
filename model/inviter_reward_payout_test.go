@@ -3,12 +3,14 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 
 	"github.com/glebarez/sqlite"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -213,6 +215,27 @@ func TestCreateInviterRewardPayout_RejectsWhenNoPending(t *testing.T) {
 	inviterId, _ := seedInviterAndTopups(t, nil, []float64{99}) // pending only
 	if _, _, err := CreateInviterRewardPayout(inviterId, 10, "", 10.0, 1); !errors.Is(err, ErrNoPendingRecharges) {
 		t.Fatalf("want ErrNoPendingRecharges, got %v", err)
+	}
+}
+
+func TestPendingInviteeTopupsQueryUsesForUpdateOnMySQL(t *testing.T) {
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(localhost:9910)/gorm?charset=utf8&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DisableAutomaticPing: true,
+		DryRun:               true,
+		Logger:               logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open dry-run mysql db: %v", err)
+	}
+
+	var rows []pendingInviteeTopupRow
+	tx := pendingInviteeTopupsQuery(db, 123).Scan(&rows)
+	sql := tx.Statement.SQL.String()
+	if !strings.Contains(sql, "FOR UPDATE") {
+		t.Fatalf("pending topup query must lock rows with FOR UPDATE, got SQL: %s", sql)
 	}
 }
 
