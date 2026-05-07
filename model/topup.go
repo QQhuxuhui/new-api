@@ -21,7 +21,8 @@ type TopUp struct {
 	PaymentMethod string  `json:"payment_method" gorm:"type:varchar(50)"`
 	CreateTime    int64   `json:"create_time"`
 	CompleteTime  int64   `json:"complete_time"`
-	Status        string  `json:"status"`
+	Status                string  `json:"status"`
+	InviterRewardPayoutId int     `json:"inviter_reward_payout_id" gorm:"index;default:0"`
 }
 
 var ErrPaymentMethodMismatch = errors.New("payment method mismatch")
