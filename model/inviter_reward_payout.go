@@ -10,5 +10,5 @@ type InviterRewardPayout struct {
 	DefaultPctUsed   float64 `json:"default_pct_used"`
 	Note             string  `json:"note" gorm:"type:varchar(500)"`
 	OperatorAdminId  int     `json:"operator_admin_id" gorm:"index;not null"`
-	CreatedAt        int64   `json:"created_at" gorm:"index;autoCreateTime"`
+	CreatedAt        int64   `json:"created_at" gorm:"index;autoCreateTime:milli"`
 }
