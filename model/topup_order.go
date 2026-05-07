@@ -37,6 +37,9 @@ type TopupOrder struct {
 	PaidAt      int64 `json:"paid_at"`                          // Payment completion time
 	CancelledAt int64 `json:"cancelled_at"`                     // Cancellation time
 
+	// Inviter reward payout marker (0 = not yet covered by any payout)
+	InviterRewardPayoutId int `json:"inviter_reward_payout_id" gorm:"index;default:0"`
+
 	// Associations
 	User *User `json:"user,omitempty" gorm:"foreignKey:UserId"`
 }

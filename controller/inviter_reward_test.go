@@ -35,7 +35,7 @@ func setupInviterRewardCtlTestDB(t *testing.T) {
 	model.DB = db
 	model.LOG_DB = db
 	common.RedisEnabled = false
-	if err := db.AutoMigrate(&model.User{}, &model.TopUp{}, &model.InviterRewardPayout{}, &model.Log{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.TopUp{}, &model.InviterRewardPayout{}, &model.Log{}, &model.PlanOrder{}, &model.TopupOrder{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 }

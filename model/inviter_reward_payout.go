@@ -11,7 +11,8 @@ import (
 )
 
 // InviterRewardPayout 记录管理员一次"线下激励发放"的批次台账。
-// 每个 payout 覆盖一组 status=success 的 top_ups（通过 top_ups.inviter_reward_payout_id 关联）。
+// 每个 payout 覆盖一组已完成的充值行（top_ups / plan_orders / topup_orders），
+// 通过各表的 inviter_reward_payout_id 字段关联。
 type InviterRewardPayout struct {
 	Id               int     `json:"id" gorm:"primaryKey;autoIncrement"`
 	InviterUserId    int     `json:"inviter_user_id" gorm:"index;not null"`
@@ -45,32 +46,27 @@ func GetInviteeRechargeSummary(inviterUserId int) (*InviteeRechargeSummary, erro
 	}
 	s.InviteeCount = int(c)
 
-	// recharge_total_usd  &  pending_total_usd
-	type sumRow struct {
-		Total float64
-	}
-	var row sumRow
-	if err := DB.Table("top_ups").
-		Joins("JOIN users u ON u.id = top_ups.user_id").
-		Where("u.inviter_id = ? AND top_ups.status = ?", inviterUserId, common.TopUpStatusSuccess).
-		Select("COALESCE(SUM(top_ups.money), 0) AS total").
-		Scan(&row).Error; err != nil {
-		return nil, err
-	}
-	s.RechargeTotalUsd = row.Total
+	type sumRow struct{ Total float64 }
 
-	row = sumRow{}
-	if err := DB.Table("top_ups").
-		Joins("JOIN users u ON u.id = top_ups.user_id").
-		Where("u.inviter_id = ? AND top_ups.status = ? AND top_ups.inviter_reward_payout_id = ?", inviterUserId, common.TopUpStatusSuccess, 0).
-		Select("COALESCE(SUM(top_ups.money), 0) AS total").
-		Scan(&row).Error; err != nil {
-		return nil, err
+	// recharge_total_usd: sum across all 3 sources
+	var totalAll, pendingAll float64
+	for _, q := range pendingMoneyQueries(inviterUserId) {
+		var row sumRow
+		if err := q.allRows.Scan(&row).Error; err != nil {
+			return nil, err
+		}
+		totalAll += row.Total
+		row = sumRow{}
+		if err := q.pendingRows.Scan(&row).Error; err != nil {
+			return nil, err
+		}
+		pendingAll += row.Total
 	}
-	s.PendingTotalUsd = row.Total
+	s.RechargeTotalUsd = totalAll
+	s.PendingTotalUsd = pendingAll
 
 	// payout_total_usd
-	row = sumRow{}
+	var row sumRow
 	if err := DB.Model(&InviterRewardPayout{}).
 		Where("inviter_user_id = ?", inviterUserId).
 		Select("COALESCE(SUM(payout_amount_usd), 0) AS total").
@@ -82,41 +78,152 @@ func GetInviteeRechargeSummary(inviterUserId int) (*InviteeRechargeSummary, erro
 	return s, nil
 }
 
+// pendingMoneyQueries returns the (all-success-rows, pending-only-rows) SUM
+// queries for each of the three sources, each prepared with its proper status
+// filter and money column.
+type sourceQueryPair struct {
+	allRows     *gorm.DB
+	pendingRows *gorm.DB
+}
+
+func pendingMoneyQueries(inviterUserId int) []sourceQueryPair {
+	return []sourceQueryPair{
+		// top_ups: status='success'
+		{
+			allRows: DB.Table("top_ups").
+				Joins("JOIN users u ON u.id = top_ups.user_id").
+				Where("u.inviter_id = ? AND top_ups.status = ?", inviterUserId, common.TopUpStatusSuccess).
+				Select("COALESCE(SUM(top_ups.money), 0) AS total"),
+			pendingRows: DB.Table("top_ups").
+				Joins("JOIN users u ON u.id = top_ups.user_id").
+				Where("u.inviter_id = ? AND top_ups.status = ? AND top_ups.inviter_reward_payout_id = 0",
+					inviterUserId, common.TopUpStatusSuccess).
+				Select("COALESCE(SUM(top_ups.money), 0) AS total"),
+		},
+		// plan_orders: status IN ('paid','delivered')
+		{
+			allRows: DB.Table("plan_orders").
+				Joins("JOIN users u ON u.id = plan_orders.user_id").
+				Where("u.inviter_id = ? AND plan_orders.status IN ?", inviterUserId, []string{"paid", "delivered"}).
+				Select("COALESCE(SUM(plan_orders.final_price), 0) AS total"),
+			pendingRows: DB.Table("plan_orders").
+				Joins("JOIN users u ON u.id = plan_orders.user_id").
+				Where("u.inviter_id = ? AND plan_orders.status IN ? AND plan_orders.inviter_reward_payout_id = 0",
+					inviterUserId, []string{"paid", "delivered"}).
+				Select("COALESCE(SUM(plan_orders.final_price), 0) AS total"),
+		},
+		// topup_orders: status='paid'
+		{
+			allRows: DB.Table("topup_orders").
+				Joins("JOIN users u ON u.id = topup_orders.user_id").
+				Where("u.inviter_id = ? AND topup_orders.status = ?", inviterUserId, "paid").
+				Select("COALESCE(SUM(topup_orders.final_price), 0) AS total"),
+			pendingRows: DB.Table("topup_orders").
+				Joins("JOIN users u ON u.id = topup_orders.user_id").
+				Where("u.inviter_id = ? AND topup_orders.status = ? AND topup_orders.inviter_reward_payout_id = 0",
+					inviterUserId, "paid").
+				Select("COALESCE(SUM(topup_orders.final_price), 0) AS total"),
+		},
+	}
+}
+
+// InviteeRechargeItem is one row of the merged invitee-recharge feed
+// (top_ups + plan_orders + topup_orders).
 type InviteeRechargeItem struct {
-	TopupId         int     `json:"topup_id"`
+	SourceType      string  `json:"source_type"`  // "topup" | "plan_order" | "topup_order"
+	RecordId        int     `json:"record_id"`    // primary key in the source table
 	InviteeUserId   int     `json:"invitee_user_id"`
 	InviteeUsername string  `json:"invitee_username"`
 	MoneyUsd        float64 `json:"money_usd"`
 	PaymentMethod   string  `json:"payment_method"`
-	TradeNo         string  `json:"trade_no"`
-	CompleteTime    int64   `json:"complete_time"`
+	OrderNo         string  `json:"order_no"`
+	PaidAtMs        int64   `json:"paid_at_ms"` // unified milliseconds
 	PayoutId        int     `json:"payout_id"`
 }
 
 func GetInviteeRechargeItems(inviterUserId int, p *common.PageInfo) ([]*InviteeRechargeItem, int64, error) {
+	// total count: sum of counts across 3 sources
 	var total int64
-	q := DB.Table("top_ups").
-		Joins("JOIN users u ON u.id = top_ups.user_id").
-		Where("u.inviter_id = ? AND top_ups.status = ?", inviterUserId, common.TopUpStatusSuccess)
-
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
+	type countRow struct{ N int64 }
+	for _, q := range []*gorm.DB{
+		DB.Table("top_ups").
+			Joins("JOIN users u ON u.id = top_ups.user_id").
+			Where("u.inviter_id = ? AND top_ups.status = ?", inviterUserId, common.TopUpStatusSuccess),
+		DB.Table("plan_orders").
+			Joins("JOIN users u ON u.id = plan_orders.user_id").
+			Where("u.inviter_id = ? AND plan_orders.status IN ?", inviterUserId, []string{"paid", "delivered"}),
+		DB.Table("topup_orders").
+			Joins("JOIN users u ON u.id = topup_orders.user_id").
+			Where("u.inviter_id = ? AND topup_orders.status = ?", inviterUserId, "paid"),
+	} {
+		var n int64
+		if err := q.Count(&n).Error; err != nil {
+			return nil, 0, err
+		}
+		total += n
 	}
 
+	if total == 0 {
+		return []*InviteeRechargeItem{}, 0, nil
+	}
+
+	// UNION ALL the three sources, normalize timestamps to ms.
+	// top_ups.complete_time is in seconds; plan_orders/topup_orders paid_at is in ms.
+	const unionSQL = `
+SELECT * FROM (
+	SELECT 'topup' AS source_type,
+	       top_ups.id AS record_id,
+	       top_ups.user_id AS invitee_user_id,
+	       u.username AS invitee_username,
+	       top_ups.money AS money_usd,
+	       top_ups.payment_method AS payment_method,
+	       top_ups.trade_no AS order_no,
+	       top_ups.complete_time * 1000 AS paid_at_ms,
+	       top_ups.inviter_reward_payout_id AS payout_id
+	FROM top_ups
+	JOIN users u ON u.id = top_ups.user_id
+	WHERE u.inviter_id = ? AND top_ups.status = ?
+
+	UNION ALL
+
+	SELECT 'plan_order',
+	       plan_orders.id,
+	       plan_orders.user_id,
+	       u.username,
+	       plan_orders.final_price,
+	       plan_orders.payment_method,
+	       plan_orders.order_no,
+	       COALESCE(plan_orders.delivered_at, plan_orders.paid_at),
+	       plan_orders.inviter_reward_payout_id
+	FROM plan_orders
+	JOIN users u ON u.id = plan_orders.user_id
+	WHERE u.inviter_id = ? AND plan_orders.status IN (?, ?)
+
+	UNION ALL
+
+	SELECT 'topup_order',
+	       topup_orders.id,
+	       topup_orders.user_id,
+	       u.username,
+	       topup_orders.final_price,
+	       topup_orders.payment_method,
+	       topup_orders.order_no,
+	       topup_orders.paid_at,
+	       topup_orders.inviter_reward_payout_id
+	FROM topup_orders
+	JOIN users u ON u.id = topup_orders.user_id
+	WHERE u.inviter_id = ? AND topup_orders.status = ?
+) AS feed
+ORDER BY paid_at_ms DESC, record_id DESC
+LIMIT ? OFFSET ?`
+
 	var items []*InviteeRechargeItem
-	err := q.
-		Select(`top_ups.id          AS topup_id,
-                top_ups.user_id     AS invitee_user_id,
-                u.username          AS invitee_username,
-                top_ups.money       AS money_usd,
-                top_ups.payment_method,
-                top_ups.trade_no,
-                top_ups.complete_time,
-                top_ups.inviter_reward_payout_id AS payout_id`).
-		Order("top_ups.id DESC").
-		Limit(p.GetPageSize()).
-		Offset(p.GetStartIdx()).
-		Scan(&items).Error
+	err := DB.Raw(unionSQL,
+		inviterUserId, common.TopUpStatusSuccess,
+		inviterUserId, "paid", "delivered",
+		inviterUserId, "paid",
+		p.GetPageSize(), p.GetStartIdx(),
+	).Scan(&items).Error
 	if err != nil {
 		return nil, 0, err
 	}
@@ -185,16 +292,20 @@ func pendingInviteeTopupsQuery(tx *gorm.DB, inviterUserId int) *gorm.DB {
 		Select("top_ups.id AS id, top_ups.money AS money")
 }
 
-// CreateInviterRewardPayout 在事务中把当前所有"未发放"的下级 success 充值打包成
-// 一次激励发放批次，并写一条审计日志。
+// CreateInviterRewardPayout locks and updates all three recharge sources
+// (top_ups, plan_orders, topup_orders) in a single transaction, creating
+// one InviterRewardPayout batch record that covers all uncovered rows.
+//
+// Tables are locked in a fixed order (top_ups → plan_orders → topup_orders)
+// to prevent deadlocks under concurrent payout creation.
 //
 // 流程：
 //   - 事务前：校验 payoutAmountUsd > 0
 //   - 事务内：
-//     1) FOR UPDATE 锁定该 inviter 下所有未发放 (status=success, payout_id=0) 的 top_ups
-//     2) 若锁到 0 行返回 ErrNoPendingRecharges（事务回滚）
+//     1) FOR UPDATE 锁定各表未发放行
+//     2) 若三表合计 0 行返回 ErrNoPendingRecharges（事务回滚）
 //     3) 插入一条 InviterRewardPayout
-//     4) 把锁定的 top_ups 全部 UPDATE 为新 payout_id
+//     4) 把锁定的行全部 UPDATE 为新 payout_id
 //   - 事务后：写一条 LogTypeManage 日志（fire-and-forget，失败不回滚业务）
 func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note string, defaultPctUsed float64, operatorAdminId int) (*InviterRewardPayout, int, error) {
 	if payoutAmountUsd <= 0 {
@@ -202,25 +313,74 @@ func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note 
 	}
 
 	var created *InviterRewardPayout
-	var topupCount int
+	var totalCount int
+
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		// 1) 锁定未发放的 top_ups
-		var rows []pendingInviteeTopupRow
-		if err := pendingInviteeTopupsQuery(tx, inviterUserId).Scan(&rows).Error; err != nil {
+		type idMoney struct {
+			Id    int
+			Money float64
+		}
+
+		// 1) lock unrewarded top_ups
+		var topupRows []idMoney
+		if err := tx.Table("top_ups").
+			Set("gorm:query_option", "FOR UPDATE").
+			Joins("JOIN users u ON u.id = top_ups.user_id").
+			Where("u.inviter_id = ? AND top_ups.status = ? AND top_ups.inviter_reward_payout_id = 0",
+				inviterUserId, common.TopUpStatusSuccess).
+			Select("top_ups.id AS id, top_ups.money AS money").
+			Scan(&topupRows).Error; err != nil {
 			return err
 		}
-		if len(rows) == 0 {
+
+		// 2) lock unrewarded plan_orders
+		var planRows []idMoney
+		if err := tx.Table("plan_orders").
+			Set("gorm:query_option", "FOR UPDATE").
+			Joins("JOIN users u ON u.id = plan_orders.user_id").
+			Where("u.inviter_id = ? AND plan_orders.status IN ? AND plan_orders.inviter_reward_payout_id = 0",
+				inviterUserId, []string{"paid", "delivered"}).
+			Select("plan_orders.id AS id, plan_orders.final_price AS money").
+			Scan(&planRows).Error; err != nil {
+			return err
+		}
+
+		// 3) lock unrewarded topup_orders
+		var orderRows []idMoney
+		if err := tx.Table("topup_orders").
+			Set("gorm:query_option", "FOR UPDATE").
+			Joins("JOIN users u ON u.id = topup_orders.user_id").
+			Where("u.inviter_id = ? AND topup_orders.status = ? AND topup_orders.inviter_reward_payout_id = 0",
+				inviterUserId, "paid").
+			Select("topup_orders.id AS id, topup_orders.final_price AS money").
+			Scan(&orderRows).Error; err != nil {
+			return err
+		}
+
+		// empty check
+		if len(topupRows)+len(planRows)+len(orderRows) == 0 {
 			return ErrNoPendingRecharges
 		}
 
 		var rechargeTotal float64
-		ids := make([]int, 0, len(rows))
-		for _, r := range rows {
+		topupIds := make([]int, 0, len(topupRows))
+		for _, r := range topupRows {
 			rechargeTotal += r.Money
-			ids = append(ids, r.Id)
+			topupIds = append(topupIds, r.Id)
 		}
+		planIds := make([]int, 0, len(planRows))
+		for _, r := range planRows {
+			rechargeTotal += r.Money
+			planIds = append(planIds, r.Id)
+		}
+		orderIds := make([]int, 0, len(orderRows))
+		for _, r := range orderRows {
+			rechargeTotal += r.Money
+			orderIds = append(orderIds, r.Id)
+		}
+		totalCount = len(topupIds) + len(planIds) + len(orderIds)
 
-		// 3) 插入 payout
+		// 4) insert payout
 		p := &InviterRewardPayout{
 			InviterUserId:    inviterUserId,
 			RechargeTotalUsd: rechargeTotal,
@@ -233,29 +393,36 @@ func CreateInviterRewardPayout(inviterUserId int, payoutAmountUsd float64, note 
 			return err
 		}
 
-		// 4) 更新 top_ups
-		result := tx.Model(&TopUp{}).
-			Where("id IN ? AND inviter_reward_payout_id = ?", ids, 0).
-			Update("inviter_reward_payout_id", p.Id)
-		if result.Error != nil {
-			return result.Error
+		// 5) update each table
+		if len(topupIds) > 0 {
+			if err := tx.Model(&TopUp{}).Where("id IN ?", topupIds).
+				Update("inviter_reward_payout_id", p.Id).Error; err != nil {
+				return err
+			}
 		}
-		if result.RowsAffected != int64(len(ids)) {
-			return ErrNoPendingRecharges
+		if len(planIds) > 0 {
+			if err := tx.Model(&PlanOrder{}).Where("id IN ?", planIds).
+				Update("inviter_reward_payout_id", p.Id).Error; err != nil {
+				return err
+			}
+		}
+		if len(orderIds) > 0 {
+			if err := tx.Model(&TopupOrder{}).Where("id IN ?", orderIds).
+				Update("inviter_reward_payout_id", p.Id).Error; err != nil {
+				return err
+			}
 		}
 
 		created = p
-		topupCount = len(ids)
 		return nil
 	})
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// 事务外写日志（非关键，失败不回滚业务）
 	RecordLog(inviterUserId, LogTypeManage,
 		fmt.Sprintf("管理员 #%d 为该用户发放邀请激励 $%.2f，覆盖充值 $%.2f，批次 #%d",
 			operatorAdminId, created.PayoutAmountUsd, created.RechargeTotalUsd, created.Id))
 
-	return created, topupCount, nil
+	return created, totalCount, nil
 }

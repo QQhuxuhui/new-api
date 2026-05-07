@@ -27,7 +27,7 @@ func setupInviterRewardTestDB(t *testing.T) {
 	}
 	DB = db
 	LOG_DB = db
-	if err := db.AutoMigrate(&User{}, &TopUp{}, &InviterRewardPayout{}, &Log{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &TopUp{}, &InviterRewardPayout{}, &Log{}, &PlanOrder{}, &TopupOrder{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 }
@@ -236,6 +236,125 @@ func TestPendingInviteeTopupsQueryUsesForUpdateOnMySQL(t *testing.T) {
 	sql := tx.Statement.SQL.String()
 	if !strings.Contains(sql, "FOR UPDATE") {
 		t.Fatalf("pending topup query must lock rows with FOR UPDATE, got SQL: %s", sql)
+	}
+}
+
+// seedPlanOrder creates a plan_orders row in the given status for the given user.
+func seedPlanOrder(t *testing.T, userId int, finalPrice float64, status string) {
+	t.Helper()
+	po := &PlanOrder{
+		OrderNo:    fmt.Sprintf("PO-%d-%f", time.Now().UnixNano(), finalPrice),
+		UserId:     userId,
+		FinalPrice: finalPrice,
+		PlanPrice:  finalPrice,
+		Status:     status,
+		CreatedAt:  time.Now().UnixMilli(),
+		PaidAt:     time.Now().UnixMilli(),
+	}
+	if status == "delivered" {
+		po.DeliveredAt = time.Now().UnixMilli()
+	}
+	if err := DB.Create(po).Error; err != nil {
+		t.Fatalf("create plan_order: %v", err)
+	}
+}
+
+// seedTopupOrder creates a topup_orders row for the given user.
+func seedTopupOrder(t *testing.T, userId int, finalPrice float64, status string) {
+	t.Helper()
+	to := &TopupOrder{
+		OrderNo:       fmt.Sprintf("TO-%d-%f", time.Now().UnixNano(), finalPrice),
+		UserId:        userId,
+		Amount:        finalPrice,
+		Quota:         int64(finalPrice * 500000),
+		OriginalPrice: finalPrice,
+		FinalPrice:    finalPrice,
+		Status:        status,
+		CreatedAt:     time.Now().UnixMilli(),
+		PaidAt:        time.Now().UnixMilli(),
+	}
+	if err := DB.Create(to).Error; err != nil {
+		t.Fatalf("create topup_order: %v", err)
+	}
+}
+
+func TestGetInviteeRechargeSummary_AllThreeSourcesContribute(t *testing.T) {
+	setupInviterRewardTestDB(t)
+	inviterId, inviteeId := seedInviterAndTopups(t, []float64{10}, nil) // top_ups: $10 success
+	seedPlanOrder(t, inviteeId, 30, "paid")
+	seedPlanOrder(t, inviteeId, 50, "delivered")
+	seedPlanOrder(t, inviteeId, 99, "cancelled") // should NOT count
+	seedTopupOrder(t, inviteeId, 7, "paid")
+	seedTopupOrder(t, inviteeId, 999, "pending") // should NOT count
+
+	s, err := GetInviteeRechargeSummary(inviterId)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	want := 10.0 + 30.0 + 50.0 + 7.0 // 97
+	if s.RechargeTotalUsd != want {
+		t.Fatalf("recharge total want %v, got %v", want, s.RechargeTotalUsd)
+	}
+	if s.PendingTotalUsd != want {
+		t.Fatalf("pending total want %v, got %v", want, s.PendingTotalUsd)
+	}
+}
+
+func TestCreateInviterRewardPayout_CoversAllThreeSources(t *testing.T) {
+	setupInviterRewardTestDB(t)
+	inviterId, inviteeId := seedInviterAndTopups(t, []float64{10}, nil)
+	seedPlanOrder(t, inviteeId, 30, "delivered")
+	seedTopupOrder(t, inviteeId, 7, "paid")
+
+	payout, count, err := CreateInviterRewardPayout(inviterId, 4.7, "test", 10.0, 1)
+	if err != nil {
+		t.Fatalf("create payout: %v", err)
+	}
+	if payout.RechargeTotalUsd != 47.0 {
+		t.Fatalf("recharge_total want 47, got %v", payout.RechargeTotalUsd)
+	}
+	if count != 3 {
+		t.Fatalf("count want 3 (1 topup + 1 plan_order + 1 topup_order), got %d", count)
+	}
+
+	// after payout: pending = 0
+	s, _ := GetInviteeRechargeSummary(inviterId)
+	if s.PendingTotalUsd != 0 {
+		t.Fatalf("after payout pending want 0, got %v", s.PendingTotalUsd)
+	}
+
+	// second payout returns ErrNoPendingRecharges
+	if _, _, err := CreateInviterRewardPayout(inviterId, 1, "", 10.0, 1); !errors.Is(err, ErrNoPendingRecharges) {
+		t.Fatalf("second call want ErrNoPendingRecharges, got %v", err)
+	}
+}
+
+func TestGetInviteeRechargeItems_MultiSourceFeed(t *testing.T) {
+	setupInviterRewardTestDB(t)
+	inviterId, inviteeId := seedInviterAndTopups(t, []float64{10}, nil)
+	seedPlanOrder(t, inviteeId, 30, "paid")
+	seedTopupOrder(t, inviteeId, 7, "paid")
+
+	items, total, err := GetInviteeRechargeItems(inviterId, &common.PageInfo{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("total want 3, got %d", total)
+	}
+	if len(items) != 3 {
+		t.Fatalf("items len want 3, got %d", len(items))
+	}
+	// each item has a valid SourceType
+	seen := map[string]bool{}
+	for _, it := range items {
+		seen[it.SourceType] = true
+		if it.MoneyUsd <= 0 {
+			t.Fatalf("item missing money: %+v", it)
+		}
+	}
+	if !seen["topup"] || !seen["plan_order"] || !seen["topup_order"] {
+		t.Fatalf("missing source types: %+v", seen)
 	}
 }
 
