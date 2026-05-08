@@ -132,8 +132,8 @@ func pendingMoneyQueries(inviterUserId int) []sourceQueryPair {
 // InviteeRechargeItem is one row of the merged invitee-recharge feed
 // (top_ups + plan_orders + topup_orders).
 type InviteeRechargeItem struct {
-	SourceType      string  `json:"source_type"`  // "topup" | "plan_order" | "topup_order"
-	RecordId        int     `json:"record_id"`    // primary key in the source table
+	SourceType      string  `json:"source_type"` // "topup" | "plan_order" | "topup_order"
+	RecordId        int     `json:"record_id"`   // primary key in the source table
 	InviteeUserId   int     `json:"invitee_user_id"`
 	InviteeUsername string  `json:"invitee_username"`
 	MoneyUsd        float64 `json:"money_usd"`
@@ -197,7 +197,7 @@ SELECT * FROM (
 	       plan_orders.final_price,
 	       plan_orders.payment_method,
 	       plan_orders.order_no,
-	       COALESCE(plan_orders.delivered_at, plan_orders.paid_at),
+	       CASE WHEN plan_orders.delivered_at > 0 THEN plan_orders.delivered_at ELSE plan_orders.paid_at END,
 	       plan_orders.inviter_reward_payout_id
 	FROM plan_orders
 	JOIN users u ON u.id = plan_orders.user_id
@@ -264,7 +264,20 @@ func GetInviterRewardPayoutHistory(inviterUserId int, p *common.PageInfo) ([]*In
                 p.operator_admin_id,
                 COALESCE(u.username, '') AS operator_admin_username,
                 p.created_at,
-                COALESCE((SELECT COUNT(*) FROM top_ups WHERE inviter_reward_payout_id = p.id), 0) AS topup_count`).
+                (
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM top_ups
+                        WHERE inviter_reward_payout_id = p.id
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM topup_orders
+                              WHERE topup_orders.order_no = top_ups.trade_no
+                          )
+                    ), 0)
+                    + COALESCE((SELECT COUNT(*) FROM plan_orders WHERE inviter_reward_payout_id = p.id), 0)
+                    + COALESCE((SELECT COUNT(*) FROM topup_orders WHERE inviter_reward_payout_id = p.id), 0)
+                ) AS topup_count`).
 		Joins("LEFT JOIN users u ON u.id = p.operator_admin_id").
 		Where("p.inviter_user_id = ?", inviterUserId).
 		Order("p.id DESC").

@@ -558,3 +558,95 @@ func TestSummary_ExcludesShadowTopups(t *testing.T) {
 		t.Fatalf("shadow top_up should NOT be stamped by payout, got payout_id=%d", shadowAfter.InviterRewardPayoutId)
 	}
 }
+
+func TestGetInviterRewardPayoutHistory_CountsAllCoveredSources(t *testing.T) {
+	setupInviterRewardTestDB(t)
+	inviterId, inviteeId := seedInviterAndTopups(t, nil, nil)
+
+	to := &TopupOrder{
+		OrderNo:       "TO-history-count",
+		UserId:        inviteeId,
+		Amount:        50,
+		Quota:         500000,
+		OriginalPrice: 50,
+		FinalPrice:    50,
+		Status:        "paid",
+		CreatedAt:     time.Now().UnixMilli(),
+		PaidAt:        time.Now().UnixMilli(),
+	}
+	if err := DB.Create(to).Error; err != nil {
+		t.Fatalf("create topup_order: %v", err)
+	}
+	shadow := &TopUp{
+		UserId:        inviteeId,
+		Money:         50,
+		TradeNo:       "TO-history-count",
+		PaymentMethod: "stripe",
+		Status:        common.TopUpStatusSuccess,
+	}
+	if err := DB.Create(shadow).Error; err != nil {
+		t.Fatalf("create shadow topup: %v", err)
+	}
+	genuine := &TopUp{
+		UserId:        inviteeId,
+		Money:         10,
+		TradeNo:       "stripe-history-count",
+		PaymentMethod: "stripe",
+		Status:        common.TopUpStatusSuccess,
+	}
+	if err := DB.Create(genuine).Error; err != nil {
+		t.Fatalf("create genuine topup: %v", err)
+	}
+	seedPlanOrder(t, inviteeId, 30, "delivered")
+
+	if _, count, err := CreateInviterRewardPayout(inviterId, 9, "count all", 10.0, 1); err != nil {
+		t.Fatalf("create payout: %v", err)
+	} else if count != 3 {
+		t.Fatalf("payout count want 3, got %d", count)
+	}
+
+	items, total, err := GetInviterRewardPayoutHistory(inviterId, &common.PageInfo{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("history err: %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("history want one item, total=%d len=%d", total, len(items))
+	}
+	if items[0].TopupCount != 3 {
+		t.Fatalf("history topup_count want 3 (genuine top_up + plan_order + topup_order), got %d", items[0].TopupCount)
+	}
+}
+
+func TestGetInviteeRechargeItems_UsesPaidAtForUndeliveredPaidPlanOrder(t *testing.T) {
+	setupInviterRewardTestDB(t)
+	inviterId, inviteeId := seedInviterAndTopups(t, nil, nil)
+	paidAt := time.Now().Add(-time.Hour).UnixMilli()
+	po := &PlanOrder{
+		OrderNo:       "PO-paid-undelivered",
+		UserId:        inviteeId,
+		FinalPrice:    30,
+		PlanPrice:     30,
+		Status:        "paid",
+		CreatedAt:     paidAt - 1000,
+		PaidAt:        paidAt,
+		DeliveredAt:   0,
+		PaymentMethod: "wxpay",
+	}
+	if err := DB.Create(po).Error; err != nil {
+		t.Fatalf("create paid plan order: %v", err)
+	}
+
+	items, total, err := GetInviteeRechargeItems(inviterId, &common.PageInfo{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("items err: %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("items want one row, total=%d len=%d", total, len(items))
+	}
+	if items[0].SourceType != "plan_order" {
+		t.Fatalf("source type want plan_order, got %q", items[0].SourceType)
+	}
+	if items[0].PaidAtMs != paidAt {
+		t.Fatalf("paid_at_ms want paid_at %d for undelivered paid order, got %d", paidAt, items[0].PaidAtMs)
+	}
+}
