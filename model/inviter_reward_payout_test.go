@@ -231,11 +231,51 @@ func TestPendingInviteeTopupsQueryUsesForUpdateOnMySQL(t *testing.T) {
 		t.Fatalf("open dry-run mysql db: %v", err)
 	}
 
-	var rows []pendingInviteeTopupRow
+	var rows []pendingInviteeRow
 	tx := pendingInviteeTopupsQuery(db, 123).Scan(&rows)
 	sql := tx.Statement.SQL.String()
 	if !strings.Contains(sql, "FOR UPDATE") {
 		t.Fatalf("pending topup query must lock rows with FOR UPDATE, got SQL: %s", sql)
+	}
+}
+
+func TestPendingInviteePlanOrdersQueryUsesForUpdateOnMySQL(t *testing.T) {
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(localhost:9910)/gorm?charset=utf8&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DisableAutomaticPing: true,
+		DryRun:               true,
+		Logger:               logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open dry-run mysql db: %v", err)
+	}
+	var rows []pendingInviteeRow
+	tx := pendingInviteePlanOrdersQuery(db, 123).Scan(&rows)
+	sql := tx.Statement.SQL.String()
+	if !strings.Contains(sql, "FOR UPDATE") {
+		t.Fatalf("plan_orders pending query must lock with FOR UPDATE, got: %s", sql)
+	}
+}
+
+func TestPendingInviteeTopupOrdersQueryUsesForUpdateOnMySQL(t *testing.T) {
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(localhost:9910)/gorm?charset=utf8&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DisableAutomaticPing: true,
+		DryRun:               true,
+		Logger:               logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open dry-run mysql db: %v", err)
+	}
+	var rows []pendingInviteeRow
+	tx := pendingInviteeTopupOrdersQuery(db, 123).Scan(&rows)
+	sql := tx.Statement.SQL.String()
+	if !strings.Contains(sql, "FOR UPDATE") {
+		t.Fatalf("topup_orders pending query must lock with FOR UPDATE, got: %s", sql)
 	}
 }
 
@@ -423,5 +463,98 @@ func TestRebindAfterPayout(t *testing.T) {
 	// B's recharge_total_usd is 100 (both t1 and t2 since invitee.inviter_id is now B)
 	if sumB.RechargeTotalUsd != 100 {
 		t.Fatalf("B recharge total want 100, got %v", sumB.RechargeTotalUsd)
+	}
+}
+
+// TestSummary_ExcludesShadowTopups: when a topup_order is paid, the system
+// also writes a "shadow" top_ups row with trade_no = topup_orders.order_no.
+// Both must NOT be counted twice.
+func TestSummary_ExcludesShadowTopups(t *testing.T) {
+	setupInviterRewardTestDB(t)
+	inviterId, inviteeId := seedInviterAndTopups(t, nil, nil)
+
+	// Create a topup_order paid for $50
+	to := &TopupOrder{
+		OrderNo:       "TO-shadow-test",
+		UserId:        inviteeId,
+		Amount:        50,
+		Quota:         500000,
+		OriginalPrice: 50,
+		FinalPrice:    50,
+		Status:        "paid",
+		CreatedAt:     time.Now().UnixMilli(),
+		PaidAt:        time.Now().UnixMilli(),
+	}
+	if err := DB.Create(to).Error; err != nil {
+		t.Fatalf("create topup_order: %v", err)
+	}
+
+	// Mimic the shadow top_ups row that the controller writes after success
+	shadow := &TopUp{
+		UserId:        inviteeId,
+		Money:         50,
+		TradeNo:       "TO-shadow-test", // same as topup_order.order_no
+		PaymentMethod: "stripe",
+		Status:        common.TopUpStatusSuccess,
+	}
+	if err := DB.Create(shadow).Error; err != nil {
+		t.Fatalf("create shadow topup: %v", err)
+	}
+
+	// Genuine legacy top_up that is NOT a shadow (different trade_no)
+	genuine := &TopUp{
+		UserId:        inviteeId,
+		Money:         10,
+		TradeNo:       "stripe-cs_genuine",
+		PaymentMethod: "stripe",
+		Status:        common.TopUpStatusSuccess,
+	}
+	if err := DB.Create(genuine).Error; err != nil {
+		t.Fatalf("create genuine topup: %v", err)
+	}
+
+	s, err := GetInviteeRechargeSummary(inviterId)
+	if err != nil {
+		t.Fatalf("summary err: %v", err)
+	}
+	want := 50.0 + 10.0 // topup_order $50 + genuine top_up $10; shadow excluded
+	if s.RechargeTotalUsd != want {
+		t.Fatalf("recharge_total want %v (shadow excluded), got %v", want, s.RechargeTotalUsd)
+	}
+	if s.PendingTotalUsd != want {
+		t.Fatalf("pending_total want %v, got %v", want, s.PendingTotalUsd)
+	}
+
+	// Items feed should also have only 2 rows (topup_order + genuine), not 3
+	items, total, err := GetInviteeRechargeItems(inviterId, &common.PageInfo{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("items err: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("items total want 2 (shadow excluded), got %d", total)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items len want 2, got %d", len(items))
+	}
+
+	// Payout: should cover only $60 worth, not $110
+	payout, count, err := CreateInviterRewardPayout(inviterId, 6, "test", 10.0, 1)
+	if err != nil {
+		t.Fatalf("create payout: %v", err)
+	}
+	if payout.RechargeTotalUsd != 60 {
+		t.Fatalf("payout recharge_total want 60, got %v", payout.RechargeTotalUsd)
+	}
+	if count != 2 {
+		t.Fatalf("count want 2 (1 topup_order + 1 genuine top_up), got %d", count)
+	}
+
+	// The shadow top_up row was NOT stamped (its payout_id should still be 0)
+	var shadowAfter TopUp
+	if err := DB.Where("trade_no = ?", "TO-shadow-test").First(&shadowAfter).Error; err != nil {
+		t.Fatalf("re-fetch shadow: %v", err)
+	}
+	if shadowAfter.InviterRewardPayoutId != 0 {
+		t.Fatalf("shadow top_up should NOT be stamped by payout, got payout_id=%d", shadowAfter.InviterRewardPayoutId)
 	}
 }
