@@ -64,6 +64,12 @@ const EditTokenModal = (props) => {
   const [groups, setGroups] = useState([]);
   const isEdit = props.editingToken.id !== undefined;
 
+  const PRESET_CLIENTS = [
+    { value: 'preset:claude-code', label: t('Claude Code') },
+    { value: 'preset:codex-cli', label: t('Codex CLI') },
+    { value: 'preset:gemini-cli', label: t('Gemini CLI') },
+  ];
+
   const getInitValues = () => ({
     name: '',
     remain_quota: 0,
@@ -74,6 +80,8 @@ const EditTokenModal = (props) => {
     allow_ips: '',
     group: '',
     tokenCount: 1,
+    client_restriction_enabled: false,
+    allowed_clients: [],
   });
 
   const handleCancel = () => {
@@ -163,6 +171,16 @@ const EditTokenModal = (props) => {
       } else {
         data.model_limits = [];
       }
+      if (typeof data.allowed_clients === 'string' && data.allowed_clients) {
+        try {
+          const parsed = JSON.parse(data.allowed_clients);
+          data.allowed_clients = Array.isArray(parsed) ? parsed : [];
+        } catch (_) {
+          data.allowed_clients = [];
+        }
+      } else if (!Array.isArray(data.allowed_clients)) {
+        data.allowed_clients = [];
+      }
       if (formApiRef.current) {
         formApiRef.current.setValues({ ...getInitValues(), ...data });
       }
@@ -222,6 +240,9 @@ const EditTokenModal = (props) => {
       }
       localInputs.model_limits = localInputs.model_limits.join(',');
       localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+      localInputs.allowed_clients = JSON.stringify(
+        localInputs.allowed_clients || [],
+      );
       let res = await API.put(`/api/token/`, {
         ...localInputs,
         id: parseInt(props.editingToken.id),
@@ -259,6 +280,9 @@ const EditTokenModal = (props) => {
         }
         localInputs.model_limits = localInputs.model_limits.join(',');
         localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+        localInputs.allowed_clients = JSON.stringify(
+          localInputs.allowed_clients || [],
+        );
         let res = await API.post(`/api/token/`, localInputs);
         const { success, message } = res.data;
         if (success) {
@@ -555,6 +579,61 @@ const EditTokenModal = (props) => {
                       extraText={t('请勿过度信任此功能，IP可能被伪造')}
                       showClear
                       style={{ width: '100%' }}
+                    />
+                  </Col>
+                  <Col span={24}>
+                    <Form.Switch
+                      field='client_restriction_enabled'
+                      label={t('客户端限制')}
+                      size='large'
+                      extraText={t(
+                        '启用后，仅命中下方任一客户端指纹的请求会被放行；该限制基于 User-Agent 与辅助请求头，可被伪造，请勿作为安全边界',
+                      )}
+                    />
+                  </Col>
+                  <Col span={24}>
+                    <Form.Select
+                      field='allowed_clients'
+                      label={t('允许的客户端')}
+                      placeholder={t(
+                        '选择预设客户端或输入自定义 User-Agent 子串后回车',
+                      )}
+                      multiple
+                      allowCreate
+                      filter
+                      optionList={PRESET_CLIENTS}
+                      extraText={t(
+                        '预设会同时校验 User-Agent 和辅助请求头；自定义条目仅按 UA 子串匹配。启用限制但留空将拒绝所有请求。',
+                      )}
+                      showClear
+                      style={{ width: '100%' }}
+                      disabled={!values?.client_restriction_enabled}
+                      onChange={(arr) => {
+                        const normalized = (arr || []).map((v) => {
+                          if (typeof v !== 'string') return v;
+                          if (
+                            v.startsWith('preset:') ||
+                            v.startsWith('custom:')
+                          ) {
+                            return v;
+                          }
+                          return 'custom:' + v;
+                        });
+                        formApiRef.current?.setValue(
+                          'allowed_clients',
+                          normalized,
+                        );
+                      }}
+                      renderSelectedItem={(option) => {
+                        const v = String(option.value || '');
+                        if (v.startsWith('custom:')) {
+                          return {
+                            isRenderInTag: true,
+                            content: v.slice('custom:'.length),
+                          };
+                        }
+                        return { isRenderInTag: true, content: option.label };
+                      }}
                     />
                   </Col>
                 </Row>

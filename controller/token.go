@@ -159,18 +159,20 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	cleanToken := model.Token{
-		UserId:             c.GetInt("id"),
-		Name:               token.Name,
-		Key:                key,
-		CreatedTime:        common.GetTimestamp(),
-		AccessedTime:       common.GetTimestamp(),
-		ExpiredTime:        token.ExpiredTime,
-		RemainQuota:        token.RemainQuota,
-		UnlimitedQuota:     token.UnlimitedQuota,
-		ModelLimitsEnabled: token.ModelLimitsEnabled,
-		ModelLimits:        token.ModelLimits,
-		AllowIps:           token.AllowIps,
-		Group:              token.Group,
+		UserId:                   c.GetInt("id"),
+		Name:                     token.Name,
+		Key:                      key,
+		CreatedTime:              common.GetTimestamp(),
+		AccessedTime:             common.GetTimestamp(),
+		ExpiredTime:              token.ExpiredTime,
+		RemainQuota:              token.RemainQuota,
+		UnlimitedQuota:           token.UnlimitedQuota,
+		ModelLimitsEnabled:       token.ModelLimitsEnabled,
+		ModelLimits:              token.ModelLimits,
+		AllowIps:                 token.AllowIps,
+		Group:                    token.Group,
+		ClientRestrictionEnabled: token.ClientRestrictionEnabled,
+		AllowedClients:           token.AllowedClients,
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -253,6 +255,8 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.ModelLimits = token.ModelLimits
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
+		cleanToken.ClientRestrictionEnabled = token.ClientRestrictionEnabled
+		cleanToken.AllowedClients = token.AllowedClients
 	}
 	err = cleanToken.Update()
 	if err != nil {
