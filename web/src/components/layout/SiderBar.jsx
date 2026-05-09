@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getLucideIcon } from '../../helpers/render';
@@ -26,6 +26,7 @@ import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
 import { isAdmin, isRoot, showError } from '../../helpers';
+import { StatusContext } from '../../context/Status';
 import SkeletonWrapper from './components/SkeletonWrapper';
 
 import { Nav, Divider, Button } from '@douyinfe/semi-ui';
@@ -60,6 +61,10 @@ const routerMap = {
 const SiderBar = ({ onNavigate = () => {} }) => {
   const { t } = useTranslation();
   const [collapsed, toggleCollapsed] = useSidebarCollapsed();
+  const [statusState] = useContext(StatusContext);
+  const drawFactoryExternalUrl = (
+    statusState?.status?.DrawFactoryExternalUrl || ''
+  ).trim();
   const {
     isModuleVisible,
     hasSectionVisibleModules,
@@ -235,11 +240,16 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey: 'playground',
         to: '/playground',
       },
-      {
-        text: t('绘图工厂'),
-        itemKey: 'drawFactory',
-        to: '/console/draw-factory',
-      },
+      // 仅当配置了外链时才注册"绘图工厂"菜单项；点击在新标签页打开外链。
+      ...(drawFactoryExternalUrl
+        ? [
+            {
+              text: t('绘图工厂'),
+              itemKey: 'drawFactory',
+              externalLink: drawFactoryExternalUrl,
+            },
+          ]
+        : []),
       {
         text: t('聊天'),
         itemKey: 'chat',
@@ -254,7 +264,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     });
 
     return filteredItems;
-  }, [chatItems, t, isModuleVisible]);
+  }, [chatItems, t, isModuleVisible, drawFactoryExternalUrl]);
 
   // 更新路由映射，添加聊天路由
   const updateRouterMapWithChats = (chats) => {
@@ -444,6 +454,24 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           hoverStyle='sidebar-nav-item:hover'
           selectedStyle='sidebar-nav-item-selected'
           renderWrapper={({ itemElement, props }) => {
+            // 绘图工厂配了外链 → 走新标签页跳转
+            if (
+              props.itemKey === 'drawFactory' &&
+              drawFactoryExternalUrl
+            ) {
+              return (
+                <a
+                  style={{ textDecoration: 'none' }}
+                  href={drawFactoryExternalUrl}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  onClick={onNavigate}
+                >
+                  {itemElement}
+                </a>
+              );
+            }
+
             const to =
               routerMapState[props.itemKey] || routerMap[props.itemKey];
 

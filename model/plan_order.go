@@ -50,6 +50,9 @@ type PlanOrder struct {
 	// Delivery retry tracking
 	DeliveryRetryCount int `json:"delivery_retry_count" gorm:"default:0"` // Number of delivery retry attempts
 
+	// Inviter reward payout marker (0 = not yet covered by any payout)
+	InviterRewardPayoutId int `json:"inviter_reward_payout_id" gorm:"index;default:0"`
+
 	// Associations
 	User     *User     `json:"user,omitempty" gorm:"foreignKey:UserId"`
 	Plan     *Plan     `json:"plan,omitempty" gorm:"foreignKey:PlanId;constraint:OnDelete:SET NULL,OnUpdate:CASCADE"` // Plan reference for display only

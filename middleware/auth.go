@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -245,6 +246,17 @@ func TokenAuth() func(c *gin.Context) {
 			clientIp := c.ClientIP()
 			if _, ok := allowIpsMap[clientIp]; !ok {
 				abortWithOpenAiMessage(c, http.StatusForbidden, "您的 IP 不在令牌允许访问的列表中")
+				return
+			}
+		}
+
+		if token.ClientRestrictionEnabled {
+			if !matchClient(c, token.AllowedClients) {
+				ua := c.Request.Header.Get("User-Agent")
+				logger.LogWarn(c, fmt.Sprintf(
+					"client restriction blocked: token=%d ua=%q ip=%s",
+					token.Id, ua, c.ClientIP()))
+				abortWithOpenAiMessage(c, http.StatusForbidden, "该令牌仅允许在指定客户端中使用")
 				return
 			}
 		}

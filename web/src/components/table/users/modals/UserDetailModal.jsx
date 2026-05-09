@@ -42,6 +42,7 @@ import { AnalyticsAPI } from '../../../../services/analyticsApi';
 import { formatUSDAmount } from '../../../../utils/currency';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import { timestamp2string } from '../../../../helpers';
+import InviteeRechargesTab from './InviteeRechargesTab';
 
 const { Text, Title } = Typography;
 
@@ -881,6 +882,16 @@ const UserDetailModal = ({ visible, user, onClose }) => {
                     />
                   </Card>
                 </Space>
+              </TabPane>
+
+              <TabPane
+                tab={t('邀请充值')}
+                itemKey="inviteeRecharges"
+              >
+                <InviteeRechargesTab
+                  visible={visible && activeTab === 'inviteeRecharges'}
+                  inviterId={user?.id}
+                />
               </TabPane>
             </Tabs>
           </Card>

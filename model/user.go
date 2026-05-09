@@ -456,6 +456,24 @@ func SetUserInviter(userId, inviterId, operatorId int) (previous int, err error)
 		return previous, err
 	}
 
+	// Keep aff_count in sync with the relationship: decrement the previous
+	// inviter (clamped at 0) and increment the new one. Atomic SQL expressions
+	// avoid lost-update races; the clamp guards against pre-existing drift so a
+	// stale 0 never goes negative.
+	if previous != 0 {
+		if err = tx.Model(&User{}).
+			Where("id = ? AND aff_count > 0", previous).
+			UpdateColumn("aff_count", gorm.Expr("aff_count - 1")).Error; err != nil {
+			return previous, err
+		}
+	}
+	if inviterId != 0 {
+		if err = tx.Model(&User{}).Where("id = ?", inviterId).
+			UpdateColumn("aff_count", gorm.Expr("aff_count + 1")).Error; err != nil {
+			return previous, err
+		}
+	}
+
 	if err = tx.Commit().Error; err != nil {
 		return previous, err
 	}

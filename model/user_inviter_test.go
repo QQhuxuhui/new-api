@@ -316,3 +316,106 @@ func TestSetUserInviter_IdempotentSkipsAuditLog(t *testing.T) {
 		t.Fatalf("expected exactly 1 audit log row, got %d", count)
 	}
 }
+
+func reloadAffCount(t *testing.T, id int) int {
+	t.Helper()
+	var u User
+	if err := DB.First(&u, id).Error; err != nil {
+		t.Fatalf("reload %d: %v", id, err)
+	}
+	return u.AffCount
+}
+
+func TestSetUserInviter_BindFromZero_IncrementsNewAffCount(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+
+	if got := reloadAffCount(t, b.Id); got != 1 {
+		t.Fatalf("b.aff_count = %d, want 1", got)
+	}
+}
+
+func TestSetUserInviter_Unbind_DecrementsPreviousAffCount(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if got := reloadAffCount(t, b.Id); got != 1 {
+		t.Fatalf("precondition b.aff_count = %d, want 1", got)
+	}
+
+	if _, err := SetUserInviter(a.Id, 0, 99); err != nil {
+		t.Fatalf("unbind: %v", err)
+	}
+
+	if got := reloadAffCount(t, b.Id); got != 0 {
+		t.Fatalf("b.aff_count = %d, want 0", got)
+	}
+}
+
+func TestSetUserInviter_Replace_AdjustsBothAffCounts(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+	c := mkUser(t, "c", 0)
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("bind to b: %v", err)
+	}
+
+	if _, err := SetUserInviter(a.Id, c.Id, 99); err != nil {
+		t.Fatalf("replace with c: %v", err)
+	}
+
+	if got := reloadAffCount(t, b.Id); got != 0 {
+		t.Fatalf("b.aff_count = %d, want 0 after replace", got)
+	}
+	if got := reloadAffCount(t, c.Id); got != 1 {
+		t.Fatalf("c.aff_count = %d, want 1 after replace", got)
+	}
+}
+
+func TestSetUserInviter_Idempotent_LeavesAffCountUnchanged(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("first bind: %v", err)
+	}
+	if got := reloadAffCount(t, b.Id); got != 1 {
+		t.Fatalf("precondition b.aff_count = %d, want 1", got)
+	}
+
+	if _, err := SetUserInviter(a.Id, b.Id, 99); err != nil {
+		t.Fatalf("second bind: %v", err)
+	}
+
+	if got := reloadAffCount(t, b.Id); got != 1 {
+		t.Fatalf("b.aff_count = %d after idempotent re-bind, want 1", got)
+	}
+}
+
+func TestSetUserInviter_Unbind_ClampsAffCountAtZero(t *testing.T) {
+	setupInviterTestDB(t)
+	a := mkUser(t, "a", 0)
+	b := mkUser(t, "b", 0)
+	// Simulate prior data drift: a is bound to b, but b.aff_count is already 0.
+	if err := DB.Model(&User{}).Where("id = ?", a.Id).
+		Update("inviter_id", b.Id).Error; err != nil {
+		t.Fatalf("seed inviter_id: %v", err)
+	}
+
+	if _, err := SetUserInviter(a.Id, 0, 99); err != nil {
+		t.Fatalf("unbind: %v", err)
+	}
+
+	if got := reloadAffCount(t, b.Id); got != 0 {
+		t.Fatalf("b.aff_count = %d, want clamped at 0", got)
+	}
+}
