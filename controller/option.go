@@ -20,6 +20,17 @@ func GetOptions(c *gin.Context) {
 	var options []*model.Option
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
+		// 海报弹窗:OSSAccessKeySecret 单独豁免,脱敏后返回 ***(非空时),
+		// 让前端能区分"未配置"和"已配置但不可读";写回 *** 时由 updateOption
+		// 的占位检测拦截不覆盖。详见 add-poster-popup-system change。
+		if k == "OSSAccessKeySecret" {
+			masked := common.Interface2String(v)
+			if masked != "" {
+				masked = "***"
+			}
+			options = append(options, &model.Option{Key: k, Value: masked})
+			continue
+		}
 		if strings.HasSuffix(k, "Token") || strings.HasSuffix(k, "Secret") || strings.HasSuffix(k, "Key") {
 			continue
 		}
