@@ -30,6 +30,7 @@ import SettingsSensitiveWords from '../../pages/Setting/Operation/SettingsSensit
 import SettingsLog from '../../pages/Setting/Operation/SettingsLog';
 import SettingsMonitoring from '../../pages/Setting/Operation/SettingsMonitoring';
 import SettingsCreditLimit from '../../pages/Setting/Operation/SettingsCreditLimit';
+import SettingsAffiliateReward from '../../pages/Setting/Operation/SettingsAffiliateReward';
 import { API, showError, toBoolean } from '../../helpers';
 
 const OperationSetting = () => {
@@ -167,6 +168,10 @@ const OperationSetting = () => {
         {/* 额度设置 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsCreditLimit options={inputs} refresh={onRefresh} />
+        </Card>
+        {/* 一级分销返佣 */}
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsAffiliateReward />
         </Card>
       </Spin>
     </>
