@@ -54,6 +54,7 @@ import MyPlans from './pages/MyPlans';
 import OrderConfirm from './pages/OrderConfirm';
 import MyOrders from './pages/MyOrders';
 import AdminOrders from './pages/AdminOrders';
+import AffMonthlyReport from './pages/AffMonthlyReport';
 import FailoverRules from './pages/FailoverRules';
 
 const Home = lazy(() => import('./pages/Home'));
@@ -185,6 +186,14 @@ function App() {
           element={
             <AdminRoute>
               <AdminOrders />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/admin/aff-monthly-report'
+          element={
+            <AdminRoute>
+              <AffMonthlyReport />
             </AdminRoute>
           }
         />

@@ -77,6 +77,7 @@ const EditUserModal = (props) => {
     email: '',
     quota: 0,
     max_concurrency: 0,
+    aff_status: 0,
     group: 'default',
     remark: '',
   });
@@ -119,6 +120,8 @@ const EditUserModal = (props) => {
       payload.quota = parseInt(payload.quota) || 0;
     if (typeof payload.max_concurrency === 'string')
       payload.max_concurrency = parseInt(payload.max_concurrency) || 0;
+    if (typeof payload.aff_status === 'string')
+      payload.aff_status = parseInt(payload.aff_status) || 0;
     if (userId) {
       payload.id = parseInt(userId);
     }
@@ -318,6 +321,19 @@ const EditUserModal = (props) => {
                           step={1}
                           extraText={t('0 表示不限制')}
                           style={{ width: '100%' }}
+                        />
+                      </Col>
+
+                      <Col span={24}>
+                        <Form.Select
+                          field='aff_status'
+                          label={t('分销状态')}
+                          extraText={t('冻结后该用户邀请的新充值不再产生返佣')}
+                          style={{ width: '100%' }}
+                          optionList={[
+                            { label: t('正常'), value: 0 },
+                            { label: t('已冻结(分销)'), value: 1 },
+                          ]}
                         />
                       </Col>
                     </Row>

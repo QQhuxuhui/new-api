@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Avatar,
   Typography,
@@ -26,8 +26,10 @@ import {
   Input,
   Badge,
   Space,
+  Banner,
 } from '@douyinfe/semi-ui';
-import { Copy, Users, BarChart2, TrendingUp, Gift, Zap } from 'lucide-react';
+import { Copy, Users, BarChart2, TrendingUp, Gift, Zap, Clock, Calendar } from 'lucide-react';
+import { API } from '../../helpers/api';
 
 const { Text } = Typography;
 
@@ -41,6 +43,22 @@ const InvitationCard = ({
   quotaForInviter,
   quotaForInvitee,
 }) => {
+  const [affSummary, setAffSummary] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    API.get('/api/user/aff/summary')
+      .then((res) => {
+        if (!cancelled && res?.data?.success) {
+          setAffSummary(res.data.data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <Card className='!rounded-2xl shadow-sm border-0'>
       {/* 卡片头部 */}
@@ -55,6 +73,17 @@ const InvitationCard = ({
           <div className='text-xs'>{t('邀请好友获得额外奖励')}</div>
         </div>
       </div>
+
+      {/* 冻结提示 */}
+      {affSummary?.aff_status === 'frozen' && (
+        <Banner
+          fullMode={false}
+          type='warning'
+          description={t('您的分销资格已冻结。如有疑问请联系客服。')}
+          closeIcon={null}
+          className='!rounded-xl mb-3'
+        />
+      )}
 
       {/* 收益展示区域 */}
       <Space vertical style={{ width: '100%' }}>
@@ -195,6 +224,45 @@ const InvitationCard = ({
           />
         </Card>
 
+        {/* 一级分销返佣 — 冷却中 / 本月新增 */}
+        {affSummary && (
+          <Card
+            className='!rounded-xl w-full'
+            title={<Text type='tertiary'>{t('返佣明细')}</Text>}
+          >
+            <div className='grid grid-cols-2 gap-4'>
+              <div className='text-center'>
+                <div className='flex items-center justify-center mb-1'>
+                  <Clock size={14} className='mr-1' />
+                  <Text type='tertiary' className='text-xs'>
+                    {t('冷却中')}
+                  </Text>
+                </div>
+                <div className='text-lg font-bold'>
+                  ${(affSummary.pending_amount_usd || 0).toFixed(4)}
+                </div>
+                <div className='text-xs text-gray-400 mt-1'>
+                  {t('支付后 {{n}} 天到账', { n: affSummary.cooldown_days })}
+                </div>
+              </div>
+              <div className='text-center'>
+                <div className='flex items-center justify-center mb-1'>
+                  <Calendar size={14} className='mr-1' />
+                  <Text type='tertiary' className='text-xs'>
+                    {t('本月新增')}
+                  </Text>
+                </div>
+                <div className='text-lg font-bold'>
+                  ${(affSummary.this_month_earned_usd || 0).toFixed(4)}
+                </div>
+                <div className='text-xs text-gray-400 mt-1'>
+                  {t('返佣比例 {{p}}%', { p: affSummary.reward_percent })}
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
+
         {/* 奖励说明 */}
         <Card
           className='!rounded-xl w-full'
@@ -204,21 +272,25 @@ const InvitationCard = ({
             <div className='flex items-start gap-2'>
               <Badge dot type='success' />
               <Text type='tertiary' className='text-sm'>
-                {t('邀请好友注册，您可获得')} <Text strong>{renderQuota(quotaForInviter || 0)}</Text> {t('奖励')}
+                {t('好友充值或开通月卡,你都能拿到 {{p}}% 返佣额度', {
+                  p: affSummary?.reward_percent ?? 10,
+                })}
               </Text>
             </div>
 
             <div className='flex items-start gap-2'>
               <Badge dot type='success' />
               <Text type='tertiary' className='text-sm'>
-                {t('好友使用您的邀请码注册，好友可获得')} <Text strong>{renderQuota(quotaForInvitee || 0)}</Text> {t('奖励')}
+                {t('月卡续费每月都拿,长期被动收入')}
               </Text>
             </div>
 
             <div className='flex items-start gap-2'>
               <Badge dot type='success' />
               <Text type='tertiary' className='text-sm'>
-                {t('通过划转功能将奖励额度转入到您的账户余额中')}
+                {t('支付后 {{n}} 天到账,然后可划转到余额自由消费', {
+                  n: affSummary?.cooldown_days ?? 7,
+                })}
               </Text>
             </div>
           </div>

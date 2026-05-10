@@ -43,6 +43,7 @@ import { formatUSDAmount } from '../../../../utils/currency';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import { timestamp2string } from '../../../../helpers';
 import InviteeRechargesTab from './InviteeRechargesTab';
+import AffAuditLogsTab from './AffAuditLogsTab';
 
 const { Text, Title } = Typography;
 
@@ -890,6 +891,16 @@ const UserDetailModal = ({ visible, user, onClose }) => {
               >
                 <InviteeRechargesTab
                   visible={visible && activeTab === 'inviteeRecharges'}
+                  inviterId={user?.id}
+                />
+              </TabPane>
+
+              <TabPane
+                tab={t('邀请奖励审计')}
+                itemKey="affAuditLogs"
+              >
+                <AffAuditLogsTab
+                  visible={visible && activeTab === 'affAuditLogs'}
                   inviterId={user?.id}
                 />
               </TabPane>
