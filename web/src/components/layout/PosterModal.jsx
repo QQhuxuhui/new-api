@@ -1,22 +1,31 @@
 import React, { useState } from 'react';
-import { Modal } from '@douyinfe/semi-ui';
+import { Modal, Button, Space } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 
 /**
  * PosterModal — 首页海报弹窗(替代/优先于现有公告)
  *
  * Props:
- *   visible:  bool      是否显示
- *   imageUrl: string    海报图片 URL(OSS 公开 URL 或外链)
- *   clickUrl: string    点击跳转 URL,空时图片不可点击
- *   onClose:  () => void 关闭回调(同时父组件应写 localStorage 阻止当天再弹)
+ *   visible:    bool                       是否显示
+ *   imageUrl:   string                     海报图片 URL(OSS 公开 URL 或外链)
+ *   clickUrl:   string                     点击跳转 URL,空时图片不可点击
+ *   onClose:        () => void             普通关闭(下次刷新仍会弹,与公告 NoticeModal 行为一致)
+ *   onCloseToday:   () => void             "今日不再弹" 关闭(写 localStorage 当天不再弹)
  *
  * 行为:
- *   - imageUrl 非空时显示大图,关闭按钮右上
+ *   - imageUrl 非空时显示大图
  *   - clickUrl 非空时整张图包 <a target=_blank rel=noopener>
  *   - <img onError> 静默隐藏图(仍允许 modal 关闭),不阻断退出
+ *   - 图下方两个按钮:[关闭] [今日不再弹](对齐公告 NoticeModal 双关闭模型)
+ *   - 点 X / 遮罩 / Esc → 普通关闭(等价"关闭"按钮)
  */
-const PosterModal = ({ visible, imageUrl, clickUrl, onClose }) => {
+const PosterModal = ({
+  visible,
+  imageUrl,
+  clickUrl,
+  onClose,
+  onCloseToday,
+}) => {
   const { t } = useTranslation();
   const [imgFailed, setImgFailed] = useState(false);
 
@@ -29,7 +38,7 @@ const PosterModal = ({ visible, imageUrl, clickUrl, onClose }) => {
       style={{
         display: imgFailed ? 'none' : 'block',
         maxWidth: '100%',
-        maxHeight: '80vh',
+        maxHeight: '70vh',
         margin: '0 auto',
         borderRadius: 8,
       }}
@@ -65,16 +74,37 @@ const PosterModal = ({ visible, imageUrl, clickUrl, onClose }) => {
       <div style={{ padding: 0, textAlign: 'center' }}>
         {content}
         {imgFailed && (
-          <div
-            style={{
-              padding: 24,
-              color: '#999',
-              fontSize: 14,
-            }}
-          >
+          <div style={{ padding: 24, color: '#999', fontSize: 14 }}>
             {t('海报图片加载失败')}
           </div>
         )}
+
+        <div
+          style={{
+            padding: '12px 16px 4px',
+            display: 'flex',
+            justifyContent: 'center',
+            gap: 12,
+          }}
+        >
+          <Space>
+            <Button
+              type='secondary'
+              onClick={() => {
+                if (typeof onCloseToday === 'function') {
+                  onCloseToday();
+                } else {
+                  onClose && onClose();
+                }
+              }}
+            >
+              {t('今日不再弹')}
+            </Button>
+            <Button type='tertiary' onClick={onClose}>
+              {t('关闭')}
+            </Button>
+          </Space>
+        </div>
       </div>
     </Modal>
   );

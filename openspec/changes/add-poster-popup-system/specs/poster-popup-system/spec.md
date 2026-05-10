@@ -118,8 +118,16 @@ announcement popup, and SHALL pop each poster at most once per day.
 - **THEN** the system SHALL bypass the poster modal entirely
 - **AND** SHALL run the existing `checkNoticeAndShow` flow with no behavioral change
 
-#### Scenario: Poster shown at most once per day per image_url
-- **GIVEN** the user has previously closed a poster with image_url=X today (same calendar date)
+#### Scenario: Two close paths mirror NoticeModal semantics
+- **GIVEN** the PosterModal is visible
+- **WHEN** the user clicks the close affordances
+- **THEN** the modal SHALL offer two distinct close actions:
+  - `关闭` / X / mask click / Esc: simply hide the modal; localStorage is NOT written; refreshing the homepage will pop the same poster again
+  - `今日不再弹`: write localStorage `poster_seen_<hash8>_<YYYYMMDD>` then hide the modal; refreshing the homepage today will NOT pop the same poster again
+- **AND** this matches NoticeModal's existing two-button pattern (`关闭公告` vs `今日关闭`) so users have consistent control over both popups
+
+#### Scenario: Poster shown at most once per day if user explicitly chose "今日不再弹"
+- **GIVEN** the user has clicked "今日不再弹" on a poster with image_url=X today (same calendar date)
 - **WHEN** the user revisits the homepage
 - **THEN** the system SHALL NOT pop the poster again today
 - **AND** the localStorage key `poster_seen_<md5(X).slice(0,8)>_<YYYYMMDD>` SHALL still exist

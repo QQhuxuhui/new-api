@@ -159,9 +159,13 @@ const Home = () => {
     checkPosterOrNotice();
   }, []);
 
-  // 海报关闭时写 localStorage,当天不再弹
+  // 普通关闭:仅 setVisible(false),下次刷新还会弹(与公告 NoticeModal 默认行为一致)
   const handlePosterClose = () => {
     setPosterVisible(false);
+  };
+
+  // "今日不再弹":写 localStorage 后关闭,当天不再弹同一海报
+  const handlePosterCloseToday = () => {
     if (posterImageUrl) {
       const todayDate = new Date();
       const yyyymmdd = `${todayDate.getFullYear()}${String(
@@ -174,6 +178,7 @@ const Home = () => {
         // localStorage 不可用时静默忽略
       }
     }
+    setPosterVisible(false);
   };
 
   useEffect(() => {
@@ -214,6 +219,7 @@ const Home = () => {
         imageUrl={posterImageUrl}
         clickUrl={posterClickUrl}
         onClose={handlePosterClose}
+        onCloseToday={handlePosterCloseToday}
       />
       <OnboardingWizard
         visible={onboardingVisible}
