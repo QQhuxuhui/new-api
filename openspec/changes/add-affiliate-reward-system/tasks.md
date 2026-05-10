@@ -6,7 +6,7 @@
 
 - [x] 1.1 在 `model/aff_audit_log.go`(新)中定义 `AffAuditLog` 结构体,字段:`Id`、`InviterUserId`、`InviteeUserId`、`SourceType`、`SourceId`、`AmountNative`、`Currency`、`AmountUsd`、`PriceRatioUsed`、`RewardUsd`、`Status`、`RejectReason`、`EligibleAt`、`CreatedAt`、`SettledAt`、`SettlePayoutId`、`OfflinePaidAt`、`OfflinePaidAmountCny`、`OfflinePaidNote`、`OfflinePaidAdminId`
 - [x] 1.2 索引:`(inviter_user_id, status, eligible_at)` 复合;`(invitee_user_id)`;**`(source_type, source_id) UNIQUE`**(防重复写入)
-- [x] 1.3 在 `model/user.go` 的 `User` 结构体新增 `AffStatus int` 字段(`tinyint default:0;index`)
+- [x] 1.3 在 `model/user.go` 的 `User` 结构体新增 `AffStatus int` 字段(`type:int default:0;index` — 用 int 而非 tinyint,因 PostgreSQL 不支持 tinyint)
 - [x] 1.4 在 `model/inviter_reward_payout.go` 的 `InviterRewardPayout` 结构体新增 `SettleMode string` 字段(`varchar(16) default:'manual';index`)
 - [x] 1.5 在 `common/constants.go` 添加配置:复用 `InviterRewardDefaultPercent`(默认 10.0,已存在);新增 `InviterRewardCooldownDays`(默认 7);新增 `EnableAffAutoSettle`(默认 true)
 - [x] 1.6 **新表** `model/user_login_ip_log.go`:`UserLoginIpLog{Id, UserId, Ip, LoggedAt}`,索引 `(user_id, logged_at)`

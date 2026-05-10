@@ -40,7 +40,7 @@ type User struct {
 	AffCount         int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
 	AffQuota         int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
 	AffHistoryQuota  int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
-	AffStatus        int            `json:"aff_status" gorm:"type:tinyint;default:0;column:aff_status;index"` // 0=正常 1=分销冻结
+	AffStatus        int            `json:"aff_status" gorm:"type:int;default:0;column:aff_status;index"` // 0=正常 1=分销冻结
 	InviterId        int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
 	DeletedAt        gorm.DeletedAt `gorm:"index"`
 	MaxConcurrency   int            `json:"max_concurrency" gorm:"type:int;default:0;column:max_concurrency" validate:"min=0"` // 0 表示不限制
