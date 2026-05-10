@@ -112,6 +112,15 @@ func InitOptionMap() {
 	common.OptionMap["InviterRewardCooldownDays"] = strconv.Itoa(common.InviterRewardCooldownDays)
 	common.OptionMap["EnableAffAutoSettle"] = strconv.FormatBool(common.EnableAffAutoSettle)
 	common.OptionMap["InviterRewardCutoffMs"] = strconv.FormatInt(common.InviterRewardCutoffMs, 10)
+
+	// OSS 凭证 + 海报弹窗(详见 add-poster-popup-system change)
+	common.OptionMap["OSSAccessKeyId"] = common.OSSAccessKeyId
+	common.OptionMap["OSSAccessKeySecret"] = common.OSSAccessKeySecret
+	common.OptionMap["OSSEndpoint"] = common.OSSEndpoint
+	common.OptionMap["OSSBucket"] = common.OSSBucket
+	common.OptionMap["PosterImageUrl"] = common.PosterImageUrl
+	common.OptionMap["PosterClickUrl"] = common.PosterClickUrl
+	common.OptionMap["EnablePoster"] = strconv.FormatBool(common.EnablePoster)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
@@ -421,6 +430,26 @@ func updateOptionMap(key string, value string) (err error) {
 	case "InviterRewardCutoffMs":
 		if v, err := strconv.ParseInt(value, 10, 64); err == nil && v >= 0 {
 			common.InviterRewardCutoffMs = v
+		}
+	case "OSSAccessKeyId":
+		common.OSSAccessKeyId = value
+	case "OSSAccessKeySecret":
+		// 占位检测:前端读到脱敏后的 *** 不修改时,直接写回会把真实 secret 覆盖成 ***;
+		// 这里严格 == 比较拦截(不用 Contains,允许真实 secret 含 *** 子串)。
+		if value != "***" {
+			common.OSSAccessKeySecret = value
+		}
+	case "OSSEndpoint":
+		common.OSSEndpoint = value
+	case "OSSBucket":
+		common.OSSBucket = value
+	case "PosterImageUrl":
+		common.PosterImageUrl = value
+	case "PosterClickUrl":
+		common.PosterClickUrl = value
+	case "EnablePoster":
+		if v, err := strconv.ParseBool(value); err == nil {
+			common.EnablePoster = v
 		}
 	case "QuotaForInvitee":
 		common.QuotaForInvitee, _ = strconv.Atoi(value)
