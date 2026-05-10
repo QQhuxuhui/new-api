@@ -286,6 +286,10 @@ func migrateDB() error {
 		&TopupOrder{},
 		&ChannelDisableRule{},
 		&InviterRewardPayout{},
+		&AffAuditLog{},
+		&AffAuditLogArchive{},
+		&UserLoginIpLog{},
+		&UserPaymentAccount{},
 	)
 	if err != nil {
 		return err

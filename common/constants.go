@@ -103,7 +103,9 @@ var TelegramBotName = ""
 
 var QuotaForNewUser = 0
 var QuotaForInviter = 0
-var InviterRewardDefaultPercent float64 = 10
+var InviterRewardDefaultPercent float64 = 10 // 一级分销返佣比例,百分比 (0-100);新自动结算与旧 admin 手动 payout 共享此变量
+var InviterRewardCooldownDays = 7            // 新一级分销:充值成功 → audit log 进入 pending → N 天后自动结算
+var EnableAffAutoSettle = true                // 新一级分销:自动结算总开关,出问题一键关停
 var QuotaForInvitee = 0
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
