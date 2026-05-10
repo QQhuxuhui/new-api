@@ -271,7 +271,51 @@ func EpayNotify(c *gin.Context) {
 
 	// Step 5: Business logic succeeded - return success
 	log.Printf("易支付回调处理成功，订单号: %s", verifyInfo.ServiceTradeNo)
+
+	// 一级分销返佣:反作弊数据源 + audit log 写入 — fire-and-forget,失败不阻塞回调。
+	// 易支付的 buyer_id (支付宝) / openid (微信) 在 raw params 中。
+	if topUp := model.GetTopUpByTradeNo(verifyInfo.ServiceTradeNo); topUp != nil {
+		var provider, accountId string
+		if v := params["buyer_id"]; v != "" {
+			provider, accountId = model.PaymentAccountProviderAlipay, v
+		} else if v := params["openid"]; v != "" {
+			provider, accountId = model.PaymentAccountProviderWechat, v
+		} else if v := params["buyer_logon_id"]; v != "" {
+			provider, accountId = model.PaymentAccountProviderAlipay, v
+		}
+		go affHookForTopUp(topUp, provider, accountId)
+	}
+
 	c.Writer.Write([]byte("success"))
+}
+
+// affHookForTopUp 在 top_ups 状态变 success 后调用:
+// 1. upsert 支付账号(反作弊数据源)
+// 2. 写入 aff_audit_log(若有邀请关系)
+//
+// 必须在 fire-and-forget goroutine 里调用;失败不阻塞主流程。
+// 也被 AdminCompleteTopUp 调用(管理员补单 = 真实支付救急,需要触发 audit log)。
+func affHookForTopUp(topUp *model.TopUp, provider, accountId string) {
+	if topUp == nil {
+		return
+	}
+	if accountId != "" && provider != "" {
+		if err := model.UpsertUserPaymentAccount(topUp.UserId, provider, accountId); err != nil {
+			common.SysLog(fmt.Sprintf("UpsertUserPaymentAccount %s failed user=%d: %v", provider, topUp.UserId, err))
+		}
+	}
+	paidAtMs := topUp.CompleteTime * 1000
+	if paidAtMs == 0 {
+		paidAtMs = time.Now().UnixMilli()
+	}
+	if _, err := service.CreateAffAuditLogIfEligible(
+		topUp.UserId,
+		model.AffAuditSourceTopUp, topUp.Id,
+		topUp.Money, model.AffAuditCurrencyUsd,
+		paidAtMs,
+	); err != nil {
+		common.SysLog(fmt.Sprintf("CreateAffAuditLogIfEligible topup failed id=%d: %v", topUp.Id, err))
+	}
 }
 
 func RequestAmount(c *gin.Context) {
@@ -370,5 +414,12 @@ func AdminCompleteTopUp(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+
+	// 一级分销返佣:管理员补单 = 真实支付救急,触发 audit log。
+	// 见 spec scenario "Admin manual top-up completion creates audit log"。
+	if topUp := model.GetTopUpByTradeNo(req.TradeNo); topUp != nil {
+		go affHookForTopUp(topUp, "", "") // admin 补单无支付账号信息,跳过 upsert
+	}
+
 	common.ApiSuccess(c, nil)
 }

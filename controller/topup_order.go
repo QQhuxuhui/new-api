@@ -314,6 +314,8 @@ func EpayTopupOrderNotify(c *gin.Context) {
 	var logUserId int
 	var logQuota int64
 	var logMoney float64
+	var logTopupOrderId int
+	var logPaidAtMs int64
 	var shouldRecordLog bool
 
 	// Process payment in transaction
@@ -419,6 +421,8 @@ func EpayTopupOrderNotify(c *gin.Context) {
 		logUserId = order.UserId
 		logQuota = order.Quota
 		logMoney = order.FinalPrice
+		logTopupOrderId = order.Id
+		logPaidAtMs = now
 		shouldRecordLog = true
 
 		return nil
@@ -436,7 +440,38 @@ func EpayTopupOrderNotify(c *gin.Context) {
 			fmt.Sprintf("使用在线支付充值成功，充值额度: %v，支付金额：%.2f", logger.FormatQuota(int(logQuota)), logMoney))
 	}
 
+	// 一级分销返佣:反作弊数据源 + audit log 写入(topup_order 路径,final_price 是 CNY)
+	if shouldRecordLog {
+		var provider, accountId string
+		if v := params["buyer_id"]; v != "" {
+			provider, accountId = model.PaymentAccountProviderAlipay, v
+		} else if v := params["openid"]; v != "" {
+			provider, accountId = model.PaymentAccountProviderWechat, v
+		} else if v := params["buyer_logon_id"]; v != "" {
+			provider, accountId = model.PaymentAccountProviderAlipay, v
+		}
+		go affHookForTopupOrder(logTopupOrderId, logUserId, logMoney, logPaidAtMs, provider, accountId)
+	}
+
 	c.Writer.Write([]byte("success"))
+}
+
+// affHookForTopupOrder 在 topup_orders.status='paid' 后异步触发反作弊数据源 + audit log。
+// 注意:topup_order 的 final_price 是 CNY,service 层会按当前 priceRatio 换算到 USD 并冻结汇率。
+func affHookForTopupOrder(orderId, userId int, finalPriceCny float64, paidAtMs int64, provider, accountId string) {
+	if accountId != "" && provider != "" {
+		if err := model.UpsertUserPaymentAccount(userId, provider, accountId); err != nil {
+			common.SysLog(fmt.Sprintf("UpsertUserPaymentAccount %s topup_order failed user=%d: %v", provider, userId, err))
+		}
+	}
+	if _, err := service.CreateAffAuditLogIfEligible(
+		userId,
+		model.AffAuditSourceTopUpOrder, orderId,
+		finalPriceCny, model.AffAuditCurrencyCny,
+		paidAtMs,
+	); err != nil {
+		common.SysLog(fmt.Sprintf("CreateAffAuditLogIfEligible topup_order failed id=%d: %v", orderId, err))
+	}
 }
 
 // CancelTopupOrderRequest is the request struct for cancelling a topup order

@@ -251,6 +251,11 @@ func fulfillStripeOrder(event stripe.Event, referenceId string, customerId strin
 	total, _ := strconv.ParseFloat(event.GetObjectValue("amount_total"), 64)
 	currency := strings.ToUpper(event.GetObjectValue("currency"))
 	log.Printf("收到款项：%s, %.2f(%s)", referenceId, total/100, currency)
+
+	// 一级分销返佣:反作弊数据源 + audit log 写入。
+	if topUp := model.GetTopUpByTradeNo(referenceId); topUp != nil {
+		go affHookForTopUp(topUp, model.PaymentAccountProviderStripe, customerId)
+	}
 }
 
 func sessionExpired(event stripe.Event) {

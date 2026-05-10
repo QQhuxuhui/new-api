@@ -521,6 +521,16 @@ func EpayPlanOrderNotify(c *gin.Context) {
 	orderLock.Lock()
 	defer orderLock.Unlock()
 
+	// 捕获事务内的 order 信息,用于 transaction 提交后的 audit log hook
+	var (
+		affHookUserId     int
+		affHookOrderId    int
+		affHookFinalPrice float64
+		affHookPlanType   string
+		affHookPaidAtMs   int64
+		affHookShouldRun  bool
+	)
+
 	// Process payment in transaction
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		// Load order with row lock
@@ -623,6 +633,14 @@ func EpayPlanOrderNotify(c *gin.Context) {
 		}
 
 		log.Printf("plan order payment processed successfully: order_no=%s, user_id=%d", orderNo, order.UserId)
+
+		affHookUserId = order.UserId
+		affHookOrderId = order.Id
+		affHookFinalPrice = order.FinalPrice
+		affHookPlanType = order.PlanType
+		affHookPaidAtMs = now
+		affHookShouldRun = true
+
 		return nil
 	})
 
@@ -632,5 +650,42 @@ func EpayPlanOrderNotify(c *gin.Context) {
 		return
 	}
 
+	// 一级分销返佣:反作弊数据源 + audit log 写入(plan_order 路径)。
+	// 试用排除:plan_type='trial' 或 final_price ≤ 1 跳过(spec scenario "Trial plan does not trigger audit log")。
+	if affHookShouldRun {
+		if affHookPlanType == "trial" || affHookFinalPrice <= 1 {
+			log.Printf("aff_audit: skip trial/low-price plan order_id=%d type=%s price=%.2f",
+				affHookOrderId, affHookPlanType, affHookFinalPrice)
+		} else {
+			var provider, accountId string
+			if v := params["buyer_id"]; v != "" {
+				provider, accountId = model.PaymentAccountProviderAlipay, v
+			} else if v := params["openid"]; v != "" {
+				provider, accountId = model.PaymentAccountProviderWechat, v
+			} else if v := params["buyer_logon_id"]; v != "" {
+				provider, accountId = model.PaymentAccountProviderAlipay, v
+			}
+			go affHookForPlanOrder(affHookOrderId, affHookUserId, affHookFinalPrice, affHookPaidAtMs, provider, accountId)
+		}
+	}
+
 	c.Writer.Write([]byte("success"))
+}
+
+// affHookForPlanOrder 在 plan_orders.status='paid' 后异步触发反作弊数据源 + audit log。
+// 注意:plan_orders.final_price 是 CNY,service 层会按当前 priceRatio 换算到 USD 并冻结汇率。
+func affHookForPlanOrder(orderId, userId int, finalPriceCny float64, paidAtMs int64, provider, accountId string) {
+	if accountId != "" && provider != "" {
+		if err := model.UpsertUserPaymentAccount(userId, provider, accountId); err != nil {
+			common.SysLog(fmt.Sprintf("UpsertUserPaymentAccount %s plan_order failed user=%d: %v", provider, userId, err))
+		}
+	}
+	if _, err := planservice.CreateAffAuditLogIfEligible(
+		userId,
+		model.AffAuditSourcePlanOrder, orderId,
+		finalPriceCny, model.AffAuditCurrencyCny,
+		paidAtMs,
+	); err != nil {
+		common.SysLog(fmt.Sprintf("CreateAffAuditLogIfEligible plan_order failed id=%d: %v", orderId, err))
+	}
 }

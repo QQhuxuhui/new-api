@@ -359,6 +359,15 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 
 	log.Printf("Creem充值成功 - 订单号: %s, 充值额度: %d, 支付金额: %.2f",
 		referenceId, topUp.Amount, topUp.Money)
+
+	// 一级分销返佣:反作弊数据源 + audit log 写入。
+	// Creem 优先用 customer.id,降级为 email。
+	creemAccountId := event.Object.Customer.Id
+	if creemAccountId == "" {
+		creemAccountId = customerEmail
+	}
+	go affHookForTopUp(topUp, model.PaymentAccountProviderCreem, creemAccountId)
+
 	c.Status(http.StatusOK)
 }
 
