@@ -46,6 +46,10 @@ func UploadFileToOSS(reader io.Reader, objectKey, contentType string) (string, e
 	if contentType != "" {
 		opts = append(opts, oss.ContentType(contentType))
 	}
+	// 强制设置 object 级 ACL = public-read,这样即使 bucket 是 private,
+	// 海报也可被浏览器直接访问。默认 bucket ACL 是 private,如不显式设置
+	// object ACL,前端 <img> 拉取会被 OSS 拒绝并报"no right to access"。
+	opts = append(opts, oss.ObjectACL(oss.ACLPublicRead))
 
 	if err := bucket.PutObject(objectKey, reader, opts...); err != nil {
 		return "", fmt.Errorf("OSS 上传失败: %w", err)

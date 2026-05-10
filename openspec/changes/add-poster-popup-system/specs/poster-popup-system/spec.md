@@ -71,6 +71,14 @@ file to the configured Aliyun OSS bucket and returns its public URL.
 - **THEN** the response SHALL be a 4xx with message asking to configure OSS first
 - **AND** no upload SHALL be attempted
 
+#### Scenario: Uploaded object is set to public-read ACL
+- **GIVEN** a bucket whose default ACL may be private
+- **AND** a successful PutObject call from the upload handler
+- **WHEN** the SDK PutObject is invoked
+- **THEN** it SHALL include the option `oss.ObjectACL(oss.ACLPublicRead)` so the uploaded object is publicly readable regardless of the bucket-level default
+- **AND** the front-end `<img>` tag fetched anonymously SHALL succeed for the returned URL
+- **AND** if the RAM credential lacks `oss:PutObjectAcl` permission, the upload SHALL still succeed when the bucket ACL is already public-read; otherwise the SDK error message SHALL surface to the admin
+
 #### Scenario: Successful upload does NOT auto-update PosterImageUrl
 - **GIVEN** a successful upload returning a public URL
 - **WHEN** the response is delivered to the frontend

@@ -29,21 +29,35 @@
 
 ### 1. 创建阿里云 OSS bucket
 - 区域:任选(推荐与平台同区,降低延迟)
-- 读写权限:**公共读**(海报需要前端浏览器直接访问)
+- 读写权限:**两种方式任选其一**
+  - 方式 A(推荐,省心):创建 bucket 时直接选 **公共读** → 整个 bucket 公开读
+  - 方式 B(更精细):创建 bucket 时保持默认 **私有** → **代码会自动给每个上传的海报 object 单独设置 ObjectACL=public-read**(`oss.ObjectACL(oss.ACLPublicRead)`),从 v271 起生效;只有海报路径下的对象公开,bucket 其他对象仍私有
+- ⚠️ **如果你之前在 v267-v270 上传过海报,那些图片 object 默认是 private,前端会报 `You have no right to access this object`。修复方式:**
+  - 选项 1:在 OSS 控制台找到 `posters/` 路径下的旧 object → 单独"设置文件 ACL → 公共读"
+  - 选项 2:在后台**重新上传**海报(v271+ 上传的会自动 public-read)
+  - 选项 3:把 bucket 整体 ACL 改为公共读
 - 跨域:可选,只要图片用 `<img>` 标签加载就不需要 CORS
 
 ### 2. 创建 RAM 子账号 + 最小权限
-推荐策略:只授予该 bucket 的 `oss:PutObject` 权限。
+推荐策略:授予 `oss:PutObject` + `oss:PutObjectAcl`。后者用于代码给每个海报对象设置 ACL=public-read。
+
 ```json
 {
   "Version": "1",
   "Statement": [{
     "Effect": "Allow",
-    "Action": "oss:PutObject",
-    "Resource": "acs:oss:*:*:my-poster-bucket/*"
+    "Action": [
+      "oss:PutObject",
+      "oss:PutObjectAcl"
+    ],
+    "Resource": "acs:oss:*:*:my-poster-bucket/posters/*"
   }]
 }
 ```
+
+如果方式 A(整个 bucket 公开读),`oss:PutObjectAcl` 也加上不亏,代码做的 ACL 设置是 idempotent 的。
+
+如果不想给 PutObjectAcl,只能选方式 A(整 bucket 公开读),代码层 ObjectACL 会失败,但因为 bucket 已经公开读,效果一样能访问。
 
 ### 3. 后台填入凭证
 后台 → 仪表盘设置 → 海报弹窗
