@@ -11,6 +11,7 @@
 | `InviterRewardDefaultPercent` | 10.0 | 一级分销返佣比例(%);新自动结算与旧 admin 手动 payout 共享此变量 |
 | `InviterRewardCooldownDays` | 7 | 充值成功后多少天进入自动结算池(冷却期) |
 | `EnableAffAutoSettle` | true | **总开关** — false 时所有 audit log 仍写入,但 cron 不结算 |
+| `InviterRewardCutoffMs` | 0 | 历史截断点(ms 时间戳),仅作记录用;实际迁移由 admin 主动调用 mark-legacy 接口触发。0 = 未启用 |
 | `QuotaPerUnit` | 500000 | 现有变量;1 USD = 多少 token。结算时 reward_usd × QuotaPerUnit → AffQuota |
 
 ## 数据库表
@@ -35,7 +36,8 @@
      │
      ├─[cron 扫描,冷却期已过]──> settled (AffQuota += reward_usd × QuotaPerUnit)
      ├─[退款 hook,v1 不接入]──> refunded
-     └─[管理员标记]──> offline_paid (记录 offline_paid_amount_cny)
+     ├─[管理员标记]──> offline_paid (记录 offline_paid_amount_cny)
+     └─[管理员一键归档,cutoff 之前]──> legacy (列表展示,不参与结算)
 ```
 
 ## 后台任务
@@ -130,12 +132,24 @@ SELECT status, COUNT(*), SUM(reward_usd) FROM aff_audit_logs GROUP BY status;
 - `GET /api/user/aff/summary` — 9 字段聚合,**不含**下级身份信息
 
 ### 管理员(admin)
-- `GET /api/user/manage/:id/aff-audit-logs?status=...&page=...` — 某邀请人的全部 audit logs
+- `GET /api/user/manage/:id/aff-audit-logs?status=...&page=...` — 某邀请人的全部 audit logs(含 legacy 过滤选项)
 - `GET /api/user/manage/:id/aff-summary` — 某邀请人完整汇总
 - `POST /api/user/manage/:id/aff-audit-logs/mark-offline-paid` — 批量标记
 - `POST /api/user/manage/aff-audit-logs/:log_id/settle` — 单条手动结算
+- `POST /api/user/manage/aff-audit-logs/mark-legacy` — body `{cutoff_ms}`,**全平台**一次性把 cutoff 之前的 pending 归档为 legacy
 - `GET /api/user/manage/aff-monthly-report?year=&month=` — 月度对账
 - `PUT /api/user/` (现有 UpdateUser) — 通过 `aff_status` 字段冻结/解冻分销资格
+
+### 历史截断使用流程
+
+如果运营在系统跑了一段时间后想"摆脱历史包袱"(让某个时间点之前的 pending 不再参与自动结算):
+
+1. 后台月度报表页(`/console/admin/aff-monthly-report`)→ 点"历史 pending 一键归档为 legacy"
+2. 选择截断时间(此时间之前 created 的 pending 会被归档)
+3. 确认后,所有 `created_at < cutoff` 且 `status='pending'` 的 log 状态改为 `legacy`
+4. legacy log:cron 不结算;前端用户端 summary 不计入;admin 列表选 legacy 过滤可查看
+5. 操作记录写入 LogTypeManage(可在用户日志里查到)
+6. 已经 settled / rejected / refunded / offline_paid 的 log **不会**被影响
 
 ## 已知限制
 

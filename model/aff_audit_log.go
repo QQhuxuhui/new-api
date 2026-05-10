@@ -50,6 +50,10 @@ const (
 	AffAuditStatusRejected    = "rejected"
 	AffAuditStatusRefunded    = "refunded"
 	AffAuditStatusOfflinePaid = "offline_paid"
+	// AffAuditStatusLegacy 是"历史包袱"状态:管理员设置 cutoff 时间之前
+	// 已存在的 pending log 被一次性迁移到这个状态。cron 不结算 legacy
+	// (天然由 status='pending' 过滤排除),admin 列表可独立筛选查看。
+	AffAuditStatusLegacy = "legacy"
 )
 
 // 来源类型枚举(对应 top_ups / topup_orders / plan_orders 三张表)
@@ -71,3 +75,19 @@ const (
 	AffAuditCurrencyUsd = "USD"
 	AffAuditCurrencyCny = "CNY"
 )
+
+// MarkPendingAsLegacyBefore 把 created_at < cutoffMs 的所有 pending log 标记为 legacy。
+// 用于"摆脱历史包袱":管理员设置一个时间截断点,之前的 pending 不参与结算
+// (但保留在表里供查询和审计)。
+//
+// cutoffMs <= 0 时直接返回 0,不做任何修改(防止误用导致全表迁移)。
+// 仅作用于 status='pending';其他状态(settled/rejected/refunded/offline_paid)不动。
+func MarkPendingAsLegacyBefore(cutoffMs int64) (int64, error) {
+	if cutoffMs <= 0 {
+		return 0, nil
+	}
+	res := DB.Model(&AffAuditLog{}).
+		Where("status = ? AND created_at < ?", AffAuditStatusPending, cutoffMs).
+		Update("status", AffAuditStatusLegacy)
+	return res.RowsAffected, res.Error
+}

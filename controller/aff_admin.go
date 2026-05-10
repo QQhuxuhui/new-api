@@ -167,6 +167,44 @@ func GetInviterAffSummaryAdmin(c *gin.Context) {
 	})
 }
 
+type markLegacyRequest struct {
+	CutoffMs int64 `json:"cutoff_ms"`
+}
+
+// MarkLegacyBeforeCutoff POST /api/user/manage/aff-audit-logs/mark-legacy
+//
+// "摆脱历史包袱"接口:把 created_at < cutoff_ms 的所有 status='pending' 行
+// 一次性迁移为 status='legacy';不参与自动结算,但保留在表里供查询和审计。
+//
+// 防呆设计:cutoff_ms <= 0 直接拒绝(避免误操作导致全表迁移)。
+func MarkLegacyBeforeCutoff(c *gin.Context) {
+	var req markLegacyRequest
+	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+	if req.CutoffMs <= 0 {
+		common.ApiErrorMsg(c, "cutoff_ms 必须大于 0(防止误操作迁移全表)")
+		return
+	}
+
+	migrated, err := model.MarkPendingAsLegacyBefore(req.CutoffMs)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	adminId := c.GetInt("id")
+	model.RecordLog(adminId, model.LogTypeManage,
+		fmt.Sprintf("管理员 #%d 设置返佣截断 cutoff=%d, 迁移 %d 条 pending 为 legacy",
+			adminId, req.CutoffMs, migrated))
+
+	common.ApiSuccess(c, gin.H{
+		"migrated":  migrated,
+		"cutoff_ms": req.CutoffMs,
+	})
+}
+
 type markOfflinePaidRequest struct {
 	LogIds           []int   `json:"log_ids"`
 	OfflineAmountCny float64 `json:"offline_amount_cny"`

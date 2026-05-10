@@ -56,6 +56,7 @@ func newAdminRouter(adminId int) *gin.Engine {
 	r.POST("/api/user/manage/:id/aff-audit-logs/mark-offline-paid", MarkAuditLogsOfflinePaid)
 	r.POST("/api/user/manage/aff-audit-logs/:log_id/settle", SettleAuditLogManually)
 	r.GET("/api/user/manage/aff-monthly-report", GetMonthlyReconciliationReport)
+	r.POST("/api/user/manage/aff-audit-logs/mark-legacy", MarkLegacyBeforeCutoff)
 	return r
 }
 
@@ -292,6 +293,85 @@ func TestSettleAuditLogManually_PendingSettles(t *testing.T) {
 	model.DB.First(&u, inv.Id)
 	if u.AffQuota != 200000 {
 		t.Errorf("aff_quota: want 200000 (0.4 * 500000), got %d", u.AffQuota)
+	}
+}
+
+func TestMarkLegacyBeforeCutoff_MigratesAndLogs(t *testing.T) {
+	setupAffAdminTestDB(t)
+	inv := &model.User{Username: "inv", Password: "x", AffCode: "INV"}
+	model.DB.Create(inv)
+	ee := &model.User{Username: "ee", Password: "x", AffCode: "EE", InviterId: inv.Id}
+	model.DB.Create(ee)
+	now := time.Now().UnixMilli()
+	day := int64(24 * 60 * 60 * 1000)
+
+	// 2 个 pending,一个老一个新
+	for i := 0; i < 2; i++ {
+		l := &model.AffAuditLog{
+			InviterUserId: inv.Id, InviteeUserId: ee.Id,
+			SourceType: model.AffAuditSourceTopUp, SourceId: i + 1,
+			Status: model.AffAuditStatusPending, RewardUsd: 1.0,
+		}
+		model.DB.Create(l)
+		// 旧的:created_at 设为 10 天前
+		if i == 0 {
+			model.DB.Model(&model.AffAuditLog{}).Where("id = ?", l.Id).
+				Update("created_at", now-10*day)
+		}
+	}
+
+	cutoff := now - 5*day
+	body := map[string]interface{}{"cutoff_ms": cutoff}
+	bodyBytes, _ := json.Marshal(body)
+	r := newAdminRouter(99)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST",
+		"/api/user/manage/aff-audit-logs/mark-legacy", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data map[string]interface{} `json:"data"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Data["migrated"].(float64) != 1 {
+		t.Errorf("migrated count: %v", resp.Data["migrated"])
+	}
+
+	// 验证状态
+	var logs []model.AffAuditLog
+	model.DB.Order("source_id ASC").Find(&logs)
+	if logs[0].Status != model.AffAuditStatusLegacy {
+		t.Errorf("old log: want legacy, got %q", logs[0].Status)
+	}
+	if logs[1].Status != model.AffAuditStatusPending {
+		t.Errorf("fresh log: want pending, got %q", logs[1].Status)
+	}
+}
+
+func TestMarkLegacyBeforeCutoff_RejectsZero(t *testing.T) {
+	setupAffAdminTestDB(t)
+	body := map[string]interface{}{"cutoff_ms": 0}
+	bodyBytes, _ := json.Marshal(body)
+	r := newAdminRouter(99)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST",
+		"/api/user/manage/aff-audit-logs/mark-legacy", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	// 0 / 负数应该被拒绝(防止误用导致全表迁移)
+	if w.Code == http.StatusOK {
+		var resp struct {
+			Success bool `json:"success"`
+		}
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp.Success {
+			t.Fatal("cutoff_ms=0 应该被拒绝,但接口返回 success")
+		}
 	}
 }
 

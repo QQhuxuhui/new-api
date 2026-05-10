@@ -338,6 +338,46 @@ The system SHALL provide a monthly reconciliation report endpoint for finance/au
   - `total_rejected_count_by_reason`
   - `top_inviters` (top 10 by settled USD; admin view only, NOT exposed to users)
 
+### Requirement: Historical Cutoff Migration (Legacy Status)
+The system SHALL support a one-shot migration that flips all
+`status='pending'` audit logs created before a given cutoff timestamp
+into a new `status='legacy'` so they never enter the auto-settle pool,
+yet remain visible in admin lists for audit and historical reference.
+
+#### Scenario: Admin migrates pending logs created before cutoff
+- **GIVEN** the platform has audit logs in `status='pending'` with various `created_at` values
+- **WHEN** an admin calls `POST /api/user/manage/aff-audit-logs/mark-legacy` with body `{cutoff_ms: <timestamp>}` where `cutoff_ms > 0`
+- **THEN** all `aff_audit_logs` rows with `status='pending' AND created_at < cutoff_ms` SHALL be updated to `status='legacy'`
+- **AND** the response SHALL return `{migrated: <count>, cutoff_ms: <ts>}`
+- **AND** a `LogTypeManage` entry SHALL be written recording the admin id, cutoff timestamp, and migrated row count
+
+#### Scenario: Cutoff zero or negative is rejected
+- **GIVEN** an admin attempts the mark-legacy endpoint with `cutoff_ms <= 0`
+- **WHEN** the request is processed
+- **THEN** the system SHALL reject with an error message (防止误操作迁移全表)
+- **AND** no rows SHALL be modified
+
+#### Scenario: Legacy logs excluded from cron auto-settlement
+- **GIVEN** an audit log with `status='legacy'` and `eligible_at <= now()`
+- **WHEN** the auto-settle cron job runs
+- **THEN** the system SHALL NOT settle this log (already filtered by `WHERE status='pending'`)
+
+#### Scenario: Legacy not exposed in user-facing summary
+- **GIVEN** a user U has audit logs with `status='legacy'` as inviter
+- **WHEN** U fetches `/api/user/aff/summary`
+- **THEN** these logs SHALL NOT contribute to `pending_amount_usd`, `this_month_earned_usd`, or any other field
+- **AND** the user SHALL NOT be informed of legacy log existence (admin-side concept only)
+
+#### Scenario: Legacy filterable in admin audit log list
+- **GIVEN** an inviter has logs in mixed statuses including `legacy`
+- **WHEN** an admin queries `GET /api/user/manage/:id/aff-audit-logs?status=legacy`
+- **THEN** the response SHALL return only legacy rows with full audit fields
+
+#### Scenario: Other statuses are not affected
+- **GIVEN** audit logs in `settled`, `rejected`, `refunded`, or `offline_paid` states with `created_at < cutoff_ms`
+- **WHEN** mark-legacy is called
+- **THEN** these logs SHALL NOT be modified; only `status='pending'` logs are migrated
+
 ### Requirement: User Agreement Affiliate Clause
 The platform's user agreement SHALL include a dedicated section describing the affiliate reward rules, anti-fraud actions, and use of station-internal credit.
 

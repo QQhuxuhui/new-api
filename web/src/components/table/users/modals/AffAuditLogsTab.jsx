@@ -21,6 +21,7 @@ const STATUS_TAGS = {
   rejected: { color: 'red', label: 'rejected' },
   refunded: { color: 'orange', label: 'refunded' },
   offline_paid: { color: 'purple', label: 'offline_paid' },
+  legacy: { color: 'grey', label: 'legacy' },
 };
 
 const REJECT_REASON_LABEL = {
@@ -201,6 +202,7 @@ const AffAuditLogsTab = ({ visible, inviterId }) => {
               { label: 'rejected', value: 'rejected' },
               { label: 'refunded', value: 'refunded' },
               { label: 'offline_paid', value: 'offline_paid' },
+              { label: 'legacy', value: 'legacy' },
             ]}
           />
           <Button

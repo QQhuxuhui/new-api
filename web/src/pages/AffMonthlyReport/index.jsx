@@ -7,6 +7,9 @@ import {
   Tag,
   Typography,
   Toast,
+  Button,
+  Modal,
+  Form,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API } from '../../helpers/api';
@@ -19,6 +22,7 @@ const STATUS_COLOR = {
   rejected: 'red',
   refunded: 'orange',
   offline_paid: 'purple',
+  legacy: 'grey',
 };
 
 const REJECT_LABEL = {
@@ -34,6 +38,9 @@ const AffMonthlyReport = () => {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [legacyModalVisible, setLegacyModalVisible] = useState(false);
+  const [legacyFormApi, setLegacyFormApi] = useState(null);
+  const [legacySubmitting, setLegacySubmitting] = useState(false);
 
   const reload = async () => {
     setLoading(true);
@@ -65,6 +72,38 @@ const AffMonthlyReport = () => {
     setMonth(d.getMonth() + 1);
   };
 
+  const handleLegacyMigrate = async (values) => {
+    if (!values?.cutoff_date) {
+      Toast.error(t('请选择截断时间'));
+      return;
+    }
+    const cutoffMs = new Date(values.cutoff_date).getTime();
+    if (cutoffMs <= 0) {
+      Toast.error(t('cutoff 时间无效'));
+      return;
+    }
+    setLegacySubmitting(true);
+    try {
+      const res = await API.post('/api/user/manage/aff-audit-logs/mark-legacy', {
+        cutoff_ms: cutoffMs,
+      });
+      if (res?.data?.success) {
+        Toast.success(
+          t('已迁移 {{n}} 条 pending 为 legacy', {
+            n: res.data.data.migrated,
+          })
+        );
+        setLegacyModalVisible(false);
+      } else {
+        Toast.error(res?.data?.message || t('迁移失败'));
+      }
+    } catch (e) {
+      Toast.error(e.response?.data?.message || e.message);
+    } finally {
+      setLegacySubmitting(false);
+    }
+  };
+
   return (
     <Space vertical style={{ width: '100%', padding: 16 }} size='large'>
       <Card>
@@ -75,6 +114,13 @@ const AffMonthlyReport = () => {
             value={`${year}-${String(month).padStart(2, '0')}`}
             onChange={handleMonthChange}
           />
+          <Button
+            type='warning'
+            theme='light'
+            onClick={() => setLegacyModalVisible(true)}
+          >
+            {t('历史 pending 一键归档为 legacy')}
+          </Button>
         </Space>
       </Card>
 
@@ -152,6 +198,44 @@ const AffMonthlyReport = () => {
           </Card>
         </>
       )}
+
+      <Modal
+        title={t('历史 pending 一键归档为 legacy')}
+        visible={legacyModalVisible}
+        onCancel={() => setLegacyModalVisible(false)}
+        footer={null}
+      >
+        <Text type='warning' style={{ display: 'block', marginBottom: 12 }}>
+          {t(
+            '此操作会把所有 created_at 早于截断时间的 status="pending" log 改为 legacy。legacy 不会被自动结算 cron 处理,但仍会显示在审计列表里。操作不可逆,请谨慎。'
+          )}
+        </Text>
+        <Form
+          getFormApi={(api) => setLegacyFormApi(api)}
+          onSubmit={handleLegacyMigrate}
+        >
+          <Form.DatePicker
+            field='cutoff_date'
+            label={t('截断时间(此时间之前的 pending 全部归档)')}
+            type='dateTime'
+            rules={[{ required: true, message: t('必填') }]}
+            style={{ width: '100%' }}
+          />
+          <Space style={{ marginTop: 12 }}>
+            <Button
+              type='warning'
+              theme='solid'
+              htmlType='submit'
+              loading={legacySubmitting}
+            >
+              {t('确认归档')}
+            </Button>
+            <Button onClick={() => setLegacyModalVisible(false)}>
+              {t('取消')}
+            </Button>
+          </Space>
+        </Form>
+      </Modal>
     </Space>
   );
 };

@@ -104,13 +104,14 @@ func TestAffAuditLog_DifferentSourceTypesAllowed(t *testing.T) {
 }
 
 func TestAffAuditLog_StatusEnumValuesExist(t *testing.T) {
-	// Compile-time + value check that all 5 status enum constants are exported.
+	// Compile-time + value check that all 6 status enum constants are exported.
 	statuses := []string{
 		AffAuditStatusPending,
 		AffAuditStatusSettled,
 		AffAuditStatusRejected,
 		AffAuditStatusRefunded,
 		AffAuditStatusOfflinePaid,
+		AffAuditStatusLegacy,
 	}
 	seen := make(map[string]bool)
 	for _, s := range statuses {
@@ -121,6 +122,94 @@ func TestAffAuditLog_StatusEnumValuesExist(t *testing.T) {
 			t.Errorf("duplicate status value: %s", s)
 		}
 		seen[s] = true
+	}
+}
+
+func TestMarkPendingAsLegacyBefore_OnlyTouchesPendingBeforeCutoff(t *testing.T) {
+	setupAffAuditLogTestDB(t)
+	now := time.Now().UnixMilli()
+	day := int64(24 * 60 * 60 * 1000)
+
+	// 一个 pending 在 cutoff 之前 — 应被标记 legacy
+	old := &AffAuditLog{
+		InviterUserId: 1, InviteeUserId: 2,
+		SourceType: AffAuditSourceTopUp, SourceId: 1,
+		Status: AffAuditStatusPending, RewardUsd: 1.0,
+	}
+	if err := DB.Create(old).Error; err != nil {
+		t.Fatalf("seed old: %v", err)
+	}
+	// 手动覆写 created_at(autoCreateTime 默认 now)
+	if err := DB.Model(&AffAuditLog{}).Where("id = ?", old.Id).
+		Update("created_at", now-10*day).Error; err != nil {
+		t.Fatalf("override created_at: %v", err)
+	}
+
+	// 另一个 pending 在 cutoff 之后 — 不动
+	fresh := &AffAuditLog{
+		InviterUserId: 1, InviteeUserId: 2,
+		SourceType: AffAuditSourceTopUp, SourceId: 2,
+		Status: AffAuditStatusPending, RewardUsd: 1.0,
+	}
+	if err := DB.Create(fresh).Error; err != nil {
+		t.Fatalf("seed fresh: %v", err)
+	}
+
+	// settled 在 cutoff 之前 — 不动(只迁移 pending)
+	settled := &AffAuditLog{
+		InviterUserId: 1, InviteeUserId: 2,
+		SourceType: AffAuditSourceTopUp, SourceId: 3,
+		Status: AffAuditStatusSettled, RewardUsd: 1.0,
+	}
+	if err := DB.Create(settled).Error; err != nil {
+		t.Fatalf("seed settled: %v", err)
+	}
+	if err := DB.Model(&AffAuditLog{}).Where("id = ?", settled.Id).
+		Update("created_at", now-10*day).Error; err != nil {
+		t.Fatalf("override created_at: %v", err)
+	}
+
+	cutoff := now - 5*day
+	migrated, err := MarkPendingAsLegacyBefore(cutoff)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if migrated != 1 {
+		t.Fatalf("want 1 migrated, got %d", migrated)
+	}
+
+	// 验证状态
+	var oldRefreshed, freshRefreshed, settledRefreshed AffAuditLog
+	DB.First(&oldRefreshed, old.Id)
+	DB.First(&freshRefreshed, fresh.Id)
+	DB.First(&settledRefreshed, settled.Id)
+
+	if oldRefreshed.Status != AffAuditStatusLegacy {
+		t.Errorf("old log: want legacy, got %q", oldRefreshed.Status)
+	}
+	if freshRefreshed.Status != AffAuditStatusPending {
+		t.Errorf("fresh log: want pending (after cutoff), got %q", freshRefreshed.Status)
+	}
+	if settledRefreshed.Status != AffAuditStatusSettled {
+		t.Errorf("settled log: want settled (only pending is migrated), got %q", settledRefreshed.Status)
+	}
+}
+
+func TestMarkPendingAsLegacyBefore_ZeroCutoffNoOp(t *testing.T) {
+	setupAffAuditLogTestDB(t)
+	pending := &AffAuditLog{
+		InviterUserId: 1, InviteeUserId: 2,
+		SourceType: AffAuditSourceTopUp, SourceId: 1,
+		Status: AffAuditStatusPending,
+	}
+	DB.Create(pending)
+
+	migrated, err := MarkPendingAsLegacyBefore(0)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if migrated != 0 {
+		t.Fatalf("cutoff=0 should be no-op, got %d migrated", migrated)
 	}
 }
 

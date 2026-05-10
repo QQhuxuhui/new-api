@@ -156,6 +156,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/manage/:id/aff-summary", controller.GetInviterAffSummaryAdmin)
 				adminRoute.POST("/manage/:id/aff-audit-logs/mark-offline-paid", controller.MarkAuditLogsOfflinePaid)
 				adminRoute.POST("/manage/aff-audit-logs/:log_id/settle", controller.SettleAuditLogManually)
+				adminRoute.POST("/manage/aff-audit-logs/mark-legacy", controller.MarkLegacyBeforeCutoff)
 				adminRoute.GET("/manage/aff-monthly-report", controller.GetMonthlyReconciliationReport)
 				adminRoute.PUT("/", controller.UpdateUser)
 				adminRoute.DELETE("/:id", controller.DeleteUser)
