@@ -109,6 +109,8 @@ func InitOptionMap() {
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["InviterRewardDefaultPercent"] = strconv.FormatFloat(common.InviterRewardDefaultPercent, 'f', -1, 64)
+	common.OptionMap["InviterRewardCooldownDays"] = strconv.Itoa(common.InviterRewardCooldownDays)
+	common.OptionMap["EnableAffAutoSettle"] = strconv.FormatBool(common.EnableAffAutoSettle)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
@@ -406,6 +408,14 @@ func updateOptionMap(key string, value string) (err error) {
 	case "InviterRewardDefaultPercent":
 		if v, err := strconv.ParseFloat(value, 64); err == nil {
 			common.InviterRewardDefaultPercent = v
+		}
+	case "InviterRewardCooldownDays":
+		if v, err := strconv.Atoi(value); err == nil && v > 0 {
+			common.InviterRewardCooldownDays = v
+		}
+	case "EnableAffAutoSettle":
+		if v, err := strconv.ParseBool(value); err == nil {
+			common.EnableAffAutoSettle = v
 		}
 	case "QuotaForInvitee":
 		common.QuotaForInvitee, _ = strconv.Atoi(value)

@@ -651,22 +651,17 @@ func EpayPlanOrderNotify(c *gin.Context) {
 	}
 
 	// 一级分销返佣:反作弊数据源 + audit log 写入(plan_order 路径)。
-	// 试用排除:plan_type='trial' 或 final_price ≤ 1 跳过(spec scenario "Trial plan does not trigger audit log")。
+	// trial 排除在 affHookForPlanOrder 内部统一处理,所有调用方(支付回调 / admin 补单)受同一保护。
 	if affHookShouldRun {
-		if affHookPlanType == "trial" || affHookFinalPrice <= 1 {
-			log.Printf("aff_audit: skip trial/low-price plan order_id=%d type=%s price=%.2f",
-				affHookOrderId, affHookPlanType, affHookFinalPrice)
-		} else {
-			var provider, accountId string
-			if v := params["buyer_id"]; v != "" {
-				provider, accountId = model.PaymentAccountProviderAlipay, v
-			} else if v := params["openid"]; v != "" {
-				provider, accountId = model.PaymentAccountProviderWechat, v
-			} else if v := params["buyer_logon_id"]; v != "" {
-				provider, accountId = model.PaymentAccountProviderAlipay, v
-			}
-			go affHookForPlanOrder(affHookOrderId, affHookUserId, affHookFinalPrice, affHookPaidAtMs, provider, accountId)
+		var provider, accountId string
+		if v := params["buyer_id"]; v != "" {
+			provider, accountId = model.PaymentAccountProviderAlipay, v
+		} else if v := params["openid"]; v != "" {
+			provider, accountId = model.PaymentAccountProviderWechat, v
+		} else if v := params["buyer_logon_id"]; v != "" {
+			provider, accountId = model.PaymentAccountProviderAlipay, v
 		}
+		go affHookForPlanOrder(affHookOrderId, affHookUserId, affHookFinalPrice, affHookPlanType, affHookPaidAtMs, provider, accountId)
 	}
 
 	c.Writer.Write([]byte("success"))
@@ -674,7 +669,15 @@ func EpayPlanOrderNotify(c *gin.Context) {
 
 // affHookForPlanOrder 在 plan_orders.status='paid' 后异步触发反作弊数据源 + audit log。
 // 注意:plan_orders.final_price 是 CNY,service 层会按当前 priceRatio 换算到 USD 并冻结汇率。
-func affHookForPlanOrder(orderId, userId int, finalPriceCny float64, paidAtMs int64, provider, accountId string) {
+//
+// 试用排除:plan_type='trial' 或 final_price ≤ 1 直接跳过(spec scenario "Trial plan does not trigger audit log")。
+// 排除逻辑放在 hook 内部,确保所有调用方(正常支付回调 / admin 手动补单)统一受保护。
+func affHookForPlanOrder(orderId, userId int, finalPriceCny float64, planType string, paidAtMs int64, provider, accountId string) {
+	if planType == "trial" || finalPriceCny <= 1 {
+		common.SysLog(fmt.Sprintf("aff_audit: skip trial/low-price plan order_id=%d type=%s price=%.2f",
+			orderId, planType, finalPriceCny))
+		return
+	}
 	if accountId != "" && provider != "" {
 		if err := model.UpsertUserPaymentAccount(userId, provider, accountId); err != nil {
 			common.SysLog(fmt.Sprintf("UpsertUserPaymentAccount %s plan_order failed user=%d: %v", provider, userId, err))

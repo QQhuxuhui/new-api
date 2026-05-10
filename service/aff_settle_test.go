@@ -253,6 +253,53 @@ func TestSettleSingleAuditLog_PendingSettles(t *testing.T) {
 	}
 }
 
+// 模拟"事务外预扫到的 candidateLogs 已被另一实例 settle"的场景:
+// settleInviterBatch 应该在事务内 FOR UPDATE 后看到 0 个 pending,
+// 直接 no-op,**不能**重复加 AffQuota / 不能创建 payout 行。
+func TestSettleInviterBatch_AlreadySettledByOtherInstanceNoOp(t *testing.T) {
+	setupAffSettleTestDB(t)
+	inviter := makeUser(t, "inv")
+	invitee := makeUser(t, "ee")
+	now := time.Now().UnixMilli()
+
+	log := seedPendingLog(t, inviter, invitee, 1, 1.0, now-1000)
+
+	// 模拟另一个实例已把这行更新成 settled
+	if err := model.DB.Model(&model.AffAuditLog{}).
+		Where("id = ?", log.Id).
+		Updates(map[string]interface{}{"status": model.AffAuditStatusSettled, "settled_at": now}).Error; err != nil {
+		t.Fatalf("simulate concurrent settle: %v", err)
+	}
+
+	// 用过时的 candidateLogs(里面 log.Status 仍写着 pending,因为是事务外取到的快照)
+	staleCandidate := []model.AffAuditLog{*log} // 注意 status 还是 pending(快照)
+	settled, err := settleInviterBatchExportedForTest(t, inviter.Id, staleCandidate)
+	if err != nil {
+		t.Fatalf("settleInviterBatch: %v", err)
+	}
+	if settled != 0 {
+		t.Fatalf("want 0 settled (already taken by another instance), got %d", settled)
+	}
+
+	// 关键断言:AffQuota 没有被加,payout 没有被创建
+	var u model.User
+	model.DB.First(&u, inviter.Id)
+	if u.AffQuota != 0 {
+		t.Errorf("aff_quota MUST NOT be incremented when nothing was actually settled; got %d", u.AffQuota)
+	}
+	var payouts int64
+	model.DB.Model(&model.InviterRewardPayout{}).Where("inviter_user_id = ?", inviter.Id).Count(&payouts)
+	if payouts != 0 {
+		t.Errorf("payout row MUST NOT be created when nothing was actually settled; got %d", payouts)
+	}
+}
+
+// settleInviterBatchExportedForTest 是为白盒测试暴露的 wrapper(避免改动小写函数签名)。
+func settleInviterBatchExportedForTest(t *testing.T, inviterId int, logs []model.AffAuditLog) (int, error) {
+	t.Helper()
+	return settleInviterBatch(inviterId, logs)
+}
+
 func TestSettleSingleAuditLog_NonPendingRejected(t *testing.T) {
 	setupAffSettleTestDB(t)
 	inviter := makeUser(t, "inv")

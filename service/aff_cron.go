@@ -9,8 +9,17 @@ import (
 
 // StartAffCronTasks 启动一级分销返佣相关后台任务:
 //   - 每日清理 30 天之前的 user_login_ip_logs
+//   - 每日归档已结算 1 年以上的 audit log
 //   - 每小时跑一次 audit log 自动结算(EnableAffAutoSettle 控制)
+//
+// 注意:这些任务只能在 master 节点运行(IsMasterNode=true),否则多实例并发会导致:
+//   - 归档任务重复移动同一行数据
+//   - 自动结算虽然有事务内 FOR UPDATE 保护(不会重复加余额),但仍会浪费 DB 连接竞争锁
 func StartAffCronTasks() {
+	if !common.IsMasterNode {
+		common.SysLog("affiliate background tasks: skipped on non-master node")
+		return
+	}
 	common.SysLog("starting affiliate background tasks")
 
 	// 每日清理过期登录 IP 日志

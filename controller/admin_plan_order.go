@@ -275,6 +275,11 @@ func ManualCompletePlanOrder(c *gin.Context) {
 	// Log admin operation
 	logAdminPlanOrderOperation("manual_complete", orderId, adminId, username)
 
+	// 一级分销返佣:管理员补单也是真实支付救急,触发 hook(与正常支付回调一致;
+	// trial / FinalPrice<=1 的过滤在 affHookForPlanOrder 内部处理)。
+	// admin 路径无支付账号信息,所以传 "" 给 provider/accountId 跳过 upsert。
+	go affHookForPlanOrder(order.Id, order.UserId, order.FinalPrice, order.PlanType, common.GetTimestamp()*1000, "", "")
+
 	common.ApiSuccess(c, gin.H{
 		"message": "订单已手动完成",
 	})
@@ -459,6 +464,13 @@ func ManualCompleteTopupOrder(c *gin.Context) {
 
 	// Log admin operation
 	logAdminPlanOrderOperation("manual_complete_topup", orderId, adminId, username)
+
+	// 一级分销返佣:管理员补单也是真实支付救急,触发 hook(与正常支付回调一致)。
+	// admin 路径无支付账号信息,所以传 "" 给 provider/accountId 跳过 upsert。
+	// 注意:order.PaidAt 在 CompleteTopupOrder 后才被赋值,这里重新读一次取最新 paid_at。
+	if completed, _ := model.GetTopupOrderById(orderId); completed != nil {
+		go affHookForTopupOrder(completed.Id, completed.UserId, completed.FinalPrice, completed.PaidAt, "", "")
+	}
 
 	common.ApiSuccess(c, gin.H{
 		"message": "充值订单已手动完成",

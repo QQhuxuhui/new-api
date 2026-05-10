@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // RunAffSettle 是一级分销返佣的自动结算 cron 任务。
@@ -60,41 +61,64 @@ func RunAffSettle() (int, error) {
 	return settledTotal, nil
 }
 
-// settleInviterBatch 在单事务内为某 inviter 的多条 pending logs 创建 payout + 累加 AffQuota。
-func settleInviterBatch(inviterId int, logs []model.AffAuditLog) (int, error) {
-	if len(logs) == 0 {
+// settleInviterBatch 在单事务内为某 inviter 的 candidateLogs 创建 payout + 累加 AffQuota。
+//
+// 并发安全设计:不能用事务外查到的 candidateLogs 直接计算金额,因为另一个 cron 实例
+// 可能已经把同样的 logs 标为 settled。必须在事务内 FOR UPDATE 重新锁定仍为 pending 的
+// 行,按**实际锁定到的行**重算金额、加余额、写 payout、更新状态。
+func settleInviterBatch(inviterId int, candidateLogs []model.AffAuditLog) (int, error) {
+	if len(candidateLogs) == 0 {
 		return 0, nil
+	}
+	candidateIds := make([]int, 0, len(candidateLogs))
+	for _, l := range candidateLogs {
+		candidateIds = append(candidateIds, l.Id)
 	}
 
 	var settled int
 	err := model.DB.Transaction(func(tx *gorm.DB) error {
-		var totalRewardUsd float64
-		var totalAmountUsd float64
-		logIds := make([]int, 0, len(logs))
-		for _, l := range logs {
+		// 1. FOR UPDATE 锁定仍为 pending 的候选行(行级排它锁)
+		var locked []model.AffAuditLog
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id IN ? AND status = ?", candidateIds, model.AffAuditStatusPending).
+			Order("id").
+			Find(&locked).Error; err != nil {
+			return err
+		}
+		if len(locked) == 0 {
+			// 全部已被其他实例处理,直接退出(不动余额、不写 payout)
+			return nil
+		}
+
+		// 2. 按实际锁定到的行重新累计(防止漏扫被并发改动的)
+		var totalRewardUsd, totalAmountUsd float64
+		lockedIds := make([]int, 0, len(locked))
+		for _, l := range locked {
 			totalRewardUsd += l.RewardUsd
 			totalAmountUsd += l.AmountUsd
-			logIds = append(logIds, l.Id)
+			lockedIds = append(lockedIds, l.Id)
 		}
 
 		// 关键换算:USD → token int (AffQuota 是 int 类型,见 design Decision 6)
 		quotaDelta := int(totalRewardUsd * common.QuotaPerUnit)
 
-		// 1. 创建 payout
+		// 3. 创建 payout
+		// DefaultPctUsed=0 表示自动 batch 不适用单一比例(每条 log 的 reward_usd 在
+		// 写入时按当时的 InviterRewardDefaultPercent 冻结,batch 可能跨多个比例时期)。
 		payout := &model.InviterRewardPayout{
 			InviterUserId:    inviterId,
 			RechargeTotalUsd: totalAmountUsd,
 			PayoutAmountUsd:  totalRewardUsd,
-			DefaultPctUsed:   common.InviterRewardDefaultPercent,
+			DefaultPctUsed:   0,
 			OperatorAdminId:  0, // system
 			SettleMode:       model.InviterRewardPayoutSettleModeAuto,
-			Note:             fmt.Sprintf("[auto] cron settled %d logs", len(logs)),
+			Note:             fmt.Sprintf("[auto] cron settled %d logs (per-log reward_usd frozen at write time)", len(locked)),
 		}
 		if err := tx.Create(payout).Error; err != nil {
 			return err
 		}
 
-		// 2. 累加 AffQuota / AffHistoryQuota
+		// 4. 累加 AffQuota / AffHistoryQuota(行已锁定,余额加和 status 更新原子)
 		if err := tx.Model(&model.User{}).
 			Where("id = ?", inviterId).
 			Updates(map[string]interface{}{
@@ -104,10 +128,10 @@ func settleInviterBatch(inviterId int, logs []model.AffAuditLog) (int, error) {
 			return err
 		}
 
-		// 3. 批量更新 logs 为 settled
+		// 5. 把锁定的 logs 标为 settled
 		now := time.Now().UnixMilli()
 		res := tx.Model(&model.AffAuditLog{}).
-			Where("id IN ? AND status = ?", logIds, model.AffAuditStatusPending).
+			Where("id IN ?", lockedIds).
 			Updates(map[string]interface{}{
 				"status":           model.AffAuditStatusSettled,
 				"settled_at":       now,
