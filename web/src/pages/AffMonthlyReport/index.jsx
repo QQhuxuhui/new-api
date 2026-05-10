@@ -82,6 +82,10 @@ const AffMonthlyReport = () => {
       Toast.error(t('cutoff 时间无效'));
       return;
     }
+    if (cutoffMs > Date.now()) {
+      Toast.error(t('cutoff 不能选择未来时间'));
+      return;
+    }
     setLegacySubmitting(true);
     try {
       const res = await API.post('/api/user/manage/aff-audit-logs/mark-legacy', {
@@ -220,6 +224,7 @@ const AffMonthlyReport = () => {
             type='dateTime'
             rules={[{ required: true, message: t('必填') }]}
             style={{ width: '100%' }}
+            disabledDate={(date) => date && date.getTime() > Date.now()}
           />
           <Space style={{ marginTop: 12 }}>
             <Button

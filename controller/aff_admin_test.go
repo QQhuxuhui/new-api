@@ -375,6 +375,48 @@ func TestMarkLegacyBeforeCutoff_RejectsZero(t *testing.T) {
 	}
 }
 
+// 防止误选未来时间把所有当前 pending 一键归档。
+func TestMarkLegacyBeforeCutoff_RejectsFuture(t *testing.T) {
+	setupAffAdminTestDB(t)
+	inv := &model.User{Username: "inv", Password: "x", AffCode: "INV"}
+	model.DB.Create(inv)
+	ee := &model.User{Username: "ee", Password: "x", AffCode: "EE", InviterId: inv.Id}
+	model.DB.Create(ee)
+	// 创建一条当前的 pending log
+	model.DB.Create(&model.AffAuditLog{
+		InviterUserId: inv.Id, InviteeUserId: ee.Id,
+		SourceType: model.AffAuditSourceTopUp, SourceId: 1,
+		Status: model.AffAuditStatusPending, RewardUsd: 1.0,
+	})
+
+	// cutoff = 一年后
+	future := time.Now().Add(365 * 24 * time.Hour).UnixMilli()
+	body := map[string]interface{}{"cutoff_ms": future}
+	bodyBytes, _ := json.Marshal(body)
+	r := newAdminRouter(99)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST",
+		"/api/user/manage/aff-audit-logs/mark-legacy", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Success {
+		t.Fatalf("future cutoff_ms 应该被拒绝,但接口 success=true 返回 %s", w.Body.String())
+	}
+
+	// 关键断言:pending log 没有被归档为 legacy
+	var log model.AffAuditLog
+	model.DB.First(&log)
+	if log.Status != model.AffAuditStatusPending {
+		t.Fatalf("pending log MUST NOT be touched when future cutoff rejected; got %q", log.Status)
+	}
+}
+
 func TestGetMonthlyReconciliationReport_Aggregates(t *testing.T) {
 	setupAffAdminTestDB(t)
 	inv := &model.User{Username: "inv", Password: "x", AffCode: "INV"}

@@ -357,6 +357,13 @@ yet remain visible in admin lists for audit and historical reference.
 - **THEN** the system SHALL reject with an error message (防止误操作迁移全表)
 - **AND** no rows SHALL be modified
 
+#### Scenario: Cutoff in the future is rejected
+- **GIVEN** an admin attempts the mark-legacy endpoint with `cutoff_ms` greater than current server time
+- **WHEN** the request is processed
+- **THEN** the system SHALL reject with an error message indicating future cutoff is not allowed (防止误选未来时间把所有当前 pending 一键归档)
+- **AND** no rows SHALL be modified
+- **AND** the frontend datepicker SHALL also disable future dates as a first line of defense
+
 #### Scenario: Legacy logs excluded from cron auto-settlement
 - **GIVEN** an audit log with `status='legacy'` and `eligible_at <= now()`
 - **WHEN** the auto-settle cron job runs

@@ -176,7 +176,9 @@ type markLegacyRequest struct {
 // "摆脱历史包袱"接口:把 created_at < cutoff_ms 的所有 status='pending' 行
 // 一次性迁移为 status='legacy';不参与自动结算,但保留在表里供查询和审计。
 //
-// 防呆设计:cutoff_ms <= 0 直接拒绝(避免误操作导致全表迁移)。
+// 防呆设计:
+//   - cutoff_ms <= 0 直接拒绝(避免误操作导致全表迁移)
+//   - cutoff_ms > now 直接拒绝(避免误选未来时间把所有当前 pending 一键归档)
 func MarkLegacyBeforeCutoff(c *gin.Context) {
 	var req markLegacyRequest
 	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
@@ -185,6 +187,11 @@ func MarkLegacyBeforeCutoff(c *gin.Context) {
 	}
 	if req.CutoffMs <= 0 {
 		common.ApiErrorMsg(c, "cutoff_ms 必须大于 0(防止误操作迁移全表)")
+		return
+	}
+	now := time.Now().UnixMilli()
+	if req.CutoffMs > now {
+		common.ApiErrorMsg(c, "cutoff_ms 不能大于当前时间(防止误选未来时间把所有 pending 一键归档)")
 		return
 	}
 
