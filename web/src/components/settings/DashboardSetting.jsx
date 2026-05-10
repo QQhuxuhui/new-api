@@ -22,6 +22,7 @@ import { Card, Spin, Button, Modal } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess, toBoolean } from '../../helpers';
 import SettingsAPIInfo from '../../pages/Setting/Dashboard/SettingsAPIInfo';
 import SettingsAnnouncements from '../../pages/Setting/Dashboard/SettingsAnnouncements';
+import SettingsPoster from '../../pages/Setting/Dashboard/SettingsPoster';
 import SettingsFAQ from '../../pages/Setting/Dashboard/SettingsFAQ';
 import SettingsTutorial from '../../pages/Setting/Dashboard/SettingsTutorial';
 import SettingsUptimeKuma from '../../pages/Setting/Dashboard/SettingsUptimeKuma';
@@ -154,6 +155,11 @@ const DashboardSetting = () => {
         {/* 系统公告管理 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsAnnouncements options={inputs} refresh={onRefresh} />
+        </Card>
+
+        {/* 海报弹窗设置 */}
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsPoster />
         </Card>
 
         {/* API信息管理 */}

@@ -28,9 +28,22 @@ import '../../components/common/markdown/markdown.css';
 import { IconPlay, IconFile, IconGithubLogo } from '@douyinfe/semi-icons';
 import { Link, useNavigate } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
+import PosterModal from '../../components/layout/PosterModal';
 import OnboardingWizard from '../../components/onboarding/OnboardingWizard';
 import HomeBento from './HomeBento';
 import './Home.css';
+
+// simpleStringHash8 — 把字符串映射到 8 位 hex(32-bit FNV-1a 变种)。
+// 用于 localStorage poster_seen key 的版本标识,不是安全级 hash。
+// 海报 URL 变化时自然产生不同 key,触发"换图重弹"。
+const simpleStringHash8 = (str) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return ('00000000' + h.toString(16)).slice(-8);
+};
 
 const Home = () => {
   const { t, i18n } = useTranslation();
@@ -39,6 +52,9 @@ const Home = () => {
   const [homePageContentLoaded, setHomePageContentLoaded] = useState(false);
   const [homePageContent, setHomePageContent] = useState('');
   const [noticeVisible, setNoticeVisible] = useState(false);
+  const [posterVisible, setPosterVisible] = useState(false);
+  const [posterImageUrl, setPosterImageUrl] = useState('');
+  const [posterClickUrl, setPosterClickUrl] = useState('');
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const iframeRef = useRef(null);
   const isMobile = useIsMobile();
@@ -90,10 +106,44 @@ const Home = () => {
   };
 
   useEffect(() => {
-    const checkNoticeAndShow = async () => {
+    // 海报优先级:有海报且 EnablePoster=true → 弹海报;否则回退到现有公告
+    // 频率:海报用 poster_seen_<hash8>_<YYYYMMDD>,公告沿用 notice_close_date
+    const checkPosterOrNotice = async () => {
+      const todayDate = new Date();
+      const yyyymmdd = `${todayDate.getFullYear()}${String(
+        todayDate.getMonth() + 1
+      ).padStart(2, '0')}${String(todayDate.getDate()).padStart(2, '0')}`;
+
+      // 优先尝试海报
+      try {
+        const res = await API.get('/api/poster');
+        const { success, data } = res.data || {};
+        if (
+          success &&
+          data &&
+          data.enabled === true &&
+          typeof data.image_url === 'string' &&
+          data.image_url.trim() !== ''
+        ) {
+          const hash8 = simpleStringHash8(data.image_url);
+          const key = `poster_seen_${hash8}_${yyyymmdd}`;
+          if (!localStorage.getItem(key)) {
+            setPosterImageUrl(data.image_url);
+            setPosterClickUrl(data.click_url || '');
+            setPosterVisible(true);
+          }
+          // 有海报无论是否当天看过,**都不**回退到公告(优先级互斥)
+          return;
+        }
+      } catch (error) {
+        // 静默降级到公告
+        console.debug('获取海报失败,回退到公告:', error);
+      }
+
+      // 回退:现有公告
       const lastCloseDate = localStorage.getItem('notice_close_date');
-      const today = new Date().toDateString();
-      if (lastCloseDate !== today) {
+      const todayStr = todayDate.toDateString();
+      if (lastCloseDate !== todayStr) {
         try {
           const res = await API.get('/api/notice');
           const { success, data } = res.data;
@@ -106,8 +156,25 @@ const Home = () => {
       }
     };
 
-    checkNoticeAndShow();
+    checkPosterOrNotice();
   }, []);
+
+  // 海报关闭时写 localStorage,当天不再弹
+  const handlePosterClose = () => {
+    setPosterVisible(false);
+    if (posterImageUrl) {
+      const todayDate = new Date();
+      const yyyymmdd = `${todayDate.getFullYear()}${String(
+        todayDate.getMonth() + 1
+      ).padStart(2, '0')}${String(todayDate.getDate()).padStart(2, '0')}`;
+      const hash8 = simpleStringHash8(posterImageUrl);
+      try {
+        localStorage.setItem(`poster_seen_${hash8}_${yyyymmdd}`, '1');
+      } catch (_) {
+        // localStorage 不可用时静默忽略
+      }
+    }
+  };
 
   useEffect(() => {
     displayHomePageContent().then();
@@ -141,6 +208,12 @@ const Home = () => {
         visible={noticeVisible}
         onClose={() => setNoticeVisible(false)}
         isMobile={isMobile}
+      />
+      <PosterModal
+        visible={posterVisible}
+        imageUrl={posterImageUrl}
+        clickUrl={posterClickUrl}
+        onClose={handlePosterClose}
       />
       <OnboardingWizard
         visible={onboardingVisible}
