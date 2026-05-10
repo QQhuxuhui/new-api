@@ -99,6 +99,9 @@ func main() {
 	// 启动套餐订单后台任务（订单过期和发放重试）
 	service.StartPlanOrderTasks()
 
+	// 启动一级分销返佣后台任务（IP 日志清理 + 自动结算 cron）
+	service.StartAffCronTasks()
+
 	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
 		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
 		if err != nil {
