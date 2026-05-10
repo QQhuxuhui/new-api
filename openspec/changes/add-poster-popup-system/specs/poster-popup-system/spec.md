@@ -8,14 +8,14 @@ existing option table so they can be edited at runtime via the admin
 Setting page, with the secret obscured on read.
 
 #### Scenario: Admin sets OSS credentials via Setting page
-- **GIVEN** an admin opens the Setting Dashboard "海报弹窗" tab
+- **GIVEN** a root admin opens the Setting Dashboard "海报弹窗" tab
 - **WHEN** the admin enters OSSAccessKeyId, OSSAccessKeySecret, OSSEndpoint, OSSBucket and saves
 - **THEN** all four values SHALL be persisted to the option table
 - **AND** the runtime `common.OSSAccessKeyId / OSSAccessKeySecret / OSSEndpoint / OSSBucket` SHALL be updated immediately without restart
 
 #### Scenario: Secret is obscured when admin reads option list
 - **GIVEN** OSSAccessKeySecret is non-empty in the option table
-- **WHEN** an admin GETs the option list (existing endpoint that returns all options)
+- **WHEN** a root admin GETs the option list (existing endpoint that returns all options)
 - **THEN** OSSAccessKeySecret in the response SHALL be replaced with `***` (placeholder string)
 - **AND** the actual secret SHALL never leave the backend
 
@@ -25,6 +25,15 @@ Setting page, with the secret obscured on read.
 - **THEN** the system SHALL detect the placeholder and NOT overwrite the stored secret with `***`
 - **AND** the original secret SHALL remain intact
 
+#### Scenario: Empty string update is also a no-op for OSSAccessKeySecret
+- **GIVEN** a stored OSSAccessKeySecret with a real value
+- **WHEN** the option update receives `OSSAccessKeySecret = ""` (empty string;
+  may happen if the admin clears the password input intending only "do not modify")
+- **THEN** the system SHALL NOT overwrite the stored secret with empty
+- **AND** the original secret SHALL remain intact
+- **AND** the operator-facing way to truly clear OSS configuration is to
+  toggle EnablePoster off (the secret can be reset via DB if ever needed)
+
 #### Scenario: Placeholder collision is documented
 - **GIVEN** the placeholder string is exactly the 3-character literal `***`
 - **AND** an Aliyun OSS AccessKeySecret is normally a 30+ character base64-like string
@@ -33,12 +42,12 @@ Setting page, with the secret obscured on read.
 - **AND** the system SHALL accept any other string as a real value, including strings that contain `***` as a substring (e.g., `abc***def`)
 
 ### Requirement: Poster Image Upload To OSS
-The system SHALL provide an admin-only API that uploads an image
+The system SHALL provide a root root-admin-only API that uploads an image
 file to the configured Aliyun OSS bucket and returns its public URL.
 
 #### Scenario: Admin uploads valid image
 - **GIVEN** OSS credentials are fully configured
-- **AND** an admin posts a multipart file `image/jpeg` of size 1 MB
+- **AND** a root admin posts a multipart file `image/jpeg` of size 1 MB
 - **WHEN** the admin calls `POST /api/option/poster/upload`
 - **THEN** the system SHALL upload the file to the bucket with object key `posters/poster_<uuid><ext>`
 - **AND** the response SHALL be `{success: true, data: {url: "<public_url>"}}`
@@ -58,7 +67,7 @@ file to the configured Aliyun OSS bucket and returns its public URL.
 
 #### Scenario: Upload fails when OSS not configured
 - **GIVEN** OSSAccessKeyId or OSSAccessKeySecret or OSSEndpoint or OSSBucket is empty
-- **WHEN** an admin attempts to upload
+- **WHEN** a root admin attempts to upload
 - **THEN** the response SHALL be a 4xx with message asking to configure OSS first
 - **AND** no upload SHALL be attempted
 
@@ -108,7 +117,7 @@ announcement popup, and SHALL pop each poster at most once per day.
 - **AND** the localStorage key `poster_seen_<md5(X).slice(0,8)>_<YYYYMMDD>` SHALL still exist
 
 #### Scenario: Different poster image triggers new popup
-- **GIVEN** an admin updates PosterImageUrl from X to Y (different URL)
+- **GIVEN** a root admin updates PosterImageUrl from X to Y (different URL)
 - **AND** the user has the localStorage key from yesterday's poster X
 - **WHEN** the user visits the homepage
 - **THEN** the system SHALL pop the new poster Y
@@ -116,7 +125,7 @@ announcement popup, and SHALL pop each poster at most once per day.
 
 #### Scenario: Same-day poster swap also triggers new popup
 - **GIVEN** earlier today the user closed a poster with image_url=X (localStorage key for X+today exists)
-- **AND** an admin then updates PosterImageUrl from X to Y on the same calendar day
+- **AND** a root admin then updates PosterImageUrl from X to Y on the same calendar day
 - **WHEN** the user revisits the homepage later that same day
 - **THEN** the system SHALL pop the new poster Y
 - **AND** the lookup uses key `poster_seen_<md5(Y).slice(0,8)>_<TODAY>` which does not exist, so the popup proceeds
@@ -185,7 +194,7 @@ can be tuned without code changes, all routed through OptionMap.
 - **AND** no poster modal SHALL ever appear in this state
 
 #### Scenario: Hot reload via existing option update flow
-- **GIVEN** an admin updates EnablePoster from false to true via the existing option PUT endpoint
+- **GIVEN** a root admin updates EnablePoster from false to true via the existing option PUT endpoint
 - **WHEN** the next user fetches `/api/poster`
 - **THEN** the response SHALL reflect the new value without a server restart
 - **AND** the same applies to the other 6 keys

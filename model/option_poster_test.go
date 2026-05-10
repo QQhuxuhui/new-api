@@ -107,6 +107,26 @@ func TestUpdateOption_OSSAccessKeySecret_AllowsSubstringStars(t *testing.T) {
 	}
 }
 
+// 关键:OSSAccessKeySecret 收到空字符串时也不覆盖原值
+// (用户清空密码输入框可能只是想"不修改",不是真的想清空 Secret)。
+func TestUpdateOption_OSSAccessKeySecret_EmptyAlsoNoOp(t *testing.T) {
+	setupOptionMapForTest()
+	defer func() { common.OSSAccessKeySecret = "" }()
+
+	original := "real_secret_dont_lose_me"
+	if err := updateOptionMap("OSSAccessKeySecret", original); err != nil {
+		t.Fatalf("set original: %v", err)
+	}
+
+	// 写入空字符串 → 不应覆盖
+	if err := updateOptionMap("OSSAccessKeySecret", ""); err != nil {
+		t.Fatalf("set empty: %v", err)
+	}
+	if common.OSSAccessKeySecret != original {
+		t.Fatalf("empty MUST NOT overwrite; got %q (want %q)", common.OSSAccessKeySecret, original)
+	}
+}
+
 // 真实 secret 写入后,再用一个不同的真实 secret 覆盖 OK。
 func TestUpdateOption_OSSAccessKeySecret_RealOverwritesReal(t *testing.T) {
 	setupOptionMapForTest()

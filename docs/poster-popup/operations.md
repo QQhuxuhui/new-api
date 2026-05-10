@@ -2,6 +2,17 @@
 
 完整设计与需求见 `openspec/changes/add-poster-popup-system/`。
 
+## 权限要求
+
+海报相关的所有运营操作(Setting 页 + 上传 + GET options 含脱敏 secret)
+要求 **root 角色**(`middleware.RootAuth()`)。这与现有 option 表的所有运营
+操作权限一致(Notice、announcements、模型分组、汇率等同样需要 root)。
+
+普通管理员(`admin` 但非 `root`)看不到设置页(Setting 入口 `isRoot()`
+判断)、调用上传接口会被中间件拦截。
+
+公开读接口 `GET /api/poster` 无需认证(给前端首页用)。
+
 ## 配置项(全部进 option 表,后台 Setting → 仪表盘设置 → 海报弹窗)
 
 | Key | 类型 | 默认 | 说明 |
@@ -71,12 +82,16 @@ EnablePoster=true && PosterImageUrl != "" ?
 
 ## 安全机制
 
-### Secret 脱敏
+### Secret 脱敏与防误覆盖
 - `GET /api/option/` 返回时,`OSSAccessKeySecret` **非空** → 替换为 `***`
 - `PUT /api/option/` 收到 `OSSAccessKeySecret = "***"` → 不覆盖原值
+- `PUT /api/option/` 收到 `OSSAccessKeySecret = ""`(空字符串)→ **也不覆盖**(防止管理员清空密码输入框时误清空 Secret)
 - 比较用严格 `==`,不是 `Contains`,真实 secret 中含 `***` 子串可正常保存
 
-⚠️ **运维警告**:**不要把字面量 `***` 设为真实 OSS Secret**。系统会把它识别为占位符,导致写回被忽略。真实 Aliyun OSS Secret 通常 30+ 字符 base64,不会出现这个问题,但请知悉这个边界。
+⚠️ **运维警告**:
+- **不要把字面量 `***` 设为真实 OSS Secret**(会被识别为占位符)
+- **要"关闭"海报功能**:关闭 EnablePoster 即可,**不要**清空 Secret 输入框试图禁用 OSS — 后端会把空字符串当成"不修改"
+- **真要重置 Secret**(罕见运维场景):后台 UI 不支持,请在 DB 中直接 `UPDATE options SET value='' WHERE \`key\`='OSSAccessKeySecret';` 然后调一次 `model.InitOptionMap()` 或重启服务
 
 ### 上传校验
 - 文件大小 ≤ 5 MB

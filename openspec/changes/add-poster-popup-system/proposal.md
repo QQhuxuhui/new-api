@@ -29,7 +29,7 @@
 - **ADDED**: `service/oss_uploader.go` 封装 OSS client,`UploadFileToOSS(reader,
   filename, contentType) (publicUrl, err)` 方法
 - **ADDED**: `controller/poster.go`:
-  - `POST /api/option/poster/upload`(admin only,multipart)— 上传图片到 OSS,
+  - `POST /api/option/poster/upload`(root admin only(挂在 optionRoute,与现有 option 表的运营操作权限一致),multipart)— 上传图片到 OSS,
     成功后返回 public URL,**不**自动覆盖 `PosterImageUrl`(让管理员预览后手动确认)
   - `GET /api/poster`(公开)— 返回 `{enabled, image_url, click_url}` 三字段
 - **ADDED**: 路由注册 + `UploadRateLimit` 中间件保护(防刷)

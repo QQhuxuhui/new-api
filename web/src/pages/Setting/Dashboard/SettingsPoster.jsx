@@ -93,9 +93,11 @@ const SettingsPoster = () => {
       // 2. 顺序逐个更新
       for (const k of POSTER_KEYS) {
         let v = payload[k];
-        // OSSAccessKeySecret:如果用户没改(仍为占位 ***),前端不发送以免后端覆盖
-        // (后端也有相同保护,但前端跳过更直观)
-        if (k === 'OSSAccessKeySecret' && v === '***') {
+        // OSSAccessKeySecret 防误覆盖:
+        //   - 留作 ***(占位符) → 不发送
+        //   - 留空(用户清空密码框) → 不发送(避免误清空已配置的 Secret)
+        // 后端 updateOption 也有相同保护,这里前端跳过更直观且省一次请求。
+        if (k === 'OSSAccessKeySecret' && (v === '***' || v == null || v === '')) {
           continue;
         }
         await updateOne(k, v == null ? '' : String(v));
@@ -156,7 +158,7 @@ const SettingsPoster = () => {
         fullMode={false}
         type='info'
         description={t(
-          '提示:OSSAccessKeySecret 已保存时显示为 ***,留作占位不修改。重新填入新值才会覆盖。请勿把字面量 *** 设为真实 Secret。',
+          '提示:OSSAccessKeySecret 已保存时显示为 ***。留作 *** 或留空都不会修改已保存的 Secret;只有重新填入完整新值才会覆盖。请勿把字面量 *** 设为真实 Secret。',
         )}
         closeIcon={null}
         style={{ marginBottom: 12 }}
@@ -177,8 +179,8 @@ const SettingsPoster = () => {
             field='OSSAccessKeySecret'
             label='OSSAccessKeySecret'
             mode='password'
-            placeholder={t('已保存时显示 ***,留空或保留 *** 表示不修改')}
-            extraText={t('字面量 *** 会被识别为占位符,不会被保存')}
+            placeholder={t('已保存时显示 ***;留空或保留 *** 都不会修改已保存值')}
+            extraText={t('字面量 *** 与空字符串都被识别为"不修改",不会清空已配置的 Secret')}
           />
           <Form.Input
             field='OSSEndpoint'

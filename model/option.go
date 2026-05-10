@@ -434,9 +434,13 @@ func updateOptionMap(key string, value string) (err error) {
 	case "OSSAccessKeyId":
 		common.OSSAccessKeyId = value
 	case "OSSAccessKeySecret":
-		// 占位检测:前端读到脱敏后的 *** 不修改时,直接写回会把真实 secret 覆盖成 ***;
-		// 这里严格 == 比较拦截(不用 Contains,允许真实 secret 含 *** 子串)。
-		if value != "***" {
+		// 防误覆盖检测:
+		//   - "***"  : 前端读到脱敏值不修改时直接写回(占位符)→ 跳过
+		//   - ""     : 前端密码框被清空(用户也许只是想"不修改")→ 跳过
+		// 真实需要清空 OSS 配置时,运营关闭 EnablePoster 即可关闭海报;
+		// 真实需要重置 Secret(罕见运维操作),走 DB 直改或新接口,而不是 UI 空字符串。
+		// 这里严格 == 比较(不用 Contains),允许真实 secret 含 *** 子串。
+		if value != "***" && value != "" {
 			common.OSSAccessKeySecret = value
 		}
 	case "OSSEndpoint":
