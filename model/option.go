@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -195,7 +196,37 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
-	// Save to database first
+	// === 落库前校验 (在 DB.Save 之前拦截非法值,防止 DB 被污染后重启加载丢真实值) ===
+
+	// 防误覆盖:OSSAccessKeySecret 收到字面量 *** 或空字符串都视为 no-op,
+	// 既不落库也不更新运行时变量。否则:
+	//   - 落库 *** → 重启时 loadOptionsFromDatabase 加载 *** → 运行时占位检测仍跳过更新,
+	//     但 OptionMap["OSSAccessKeySecret"]="***" 已被污染,且真实 secret 在 common
+	//     变量初始化时是 "" → 真实 secret 永久丢失
+	//   - 落库 "" → 同上,但 OptionMap value 为 ""
+	// 这是高严重度 bug:必须在落库前拦截。
+	if key == "OSSAccessKeySecret" && (value == "***" || value == "") {
+		return nil // silent no-op,与 spec "saving placeholder is no-op" 契合
+	}
+
+	// 财务类参数范围校验:防止管理员或非法 client 绕过前端校验直接调用 API
+	// 写入越界值,导致后续返佣计算引用异常全局变量。
+	switch key {
+	case "InviterRewardDefaultPercent":
+		if v, err := strconv.ParseFloat(value, 64); err != nil || v < 0 || v > 100 {
+			return errors.New("InviterRewardDefaultPercent 必须为 0-100 之间的数字")
+		}
+	case "InviterRewardCooldownDays":
+		if v, err := strconv.Atoi(value); err != nil || v < 1 || v > 365 {
+			return errors.New("InviterRewardCooldownDays 必须为 1-365 之间的整数")
+		}
+	case "InviterRewardCutoffMs":
+		if v, err := strconv.ParseInt(value, 10, 64); err != nil || v < 0 {
+			return errors.New("InviterRewardCutoffMs 必须为非负整数(0=未启用)")
+		}
+	}
+
+	// === 落库 ===
 	option := Option{
 		Key: key,
 	}

@@ -105,6 +105,23 @@ const Home = () => {
     }
   };
 
+  // 公告检查抽成可复用函数(独立于海报路径)。海报存在时跳过;
+  // 海报 fetch 失败 / 海报图片加载失败 / 海报无效 → 都可以回退到这里。
+  const checkAnnouncementAndShow = async () => {
+    const todayStr = new Date().toDateString();
+    const lastCloseDate = localStorage.getItem('notice_close_date');
+    if (lastCloseDate === todayStr) return;
+    try {
+      const res = await API.get('/api/notice');
+      const { success, data } = res.data;
+      if (success && data && data.trim() !== '') {
+        setNoticeVisible(true);
+      }
+    } catch (error) {
+      console.error('获取公告失败:', error);
+    }
+  };
+
   useEffect(() => {
     // 海报优先级:有海报且 EnablePoster=true → 弹海报;否则回退到现有公告
     // 频率:海报用 poster_seen_<hash8>_<YYYYMMDD>,公告沿用 notice_close_date
@@ -132,36 +149,35 @@ const Home = () => {
             setPosterClickUrl(data.click_url || '');
             setPosterVisible(true);
           }
-          // 有海报无论是否当天看过,**都不**回退到公告(优先级互斥)
+          // 有海报无论是否当天看过,**都不**回退到公告(优先级互斥)。
+          // 注:**图片加载失败**会经 PosterModal onImageError → handlePosterImageError
+          //     重新触发 checkAnnouncementAndShow,实现 graceful 降级。
           return;
         }
       } catch (error) {
-        // 静默降级到公告
+        // /api/poster 调用本身失败 → 静默降级到公告
         console.debug('获取海报失败,回退到公告:', error);
       }
 
       // 回退:现有公告
-      const lastCloseDate = localStorage.getItem('notice_close_date');
-      const todayStr = todayDate.toDateString();
-      if (lastCloseDate !== todayStr) {
-        try {
-          const res = await API.get('/api/notice');
-          const { success, data } = res.data;
-          if (success && data && data.trim() !== '') {
-            setNoticeVisible(true);
-          }
-        } catch (error) {
-          console.error('获取公告失败:', error);
-        }
-      }
+      checkAnnouncementAndShow();
     };
 
     checkPosterOrNotice();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 普通关闭:仅 setVisible(false),下次刷新还会弹(与公告 NoticeModal 默认行为一致)
   const handlePosterClose = () => {
     setPosterVisible(false);
+  };
+
+  // 图片加载失败(URL 错 / 403 / OSS 失效等):立即关海报 + 降级回公告。
+  // 不写 localStorage(下次刷新可能 OSS 已恢复,允许再次尝试)。
+  const handlePosterImageError = () => {
+    console.warn('海报图片加载失败,降级到系统公告');
+    setPosterVisible(false);
+    checkAnnouncementAndShow();
   };
 
   // "今日不再弹":写 localStorage 后关闭,当天不再弹同一海报
@@ -220,6 +236,7 @@ const Home = () => {
         clickUrl={posterClickUrl}
         onClose={handlePosterClose}
         onCloseToday={handlePosterCloseToday}
+        onImageError={handlePosterImageError}
       />
       <OnboardingWizard
         visible={onboardingVisible}

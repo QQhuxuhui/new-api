@@ -24,6 +24,8 @@ Setting page, with the secret obscured on read.
 - **WHEN** the admin saves the form
 - **THEN** the system SHALL detect the placeholder and NOT overwrite the stored secret with `***`
 - **AND** the original secret SHALL remain intact
+- **AND** the rejection MUST happen at the `model.UpdateOption` entry point BEFORE any database write, so the underlying option row is never poisoned (otherwise on next service restart, `loadOptionsFromDatabase` would load `***` and the real secret would be lost permanently)
+- **AND** the same protection applies to empty string `""` (admin clearing the password field)
 
 #### Scenario: Empty string update is also a no-op for OSSAccessKeySecret
 - **GIVEN** a stored OSSAccessKeySecret with a real value
@@ -169,16 +171,18 @@ the URL in a new tab.
 - **THEN** the image SHALL NOT be wrapped in an anchor
 - **AND** the image SHALL be displayed without click handler
 
-### Requirement: Poster Image Load Failure Is Silent
-The PosterModal SHALL handle broken image URLs gracefully without
-breaking the modal close flow.
+### Requirement: Poster Image Load Failure Falls Back To Announcement
+The PosterModal SHALL handle broken image URLs gracefully and fall
+back to the system announcement so users always see at least one of
+the two popup channels.
 
-#### Scenario: Broken image URL still allows close
-- **GIVEN** PosterImageUrl points to a non-existent OSS object
-- **WHEN** the modal renders
-- **THEN** the `<img onError>` handler SHALL hide the image (or show a placeholder)
-- **AND** the close button SHALL still be usable
-- **AND** localStorage SHALL still record this poster was "shown" so it doesn't loop
+#### Scenario: Broken image URL falls back to announcement
+- **GIVEN** PosterImageUrl points to a non-existent / 403 / cross-origin-blocked OSS object
+- **WHEN** the modal renders and `<img onError>` fires
+- **THEN** the modal SHALL be closed immediately
+- **AND** the system SHALL invoke the announcement check path (existing `/api/notice` flow)
+- **AND** if the user has not closed today's announcement, the NoticeModal SHALL appear
+- **AND** localStorage `poster_seen_*` SHALL NOT be written (next refresh may succeed if OSS recovered)
 
 ### Requirement: Existing Announcement Mechanism Unchanged
 The existing system announcement mechanism SHALL remain functionally unchanged: OptionMap["Notice"], /api/notice endpoint, NoticeModal component, and localStorage.notice_close_date all continue to behave exactly as before this change.

@@ -316,6 +316,16 @@ The system SHALL expose configuration flags so that affiliate behavior can be tu
 - **THEN** it SHALL exit immediately without modifying any audit log
 - **AND** audit log writing on payment success SHALL continue normally (so resuming the cron later still has data to settle)
 
+#### Scenario: Server-side range validation for financial config
+- **GIVEN** any client (admin UI, curl, internal tool) calls `PUT /api/option/` with one of the affiliate config keys
+- **WHEN** the value is parsed at the `model.UpdateOption` entry point
+- **THEN** the following ranges SHALL be enforced **before any DB write**:
+  - `InviterRewardDefaultPercent`: finite number in `[0, 100]` (0 is legal — operator may temporarily disable new reward accrual)
+  - `InviterRewardCooldownDays`: integer in `[1, 365]`
+  - `InviterRewardCutoffMs`: non-negative integer (`0` = disabled)
+- **AND** invalid values SHALL return an error without persisting (so corrupt frontend or scripted clients cannot poison the option table with out-of-range values)
+- **AND** front-end validation alone is NOT sufficient for these financial parameters
+
 ### Requirement: Manual Settlement Recovery API
 The system SHALL provide an admin API to manually settle a specific stuck audit log, for use when the cron has missed a record due to bugs or temporary failures.
 

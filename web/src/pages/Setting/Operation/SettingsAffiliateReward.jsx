@@ -59,13 +59,19 @@ const SettingsAffiliateReward = () => {
       const next = { ...config };
       data.forEach((item) => {
         if (item.key === 'InviterRewardDefaultPercent') {
-          next[item.key] = parseFloat(item.value) || 10;
+          // 不能用 `parseFloat(...) || 10` — "0" 是合法配置值(临时停发新返佣),
+          // 但会被 || 当成 falsy 还原成 10,刷新后保存又把 0 覆盖回 10。
+          const n = parseFloat(item.value);
+          if (Number.isFinite(n)) next[item.key] = n;
         } else if (item.key === 'InviterRewardCooldownDays') {
-          next[item.key] = parseInt(item.value) || 7;
+          // 服务端约束 1-365,这里只要 parse 成功且为正整数就用,不用 || 兜底
+          const n = parseInt(item.value, 10);
+          if (Number.isFinite(n) && n > 0) next[item.key] = n;
         } else if (item.key === 'EnableAffAutoSettle') {
           next[item.key] = item.value === 'true' || item.value === true;
         } else if (item.key === 'InviterRewardCutoffMs') {
-          setCutoffMs(parseInt(item.value) || 0);
+          const n = parseInt(item.value, 10);
+          setCutoffMs(Number.isFinite(n) && n >= 0 ? n : 0);
         }
       });
       setConfig(next);
