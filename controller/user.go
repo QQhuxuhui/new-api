@@ -110,6 +110,14 @@ func setupLogin(user *model.User, c *gin.Context) {
 		})
 		return
 	}
+
+	// Fire-and-forget: 一级分销返佣的"同 IP"反作弊数据源。
+	// 失败不阻塞登录主流程。30 天后由 cleanup cron 清理。
+	go func(uid int, ip string) {
+		if err := model.RecordUserLoginIp(uid, ip); err != nil {
+			common.SysLog(fmt.Sprintf("RecordUserLoginIp failed for user=%d ip=%s: %v", uid, ip, err))
+		}
+	}(user.Id, c.ClientIP())
 	cleanUser := model.User{
 		Id:          user.Id,
 		Username:    user.Username,
@@ -657,6 +665,16 @@ func UpdateUser(c *gin.Context) {
 	}
 	if originUser.Quota != updatedUser.Quota {
 		model.RecordLog(originUser.Id, model.LogTypeManage, fmt.Sprintf("管理员将用户额度从 %s修改为 %s", logger.LogQuota(originUser.Quota), logger.LogQuota(updatedUser.Quota)))
+	}
+	if originUser.AffStatus != updatedUser.AffStatus {
+		statusName := func(s int) string {
+			if s == 1 {
+				return "已冻结"
+			}
+			return "正常"
+		}
+		model.RecordLog(originUser.Id, model.LogTypeManage,
+			fmt.Sprintf("管理员将用户分销状态从 %s 修改为 %s", statusName(originUser.AffStatus), statusName(updatedUser.AffStatus)))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
