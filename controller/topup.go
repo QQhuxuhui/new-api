@@ -295,6 +295,11 @@ func EpayNotify(c *gin.Context) {
 //
 // 必须在 fire-and-forget goroutine 里调用;失败不阻塞主流程。
 // 也被 AdminCompleteTopUp 调用(管理员补单 = 真实支付救急,需要触发 audit log)。
+//
+// 返佣基数(creditUsd = 实际到账 USD 额度)按支付方式分派:
+//   - stripe: topUp.Money 即 chargedMoney(USD,与到账 quota 一致)
+//   - creem:  topUp.Amount 是 token 数,除以 QuotaPerUnit 得 USD
+//   - 其他(易支付 alipay/wxpay): topUp.Amount 是 USD 面值,Money 是 CNY 实付
 func affHookForTopUp(topUp *model.TopUp, provider, accountId string) {
 	if topUp == nil {
 		return
@@ -308,10 +313,27 @@ func affHookForTopUp(topUp *model.TopUp, provider, accountId string) {
 	if paidAtMs == 0 {
 		paidAtMs = time.Now().UnixMilli()
 	}
+
+	var creditUsd float64
+	currency := model.AffAuditCurrencyUsd
+	switch topUp.PaymentMethod {
+	case PaymentMethodStripe:
+		creditUsd = topUp.Money
+	case PaymentMethodCreem:
+		if common.QuotaPerUnit > 0 {
+			creditUsd = float64(topUp.Amount) / common.QuotaPerUnit
+		}
+	default:
+		// 易支付(alipay / wxpay 等): Money 是 CNY 实付,Amount 是 USD 面值
+		creditUsd = float64(topUp.Amount)
+		currency = model.AffAuditCurrencyCny
+	}
+
 	if _, err := service.CreateAffAuditLogIfEligible(
 		topUp.UserId,
 		model.AffAuditSourceTopUp, topUp.Id,
-		topUp.Money, model.AffAuditCurrencyUsd,
+		topUp.Money, currency,
+		creditUsd,
 		paidAtMs,
 	); err != nil {
 		common.SysLog(fmt.Sprintf("CreateAffAuditLogIfEligible topup failed id=%d: %v", topUp.Id, err))

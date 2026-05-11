@@ -526,6 +526,7 @@ func EpayPlanOrderNotify(c *gin.Context) {
 		affHookUserId     int
 		affHookOrderId    int
 		affHookFinalPrice float64
+		affHookPlanQuota  int64
 		affHookPlanType   string
 		affHookPaidAtMs   int64
 		affHookShouldRun  bool
@@ -637,6 +638,7 @@ func EpayPlanOrderNotify(c *gin.Context) {
 		affHookUserId = order.UserId
 		affHookOrderId = order.Id
 		affHookFinalPrice = order.FinalPrice
+		affHookPlanQuota = order.PlanQuota
 		affHookPlanType = order.PlanType
 		affHookPaidAtMs = now
 		affHookShouldRun = true
@@ -661,18 +663,19 @@ func EpayPlanOrderNotify(c *gin.Context) {
 		} else if v := params["buyer_logon_id"]; v != "" {
 			provider, accountId = model.PaymentAccountProviderAlipay, v
 		}
-		go affHookForPlanOrder(affHookOrderId, affHookUserId, affHookFinalPrice, affHookPlanType, affHookPaidAtMs, provider, accountId)
+		go affHookForPlanOrder(affHookOrderId, affHookUserId, affHookFinalPrice, affHookPlanQuota, affHookPlanType, affHookPaidAtMs, provider, accountId)
 	}
 
 	c.Writer.Write([]byte("success"))
 }
 
 // affHookForPlanOrder 在 plan_orders.status='paid' 后异步触发反作弊数据源 + audit log。
-// 注意:plan_orders.final_price 是 CNY,service 层会按当前 priceRatio 换算到 USD 并冻结汇率。
+// 注意:plan_orders.final_price 是 CNY 实付金额(含折扣);返佣以套餐 PlanQuota 换算
+// 后的 USD 额度(用户实际到账)为基数,final_price 仅作原币记录展示。
 //
 // 试用排除:plan_type='trial' 或 final_price ≤ 1 直接跳过(spec scenario "Trial plan does not trigger audit log")。
 // 排除逻辑放在 hook 内部,确保所有调用方(正常支付回调 / admin 手动补单)统一受保护。
-func affHookForPlanOrder(orderId, userId int, finalPriceCny float64, planType string, paidAtMs int64, provider, accountId string) {
+func affHookForPlanOrder(orderId, userId int, finalPriceCny float64, planQuota int64, planType string, paidAtMs int64, provider, accountId string) {
 	if planType == "trial" || finalPriceCny <= 1 {
 		common.SysLog(fmt.Sprintf("aff_audit: skip trial/low-price plan order_id=%d type=%s price=%.2f",
 			orderId, planType, finalPriceCny))
@@ -683,10 +686,15 @@ func affHookForPlanOrder(orderId, userId int, finalPriceCny float64, planType st
 			common.SysLog(fmt.Sprintf("UpsertUserPaymentAccount %s plan_order failed user=%d: %v", provider, userId, err))
 		}
 	}
+	var creditUsd float64
+	if common.QuotaPerUnit > 0 {
+		creditUsd = float64(planQuota) / common.QuotaPerUnit
+	}
 	if _, err := planservice.CreateAffAuditLogIfEligible(
 		userId,
 		model.AffAuditSourcePlanOrder, orderId,
 		finalPriceCny, model.AffAuditCurrencyCny,
+		creditUsd,
 		paidAtMs,
 	); err != nil {
 		common.SysLog(fmt.Sprintf("CreateAffAuditLogIfEligible plan_order failed id=%d: %v", orderId, err))

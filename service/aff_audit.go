@@ -21,18 +21,21 @@ import (
 //   - 通过 → 写入 status='pending',eligible_at = paidAtMs + cooldown
 //   - (source_type, source_id) 唯一索引冲突 → silent skip,返回 (false, nil)
 //
-// USD 直接使用 amountNative;CNY 按当前 priceRatio 换算后冻结到字段 PriceRatioUsed。
+// 返佣基数:`creditUsd`(= 用户充值后实际兑换到账的美金额度),由调用方按
+// 支付路径计算后传入(top_ups / topup_orders / plan_orders 各路径口径不同)。
+// `amountNative` + `currency` 仅作记录,反映用户实际支付的原币金额,用于审计展示。
 //
-// 调用方:三个支付成功 hook(controller/topup.go / topup_order.go / plan_order.go)。
+// 调用方:三个支付成功 hook(controller/topup.go / topup_order.go / plan_purchase.go)。
 // 参数:
 //   - inviteeUserId:被邀请人 ID(service 内部 fetch User,确保拿到最新 InviterId)
 //   - sourceType / sourceId:充值流水定位(用于唯一索引)
-//   - amountNative:原币金额(USD 或 CNY)
+//   - amountNative:原币支付金额(USD 或 CNY,仅记录用)
 //   - currency:model.AffAuditCurrencyUsd / AffAuditCurrencyCny
+//   - creditUsd:用户实际到账的 USD 额度(返佣计算基数)
 //   - paidAtMs:支付完成时间戳(毫秒),用于计算 eligible_at
 //
 // 返回 (created, err);created=true 表示插入了一行(无论 pending / rejected)。
-func CreateAffAuditLogIfEligible(inviteeUserId int, sourceType string, sourceId int, amountNative float64, currency string, paidAtMs int64) (bool, error) {
+func CreateAffAuditLogIfEligible(inviteeUserId int, sourceType string, sourceId int, amountNative float64, currency string, creditUsd float64, paidAtMs int64) (bool, error) {
 	if inviteeUserId == 0 {
 		return false, nil
 	}
@@ -58,26 +61,25 @@ func CreateAffAuditLogIfEligible(inviteeUserId int, sourceType string, sourceId 
 		return false, err
 	}
 
-	// 2. 计算金额:USD 直接用,CNY 按当前 priceRatio 换算并冻结
-	var (
-		amountUsd      float64
-		priceRatioUsed float64
-	)
+	// 2. 校验 currency 合法,并(仅 CNY 路径)冻结当时的 priceRatio 供审计追溯。
+	//    返佣不再用原币换算,而是直接用调用方传入的 creditUsd。
+	var priceRatioUsed float64
 	switch currency {
 	case model.AffAuditCurrencyUsd:
-		amountUsd = amountNative
 		priceRatioUsed = 0
 	case model.AffAuditCurrencyCny:
 		ratio := operation_setting.Price
 		if ratio <= 0 {
 			ratio = 7.0 // safety fallback
 		}
-		amountUsd = amountNative / ratio
 		priceRatioUsed = ratio
 	default:
 		return false, fmt.Errorf("unsupported currency: %q", currency)
 	}
-	rewardUsd := amountUsd * common.InviterRewardDefaultPercent / 100
+	if creditUsd < 0 {
+		creditUsd = 0
+	}
+	rewardUsd := creditUsd * common.InviterRewardDefaultPercent / 100
 
 	// 3. 反作弊预检
 	rejectReason := ""
@@ -107,7 +109,7 @@ func CreateAffAuditLogIfEligible(inviteeUserId int, sourceType string, sourceId 
 		SourceId:       sourceId,
 		AmountNative:   amountNative,
 		Currency:       currency,
-		AmountUsd:      amountUsd,
+		AmountUsd:      creditUsd,
 		PriceRatioUsed: priceRatioUsed,
 		RewardUsd:      rewardUsd,
 		Status:         status,

@@ -314,6 +314,7 @@ func EpayTopupOrderNotify(c *gin.Context) {
 	var logUserId int
 	var logQuota int64
 	var logMoney float64
+	var logAmountUsd float64
 	var logTopupOrderId int
 	var logPaidAtMs int64
 	var shouldRecordLog bool
@@ -421,6 +422,7 @@ func EpayTopupOrderNotify(c *gin.Context) {
 		logUserId = order.UserId
 		logQuota = order.Quota
 		logMoney = order.FinalPrice
+		logAmountUsd = order.Amount
 		logTopupOrderId = order.Id
 		logPaidAtMs = now
 		shouldRecordLog = true
@@ -450,15 +452,16 @@ func EpayTopupOrderNotify(c *gin.Context) {
 		} else if v := params["buyer_logon_id"]; v != "" {
 			provider, accountId = model.PaymentAccountProviderAlipay, v
 		}
-		go affHookForTopupOrder(logTopupOrderId, logUserId, logMoney, logPaidAtMs, provider, accountId)
+		go affHookForTopupOrder(logTopupOrderId, logUserId, logMoney, logAmountUsd, logPaidAtMs, provider, accountId)
 	}
 
 	c.Writer.Write([]byte("success"))
 }
 
 // affHookForTopupOrder 在 topup_orders.status='paid' 后异步触发反作弊数据源 + audit log。
-// 注意:topup_order 的 final_price 是 CNY,service 层会按当前 priceRatio 换算到 USD 并冻结汇率。
-func affHookForTopupOrder(orderId, userId int, finalPriceCny float64, paidAtMs int64, provider, accountId string) {
+// 注意:topup_order 的 final_price 是 CNY 实付金额(含折扣),amount 是 USD 面值(到账额度)。
+// 返佣以 amountUsd(到账额度)为基数,final_price 仅作原币记录展示。
+func affHookForTopupOrder(orderId, userId int, finalPriceCny, amountUsd float64, paidAtMs int64, provider, accountId string) {
 	if accountId != "" && provider != "" {
 		if err := model.UpsertUserPaymentAccount(userId, provider, accountId); err != nil {
 			common.SysLog(fmt.Sprintf("UpsertUserPaymentAccount %s topup_order failed user=%d: %v", provider, userId, err))
@@ -468,6 +471,7 @@ func affHookForTopupOrder(orderId, userId int, finalPriceCny float64, paidAtMs i
 		userId,
 		model.AffAuditSourceTopUpOrder, orderId,
 		finalPriceCny, model.AffAuditCurrencyCny,
+		amountUsd,
 		paidAtMs,
 	); err != nil {
 		common.SysLog(fmt.Sprintf("CreateAffAuditLogIfEligible topup_order failed id=%d: %v", orderId, err))

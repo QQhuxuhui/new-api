@@ -77,7 +77,7 @@ func TestCreateAffAuditLogIfEligible_NoInviterDoesNothing(t *testing.T) {
 	if err := model.DB.Create(user).Error; err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	created, err := CreateAffAuditLogIfEligible(user.Id, model.AffAuditSourceTopUp, 1, 10.0, model.AffAuditCurrencyUsd, time.Now().UnixMilli())
+	created, err := CreateAffAuditLogIfEligible(user.Id, model.AffAuditSourceTopUp, 1, 10.0, model.AffAuditCurrencyUsd, 10.0, time.Now().UnixMilli())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestCreateAffAuditLogIfEligible_HappyPathPending(t *testing.T) {
 	inviter, invitee := makeInviterAndInvitee(t, false)
 	paidAt := time.Now().UnixMilli()
 
-	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 100, 10.0, model.AffAuditCurrencyUsd, paidAt)
+	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 100, 10.0, model.AffAuditCurrencyUsd, 10.0, paidAt)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -126,11 +126,13 @@ func TestCreateAffAuditLogIfEligible_HappyPathPending(t *testing.T) {
 	}
 }
 
-func TestCreateAffAuditLogIfEligible_CnyConvertsToUsd(t *testing.T) {
+func TestCreateAffAuditLogIfEligible_CnyRecordsRatioAndUsesCreditUsd(t *testing.T) {
 	setupAffAuditServiceTestDB(t)
 	_, invitee := makeInviterAndInvitee(t, false)
 
-	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourcePlanOrder, 100, 70.0, model.AffAuditCurrencyCny, time.Now().UnixMilli())
+	// 70 CNY 实付,但用户实际到账额度 $10(等价不打折的 70/7=$10,也可能是含折扣套餐 → creditUsd 由调用方决定)。
+	// 返佣应基于 creditUsd($10),而不是 amountNative/priceRatio。
+	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourcePlanOrder, 100, 70.0, model.AffAuditCurrencyCny, 10.0, time.Now().UnixMilli())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -146,13 +148,39 @@ func TestCreateAffAuditLogIfEligible_CnyConvertsToUsd(t *testing.T) {
 		t.Fatalf("amount_native: %v", log.AmountNative)
 	}
 	if log.PriceRatioUsed != 7.0 {
-		t.Fatalf("price_ratio_used: want 7.0, got %v", log.PriceRatioUsed)
+		t.Fatalf("price_ratio_used: want 7.0 (frozen for audit), got %v", log.PriceRatioUsed)
 	}
 	if log.AmountUsd != 10.0 {
-		t.Fatalf("amount_usd: want 10.0 (70/7), got %v", log.AmountUsd)
+		t.Fatalf("amount_usd: want creditUsd=10.0, got %v", log.AmountUsd)
 	}
 	if log.RewardUsd != 1.0 {
 		t.Fatalf("reward_usd: want 1.0, got %v", log.RewardUsd)
+	}
+}
+
+func TestCreateAffAuditLogIfEligible_DiscountedCnyRewardsByCreditNotPaid(t *testing.T) {
+	setupAffAuditServiceTestDB(t)
+	_, invitee := makeInviterAndInvitee(t, false)
+
+	// 场景:$10 套餐 + 9 折 → 实付 63 CNY,但用户到账仍为 $10。
+	// 返佣必须基于到账额度 $10(=> $1.0),不能用实付金额换算后的 $9。
+	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourcePlanOrder, 101, 63.0, model.AffAuditCurrencyCny, 10.0, time.Now().UnixMilli())
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !created {
+		t.Fatal("expected created=true")
+	}
+	var log model.AffAuditLog
+	model.DB.First(&log)
+	if log.AmountNative != 63.0 {
+		t.Fatalf("amount_native (paid CNY): want 63.0, got %v", log.AmountNative)
+	}
+	if log.AmountUsd != 10.0 {
+		t.Fatalf("amount_usd (credit basis): want 10.0, got %v", log.AmountUsd)
+	}
+	if log.RewardUsd != 1.0 {
+		t.Fatalf("reward_usd: want 1.0 (10%% of $10 credit), got %v", log.RewardUsd)
 	}
 }
 
@@ -160,7 +188,7 @@ func TestCreateAffAuditLogIfEligible_FrozenInviterRejected(t *testing.T) {
 	setupAffAuditServiceTestDB(t)
 	_, invitee := makeInviterAndInvitee(t, true) // inviter frozen
 
-	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 1, 10.0, model.AffAuditCurrencyUsd, time.Now().UnixMilli())
+	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 1, 10.0, model.AffAuditCurrencyUsd, 10.0, time.Now().UnixMilli())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -185,7 +213,7 @@ func TestCreateAffAuditLogIfEligible_SameIpRejected(t *testing.T) {
 	model.DB.Create(&model.UserLoginIpLog{UserId: inviter.Id, Ip: "1.2.3.4", LoggedAt: now - 1000})
 	model.DB.Create(&model.UserLoginIpLog{UserId: invitee.Id, Ip: "1.2.3.4", LoggedAt: now - 500})
 
-	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 1, 10.0, model.AffAuditCurrencyUsd, now)
+	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 1, 10.0, model.AffAuditCurrencyUsd, 10.0, now)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -205,7 +233,7 @@ func TestCreateAffAuditLogIfEligible_SamePaymentAccountRejected(t *testing.T) {
 	model.UpsertUserPaymentAccount(inviter.Id, model.PaymentAccountProviderStripe, "cus_X")
 	model.UpsertUserPaymentAccount(invitee.Id, model.PaymentAccountProviderStripe, "cus_X") // same!
 
-	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 1, 10.0, model.AffAuditCurrencyUsd, time.Now().UnixMilli())
+	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 1, 10.0, model.AffAuditCurrencyUsd, 10.0, time.Now().UnixMilli())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -224,12 +252,12 @@ func TestCreateAffAuditLogIfEligible_DuplicateSourceSkipsSilently(t *testing.T) 
 	_, invitee := makeInviterAndInvitee(t, false)
 	now := time.Now().UnixMilli()
 
-	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 999, 10.0, model.AffAuditCurrencyUsd, now)
+	created, err := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 999, 10.0, model.AffAuditCurrencyUsd, 10.0, now)
 	if err != nil || !created {
 		t.Fatalf("first: created=%v err=%v", created, err)
 	}
 	// Same (source_type, source_id) again — should silently skip
-	created2, err2 := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 999, 10.0, model.AffAuditCurrencyUsd, now)
+	created2, err2 := CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 999, 10.0, model.AffAuditCurrencyUsd, 10.0, now)
 	if err2 != nil {
 		t.Fatalf("second call should not error, got: %v", err2)
 	}
@@ -247,13 +275,13 @@ func TestCreateAffAuditLogIfEligible_PercentChangeDoesNotAffectExisting(t *testi
 	setupAffAuditServiceTestDB(t)
 	_, invitee := makeInviterAndInvitee(t, false)
 	common.InviterRewardDefaultPercent = 10
-	CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 1, 10.0, model.AffAuditCurrencyUsd, time.Now().UnixMilli())
+	CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 1, 10.0, model.AffAuditCurrencyUsd, 10.0, time.Now().UnixMilli())
 
 	// Change percent
 	common.InviterRewardDefaultPercent = 5
 
 	// New log uses new percent
-	CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 2, 10.0, model.AffAuditCurrencyUsd, time.Now().UnixMilli())
+	CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 2, 10.0, model.AffAuditCurrencyUsd, 10.0, time.Now().UnixMilli())
 
 	var logs []model.AffAuditLog
 	model.DB.Order("source_id ASC").Find(&logs)
@@ -271,7 +299,7 @@ func TestCreateAffAuditLogIfEligible_PercentChangeDoesNotAffectExisting(t *testi
 func TestMarkRefunded_PendingReversed(t *testing.T) {
 	setupAffAuditServiceTestDB(t)
 	_, invitee := makeInviterAndInvitee(t, false)
-	CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 50, 10.0, model.AffAuditCurrencyUsd, time.Now().UnixMilli())
+	CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 50, 10.0, model.AffAuditCurrencyUsd, 10.0, time.Now().UnixMilli())
 
 	if err := MarkRefunded(model.AffAuditSourceTopUp, 50); err != nil {
 		t.Fatalf("MarkRefunded: %v", err)
@@ -286,7 +314,7 @@ func TestMarkRefunded_PendingReversed(t *testing.T) {
 func TestMarkRefunded_SettledAlsoReversed(t *testing.T) {
 	setupAffAuditServiceTestDB(t)
 	_, invitee := makeInviterAndInvitee(t, false)
-	CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 50, 10.0, model.AffAuditCurrencyUsd, time.Now().UnixMilli())
+	CreateAffAuditLogIfEligible(invitee.Id, model.AffAuditSourceTopUp, 50, 10.0, model.AffAuditCurrencyUsd, 10.0, time.Now().UnixMilli())
 
 	// Manually mark as settled (simulating cron)
 	model.DB.Model(&model.AffAuditLog{}).Where("source_id = ?", 50).
