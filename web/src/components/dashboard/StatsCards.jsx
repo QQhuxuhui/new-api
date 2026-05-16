@@ -17,12 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, Avatar, Skeleton, Tag, Progress, Button, Banner } from '@douyinfe/semi-ui';
 import { VChart } from '@visactor/react-vchart';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { TrendingUp } from 'lucide-react';
+import { API } from '../../helpers';
+import AffiliateRewardCard from './AffiliateRewardCard';
 
 const StatsCards = ({
   groupedStatsData,
@@ -37,6 +39,34 @@ const StatsCards = ({
 }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+
+  // Affiliate reward summary (for the third dashboard slot)
+  // NOTE: only fetch the read-only summary here. The aff code endpoint
+  // /api/user/aff has a write side-effect (auto-generates a code on first call),
+  // so it is lazily fetched inside AffiliateRewardCard when the user clicks copy.
+  const [affSummary, setAffSummary] = useState(null);
+  const [affLoading, setAffLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    API.get('/api/user/aff/summary')
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.data?.success) {
+          setAffSummary(res.data.data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setAffLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const showAffSlot =
+    affLoading || (affSummary && (affSummary.reward_percent ?? 0) > 0);
 
   // Helper function to format date
   const formatDate = (timestamp) => {
@@ -288,70 +318,85 @@ const StatsCards = ({
     }))
   );
 
+  const mainSpanClass = showAffSlot ? 'lg:col-span-2' : '';
+  const gridColsClass = showAffSlot ? 'lg:grid-cols-5' : 'lg:grid-cols-2';
+
   return (
     <div className="mb-4 space-y-4">
-      {/* First Row: Subscription + Account Data */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+      {/* First Row: Subscription + Account Data (+ Affiliate when enabled) */}
+      <div className={`grid gap-4 grid-cols-1 ${gridColsClass}`}>
         {/* Subscription Card */}
-        {renderSubscriptionCard()}
+        <div className={mainSpanClass}>{renderSubscriptionCard()}</div>
 
         {/* Account Data Card */}
         {accountData && (
-          <Card
-            {...CARD_PROPS}
-            className={`${accountData.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200`}
-            title={
-              <div className="flex items-center justify-between w-full">
-                {accountData.title}
-                <Button
-                  theme="solid"
-                  type="primary"
-                  onClick={() => navigate('/console/topup')}
-                >
-                  {t('充值')}
-                </Button>
-              </div>
-            }
-          >
-            <div className="grid grid-cols-2 gap-4">
-              {accountData.items.map((item, itemIdx) => (
-                <div
-                  key={itemIdx}
-                  className="flex items-center gap-3 cursor-pointer hover:bg-white/50 rounded-xl p-3 transition-all duration-200"
-                  onClick={item.onClick}
-                >
-                  <Avatar
-                    size="default"
-                    color={item.avatarColor}
+          <div className={mainSpanClass}>
+            <Card
+              {...CARD_PROPS}
+              className={`${accountData.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200`}
+              title={
+                <div className="flex items-center justify-between w-full">
+                  {accountData.title}
+                  <Button
+                    theme="solid"
+                    type="primary"
+                    onClick={() => navigate('/console/topup')}
                   >
-                    {item.icon}
-                  </Avatar>
-                  <div className="flex-1">
-                    <div className="text-xs text-gray-500">{item.title}</div>
-                    <div className="text-xl font-bold">
-                      <Skeleton
-                        loading={loading}
-                        active
-                        placeholder={
-                          <Skeleton.Paragraph
-                            active
-                            rows={1}
-                            style={{
-                              width: '80px',
-                              height: '28px',
-                              marginTop: '4px',
-                            }}
-                          />
-                        }
-                      >
-                        {item.value}
-                      </Skeleton>
+                    {t('充值')}
+                  </Button>
+                </div>
+              }
+            >
+              <div className="grid grid-cols-2 gap-4">
+                {accountData.items.map((item, itemIdx) => (
+                  <div
+                    key={itemIdx}
+                    className="flex items-center gap-3 cursor-pointer hover:bg-white/50 rounded-xl p-3 transition-all duration-200"
+                    onClick={item.onClick}
+                  >
+                    <Avatar
+                      size="default"
+                      color={item.avatarColor}
+                    >
+                      {item.icon}
+                    </Avatar>
+                    <div className="flex-1">
+                      <div className="text-xs text-gray-500">{item.title}</div>
+                      <div className="text-xl font-bold">
+                        <Skeleton
+                          loading={loading}
+                          active
+                          placeholder={
+                            <Skeleton.Paragraph
+                              active
+                              rows={1}
+                              style={{
+                                width: '80px',
+                                height: '28px',
+                                marginTop: '4px',
+                              }}
+                            />
+                          }
+                        >
+                          {item.value}
+                        </Skeleton>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </Card>
+                ))}
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* Affiliate Reward Card (3rd slot) */}
+        {showAffSlot && (
+          <div className="lg:col-span-1">
+            <AffiliateRewardCard
+              summary={affSummary}
+              loading={affLoading}
+            />
+          </div>
         )}
       </div>
     </div>
