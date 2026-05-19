@@ -48,6 +48,7 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
   const isNewYear = currentDate.getMonth() === 0 && currentDate.getDate() === 1;
 
   const isSelfUseMode = statusState?.status?.self_use_mode_enabled || false;
+  const isRegisterEnabled = statusState?.status?.register_enabled !== false;
   const docsLink = statusState?.status?.docs_link || '';
   const isDemoSiteMode = statusState?.status?.demo_site_enabled || false;
   const tutorialEnabled = statusState?.status?.tutorial_enabled === true || statusState?.status?.tutorial_enabled === 'true';
@@ -188,6 +189,7 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     logo,
     isNewYear,
     isSelfUseMode,
+    isRegisterEnabled,
     docsLink,
     isDemoSiteMode,
     isConsoleRoute,

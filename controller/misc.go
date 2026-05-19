@@ -50,6 +50,8 @@ func GetStatus(c *gin.Context) {
 		"version":                     common.Version,
 		"start_time":                  common.StartTime,
 		"email_verification":          common.EmailVerificationEnabled,
+		"register_enabled":            common.RegisterEnabled,
+		"password_register_enabled":   common.PasswordRegisterEnabled,
 		"github_oauth":                common.GitHubOAuthEnabled,
 		"github_client_id":            common.GitHubClientId,
 		"linuxdo_oauth":               common.LinuxDOOAuthEnabled,
