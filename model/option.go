@@ -93,6 +93,19 @@ func InitOptionMap() {
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
 	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
+	common.OptionMap["EpUsdtApiUrl"] = setting.EpUsdtApiUrl
+	common.OptionMap["EpUsdtApiToken"] = setting.EpUsdtApiToken
+	common.OptionMap["EpUsdtMinTopUp"] = strconv.Itoa(setting.EpUsdtMinTopUp)
+	common.OptionMap["EpUsdtTestMode"] = strconv.FormatBool(setting.EpUsdtTestMode)
+	common.OptionMap["EpUsdtCnyRate"] = strconv.FormatFloat(setting.GetEpUsdtCnyRate(), 'f', -1, 64)
+	common.OptionMap["EpUsdtRateAuto"] = strconv.FormatBool(setting.EpUsdtRateAuto)
+	common.OptionMap["EpUsdtRateSource"] = setting.EpUsdtRateSource
+	common.OptionMap["EpUsdtRateInterval"] = strconv.Itoa(setting.EpUsdtRateInterval)
+	common.OptionMap["EpUsdtRateMargin"] = strconv.FormatFloat(setting.EpUsdtRateMargin, 'f', -1, 64)
+	common.OptionMap["EpUsdtRateMin"] = strconv.FormatFloat(setting.EpUsdtRateMin, 'f', -1, 64)
+	common.OptionMap["EpUsdtRateMax"] = strconv.FormatFloat(setting.EpUsdtRateMax, 'f', -1, 64)
+	common.OptionMap["EpUsdtRateStaleSec"] = strconv.FormatInt(setting.EpUsdtRateStaleSec, 10)
+	common.OptionMap["EpUsdtRateUpdatedAt"] = strconv.FormatInt(setting.EpUsdtRateUpdatedAt, 10)
 	common.OptionMap["TopupGroupRatio"] = common.TopupGroupRatio2JSONString()
 	common.OptionMap["Chats"] = setting.Chats2JsonString()
 	common.OptionMap["AutoGroups"] = setting.AutoGroups2JsonString()
@@ -410,6 +423,36 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
+	case "EpUsdtApiUrl":
+		setting.EpUsdtApiUrl = value
+	case "EpUsdtApiToken":
+		setting.EpUsdtApiToken = value
+	case "EpUsdtMinTopUp":
+		setting.EpUsdtMinTopUp, _ = strconv.Atoi(value)
+	case "EpUsdtTestMode":
+		setting.EpUsdtTestMode = value == "true"
+	case "EpUsdtCnyRate":
+		if v, err := strconv.ParseFloat(value, 64); err == nil && v > 0 {
+			setting.SetEpUsdtCnyRate(v)
+		}
+	case "EpUsdtRateAuto":
+		setting.EpUsdtRateAuto = value == "true"
+	case "EpUsdtRateSource":
+		setting.EpUsdtRateSource = value
+	case "EpUsdtRateInterval":
+		if v, err := strconv.Atoi(value); err == nil && v >= 5 {
+			setting.EpUsdtRateInterval = v
+		}
+	case "EpUsdtRateMargin":
+		setting.EpUsdtRateMargin, _ = strconv.ParseFloat(value, 64)
+	case "EpUsdtRateMin":
+		setting.EpUsdtRateMin, _ = strconv.ParseFloat(value, 64)
+	case "EpUsdtRateMax":
+		setting.EpUsdtRateMax, _ = strconv.ParseFloat(value, 64)
+	case "EpUsdtRateStaleSec":
+		setting.EpUsdtRateStaleSec, _ = strconv.ParseInt(value, 10, 64)
+	case "EpUsdtRateUpdatedAt":
+		setting.EpUsdtRateUpdatedAt, _ = strconv.ParseInt(value, 10, 64)
 	case "TopupGroupRatio":
 		err = common.UpdateTopupGroupRatioByJSONString(value)
 	case "GitHubClientId":

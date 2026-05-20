@@ -57,6 +57,7 @@ const RechargeCard = ({
   enableOnlineTopUp,
   enableStripeTopUp,
   enableCreemTopUp,
+  enableUsdtTopUp,
   creemProducts,
   creemPreTopUp,
   presetAmounts,
@@ -462,9 +463,11 @@ const RechargeCard = ({
                               const minTopupVal =
                                 Number(payMethod.min_topup) || 0;
                               const isStripe = payMethod.type === 'stripe';
+                              const isUsdt = payMethod.type === 'usdt';
                               const disabled =
-                                (!enableOnlineTopUp && !isStripe) ||
+                                (!enableOnlineTopUp && !isStripe && !isUsdt) ||
                                 (!enableStripeTopUp && isStripe) ||
+                                (!enableUsdtTopUp && isUsdt) ||
                                 minTopupVal > Number(topUpCount || 0);
 
                               const buttonEl = (
@@ -484,6 +487,8 @@ const RechargeCard = ({
                                       <SiWechat size={18} color='#07C160' />
                                     ) : payMethod.type === 'stripe' ? (
                                       <SiStripe size={18} color='#635BFF' />
+                                    ) : payMethod.type === 'usdt' ? (
+                                      <Coins size={18} color='#26A17B' />
                                     ) : (
                                       <CreditCard
                                         size={18}

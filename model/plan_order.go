@@ -75,6 +75,7 @@ const (
 	PaymentMethodWxpay  = "wxpay"  // Epay-normalized form stored since commit 2cf1261e
 	PaymentMethodStripe = "stripe"
 	PaymentMethodCreem  = "creem"
+	PaymentMethodUSDT   = "usdt"
 )
 
 // Order expiration time (30 minutes)

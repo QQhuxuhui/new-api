@@ -39,6 +39,7 @@ import InvitationCard from './InvitationCard';
 import TransferModal from './modals/TransferModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
+import UsdtPaymentModal from './modals/UsdtPaymentModal';
 
 const TopUp = () => {
   const { t } = useTranslation();
@@ -69,6 +70,12 @@ const TopUp = () => {
   const [enableCreemTopUp, setEnableCreemTopUp] = useState(false);
   const [creemOpen, setCreemOpen] = useState(false);
   const [selectedCreemProduct, setSelectedCreemProduct] = useState(null);
+
+  // USDT 相关状态
+  const [enableUsdtTopUp, setEnableUsdtTopUp] = useState(false);
+  const [usdtMinTopup, setUsdtMinTopup] = useState(1);
+  const [usdtOpen, setUsdtOpen] = useState(false);
+  const [usdtPaymentData, setUsdtPaymentData] = useState(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [open, setOpen] = useState(false);
@@ -171,6 +178,11 @@ const TopUp = () => {
         showError(t('管理员未开启Stripe充值！'));
         return;
       }
+    } else if (payment === 'usdt') {
+      if (!enableUsdtTopUp) {
+        showError(t('管理员未开启 USDT 充值！'));
+        return;
+      }
     } else {
       if (!enableOnlineTopUp) {
         showError(t('管理员未开启在线充值！'));
@@ -184,11 +196,13 @@ const TopUp = () => {
       if (payment === 'stripe') {
         await getStripeAmount();
       } else {
+        // USDT 复用通用 getAmount(返回 CNY), 弹窗里会展示 CNY, 实际下单时网关换算为 USDT
         await getAmount();
       }
 
-      if (topUpCount < minTopUp) {
-        showError(t('充值数量不能小于') + minTopUp);
+      const requiredMin = payment === 'usdt' ? Math.max(minTopUp, usdtMinTopup) : minTopUp;
+      if (topUpCount < requiredMin) {
+        showError(t('充值数量不能小于') + requiredMin);
         return;
       }
       setOpen(true);
@@ -225,6 +239,11 @@ const TopUp = () => {
           amount: parseInt(topUpCount),
           payment_method: 'stripe',
         });
+      } else if (payWay === 'usdt') {
+        res = await API.post('/api/user/pay/usdt', {
+          amount: parseInt(topUpCount),
+          payment_method: 'usdt',
+        });
       } else {
         // 普通支付请求
         res = await API.post('/api/user/pay', {
@@ -239,6 +258,9 @@ const TopUp = () => {
           if (payWay === 'stripe') {
             // Stripe 支付回调处理
             window.open(data.pay_link, '_blank');
+          } else if (payWay === 'usdt') {
+            setUsdtPaymentData(data);
+            setUsdtOpen(true);
           } else {
             // 普通支付表单提交
             let params = data;
@@ -402,11 +424,18 @@ const TopUp = () => {
           const enableStripeTopUp = data.enable_stripe_topup || false;
           const enableOnlineTopUp = data.enable_online_topup || false;
           const enableCreemTopUp = data.enable_creem_topup || false;
+          const enableUsdtTopUp = data.enable_usdt_topup || false;
+          setEnableUsdtTopUp(enableUsdtTopUp);
+          if (data.usdt_min_topup !== undefined) {
+            setUsdtMinTopup(Number(data.usdt_min_topup) || 1);
+          }
           const minTopUpValue = enableOnlineTopUp
             ? data.min_topup
             : enableStripeTopUp
               ? data.stripe_min_topup
-              : 1;
+              : enableUsdtTopUp
+                ? data.usdt_min_topup
+                : 1;
           setEnableOnlineTopUp(enableOnlineTopUp);
           setEnableStripeTopUp(enableStripeTopUp);
           setEnableCreemTopUp(enableCreemTopUp);
@@ -659,6 +688,17 @@ const TopUp = () => {
         t={t}
       />
 
+      {/* USDT 支付指引模态框 */}
+      <UsdtPaymentModal
+        visible={usdtOpen}
+        onClose={() => {
+          setUsdtOpen(false);
+          getUserQuota().then();
+        }}
+        data={usdtPaymentData}
+        t={t}
+      />
+
       {/* Creem 充值确认模态框 */}
       <Modal
         title={t('确定要充值 $')}
@@ -697,6 +737,7 @@ const TopUp = () => {
               enableOnlineTopUp={enableOnlineTopUp}
               enableStripeTopUp={enableStripeTopUp}
               enableCreemTopUp={enableCreemTopUp}
+              enableUsdtTopUp={enableUsdtTopUp}
               creemProducts={creemProducts}
               creemPreTopUp={creemPreTopUp}
               presetAmounts={presetAmounts}

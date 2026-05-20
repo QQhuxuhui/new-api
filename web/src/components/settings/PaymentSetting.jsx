@@ -23,6 +23,7 @@ import SettingsGeneralPayment from '../../pages/Setting/Payment/SettingsGeneralP
 import SettingsPaymentGateway from '../../pages/Setting/Payment/SettingsPaymentGateway';
 import SettingsPaymentGatewayStripe from '../../pages/Setting/Payment/SettingsPaymentGatewayStripe';
 import SettingsPaymentGatewayCreem from '../../pages/Setting/Payment/SettingsPaymentGatewayCreem';
+import SettingsPaymentGatewayUsdt from '../../pages/Setting/Payment/SettingsPaymentGatewayUsdt';
 import { API, showError, toBoolean } from '../../helpers';
 import { useTranslation } from 'react-i18next';
 
@@ -98,6 +99,14 @@ const PaymentSetting = () => {
           case 'MinTopUp':
           case 'StripeUnitPrice':
           case 'StripeMinTopUp':
+          case 'EpUsdtMinTopUp':
+          case 'EpUsdtCnyRate':
+          case 'EpUsdtRateInterval':
+          case 'EpUsdtRateMargin':
+          case 'EpUsdtRateMin':
+          case 'EpUsdtRateMax':
+          case 'EpUsdtRateStaleSec':
+          case 'EpUsdtRateUpdatedAt':
             newInputs[item.key] = parseFloat(item.value);
             break;
           default:
@@ -145,6 +154,9 @@ const PaymentSetting = () => {
         </Card>
         <Card style={{ marginTop: '10px' }}>
           <SettingsPaymentGatewayCreem options={inputs} refresh={onRefresh} />
+        </Card>
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsPaymentGatewayUsdt options={inputs} refresh={onRefresh} />
         </Card>
       </Spin>
     </>

@@ -29,6 +29,7 @@ const (
 	PaymentAccountProviderAlipay = "alipay"
 	PaymentAccountProviderWechat = "wechat"
 	PaymentAccountProviderCreem  = "creem"
+	PaymentAccountProviderUsdt   = "usdt_trc20"
 )
 
 // UpsertUserPaymentAccount 在支付成功回调里 upsert 一行 (user_id, provider, account_id)。

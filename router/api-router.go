@@ -49,6 +49,7 @@ func SetApiRouter(router *gin.Engine) {
 
 		// Plan purchase payment callback (no auth required - handled by payment gateway)
 		apiRouter.GET("/plan/purchase/epay/notify", controller.EpayPlanOrderNotify)
+		apiRouter.POST("/plan/purchase/usdt/notify", controller.UsdtPlanOrderNotify)
 
 		// Topup order payment callback (no auth required - handled by payment gateway)
 		apiRouter.GET("/user/topup/order/epay/notify", controller.EpayTopupOrderNotify)
@@ -67,6 +68,7 @@ func SetApiRouter(router *gin.Engine) {
 			//userRoute.POST("/tokenlog", middleware.CriticalRateLimit(), controller.TokenLog)
 			userRoute.GET("/logout", controller.Logout)
 			userRoute.GET("/epay/notify", controller.EpayNotify)
+			userRoute.POST("/epay/usdt-notify", controller.EpUsdtNotify)
 			userRoute.GET("/groups", controller.GetUserGroups)
 			userRoute.GET("/topup/info", controller.GetTopUpInfo) // Public access for pricing page
 
@@ -94,6 +96,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.RequestStripePay)
 				selfRoute.POST("/stripe/amount", controller.RequestStripeAmount)
 				selfRoute.POST("/creem/pay", middleware.CriticalRateLimit(), controller.RequestCreemPay)
+				selfRoute.POST("/pay/usdt", middleware.CriticalRateLimit(), controller.RequestEpUsdtPay)
 				selfRoute.POST("/aff_transfer", controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 
@@ -131,6 +134,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/", controller.GetAllUsers)
 				adminRoute.GET("/topup", controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
+				adminRoute.POST("/usdt/rate/refresh", controller.AdminRefreshEpUsdtRate)
 
 				// Plan order management (admin)
 				adminRoute.GET("/plan-orders", controller.GetAllPlanOrders)

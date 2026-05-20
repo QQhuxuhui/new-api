@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	planservice "github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/Calcium-Ion/go-epay/epay"
@@ -120,6 +121,12 @@ func PayPlanOrder(c *gin.Context) {
 		return
 	}
 
+	// USDT 走独立分支
+	if req.PaymentMethod == PaymentMethodUSDT {
+		payPlanOrderViaUsdt(c, order)
+		return
+	}
+
 	// Verify payment method is Epay-supported type
 	// Plan purchase only supports Epay standard payment methods
 	// Note: Epay only accepts 'alipay' and 'wxpay', NOT 'wechat'
@@ -132,7 +139,7 @@ func PayPlanOrder(c *gin.Context) {
 		}
 	}
 	if !isValidEpayMethod {
-		common.ApiError(c, fmt.Errorf("套餐购买仅支持支付宝或微信支付，不支持: %s", req.PaymentMethod))
+		common.ApiError(c, fmt.Errorf("套餐购买仅支持支付宝/微信/USDT，不支持: %s", req.PaymentMethod))
 		return
 	}
 
@@ -486,6 +493,208 @@ func CancelPlanOrder(c *gin.Context) {
 	})
 }
 
+// payPlanOrderViaUsdt 套餐订单走 USDT 支付。
+// 计价: order.FinalPrice 是 CNY, 除以 EpUsdtCnyRate 得 USDT。
+func payPlanOrderViaUsdt(c *gin.Context, order *model.PlanOrder) {
+	if !epUsdtConfigured() {
+		common.ApiError(c, errors.New("管理员未配置 USDT 支付"))
+		return
+	}
+	rate := getValidUsdtRateOrError(c)
+	if rate <= 0 {
+		return // helper 已写错误响应
+	}
+	usdtAmount := order.FinalPrice / rate
+	// 向上保留两位小数
+	usdtAmount = float64(int64(usdtAmount*100+0.999999)) / 100.0
+	if usdtAmount < 0.01 {
+		common.ApiError(c, errors.New("USDT 金额过低"))
+		return
+	}
+
+	callBackAddress := planservice.GetCallbackAddress()
+	notifyURL := callBackAddress + "/api/plan/purchase/usdt/notify"
+	redirectURL := system_setting.ServerAddress + "/console/my-orders"
+
+	resp, err := requestEpUsdtCreateOrder(order.OrderNo, usdtAmount, notifyURL, redirectURL)
+	if err != nil {
+		log.Printf("plan order USDT 下单失败: %v, order_no=%s", err, order.OrderNo)
+		common.ApiError(c, errors.New("拉起支付失败"))
+		return
+	}
+
+	if err := model.DB.Model(order).Updates(map[string]interface{}{
+		"payment_method":   model.PaymentMethodUSDT,
+		"payment_trade_no": order.OrderNo,
+	}).Error; err != nil {
+		common.ApiError(c, errors.New("更新订单失败"))
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"success": true,
+		"data": gin.H{
+			"payment_method":  "usdt",
+			"trade_no":        order.OrderNo,
+			"trade_id":        resp.Data.TradeID,
+			"amount":          resp.Data.Amount,
+			"actual_amount":   resp.Data.ActualAmount,
+			"token":           resp.Data.Token,
+			"expiration_time": resp.Data.ExpirationTime,
+			"payment_url":     resp.Data.PaymentURL,
+		},
+	})
+}
+
+// getValidUsdtRateOrError 拿到一个可用的 USDT 汇率, 若无效则向 c 写错误响应并返 0。
+func getValidUsdtRateOrError(c *gin.Context) float64 {
+	rate := setting.GetEpUsdtCnyRate()
+	if rate <= 0 {
+		common.ApiError(c, errors.New("USDT 汇率未配置"))
+		return 0
+	}
+	if !planservice.IsEpUsdtRateFresh() {
+		common.ApiError(c, errors.New("USDT 汇率已陈旧, 请联系管理员"))
+		return 0
+	}
+	return rate
+}
+
+// UsdtPlanOrderNotify 处理 ePUSDT 网关对套餐订单的回调 (form-data)。
+// 路径: POST /api/plan/purchase/usdt/notify
+func UsdtPlanOrderNotify(c *gin.Context) {
+	if !epUsdtConfigured() {
+		log.Println("plan USDT 回调: 未配置")
+		c.String(200, "fail")
+		return
+	}
+	if err := c.Request.ParseForm(); err != nil {
+		log.Printf("plan USDT 回调 parseForm 失败: %v", err)
+		c.String(200, "fail")
+		return
+	}
+	params := make(map[string]string, len(c.Request.PostForm))
+	for k, v := range c.Request.PostForm {
+		if len(v) > 0 {
+			params[k] = v[0]
+		}
+	}
+	if !verifyEpUsdt(params, setting.EpUsdtApiToken) {
+		log.Printf("plan USDT 回调签名校验失败: order_id=%s", params["order_id"])
+		c.String(200, "fail")
+		return
+	}
+	orderNo := params["order_id"]
+	if orderNo == "" {
+		log.Println("plan USDT 回调缺少 order_id")
+		c.String(200, "fail")
+		return
+	}
+
+	orderLock := common.PlanOrderLockManager.GetLock(orderNo)
+	orderLock.Lock()
+	defer orderLock.Unlock()
+
+	var (
+		affHookUserId     int
+		affHookOrderId    int
+		affHookFinalPrice float64
+		affHookPlanQuota  int64
+		affHookPlanType   string
+		affHookPaidAtMs   int64
+		affHookShouldRun  bool
+	)
+
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var order model.PlanOrder
+		refCol := "`order_no`"
+		if common.UsingPostgreSQL {
+			refCol = `"order_no"`
+		}
+		err := tx.Set("gorm:query_option", "FOR UPDATE").
+			Where(refCol+" = ?", orderNo).
+			First(&order).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("订单不存在")
+			}
+			return err
+		}
+
+		// Defense-in-depth: USDT 回调只能完成 USDT 订单
+		if order.PaymentMethod != model.PaymentMethodUSDT {
+			log.Printf("plan USDT 回调: 支付方式不匹配 got=%s, order_no=%s",
+				order.PaymentMethod, orderNo)
+			return errors.New("支付方式不匹配")
+		}
+
+		switch order.Status {
+		case model.OrderStatusPending:
+			// continue
+		case model.OrderStatusPaid, model.OrderStatusDelivered:
+			log.Printf("plan USDT 回调: 订单已处理 order_no=%s status=%s", orderNo, order.Status)
+			return nil
+		case model.OrderStatusCancelled:
+			log.Printf("ALERT plan USDT: payment received for cancelled order: order_no=%s", orderNo)
+			// continue
+		case model.OrderStatusExpired:
+			gracePeriodMs := int64(5 * 60 * 1000)
+			now := time.Now().UnixMilli()
+			if now > order.ExpiredAt+gracePeriodMs {
+				log.Printf("REJECTED plan USDT: expired beyond grace: order_no=%s", orderNo)
+				return errors.New("订单已过期，无法支付")
+			}
+			log.Printf("ALERT plan USDT: payment within grace period: order_no=%s", orderNo)
+			// continue
+		default:
+			log.Printf("REJECTED plan USDT: unexpected status: order_no=%s status=%s", orderNo, order.Status)
+			return errors.New("订单状态异常，无法支付")
+		}
+
+		now := time.Now().UnixMilli()
+		updateFields := map[string]interface{}{
+			"status":  model.OrderStatusPaid,
+			"paid_at": now,
+		}
+		if order.Status == model.OrderStatusCancelled {
+			updateFields["cancelled_at"] = 0
+		}
+		if err := tx.Model(&order).Updates(updateFields).Error; err != nil {
+			return err
+		}
+
+		if err := planservice.DeliverPlan(order.Id, tx); err != nil {
+			log.Printf("plan USDT delivery failed for order %d: %v", order.Id, err)
+			return nil // 订单已 paid, 留给重试机制
+		}
+
+		log.Printf("plan USDT 回调入账成功 order_no=%s user_id=%d", orderNo, order.UserId)
+
+		affHookUserId = order.UserId
+		affHookOrderId = order.Id
+		affHookFinalPrice = order.FinalPrice
+		affHookPlanQuota = order.PlanQuota
+		affHookPlanType = order.PlanType
+		affHookPaidAtMs = now
+		affHookShouldRun = true
+		return nil
+	})
+
+	if err != nil {
+		log.Printf("plan USDT 回调处理失败: %v, order_no=%s", err, orderNo)
+		c.String(200, "fail")
+		return
+	}
+
+	if affHookShouldRun {
+		// USDT TRC20 地址作为反作弊数据源
+		go affHookForPlanOrder(affHookOrderId, affHookUserId, affHookFinalPrice, affHookPlanQuota, affHookPlanType, affHookPaidAtMs,
+			model.PaymentAccountProviderUsdt, params["token"])
+	}
+
+	c.String(200, "ok")
+}
+
 // EpayPlanOrderNotify handles Epay payment callback for plan orders
 func EpayPlanOrderNotify(c *gin.Context) {
 	params := lo.Reduce(lo.Keys(c.Request.URL.Query()), func(r map[string]string, t string, i int) map[string]string {
@@ -552,8 +761,7 @@ func EpayPlanOrderNotify(c *gin.Context) {
 		}
 
 		// Defense-in-depth: reject orders placed via non-Epay gateways.
-		// Currently PayPlanOrder only creates alipay/wechat orders, but the
-		// PlanOrder model also declares stripe/creem constants — guard here so
+		// PlanOrder model also declares stripe/creem/usdt constants — guard here so
 		// a future cross-gateway code path can't be completed by this notify.
 		if order.PaymentMethod != model.PaymentMethodAlipay &&
 			order.PaymentMethod != model.PaymentMethodWechat &&

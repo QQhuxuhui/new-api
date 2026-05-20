@@ -47,14 +47,36 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	// 如果启用了 USDT (TRC20) 支付，添加到支付方法列表
+	if setting.EpUsdtApiUrl != "" && setting.EpUsdtApiToken != "" {
+		hasUsdt := false
+		for _, method := range payMethods {
+			if method["type"] == "usdt" {
+				hasUsdt = true
+				break
+			}
+		}
+		if !hasUsdt {
+			payMethods = append(payMethods, map[string]string{
+				"name":      "USDT (TRC20)",
+				"type":      "usdt",
+				"color":     "rgba(var(--semi-green-5), 1)",
+				"min_topup": strconv.Itoa(setting.EpUsdtMinTopUp),
+			})
+		}
+	}
+
 	data := gin.H{
 		"enable_online_topup": operation_setting.PayAddress != "" && operation_setting.EpayId != "" && operation_setting.EpayKey != "",
 		"enable_stripe_topup": setting.StripeApiSecret != "" && setting.StripeWebhookSecret != "" && setting.StripePriceId != "",
 		"enable_creem_topup":  setting.CreemApiKey != "" && setting.CreemProducts != "[]",
+		"enable_usdt_topup":   setting.EpUsdtApiUrl != "" && setting.EpUsdtApiToken != "",
 		"creem_products":      setting.CreemProducts,
 		"pay_methods":         payMethods,
 		"min_topup":           operation_setting.MinTopUp,
 		"stripe_min_topup":    setting.StripeMinTopUp,
+		"usdt_min_topup":      setting.EpUsdtMinTopUp,
+		"usdt_cny_rate":       setting.GetEpUsdtCnyRate(),
 		"amount_options":      operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":            operation_setting.GetPaymentSetting().AmountDiscount,
 	}
@@ -323,6 +345,10 @@ func affHookForTopUp(topUp *model.TopUp, provider, accountId string) {
 		if common.QuotaPerUnit > 0 {
 			creditUsd = float64(topUp.Amount) / common.QuotaPerUnit
 		}
+	case PaymentMethodUSDT:
+		// USDT: Money 是 USDT 数值, Amount 是 USD 面值, 与 alipay 同口径用 Amount
+		creditUsd = float64(topUp.Amount)
+		// USDT ≈ USD 市场价值, 返佣审计按 USD 货币记录
 	default:
 		// 易支付(alipay / wxpay 等): Money 是 CNY 实付,Amount 是 USD 面值
 		creditUsd = float64(topUp.Amount)

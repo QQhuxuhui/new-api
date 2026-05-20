@@ -102,6 +102,9 @@ func main() {
 	// 启动一级分销返佣后台任务（IP 日志清理 + 自动结算 cron）
 	service.StartAffCronTasks()
 
+	// 启动 USDT 汇率自动刷新（仅在开启自动模式时实际拉取）
+	service.StartEpUsdtRateRefresher()
+
 	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
 		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
 		if err != nil {

@@ -32,6 +32,7 @@ import {
   Info,
 } from 'lucide-react';
 import { API, showError } from '../../helpers';
+import UsdtPaymentModal from '../../components/topup/modals/UsdtPaymentModal';
 
 const PAGE_BG_GRADIENT =
   'linear-gradient(180deg, var(--semi-color-bg-0) 0%, rgba(37, 99, 235, 0.04) 100%)';
@@ -43,6 +44,7 @@ const MONO_STACK = "'SF Mono', Menlo, Monaco, Consolas, monospace";
 
 const ALIPAY_BRAND = '#1677FF';
 const WECHAT_BRAND = '#07C160';
+const USDT_BRAND = '#26A17B';
 
 const OrderConfirm = () => {
   const { t } = useTranslation();
@@ -56,6 +58,8 @@ const OrderConfirm = () => {
   const [paymentMethod, setPaymentMethod] = useState('');
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [countdown, setCountdown] = useState(0);
+  const [usdtOpen, setUsdtOpen] = useState(false);
+  const [usdtData, setUsdtData] = useState(null);
 
   // Load payment methods configuration
   const loadPaymentMethods = async () => {
@@ -63,7 +67,8 @@ const OrderConfirm = () => {
       const res = await API.get('/api/user/topup/info');
       const { success, data } = res.data;
       if (success && data && data.pay_methods && Array.isArray(data.pay_methods)) {
-        // IMPORTANT: Epay SDK only accepts 'alipay' and 'wxpay', NOT 'wechat'
+        // IMPORTANT: Epay SDK only accepts 'alipay' and 'wxpay', NOT 'wechat'.
+        // USDT 走独立网关, 与 epay 并列展示。
         const methodMap = new Map();
         data.pay_methods.forEach((method) => {
           if (method.type === 'alipay') {
@@ -76,6 +81,8 @@ const OrderConfirm = () => {
                 name: method.name || '微信支付',
               });
             }
+          } else if (method.type === 'usdt') {
+            methodMap.set('usdt', { ...method, name: method.name || 'USDT (TRC20)' });
           }
         });
 
@@ -219,8 +226,12 @@ const OrderConfirm = () => {
       });
       const { success, message, data } = res.data;
       if (success && data) {
-        // IMPORTANT: Must use form submission with params, not direct URL navigation
-        if (data.payment_url && data.params) {
+        // USDT 走独立网关: 拿到 token/actual_amount/payment_url 展示在弹窗
+        if (paymentMethod === 'usdt' || data.payment_method === 'usdt') {
+          setUsdtData(data);
+          setUsdtOpen(true);
+          shouldResetPaying = true;
+        } else if (data.payment_url && data.params) {
           const form = document.createElement('form');
           form.method = 'POST';
           form.action = data.payment_url;
@@ -548,10 +559,22 @@ const OrderConfirm = () => {
 
   const renderPaymentTile = (method) => {
     const isAlipay = method.type === 'alipay';
-    const brandColor = isAlipay ? ALIPAY_BRAND : WECHAT_BRAND;
+    const isUsdt = method.type === 'usdt';
+    const brandColor = isAlipay
+      ? ALIPAY_BRAND
+      : isUsdt
+        ? USDT_BRAND
+        : WECHAT_BRAND;
     const isActive = paymentMethod === method.type;
-    const label = method.name || (isAlipay ? t('支付宝') : t('微信支付'));
-    const sub = isAlipay ? t('扫码 / 网页支付') : t('扫码支付');
+    const label =
+      method.name ||
+      (isAlipay ? t('支付宝') : isUsdt ? 'USDT (TRC20)' : t('微信支付'));
+    const sub = isAlipay
+      ? t('扫码 / 网页支付')
+      : isUsdt
+        ? t('TRC20 链上转账')
+        : t('扫码支付');
+    const initial = isAlipay ? '支' : isUsdt ? '₮' : '微';
 
     return (
       <button
@@ -590,7 +613,7 @@ const OrderConfirm = () => {
             boxShadow: `0 4px 10px -3px ${brandColor}66`,
           }}
         >
-          {isAlipay ? '支' : '微'}
+          {initial}
         </div>
         <div className='flex-1 min-w-0'>
           <div
@@ -1033,6 +1056,17 @@ const OrderConfirm = () => {
           </button>
         </div>
       </div>
+
+      <UsdtPaymentModal
+        visible={usdtOpen}
+        onClose={() => {
+          setUsdtOpen(false);
+          // 关闭后刷新订单状态, 以便用户看到 paid
+          loadOrder();
+        }}
+        data={usdtData}
+        t={t}
+      />
     </div>
   );
 };
