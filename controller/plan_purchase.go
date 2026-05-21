@@ -516,18 +516,21 @@ func payPlanOrderViaUsdt(c *gin.Context, order *model.PlanOrder) {
 	notifyURL := callBackAddress + "/api/plan/purchase/usdt/notify"
 	redirectURL := system_setting.ServerAddress + "/console/my-orders"
 
-	resp, err := requestEpUsdtCreateOrder(order.OrderNo, usdtAmount, notifyURL, redirectURL)
-	if err != nil {
-		log.Printf("plan order USDT 下单失败: %v, order_no=%s", err, order.OrderNo)
-		common.ApiError(c, errors.New("拉起支付失败"))
-		return
-	}
-
+	// 先标记本地订单 payment_method=usdt, 再调网关。
+	// 否则: 网关下单成功但本地 update 失败 → 后续回调因 PaymentMethod 不匹配被拒,
+	// 用户实际付款无法入账。
 	if err := model.DB.Model(order).Updates(map[string]interface{}{
 		"payment_method":   model.PaymentMethodUSDT,
 		"payment_trade_no": order.OrderNo,
 	}).Error; err != nil {
 		common.ApiError(c, errors.New("更新订单失败"))
+		return
+	}
+
+	resp, err := requestEpUsdtCreateOrder(order.OrderNo, usdtAmount, notifyURL, redirectURL)
+	if err != nil {
+		log.Printf("plan order USDT 下单失败: %v, order_no=%s", err, order.OrderNo)
+		common.ApiError(c, errors.New("拉起支付失败"))
 		return
 	}
 
@@ -587,6 +590,21 @@ func UsdtPlanOrderNotify(c *gin.Context) {
 	orderNo := params["order_id"]
 	if orderNo == "" {
 		log.Println("plan USDT 回调缺少 order_id")
+		c.String(200, "fail")
+		return
+	}
+
+	// 状态强校验: 仅成功态入账
+	if !isEpUsdtCallbackSuccess(params) {
+		log.Printf("plan USDT 回调非成功状态: status=%q, order_no=%s (返 ok 阻止重试)",
+			params["status"], orderNo)
+		c.String(200, "ok")
+		return
+	}
+
+	// 实付金额 sanity 校验: 必须为正数 (plan_orders 没存 USDT snapshot, 这里只做基本拦截)
+	if parseUsdtCallbackAmount(params) <= 0 {
+		log.Printf("plan USDT 回调缺少有效 actual_amount, order_no=%s", orderNo)
 		c.String(200, "fail")
 		return
 	}

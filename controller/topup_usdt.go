@@ -107,6 +107,35 @@ func verifyEpUsdt(params map[string]string, token string) bool {
 	return strings.EqualFold(got, expected)
 }
 
+// isEpUsdtCallbackSuccess 判断回调里的 status 字段是否表示支付成功。
+// assimon/epusdt v0.x: status 取值 1=待支付, 2=支付成功, 3=已过期。
+// 部分 fork / 新版可能返回 "success" / "paid" 等字符串, 统一兼容。
+// 仅 "已成功" 才入账, 其他一律 fail (包括缺字段的情况)。
+func isEpUsdtCallbackSuccess(params map[string]string) bool {
+	s := strings.ToLower(strings.TrimSpace(params["status"]))
+	switch s {
+	case "2", "success", "paid", "completed":
+		return true
+	}
+	return false
+}
+
+// parseUsdtCallbackAmount 解析 actual_amount, 失败返回 0。
+func parseUsdtCallbackAmount(params map[string]string) float64 {
+	v := strings.TrimSpace(params["actual_amount"])
+	if v == "" {
+		v = strings.TrimSpace(params["amount"])
+	}
+	if v == "" {
+		return 0
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0 {
+		return 0
+	}
+	return f
+}
+
 // getUsdtMinTopup 与 getMinTopup 同理: tokens 显示口径下要乘 QuotaPerUnit。
 func getUsdtMinTopup() int64 {
 	m := setting.EpUsdtMinTopUp
@@ -175,14 +204,8 @@ func RequestEpUsdtPay(c *gin.Context) {
 	notifyURL := callBackAddress + "/api/user/epay/usdt-notify"
 	redirectURL := system_setting.ServerAddress + "/console/log"
 
-	resp, err := requestEpUsdtCreateOrder(tradeNo, usdtAmount, notifyURL, redirectURL)
-	if err != nil {
-		log.Printf("USDT 下单失败: %v, trade=%s", err, tradeNo)
-		c.JSON(200, gin.H{"message": "error", "data": "拉起支付失败"})
-		return
-	}
-
-	// 落 amount 同 epay 路径: tokens 口径下换回 USD 面值
+	// 先落 pending 本地订单, 再调网关。避免: 网关下单成功但本地 Insert 失败
+	// 导致用户拿不到支付信息 / 后续回调找不到订单。
 	amount := req.Amount
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		amount = req.Amount / int64(common.QuotaPerUnit)
@@ -190,14 +213,27 @@ func RequestEpUsdtPay(c *gin.Context) {
 	topUp := &model.TopUp{
 		UserId:        id,
 		Amount:        amount,
-		Money:         usdtAmount, // 存 USDT 数值
+		Money:         usdtAmount, // 存 USDT 数值, 回调时与 actual_amount 对账
 		TradeNo:       tradeNo,
 		PaymentMethod: PaymentMethodUSDT,
 		CreateTime:    time.Now().Unix(),
 		Status:        common.TopUpStatusPending,
 	}
 	if err := topUp.Insert(); err != nil {
+		log.Printf("USDT 本地订单创建失败: %v, trade=%s", err, tradeNo)
 		c.JSON(200, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
+
+	resp, err := requestEpUsdtCreateOrder(tradeNo, usdtAmount, notifyURL, redirectURL)
+	if err != nil {
+		log.Printf("USDT 网关下单失败: %v, trade=%s", err, tradeNo)
+		// 将本地订单标记为 failed, 防止后续回调误命中或长期占用 pending
+		topUp.Status = common.TopUpStatusFailed
+		if uErr := topUp.Update(); uErr != nil {
+			log.Printf("USDT 标记订单 failed 出错: %v, trade=%s", uErr, tradeNo)
+		}
+		c.JSON(200, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}
 
@@ -216,9 +252,18 @@ func RequestEpUsdtPay(c *gin.Context) {
 }
 
 // requestEpUsdtCreateOrder 调用 ePUSDT 网关下单接口。
+// 下单路径来自 setting.EpUsdtCreateOrderPath, 默认兼容 assimon v0.x 旧版,
+// 新版 ePUSDT 或 GMPay 兼容接口可在后台改为对应路径 (如 /api/v1/order/create)。
 func requestEpUsdtCreateOrder(orderID string, amount float64, notifyURL, redirectURL string) (*EpUsdtCreateResponse, error) {
 	base := strings.TrimRight(setting.EpUsdtApiUrl, "/")
-	url := base + "/api/v1/order/create-transaction"
+	path := setting.EpUsdtCreateOrderPath
+	if path == "" {
+		path = "/api/v1/order/create-transaction"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	url := base + path
 
 	// 签名需要把 amount 转成字符串
 	signParams := map[string]string{
@@ -301,6 +346,15 @@ func EpUsdtNotify(c *gin.Context) {
 		return
 	}
 
+	// 状态强校验: 网关也会对非成功状态发签名通知, 必须放行成功态。
+	if !isEpUsdtCallbackSuccess(params) {
+		log.Printf("USDT 回调非成功状态: status=%q, order_id=%s (返 ok 阻止重试)",
+			params["status"], orderID)
+		// 返 ok 让网关停止重试; 我们不入账
+		c.String(http.StatusOK, usdtNotifySuccessReply)
+		return
+	}
+
 	LockOrder(orderID)
 	defer UnlockOrder(orderID)
 
@@ -322,7 +376,22 @@ func EpUsdtNotify(c *gin.Context) {
 		return
 	}
 
-	if err := model.RechargeEpay(orderID); err != nil {
+	// 金额对账: 实际到账 USDT 必须 ≥ 我们记录的预期 (允许 0.01 容差)。
+	// topUp.Money 是下单时计算的 usdtAmount; 网关防碰撞机制会调高 0.01 上下, 故只要 actual ≥ money-0.01 即视为合法。
+	actual := parseUsdtCallbackAmount(params)
+	if actual <= 0 {
+		log.Printf("USDT 回调缺少有效 actual_amount, ref=%s", orderID)
+		c.String(http.StatusOK, usdtNotifyFailReply)
+		return
+	}
+	if actual+0.01 < topUp.Money {
+		log.Printf("USDT 回调实付金额低于预期: expected=%.4f, actual=%.4f, ref=%s",
+			topUp.Money, actual, orderID)
+		c.String(http.StatusOK, usdtNotifyFailReply)
+		return
+	}
+
+	if err := model.RechargeUsdt(orderID); err != nil {
 		log.Printf("USDT 回调入账失败: %v, ref=%s", err, orderID)
 		c.String(http.StatusOK, usdtNotifyFailReply)
 		return

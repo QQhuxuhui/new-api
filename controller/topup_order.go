@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
@@ -211,6 +212,12 @@ func PayTopupOrder(c *gin.Context) {
 		return
 	}
 
+	// USDT 走独立分支
+	if req.PaymentMethod == PaymentMethodUSDT {
+		payTopupOrderViaUsdt(c, order)
+		return
+	}
+
 	// Verify payment method
 	epayPaymentMethods := []string{"alipay", "wxpay", "wechat"}
 	isValidEpayMethod := false
@@ -221,7 +228,7 @@ func PayTopupOrder(c *gin.Context) {
 		}
 	}
 	if !isValidEpayMethod {
-		common.ApiError(c, fmt.Errorf("充值仅支持支付宝或微信支付，不支持: %s", req.PaymentMethod))
+		common.ApiError(c, fmt.Errorf("充值仅支持支付宝/微信/USDT，不支持: %s", req.PaymentMethod))
 		return
 	}
 
@@ -563,4 +570,224 @@ func GetMyTopupOrders(c *gin.Context) {
 		"page":      page,
 		"page_size": pageSize,
 	})
+}
+
+// payTopupOrderViaUsdt 充值订单走 USDT 支付。计价: order.FinalPrice (CNY) / EpUsdtCnyRate。
+func payTopupOrderViaUsdt(c *gin.Context, order *model.TopupOrder) {
+	if !epUsdtConfigured() {
+		common.ApiError(c, errors.New("管理员未配置 USDT 支付"))
+		return
+	}
+	rate := setting.GetEpUsdtCnyRate()
+	if rate <= 0 {
+		common.ApiError(c, errors.New("USDT 汇率未配置"))
+		return
+	}
+	if !service.IsEpUsdtRateFresh() {
+		common.ApiError(c, errors.New("USDT 汇率已陈旧, 请联系管理员"))
+		return
+	}
+
+	usdtAmount := order.FinalPrice / rate
+	usdtAmount = float64(int64(usdtAmount*100+0.999999)) / 100.0
+	if usdtAmount < 0.01 {
+		common.ApiError(c, errors.New("USDT 金额过低"))
+		return
+	}
+
+	// 先标记本地订单 payment_method=usdt, 再调网关 (与 plan_purchase USDT 同样防御)
+	if err := model.UpdateTopupOrderPaymentMethod(order.Id, model.PaymentMethodUSDT); err != nil {
+		common.ApiError(c, errors.New("更新订单失败"))
+		return
+	}
+
+	callBackAddress := service.GetCallbackAddress()
+	notifyURL := callBackAddress + "/api/user/topup/order/usdt/notify"
+	redirectURL := system_setting.ServerAddress + "/console/topup"
+
+	resp, err := requestEpUsdtCreateOrder(order.OrderNo, usdtAmount, notifyURL, redirectURL)
+	if err != nil {
+		log.Printf("topup order USDT 下单失败: %v, order_no=%s", err, order.OrderNo)
+		common.ApiError(c, errors.New("拉起支付失败"))
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"success": true,
+		"data": gin.H{
+			"payment_method":  "usdt",
+			"trade_no":        order.OrderNo,
+			"trade_id":        resp.Data.TradeID,
+			"amount":          resp.Data.Amount,
+			"actual_amount":   resp.Data.ActualAmount,
+			"token":           resp.Data.Token,
+			"expiration_time": resp.Data.ExpirationTime,
+			"payment_url":     resp.Data.PaymentURL,
+		},
+	})
+}
+
+// UsdtTopupOrderNotify ePUSDT 网关对充值订单的回调 (form-data)。
+// 路径: POST /api/user/topup/order/usdt/notify
+func UsdtTopupOrderNotify(c *gin.Context) {
+	if !epUsdtConfigured() {
+		log.Println("topup order USDT 回调: 未配置")
+		c.String(200, "fail")
+		return
+	}
+	if err := c.Request.ParseForm(); err != nil {
+		log.Printf("topup order USDT 回调 parseForm 失败: %v", err)
+		c.String(200, "fail")
+		return
+	}
+	params := make(map[string]string, len(c.Request.PostForm))
+	for k, v := range c.Request.PostForm {
+		if len(v) > 0 {
+			params[k] = v[0]
+		}
+	}
+	if !verifyEpUsdt(params, setting.EpUsdtApiToken) {
+		log.Printf("topup order USDT 回调签名校验失败: order_id=%s", params["order_id"])
+		c.String(200, "fail")
+		return
+	}
+	orderNo := params["order_id"]
+	if orderNo == "" {
+		log.Println("topup order USDT 回调缺少 order_id")
+		c.String(200, "fail")
+		return
+	}
+	if !isEpUsdtCallbackSuccess(params) {
+		log.Printf("topup order USDT 回调非成功状态: status=%q, order_no=%s",
+			params["status"], orderNo)
+		c.String(200, "ok")
+		return
+	}
+	if parseUsdtCallbackAmount(params) <= 0 {
+		log.Printf("topup order USDT 回调缺少有效 actual_amount, order_no=%s", orderNo)
+		c.String(200, "fail")
+		return
+	}
+
+	LockOrder(orderNo)
+	defer UnlockOrder(orderNo)
+
+	var (
+		logUserId       int
+		logQuota        int64
+		logMoney        float64
+		logAmountUsd    float64
+		logTopupOrderId int
+		logPaidAtMs     int64
+		shouldRecordLog bool
+	)
+
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var order model.TopupOrder
+		refCol := "`order_no`"
+		if common.UsingPostgreSQL {
+			refCol = `"order_no"`
+		}
+		err := tx.Set("gorm:query_option", "FOR UPDATE").
+			Where(refCol+" = ?", orderNo).
+			First(&order).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("订单不存在")
+			}
+			return err
+		}
+
+		// 跨网关补单防护: USDT 回调只能完成 USDT 订单
+		if order.PaymentMethod != model.PaymentMethodUSDT {
+			log.Printf("topup order USDT 回调支付方式不匹配: got=%s, order_no=%s",
+				order.PaymentMethod, orderNo)
+			return errors.New("支付方式不匹配")
+		}
+
+		switch order.Status {
+		case model.TopupOrderStatusPending:
+			// continue
+		case model.TopupOrderStatusPaid:
+			log.Printf("topup order USDT 已处理: order_no=%s", orderNo)
+			return nil
+		case model.TopupOrderStatusExpired:
+			log.Printf("REJECT topup USDT: expired order_no=%s", orderNo)
+			return errors.New("订单已过期")
+		case model.TopupOrderStatusCancelled:
+			log.Printf("ALERT topup USDT: cancelled order paid order_no=%s", orderNo)
+		default:
+			log.Printf("WARN topup USDT: unexpected status order_no=%s status=%s",
+				orderNo, order.Status)
+		}
+
+		now := time.Now().UnixMilli()
+		updateFields := map[string]interface{}{
+			"status":  model.TopupOrderStatusPaid,
+			"paid_at": now,
+		}
+		if order.Status == model.TopupOrderStatusCancelled {
+			updateFields["cancelled_at"] = 0
+		}
+		if err := tx.Model(&model.TopupOrder{}).
+			Where("id = ?", order.Id).
+			Updates(updateFields).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Model(&model.User{}).
+			Where("id = ?", order.UserId).
+			Update("quota", gorm.Expr("quota + ?", order.Quota)).Error; err != nil {
+			return err
+		}
+
+		// 写 TopUp 历史记录, 走 USDT 渠道, Money 存 actual USDT 实付金额
+		dAmount := decimal.NewFromFloat(order.Amount)
+		if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
+			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+			dAmount = dAmount.Mul(dQuotaPerUnit)
+		}
+		actualUsdt := parseUsdtCallbackAmount(params)
+		topUp := &model.TopUp{
+			UserId:        order.UserId,
+			Amount:        dAmount.IntPart(),
+			Money:         actualUsdt,
+			TradeNo:       order.OrderNo,
+			PaymentMethod: model.PaymentMethodUSDT,
+			CreateTime:    time.Now().Unix(),
+			Status:        common.TopUpStatusSuccess,
+		}
+		if err := tx.Create(topUp).Error; err != nil {
+			log.Printf("failed to create USDT topup history: %v", err)
+		}
+
+		log.Printf("topup order USDT 入账成功: order_no=%s user_id=%d quota=%d",
+			orderNo, order.UserId, order.Quota)
+
+		logUserId = order.UserId
+		logQuota = order.Quota
+		logMoney = order.FinalPrice
+		logAmountUsd = order.Amount
+		logTopupOrderId = order.Id
+		logPaidAtMs = now
+		shouldRecordLog = true
+		return nil
+	})
+
+	if err != nil {
+		log.Printf("topup order USDT 回调处理失败: %v, order_no=%s", err, orderNo)
+		c.String(200, "fail")
+		return
+	}
+
+	if shouldRecordLog {
+		model.RecordLog(logUserId, model.LogTypeTopup,
+			fmt.Sprintf("使用 USDT (TRC20) 充值成功，充值额度: %v，支付金额：%.2f CNY",
+				logger.FormatQuota(int(logQuota)), logMoney))
+		// 反作弊 + audit log, TRC20 地址作为 provider account_id
+		go affHookForTopupOrder(logTopupOrderId, logUserId, logMoney, logAmountUsd, logPaidAtMs,
+			model.PaymentAccountProviderUsdt, params["token"])
+	}
+
+	c.String(200, "ok")
 }

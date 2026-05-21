@@ -97,6 +97,7 @@ func InitOptionMap() {
 	common.OptionMap["EpUsdtApiToken"] = setting.EpUsdtApiToken
 	common.OptionMap["EpUsdtMinTopUp"] = strconv.Itoa(setting.EpUsdtMinTopUp)
 	common.OptionMap["EpUsdtTestMode"] = strconv.FormatBool(setting.EpUsdtTestMode)
+	common.OptionMap["EpUsdtCreateOrderPath"] = setting.EpUsdtCreateOrderPath
 	common.OptionMap["EpUsdtCnyRate"] = strconv.FormatFloat(setting.GetEpUsdtCnyRate(), 'f', -1, 64)
 	common.OptionMap["EpUsdtRateAuto"] = strconv.FormatBool(setting.EpUsdtRateAuto)
 	common.OptionMap["EpUsdtRateSource"] = setting.EpUsdtRateSource
@@ -431,6 +432,10 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.EpUsdtMinTopUp, _ = strconv.Atoi(value)
 	case "EpUsdtTestMode":
 		setting.EpUsdtTestMode = value == "true"
+	case "EpUsdtCreateOrderPath":
+		if value != "" {
+			setting.EpUsdtCreateOrderPath = value
+		}
 	case "EpUsdtCnyRate":
 		if v, err := strconv.ParseFloat(value, 64); err == nil && v > 0 {
 			setting.SetEpUsdtCnyRate(v)

@@ -448,14 +448,18 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	return nil
 }
 
-// RechargeEpay 易支付充值成功后的处理（使用事务保证原子性）
-func RechargeEpay(referenceId string) (err error) {
+// rechargeWalletByGateway 共享充值入账事务: 校验 PaymentMethod 在 allowed 集合内,
+// 然后原子写 success + 加 quota + 更新缓存 + 写日志。返回是否已经处于 success 态。
+//
+// allowedMethods: 该调用方允许处理的 PaymentMethod, 防御跨网关补单。
+// logChannel: 日志里展示的支付渠道名 (例如 "易支付"、"USDT (TRC20)")。
+func rechargeWalletByGateway(referenceId string, allowedMethods map[string]bool, logChannel string) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
 	}
 
 	var quota int
-	var alreadyCompleted bool // 标记订单是否已经完成
+	var alreadyCompleted bool
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -469,17 +473,16 @@ func RechargeEpay(referenceId string) (err error) {
 			return errors.New("充值订单不存在")
 		}
 
-		// 拒绝跨网关补单：Stripe/Creem 订单不允许通过易支付回调完成
-		if topUp.PaymentMethod == "stripe" || topUp.PaymentMethod == "creem" {
+		// 严格 allow-list: 只有指定网关族能完成该订单
+		if !allowedMethods[topUp.PaymentMethod] {
 			return ErrPaymentMethodMismatch
 		}
 
-		// 幂等处理：订单已成功则直接返回
+		// 幂等处理
 		if topUp.Status == common.TopUpStatusSuccess {
 			alreadyCompleted = true
 			return nil
 		}
-
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
 		}
@@ -491,7 +494,6 @@ func RechargeEpay(referenceId string) (err error) {
 			return err
 		}
 
-		// 计算充值额度（参考原有的计算逻辑）
 		dAmount := decimal.NewFromInt(int64(topUp.Amount))
 		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 		quota = int(dAmount.Mul(dQuotaPerUnit).IntPart())
@@ -500,7 +502,6 @@ func RechargeEpay(referenceId string) (err error) {
 		if err != nil {
 			return err
 		}
-
 		return nil
 	})
 
@@ -510,21 +511,35 @@ func RechargeEpay(referenceId string) (err error) {
 		}
 		return errors.New("充值失败，" + err.Error())
 	}
-
-	// 如果订单已经完成，直接返回，不重复执行缓存和日志
 	if alreadyCompleted {
 		return nil
 	}
 
-	// 异步更新Redis缓存
 	gopool.Go(func() {
 		err := cacheIncrUserQuota(topUp.UserId, int64(quota))
 		if err != nil {
-			common.SysLog("failed to update user quota cache after Epay recharge: " + err.Error())
+			common.SysLog("failed to update user quota cache after " + logChannel + " recharge: " + err.Error())
 		}
 	})
 
-	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用易支付充值成功，充值额度: %v，支付金额：%.2f", logger.FormatQuota(quota), topUp.Money))
-
+	RecordLog(topUp.UserId, LogTypeTopup,
+		fmt.Sprintf("使用%s充值成功，充值额度: %v，支付金额：%.2f",
+			logChannel, logger.FormatQuota(quota), topUp.Money))
 	return nil
+}
+
+// RechargeEpay 易支付族 (alipay / wxpay / wechat) 充值入账。USDT/Stripe/Creem 走各自函数。
+func RechargeEpay(referenceId string) (err error) {
+	return rechargeWalletByGateway(referenceId, map[string]bool{
+		"alipay": true,
+		"wxpay":  true,
+		"wechat": true,
+	}, "易支付")
+}
+
+// RechargeUsdt USDT (TRC20, ePUSDT 网关) 充值入账。仅接受 PaymentMethod=usdt 的订单。
+func RechargeUsdt(referenceId string) (err error) {
+	return rechargeWalletByGateway(referenceId, map[string]bool{
+		"usdt": true,
+	}, "USDT (TRC20)")
 }

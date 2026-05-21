@@ -42,6 +42,48 @@ func TestSignEpUsdt_SkipsEmptyAndSignatureField(t *testing.T) {
 	}
 }
 
+// isEpUsdtCallbackSuccess: 必须严格判 "2"/"success"/"paid"/"completed", 其余一律 false。
+func TestIsEpUsdtCallbackSuccess(t *testing.T) {
+	successes := []string{"2", "success", "SUCCESS", " paid ", "completed", "Paid"}
+	failures := []string{"", "1", "3", "pending", "expired", "0", "fail"}
+	for _, v := range successes {
+		if !isEpUsdtCallbackSuccess(map[string]string{"status": v}) {
+			t.Errorf("status %q should be success but rejected", v)
+		}
+	}
+	for _, v := range failures {
+		if isEpUsdtCallbackSuccess(map[string]string{"status": v}) {
+			t.Errorf("status %q should be NOT success but accepted", v)
+		}
+	}
+	// 缺字段视为非成功
+	if isEpUsdtCallbackSuccess(map[string]string{}) {
+		t.Error("missing status should be NOT success")
+	}
+}
+
+// parseUsdtCallbackAmount: 优先 actual_amount, 兜底 amount; 非法返 0。
+func TestParseUsdtCallbackAmount(t *testing.T) {
+	cases := []struct {
+		params map[string]string
+		want   float64
+	}{
+		{map[string]string{"actual_amount": "9.99"}, 9.99},
+		{map[string]string{"amount": "5.00"}, 5.00},
+		{map[string]string{"actual_amount": "10", "amount": "999"}, 10}, // actual 优先
+		{map[string]string{}, 0},
+		{map[string]string{"actual_amount": "bad"}, 0},
+		{map[string]string{"actual_amount": "-1"}, 0},
+		{map[string]string{"actual_amount": "0"}, 0},
+	}
+	for i, tc := range cases {
+		got := parseUsdtCallbackAmount(tc.params)
+		if got != tc.want {
+			t.Errorf("case %d: got %v want %v (params=%v)", i, got, tc.want, tc.params)
+		}
+	}
+}
+
 // verifyEpUsdt: 测试模式应放行任何签名; 否则严格比对。
 func TestVerifyEpUsdt_TestModeBypass(t *testing.T) {
 	prevTest := setting.EpUsdtTestMode

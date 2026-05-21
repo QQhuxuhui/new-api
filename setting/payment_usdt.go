@@ -18,6 +18,11 @@ var (
 	EpUsdtApiToken = ""    // 网关 API token, 签名密钥
 	EpUsdtMinTopUp = 1     // USDT 充值最小额度 (USD 面值)
 	EpUsdtTestMode = false // 测试模式: 跳过签名校验, 仅开发环境使用
+
+	// 下单 API 路径, 不同 ePUSDT 版本/fork 端点不一致:
+	//   - assimon v0.x 旧版:        /api/v1/order/create-transaction (默认)
+	//   - 新版本 / GMPay 兼容接口:  /api/v1/order/create (运营自行配置)
+	EpUsdtCreateOrderPath = "/api/v1/order/create-transaction"
 )
 
 // 汇率与自动刷新配置

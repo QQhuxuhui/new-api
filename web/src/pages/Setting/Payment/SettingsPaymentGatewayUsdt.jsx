@@ -17,6 +17,7 @@ const { Text } = Typography;
 const DEFAULTS = {
   EpUsdtApiUrl: '',
   EpUsdtApiToken: '',
+  EpUsdtCreateOrderPath: '/api/v1/order/create-transaction',
   EpUsdtMinTopUp: 1,
   EpUsdtTestMode: false,
   EpUsdtCnyRate: 7.2,
@@ -42,6 +43,9 @@ export default function SettingsPaymentGatewayUsdt(props) {
     const current = {
       EpUsdtApiUrl: props.options.EpUsdtApiUrl || '',
       EpUsdtApiToken: props.options.EpUsdtApiToken || '',
+      EpUsdtCreateOrderPath:
+        props.options.EpUsdtCreateOrderPath ||
+        '/api/v1/order/create-transaction',
       EpUsdtMinTopUp: Number(props.options.EpUsdtMinTopUp) || 1,
       EpUsdtTestMode:
         props.options.EpUsdtTestMode === true ||
@@ -88,6 +92,11 @@ export default function SettingsPaymentGatewayUsdt(props) {
         ...(inputs.EpUsdtApiToken
           ? [{ key: 'EpUsdtApiToken', value: inputs.EpUsdtApiToken }]
           : []),
+        {
+          key: 'EpUsdtCreateOrderPath',
+          value:
+            inputs.EpUsdtCreateOrderPath || '/api/v1/order/create-transaction',
+        },
         { key: 'EpUsdtMinTopUp', value: String(Math.max(1, parseInt(inputs.EpUsdtMinTopUp) || 1)) },
         { key: 'EpUsdtTestMode', value: inputs.EpUsdtTestMode ? 'true' : 'false' },
         { key: 'EpUsdtCnyRate', value: String(inputs.EpUsdtCnyRate) },
@@ -169,6 +178,16 @@ export default function SettingsPaymentGatewayUsdt(props) {
                 label={t('API Token (签名密钥)')}
                 placeholder={t('为空表示不修改已保存的 token')}
                 type='password'
+              />
+            </Col>
+            <Col xs={24} sm={24} md={12}>
+              <Form.Input
+                field='EpUsdtCreateOrderPath'
+                label={t('下单 API 路径')}
+                placeholder='/api/v1/order/create-transaction'
+                extraText={t(
+                  'assimon v0.x 默认即可；新版 ePUSDT 或 GMPay 兼容接口请按其文档填写',
+                )}
               />
             </Col>
             <Col xs={24} sm={24} md={8}>

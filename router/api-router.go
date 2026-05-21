@@ -53,6 +53,7 @@ func SetApiRouter(router *gin.Engine) {
 
 		// Topup order payment callback (no auth required - handled by payment gateway)
 		apiRouter.GET("/user/topup/order/epay/notify", controller.EpayTopupOrderNotify)
+		apiRouter.POST("/user/topup/order/usdt/notify", controller.UsdtTopupOrderNotify)
 
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.UniversalVerify)
