@@ -15,14 +15,19 @@ import (
 var (
 	// ePUSDT 网关基础配置
 	EpUsdtApiUrl   = ""    // 网关 base URL, 例如 https://usdt.example.com
-	EpUsdtApiToken = ""    // 网关 API token, 签名密钥
+	EpUsdtApiToken = ""    // 网关 API token (secret_key), 用于 MD5 签名
 	EpUsdtMinTopUp = 1     // USDT 充值最小额度 (USD 面值)
 	EpUsdtTestMode = false // 测试模式: 跳过签名校验, 仅开发环境使用
 
-	// 下单 API 路径, 不同 ePUSDT 版本/fork 端点不一致:
-	//   - assimon v0.x 旧版:        /api/v1/order/create-transaction (默认)
-	//   - 新版本 / GMPay 兼容接口:  /api/v1/order/create (运营自行配置)
-	EpUsdtCreateOrderPath = "/api/v1/order/create-transaction"
+	// 下单 API 路径, 默认使用 ePUSDT v1.x 的 GMPay 兼容接口。
+	// 旧版 assimon v0.x 可改为 /api/v1/order/create-transaction。
+	EpUsdtCreateOrderPath = "/payments/gmpay/v1/order/create-transaction"
+
+	// GMPay 协议字段, 旧版 (v0.x) 不需要这些字段, 留空即可。
+	EpUsdtMerchantId = ""     // 商户 ID (GMPay 协议的 pid 字段, 后台获取)
+	EpUsdtCurrency   = "cny"  // 计价币种 (GMPay 协议 currency)
+	EpUsdtAsset      = "usdt" // 加密资产 (GMPay 协议 token)
+	EpUsdtNetwork    = "tron" // 网络/链 (GMPay 协议 network), TRC20=tron
 )
 
 // 汇率与自动刷新配置

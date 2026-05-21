@@ -1,9 +1,15 @@
 package controller
 
 import (
+	"bytes"
+	"io"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/gin-gonic/gin"
 )
 
 // signEpUsdt 应按 key 字典序拼接非空字段, 末尾追加 token, MD5 小写。
@@ -107,5 +113,125 @@ func TestVerifyEpUsdt_TestModeBypass(t *testing.T) {
 	params["signature"] = "wrong"
 	if verifyEpUsdt(params, "tok") {
 		t.Fatalf("wrong signature must not verify")
+	}
+}
+
+// parseEpUsdtNotifyBody: JSON Content-Type 路径下应解析嵌平字段为字符串,
+// 数字格式与签名一致 (无尾零, 与 strconv.FormatFloat(-1) 等价)。
+func TestParseEpUsdtNotifyBody_JSON(t *testing.T) {
+	prevTest := setting.EpUsdtTestMode
+	defer func() { setting.EpUsdtTestMode = prevTest }()
+	setting.EpUsdtTestMode = false
+
+	body := `{"order_id":"OID1","amount":9.99,"actual_amount":9.98,"status":"2","token":"TXxxx","signature":"sig"}`
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest("POST", "/notify", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	c.Request = req
+
+	params, err := parseEpUsdtNotifyBody(c)
+	if err != nil {
+		t.Fatalf("parse err: %v", err)
+	}
+	if params["order_id"] != "OID1" {
+		t.Errorf("order_id got=%q", params["order_id"])
+	}
+	if params["amount"] != "9.99" {
+		t.Errorf("amount got=%q want=9.99", params["amount"])
+	}
+	if params["actual_amount"] != "9.98" {
+		t.Errorf("actual_amount got=%q", params["actual_amount"])
+	}
+	if params["status"] != "2" {
+		t.Errorf("status got=%q", params["status"])
+	}
+}
+
+// 同样 body, 旧版 form-data 路径 (Content-Type 非 JSON) 也能解析。
+func TestParseEpUsdtNotifyBody_Form(t *testing.T) {
+	form := url.Values{
+		"order_id":      {"OID1"},
+		"amount":        {"9.99"},
+		"actual_amount": {"9.98"},
+		"status":        {"2"},
+		"token":         {"TXxxx"},
+		"signature":     {"sig"},
+	}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest("POST", "/notify",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	c.Request = req
+
+	params, err := parseEpUsdtNotifyBody(c)
+	if err != nil {
+		t.Fatalf("parse err: %v", err)
+	}
+	if params["order_id"] != "OID1" || params["status"] != "2" {
+		t.Errorf("bad parse: %+v", params)
+	}
+}
+
+// anyToSignString: 不同 JSON 类型应得到与签名一致的字符串形式。
+func TestAnyToSignString(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{"hello", "hello"},
+		{9.99, "9.99"},
+		{float64(9), "9"},      // 整数 float, 不应输出 "9.00"
+		{float64(0), "0"},
+		{true, "true"},
+		{false, "false"},
+		{nil, ""},
+	}
+	for _, tc := range cases {
+		got := anyToSignString(tc.in)
+		if got != tc.want {
+			t.Errorf("anyToSignString(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// 端到端: GMPay 协议下用真实签名往 callback 传, verifyEpUsdt 应通过。
+func TestParseAndVerifyEpUsdtGMPay(t *testing.T) {
+	prevTest := setting.EpUsdtTestMode
+	defer func() { setting.EpUsdtTestMode = prevTest }()
+	setting.EpUsdtTestMode = false
+
+	// 1. 先构造预签名字段
+	src := map[string]string{
+		"pid":           "merchant_a",
+		"order_id":      "PO1NOabc",
+		"actual_amount": "9.98",
+		"amount":        "9.99",
+		"status":        "2",
+		"token":         "TXdummy",
+	}
+	sig := signEpUsdt(src, "test-secret")
+
+	// 2. 编排成 JSON body (GMPay 风格)
+	jsonBody := `{` +
+		`"pid":"merchant_a",` +
+		`"order_id":"PO1NOabc",` +
+		`"actual_amount":9.98,` +
+		`"amount":9.99,` +
+		`"status":"2",` +
+		`"token":"TXdummy",` +
+		`"signature":"` + sig + `"}`
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest("POST", "/notify",
+		io.NopCloser(bytes.NewReader([]byte(jsonBody))))
+	req.Header.Set("Content-Type", "application/json")
+	c.Request = req
+
+	params, err := parseEpUsdtNotifyBody(c)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !verifyEpUsdt(params, "test-secret") {
+		t.Fatalf("signature should verify on parsed JSON callback, params=%+v sig=%s", params, sig)
 	}
 }

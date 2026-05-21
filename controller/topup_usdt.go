@@ -40,18 +40,12 @@ type EpUsdtPayRequest struct {
 	TopUpCode     string `json:"top_up_code"`
 }
 
-// EpUsdtCreateRequest 发往 ePUSDT 网关的下单请求。
-type EpUsdtCreateRequest struct {
-	OrderID     string  `json:"order_id"`
-	Amount      float64 `json:"amount"`
-	NotifyURL   string  `json:"notify_url"`
-	RedirectURL string  `json:"redirect_url"`
-	Signature   string  `json:"signature"`
-}
-
-// EpUsdtCreateResponse 网关返回。
+// EpUsdtCreateResponse 网关下单响应 (容错于 v0.x / GMPay 两种版本)。
+// v0.x: { status_code: 200, message, data: {...} }
+// GMPay: { code: 0, message, data: {...} } 或同时存在 status_code
 type EpUsdtCreateResponse struct {
 	StatusCode int    `json:"status_code"`
+	Code       int    `json:"code"`
 	Message    string `json:"message"`
 	Data       struct {
 		TradeID        string  `json:"trade_id"`
@@ -62,6 +56,20 @@ type EpUsdtCreateResponse struct {
 		ExpirationTime int64   `json:"expiration_time"`
 		PaymentURL     string  `json:"payment_url"`
 	} `json:"data"`
+}
+
+func (r *EpUsdtCreateResponse) ok() bool {
+	// 三选一判定成功:
+	//   1. status_code == 200 (v0.x)
+	//   2. code == 0 (GMPay 风格)
+	//   3. payment_url 非空 (兜底, 防止上游 schema 变更)
+	if r.StatusCode == 200 {
+		return true
+	}
+	if r.Code == 0 && r.Data.PaymentURL != "" {
+		return true
+	}
+	return r.Data.PaymentURL != ""
 }
 
 // epUsdtConfigured 网关地址 + token 都配置才视为启用。
@@ -118,6 +126,63 @@ func isEpUsdtCallbackSuccess(params map[string]string) bool {
 		return true
 	}
 	return false
+}
+
+// parseEpUsdtNotifyBody 读 c.Request.Body 并解析为扁平 map[string]string,
+// 供签名校验与字段读取。同时兼容 JSON (GMPay v1+) 与 form-data (assimon v0.x):
+//   - Content-Type 含 "application/json": JSON 路径
+//   - 否则按 application/x-www-form-urlencoded 解析
+//
+// JSON 数字使用 strconv.FormatFloat(f, 'f', -1, 64), 与上游 json.Marshal(float64)
+// 输出一致, 避免签名因数字格式差异不匹配。
+func parseEpUsdtNotifyBody(c *gin.Context) (map[string]string, error) {
+	ct := strings.ToLower(c.GetHeader("Content-Type"))
+	if strings.Contains(ct, "application/json") {
+		raw, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read body: %w", err)
+		}
+		var anyMap map[string]any
+		if err := json.Unmarshal(raw, &anyMap); err != nil {
+			return nil, fmt.Errorf("json decode: %w", err)
+		}
+		out := make(map[string]string, len(anyMap))
+		for k, v := range anyMap {
+			out[k] = anyToSignString(v)
+		}
+		return out, nil
+	}
+	// form-data / x-www-form-urlencoded fallback (v0.x)
+	if err := c.Request.ParseForm(); err != nil {
+		return nil, fmt.Errorf("parse form: %w", err)
+	}
+	out := make(map[string]string, len(c.Request.PostForm))
+	for k, v := range c.Request.PostForm {
+		if len(v) > 0 {
+			out[k] = v[0]
+		}
+	}
+	return out, nil
+}
+
+// anyToSignString 把 JSON Unmarshal 出的 any 转成签名一致的字符串。
+// 数字保留无尾零、bool→true/false、string 原样、其他 fmt.Sprint。
+func anyToSignString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(x)
+	}
 }
 
 // parseUsdtCallbackAmount 解析 actual_amount, 失败返回 0。
@@ -251,37 +316,40 @@ func RequestEpUsdtPay(c *gin.Context) {
 	})
 }
 
-// requestEpUsdtCreateOrder 调用 ePUSDT 网关下单接口。
-// 下单路径来自 setting.EpUsdtCreateOrderPath, 默认兼容 assimon v0.x 旧版,
-// 新版 ePUSDT 或 GMPay 兼容接口可在后台改为对应路径 (如 /api/v1/order/create)。
+// requestEpUsdtCreateOrder 调用 ePUSDT 网关下单。
+// 默认走 GMPay v1 协议 (POST /payments/gmpay/v1/order/create-transaction),
+// 请求体含 pid / order_id / currency / token / network / amount / notify_url + signature。
+// 旧版 assimon v0.x 把路径改回 /api/v1/order/create-transaction 即可;
+// 旧版会忽略 pid/currency/token/network 等多余字段, 因此请求体保持一致即可。
 func requestEpUsdtCreateOrder(orderID string, amount float64, notifyURL, redirectURL string) (*EpUsdtCreateResponse, error) {
 	base := strings.TrimRight(setting.EpUsdtApiUrl, "/")
 	path := setting.EpUsdtCreateOrderPath
 	if path == "" {
-		path = "/api/v1/order/create-transaction"
+		path = "/payments/gmpay/v1/order/create-transaction"
 	}
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
 	url := base + path
 
-	// 签名需要把 amount 转成字符串
-	signParams := map[string]string{
-		"order_id":     orderID,
-		"amount":       strconv.FormatFloat(amount, 'f', 2, 64),
-		"notify_url":   notifyURL,
-		"redirect_url": redirectURL,
+	// 用 map 一处定义所有字段, 既参与签名又作为最终 body, 杜绝两边漂移。
+	// 数字按 GMPay 规范用定点 2 位字符串 (避免 9.0 / 9 序列化歧义)。
+	fields := map[string]string{
+		"pid":        setting.EpUsdtMerchantId,
+		"order_id":   orderID,
+		"currency":   setting.EpUsdtCurrency,
+		"token":      setting.EpUsdtAsset,
+		"network":    setting.EpUsdtNetwork,
+		"amount":     strconv.FormatFloat(amount, 'f', 2, 64),
+		"notify_url": notifyURL,
 	}
-	signature := signEpUsdt(signParams, setting.EpUsdtApiToken)
+	// 旧版 v0.x 还要 redirect_url, 一并放入 (新版会忽略多余字段)
+	if redirectURL != "" {
+		fields["redirect_url"] = redirectURL
+	}
+	fields["signature"] = signEpUsdt(fields, setting.EpUsdtApiToken)
 
-	body := EpUsdtCreateRequest{
-		OrderID:     orderID,
-		Amount:      amount,
-		NotifyURL:   notifyURL,
-		RedirectURL: redirectURL,
-		Signature:   signature,
-	}
-	buf, err := json.Marshal(body)
+	buf, err := json.Marshal(fields)
 	if err != nil {
 		return nil, err
 	}
@@ -307,8 +375,9 @@ func requestEpUsdtCreateOrder(orderID string, amount float64, notifyURL, redirec
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("epusdt decode: %w (body=%s)", err, string(raw))
 	}
-	if parsed.StatusCode != 200 || parsed.Data.PaymentURL == "" {
-		return nil, fmt.Errorf("epusdt error: code=%d msg=%s", parsed.StatusCode, parsed.Message)
+	if !parsed.ok() {
+		return nil, fmt.Errorf("epusdt error: status_code=%d code=%d msg=%s",
+			parsed.StatusCode, parsed.Code, parsed.Message)
 	}
 	return &parsed, nil
 }
@@ -321,16 +390,11 @@ func EpUsdtNotify(c *gin.Context) {
 		c.String(http.StatusOK, usdtNotifyFailReply)
 		return
 	}
-	if err := c.Request.ParseForm(); err != nil {
-		log.Printf("USDT 回调 parseForm 失败: %v", err)
+	params, err := parseEpUsdtNotifyBody(c)
+	if err != nil {
+		log.Printf("USDT 回调解析失败: %v", err)
 		c.String(http.StatusOK, usdtNotifyFailReply)
 		return
-	}
-	params := make(map[string]string, len(c.Request.PostForm))
-	for k, v := range c.Request.PostForm {
-		if len(v) > 0 {
-			params[k] = v[0]
-		}
 	}
 	// 签名校验
 	if !verifyEpUsdt(params, setting.EpUsdtApiToken) {

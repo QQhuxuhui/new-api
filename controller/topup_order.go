@@ -638,7 +638,8 @@ func payTopupOrderViaUsdt(c *gin.Context, order *model.TopupOrder) {
 	})
 }
 
-// UsdtTopupOrderNotify ePUSDT 网关对充值订单的回调 (form-data)。
+// UsdtTopupOrderNotify ePUSDT 网关对充值订单的回调。
+// 兼容 GMPay v1+ (JSON) 与 assimon v0.x (form-data)。
 // 路径: POST /api/user/topup/order/usdt/notify
 func UsdtTopupOrderNotify(c *gin.Context) {
 	if !epUsdtConfigured() {
@@ -646,16 +647,11 @@ func UsdtTopupOrderNotify(c *gin.Context) {
 		c.String(200, "fail")
 		return
 	}
-	if err := c.Request.ParseForm(); err != nil {
-		log.Printf("topup order USDT 回调 parseForm 失败: %v", err)
+	params, perr := parseEpUsdtNotifyBody(c)
+	if perr != nil {
+		log.Printf("topup order USDT 回调解析失败: %v", perr)
 		c.String(200, "fail")
 		return
-	}
-	params := make(map[string]string, len(c.Request.PostForm))
-	for k, v := range c.Request.PostForm {
-		if len(v) > 0 {
-			params[k] = v[0]
-		}
 	}
 	if !verifyEpUsdt(params, setting.EpUsdtApiToken) {
 		log.Printf("topup order USDT 回调签名校验失败: order_id=%s", params["order_id"])

@@ -17,7 +17,11 @@ const { Text } = Typography;
 const DEFAULTS = {
   EpUsdtApiUrl: '',
   EpUsdtApiToken: '',
-  EpUsdtCreateOrderPath: '/api/v1/order/create-transaction',
+  EpUsdtCreateOrderPath: '/payments/gmpay/v1/order/create-transaction',
+  EpUsdtMerchantId: '',
+  EpUsdtCurrency: 'cny',
+  EpUsdtAsset: 'usdt',
+  EpUsdtNetwork: 'tron',
   EpUsdtMinTopUp: 1,
   EpUsdtTestMode: false,
   EpUsdtCnyRate: 7.2,
@@ -45,7 +49,11 @@ export default function SettingsPaymentGatewayUsdt(props) {
       EpUsdtApiToken: props.options.EpUsdtApiToken || '',
       EpUsdtCreateOrderPath:
         props.options.EpUsdtCreateOrderPath ||
-        '/api/v1/order/create-transaction',
+        '/payments/gmpay/v1/order/create-transaction',
+      EpUsdtMerchantId: props.options.EpUsdtMerchantId || '',
+      EpUsdtCurrency: props.options.EpUsdtCurrency || 'cny',
+      EpUsdtAsset: props.options.EpUsdtAsset || 'usdt',
+      EpUsdtNetwork: props.options.EpUsdtNetwork || 'tron',
       EpUsdtMinTopUp: Number(props.options.EpUsdtMinTopUp) || 1,
       EpUsdtTestMode:
         props.options.EpUsdtTestMode === true ||
@@ -95,8 +103,13 @@ export default function SettingsPaymentGatewayUsdt(props) {
         {
           key: 'EpUsdtCreateOrderPath',
           value:
-            inputs.EpUsdtCreateOrderPath || '/api/v1/order/create-transaction',
+            inputs.EpUsdtCreateOrderPath ||
+            '/payments/gmpay/v1/order/create-transaction',
         },
+        { key: 'EpUsdtMerchantId', value: inputs.EpUsdtMerchantId || '' },
+        { key: 'EpUsdtCurrency', value: inputs.EpUsdtCurrency || 'cny' },
+        { key: 'EpUsdtAsset', value: inputs.EpUsdtAsset || 'usdt' },
+        { key: 'EpUsdtNetwork', value: inputs.EpUsdtNetwork || 'tron' },
         { key: 'EpUsdtMinTopUp', value: String(Math.max(1, parseInt(inputs.EpUsdtMinTopUp) || 1)) },
         { key: 'EpUsdtTestMode', value: inputs.EpUsdtTestMode ? 'true' : 'false' },
         { key: 'EpUsdtCnyRate', value: String(inputs.EpUsdtCnyRate) },
@@ -184,10 +197,40 @@ export default function SettingsPaymentGatewayUsdt(props) {
               <Form.Input
                 field='EpUsdtCreateOrderPath'
                 label={t('下单 API 路径')}
-                placeholder='/api/v1/order/create-transaction'
+                placeholder='/payments/gmpay/v1/order/create-transaction'
                 extraText={t(
-                  'assimon v0.x 默认即可；新版 ePUSDT 或 GMPay 兼容接口请按其文档填写',
+                  'GMPay v1 默认即可；assimon v0.x 改为 /api/v1/order/create-transaction',
                 )}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={12}>
+              <Form.Input
+                field='EpUsdtMerchantId'
+                label={t('商户 ID (pid)')}
+                placeholder={t('GMPay 后台 → 商户/接口设置 → pid')}
+                extraText={t('仅 GMPay v1+ 需要；assimon v0.x 留空')}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={8}>
+              <Form.Input
+                field='EpUsdtCurrency'
+                label={t('计价币种 (currency)')}
+                placeholder='cny'
+              />
+            </Col>
+            <Col xs={24} sm={24} md={8}>
+              <Form.Input
+                field='EpUsdtAsset'
+                label={t('加密资产 (token)')}
+                placeholder='usdt'
+              />
+            </Col>
+            <Col xs={24} sm={24} md={8}>
+              <Form.Input
+                field='EpUsdtNetwork'
+                label={t('网络 (network)')}
+                placeholder='tron'
+                extraText={t('TRC20 对应 tron')}
               />
             </Col>
             <Col xs={24} sm={24} md={8}>

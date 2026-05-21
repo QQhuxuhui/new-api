@@ -98,6 +98,10 @@ func InitOptionMap() {
 	common.OptionMap["EpUsdtMinTopUp"] = strconv.Itoa(setting.EpUsdtMinTopUp)
 	common.OptionMap["EpUsdtTestMode"] = strconv.FormatBool(setting.EpUsdtTestMode)
 	common.OptionMap["EpUsdtCreateOrderPath"] = setting.EpUsdtCreateOrderPath
+	common.OptionMap["EpUsdtMerchantId"] = setting.EpUsdtMerchantId
+	common.OptionMap["EpUsdtCurrency"] = setting.EpUsdtCurrency
+	common.OptionMap["EpUsdtAsset"] = setting.EpUsdtAsset
+	common.OptionMap["EpUsdtNetwork"] = setting.EpUsdtNetwork
 	common.OptionMap["EpUsdtCnyRate"] = strconv.FormatFloat(setting.GetEpUsdtCnyRate(), 'f', -1, 64)
 	common.OptionMap["EpUsdtRateAuto"] = strconv.FormatBool(setting.EpUsdtRateAuto)
 	common.OptionMap["EpUsdtRateSource"] = setting.EpUsdtRateSource
@@ -435,6 +439,20 @@ func updateOptionMap(key string, value string) (err error) {
 	case "EpUsdtCreateOrderPath":
 		if value != "" {
 			setting.EpUsdtCreateOrderPath = value
+		}
+	case "EpUsdtMerchantId":
+		setting.EpUsdtMerchantId = value
+	case "EpUsdtCurrency":
+		if value != "" {
+			setting.EpUsdtCurrency = value
+		}
+	case "EpUsdtAsset":
+		if value != "" {
+			setting.EpUsdtAsset = value
+		}
+	case "EpUsdtNetwork":
+		if value != "" {
+			setting.EpUsdtNetwork = value
 		}
 	case "EpUsdtCnyRate":
 		if v, err := strconv.ParseFloat(value, 64); err == nil && v > 0 {

@@ -580,16 +580,11 @@ func UsdtPlanOrderNotify(c *gin.Context) {
 		c.String(200, "fail")
 		return
 	}
-	if err := c.Request.ParseForm(); err != nil {
-		log.Printf("plan USDT 回调 parseForm 失败: %v", err)
+	params, err := parseEpUsdtNotifyBody(c)
+	if err != nil {
+		log.Printf("plan USDT 回调解析失败: %v", err)
 		c.String(200, "fail")
 		return
-	}
-	params := make(map[string]string, len(c.Request.PostForm))
-	for k, v := range c.Request.PostForm {
-		if len(v) > 0 {
-			params[k] = v[0]
-		}
 	}
 	if !verifyEpUsdt(params, setting.EpUsdtApiToken) {
 		log.Printf("plan USDT 回调签名校验失败: order_id=%s", params["order_id"])
@@ -632,7 +627,7 @@ func UsdtPlanOrderNotify(c *gin.Context) {
 		affHookShouldRun  bool
 	)
 
-	err := model.DB.Transaction(func(tx *gorm.DB) error {
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		var order model.PlanOrder
 		refCol := "`order_no`"
 		if common.UsingPostgreSQL {

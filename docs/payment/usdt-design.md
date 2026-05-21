@@ -99,24 +99,32 @@ ticker (默认 10 分钟)
 
 ## ePUSDT 协议对接
 
+默认走 **GMPay v1 协议**（ePUSDT v1.0.0+ 2026-05-20 起的官方推荐路径）。
+旧版 assimon v0.x 通过 `EpUsdtCreateOrderPath` 配置即可兼容。
+
 ### 下单
 
 ```
-POST {EpUsdtApiUrl}/api/v1/order/create-transaction
+POST {EpUsdtApiUrl}/payments/gmpay/v1/order/create-transaction
 Content-Type: application/json
 ```
 
-请求体（按 key 字典序拼成 `k=v&k=v&...&token` 后 MD5）：
+请求体（按 key 字典序拼成 `k=v&k=v&...` + secret_key 后 MD5）：
 
 ```json
 {
+  "pid": "merchant_a",
   "order_id": "USR123NOaB2c3d1700000000",
-  "amount": 9.99,
+  "currency": "cny",
+  "token": "usdt",
+  "network": "tron",
+  "amount": "9.99",
   "notify_url": "{server}/api/user/epay/usdt-notify",
-  "redirect_url": "{server}/console/log",
   "signature": "abc...xyz"
 }
 ```
+
+旧版 v0.x 会忽略 pid/currency/token/network 字段, 兼容性向前。
 
 响应：
 
@@ -137,9 +145,13 @@ Content-Type: application/json
 
 ### 回调
 
-`POST /api/user/epay/usdt-notify`（form-data）
+`POST /api/user/epay/usdt-notify`
 
-字段：`trade_id, order_id, amount, actual_amount, token, block_transaction_id, signature`
+- GMPay v1+: `Content-Type: application/json`
+- assimon v0.x: `Content-Type: application/x-www-form-urlencoded` (代码自动按 header 切换)
+
+字段：`trade_id, order_id, amount, actual_amount, token, status, signature`
+(status="2"/"success"/"paid"/"completed" 视为成功)
 
 处理流程：
 1. `verifyEpUsdt(params, EpUsdtApiToken)` 校验 MD5 签名 → 失败返 `fail`
