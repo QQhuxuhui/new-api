@@ -1,0 +1,59 @@
+# GM Pay / ePUSDT 自部署 docker-compose
+#
+# 上游: https://github.com/GMWalletApp/epusdt  (原 assimon/epusdt, 已改名为 GM Pay)
+# 官方镜像: gmwallet/epusdt
+# 官方文档: https://epusdt.com/guide/installation/docker
+# 当前最新: v1.0.1 (2026-05-21)
+# new-api 适配点: 提交 3e225cbf "feat(payment-usdt): adapt to ePUSDT v1 GMPay protocol"
+#
+# 部署步骤:
+#   1) 把本文件放一个独立目录, 例如 /opt/epusdt/docker-compose.yml
+#   2) docker compose up -d
+#   3) 浏览器打开 http://<服务器>:8000 跑首次安装向导 ——
+#      向导会在 ./data/.env 写入: 数据库连接 / Redis / AUTH_TOKEN /
+#      回调地址 / TG 通知 等全部配置. v1 不再用环境变量传这些, 全部走向导.
+#   4) 向导完成后进后台, 在「钱包管理」绑定 TRC20 收款地址
+#   5) 拿到向导生成的 AUTH_TOKEN, 去 new-api 后台「支付配置 → USDT」填:
+#        网关 URL       = http://<服务器>:8000  (同 compose 网络下可用 http://epusdt:8000)
+#        API Token      = AUTH_TOKEN (必须完全一致, 用作 MD5 签名密钥)
+#        创建订单路径    = /payments/gmpay/v1/order/create-transaction   # v1.x 默认
+#                        # 旧版 v0.x 用:  /api/v1/order/create-transaction
+#        商户 ID (pid)  = 向导分配的 pid
+#        currency=cny / asset=usdt / network=tron   # GMPay v1 必填
+#
+# 与 new-api 共享网络 (推荐, 免暴露 8000 到公网):
+#   docker network create payments
+#   把 new-api 的 docker-compose.yml 顶层加:
+#     networks:
+#       default:
+#         external: true
+#         name: payments
+#   再取消本文件底部 networks 段的注释.
+
+version: "3.8"
+
+services:
+  epusdt:
+    # 钉版本号避免上游升级带来意外. 升级前看 release notes:
+    # https://github.com/GMWalletApp/epusdt/releases
+    image: gmwallet/epusdt:v1.0.1
+    container_name: epusdt
+    restart: always
+    ports:
+      - "8000:8000"          # 后台 + 回调入口; 若与 new-api 共享网络可去掉宿主端口映射
+    environment:
+      EPUSDT_CONFIG: /data/.env   # v1 唯一需要的环境变量; 其它配置由安装向导写入此文件
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/data          # .env / sqlite / 日志 全在这里, 备份这个目录就够
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+# 如需与 new-api 共享网络, 取消下面注释, 并把 new-api 也接入同名外部网络.
+# networks:
+#   default:
+#     external: true
+#     name: payments
