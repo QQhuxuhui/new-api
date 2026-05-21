@@ -471,11 +471,9 @@ func EpUsdtNotify(c *gin.Context) {
 }
 
 // AdminRefreshEpUsdtRate 管理员手动触发汇率刷新 (后台 UI "立即刷新" 按钮)。
+// 无论自动/手动模式都可调用 —— 本质是"测试一次外部源 + 应用 margin + 写库"。
+// 手动模式下点了等于把当前手填值覆盖为市场价, 是显式动作。
 func AdminRefreshEpUsdtRate(c *gin.Context) {
-	if !setting.EpUsdtRateAuto {
-		common.ApiErrorMsg(c, "当前为手动汇率模式, 请直接编辑 EpUsdtCnyRate")
-		return
-	}
 	go service.RefreshEpUsdtRateOnce()
-	common.ApiSuccess(c, gin.H{"message": "已触发, 请稍后查看"})
+	common.ApiSuccess(c, gin.H{"message": "已触发, 请稍后查看上次更新时间"})
 }

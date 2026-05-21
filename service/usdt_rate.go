@@ -24,13 +24,10 @@ var usdtRateHTTPClient = &http.Client{Timeout: 5 * time.Second}
 // 防止并发重入刷新 (例如手动触发 + 定时同时跑)
 var usdtRateRefreshMu sync.Mutex
 
-// StartEpUsdtRateRefresher 在 main 启动时调用。
-// 仅当 EpUsdtRateAuto = true 时启动后台 ticker。
+// StartEpUsdtRateRefresher 在 main 启动时调用, 常驻运行。
+// 每个 tick 内部判断 EpUsdtRateAuto, 关 → 跳过, 开 → 拉取。
+// 这样运行时通过后台开启自动模式可即时生效, 无需重启服务。
 func StartEpUsdtRateRefresher() {
-	if !setting.EpUsdtRateAuto {
-		common.SysLog("usdt rate refresher: auto mode disabled, skip")
-		return
-	}
 	interval := setting.EpUsdtRateInterval
 	if interval < 5 {
 		interval = 5
@@ -38,18 +35,19 @@ func StartEpUsdtRateRefresher() {
 	go func() {
 		// 启动后稍延迟首次拉取, 让 DB 与 OptionMap 初始化完成
 		time.Sleep(10 * time.Second)
-		RefreshEpUsdtRateOnce()
+		if setting.EpUsdtRateAuto {
+			RefreshEpUsdtRateOnce()
+		}
 		ticker := time.NewTicker(time.Duration(interval) * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			if !setting.EpUsdtRateAuto {
-				common.SysLog("usdt rate refresher: auto mode turned off, exit loop")
-				return
+				continue // 手动模式静默跳过, 避免每 N 分钟刷一条日志
 			}
 			RefreshEpUsdtRateOnce()
 		}
 	}()
-	common.SysLog(fmt.Sprintf("usdt rate refresher started: source=%s interval=%dm",
+	common.SysLog(fmt.Sprintf("usdt rate refresher daemon started: source=%s interval=%dm (auto mode toggled at runtime)",
 		setting.EpUsdtRateSource, interval))
 }
 

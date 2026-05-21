@@ -143,7 +143,8 @@ export default function SettingsPaymentGatewayUsdt(props) {
     try {
       const res = await API.post('/api/user/usdt/rate/refresh');
       if (res.data.success) {
-        showSuccess(t('已触发汇率刷新, 请稍后回到本页查看结果'));
+        showSuccess(t('已触发汇率刷新, 3 秒后回显新值'));
+        // 后端是异步 goroutine 拉取, 留 3s 等结果落库再 refresh
         setTimeout(() => props.refresh?.(), 3000);
       } else {
         showError(res.data.message);
@@ -262,7 +263,11 @@ export default function SettingsPaymentGatewayUsdt(props) {
                 precision={4}
                 style={{ width: '100%' }}
                 disabled={inputs.EpUsdtRateAuto}
-                extraText={inputs.EpUsdtRateAuto ? t('自动模式: 由后台 goroutine 维护') : t('手动模式: 请按市价填写')}
+                extraText={
+                  inputs.EpUsdtRateAuto
+                    ? t('自动模式: 由后台 goroutine 每 N 分钟拉取')
+                    : t('手动模式: 按市价填写, 或点右侧"立即刷新"从公网拉一次')
+                }
               />
             </Col>
             <Col xs={24} sm={24} md={8}>
@@ -348,7 +353,6 @@ export default function SettingsPaymentGatewayUsdt(props) {
                   size='small'
                   style={{ marginLeft: 12 }}
                   loading={refreshing}
-                  disabled={!inputs.EpUsdtRateAuto}
                   onClick={refreshRateNow}
                 >
                   {t('立即刷新汇率')}
