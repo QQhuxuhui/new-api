@@ -428,11 +428,12 @@ const UserPlansModal = ({ visible, user, onClose, refresh }) => {
     setShowEditModal(true);
   };
 
-  // Get available plans for assignment (exclude already assigned)
+  // Get available plans for assignment.
+  // 允许任意分配 (含已持有的同款), 仅按 status=1 启用筛选;
+  // 后端去掉 (user_id, plan_id) 唯一性后, 同款套餐可以叠加进入队列。
   const getAvailablePlans = () => {
-    const assignedPlanIds = userPlans.map((up) => up.plan_id);
     return allPlans
-      .filter((p) => !assignedPlanIds.includes(p.id) && p.status === 1)
+      .filter((p) => p.status === 1)
       .map((p) => ({
         label: `${p.name} (${t(p.type)})`,
         value: p.id,

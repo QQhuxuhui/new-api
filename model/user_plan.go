@@ -412,14 +412,9 @@ func (up *UserPlan) Insert() error {
 		return errors.New("套餐ID不能为空")
 	}
 
-	// Check if user plan already exists
-	var count int64
-	if err := DB.Model(&UserPlan{}).Where("user_id = ? AND plan_id = ?", up.UserId, *up.PlanId).Count(&count).Error; err != nil {
-		return err
-	}
-	if count > 0 {
-		return errors.New("该用户已拥有此套餐")
-	}
+	// 允许同一用户拥有多份相同 plan_id 的套餐 (运营常见诉求: 多次叠加同款套餐),
+	// 由 IsCurrent + queue 机制保证只有一份激活, 其余排队。
+	// 历史上这里会因 (user_id, plan_id) 已存在而拦截, 现移除该限制。
 
 	up.CreatedAt = time.Now().UnixMilli()
 	up.UpdatedAt = time.Now().UnixMilli()
