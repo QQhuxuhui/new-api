@@ -595,8 +595,9 @@ func payTopupOrderViaUsdt(c *gin.Context, order *model.TopupOrder) {
 		return
 	}
 
-	// 先标记本地订单 payment_method=usdt, 再调网关 (与 plan_purchase USDT 同样防御)
-	if err := model.UpdateTopupOrderPaymentMethod(order.Id, model.PaymentMethodUSDT); err != nil {
+	// 先标记本地订单 payment_method=usdt + 写入预期 USDT 金额快照, 再调网关。
+	// 用 UpdateTopupOrderUsdtPayment 原子写入两个字段 (snapshot 供回调对账)。
+	if err := model.UpdateTopupOrderUsdtPayment(order.Id, usdtAmount); err != nil {
 		common.ApiError(c, errors.New("更新订单失败"))
 		return
 	}
@@ -608,6 +609,11 @@ func payTopupOrderViaUsdt(c *gin.Context, order *model.TopupOrder) {
 	resp, err := requestEpUsdtCreateOrder(order.OrderNo, usdtAmount, notifyURL, redirectURL)
 	if err != nil {
 		log.Printf("topup order USDT 下单失败: %v, order_no=%s", err, order.OrderNo)
+		// 网关失败回滚 payment_method / snapshot, 避免脏数据残留。
+		// 仅当订单仍是 pending 且 payment_method 仍为 usdt 时回滚 (防止竞态)。
+		if rerr := model.ResetTopupOrderPayment(order.Id, model.PaymentMethodUSDT); rerr != nil {
+			log.Printf("topup order USDT 回滚 payment_method 失败: %v, order_no=%s", rerr, order.OrderNo)
+		}
 		common.ApiError(c, errors.New("拉起支付失败"))
 		return
 	}
@@ -663,7 +669,8 @@ func UsdtTopupOrderNotify(c *gin.Context) {
 		c.String(200, "ok")
 		return
 	}
-	if parseUsdtCallbackAmount(params) <= 0 {
+	actualUsdt := parseUsdtCallbackAmount(params)
+	if actualUsdt <= 0 {
 		log.Printf("topup order USDT 回调缺少有效 actual_amount, order_no=%s", orderNo)
 		c.String(200, "fail")
 		return
@@ -703,6 +710,16 @@ func UsdtTopupOrderNotify(c *gin.Context) {
 			log.Printf("topup order USDT 回调支付方式不匹配: got=%s, order_no=%s",
 				order.PaymentMethod, orderNo)
 			return errors.New("支付方式不匹配")
+		}
+
+		// 金额对账: 实际到账 USDT 必须 ≥ 下单时记录的预期 (0.01 容差容纳网关防碰撞调金)。
+		// snapshot==0 表示老数据或迁移前订单, 退化为基本 sanity (actualUsdt > 0 已在前置校验过)。
+		if order.PaymentAmountSnapshot > 0 {
+			if actualUsdt+0.01 < order.PaymentAmountSnapshot {
+				log.Printf("topup order USDT 回调实付低于预期: expected=%.4f, actual=%.4f, order_no=%s",
+					order.PaymentAmountSnapshot, actualUsdt, orderNo)
+				return errors.New("支付金额不匹配")
+			}
 		}
 
 		switch order.Status {
@@ -747,7 +764,6 @@ func UsdtTopupOrderNotify(c *gin.Context) {
 			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 			dAmount = dAmount.Mul(dQuotaPerUnit)
 		}
-		actualUsdt := parseUsdtCallbackAmount(params)
 		topUp := &model.TopUp{
 			UserId:        order.UserId,
 			Amount:        dAmount.IntPart(),

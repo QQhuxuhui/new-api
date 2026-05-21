@@ -516,13 +516,17 @@ func payPlanOrderViaUsdt(c *gin.Context, order *model.PlanOrder) {
 	notifyURL := callBackAddress + "/api/plan/purchase/usdt/notify"
 	redirectURL := system_setting.ServerAddress + "/console/my-orders"
 
-	// 先标记本地订单 payment_method=usdt, 再调网关。
+	// 先标记本地订单 payment_method=usdt + 写入预期 USDT 金额快照, 再调网关。
 	// 否则: 网关下单成功但本地 update 失败 → 后续回调因 PaymentMethod 不匹配被拒,
 	// 用户实际付款无法入账。
-	if err := model.DB.Model(order).Updates(map[string]interface{}{
-		"payment_method":   model.PaymentMethodUSDT,
-		"payment_trade_no": order.OrderNo,
-	}).Error; err != nil {
+	// snapshot 供回调对账, 防止低于订单金额的回调入账。
+	if err := model.DB.Model(order).
+		Where("status = ?", model.OrderStatusPending).
+		Updates(map[string]interface{}{
+			"payment_method":          model.PaymentMethodUSDT,
+			"payment_trade_no":        order.OrderNo,
+			"payment_amount_snapshot": usdtAmount,
+		}).Error; err != nil {
 		common.ApiError(c, errors.New("更新订单失败"))
 		return
 	}
@@ -530,6 +534,19 @@ func payPlanOrderViaUsdt(c *gin.Context, order *model.PlanOrder) {
 	resp, err := requestEpUsdtCreateOrder(order.OrderNo, usdtAmount, notifyURL, redirectURL)
 	if err != nil {
 		log.Printf("plan order USDT 下单失败: %v, order_no=%s", err, order.OrderNo)
+		// 网关失败回滚 payment_method / snapshot, 避免脏数据。
+		// 仅当订单仍 pending 且 payment_method 还是 usdt 时回滚 (防止竞态)。
+		if rerr := model.DB.Model(&model.PlanOrder{}).
+			Where("id = ? AND status = ? AND payment_method = ?",
+				order.Id, model.OrderStatusPending, model.PaymentMethodUSDT).
+			Updates(map[string]interface{}{
+				"payment_method":          "",
+				"payment_trade_no":        "",
+				"payment_amount_snapshot": 0,
+			}).Error; rerr != nil {
+			log.Printf("plan order USDT 回滚 payment_method 失败: %v, order_no=%s",
+				rerr, order.OrderNo)
+		}
 		common.ApiError(c, errors.New("拉起支付失败"))
 		return
 	}
@@ -602,8 +619,8 @@ func UsdtPlanOrderNotify(c *gin.Context) {
 		return
 	}
 
-	// 实付金额 sanity 校验: 必须为正数 (plan_orders 没存 USDT snapshot, 这里只做基本拦截)
-	if parseUsdtCallbackAmount(params) <= 0 {
+	actualUsdt := parseUsdtCallbackAmount(params)
+	if actualUsdt <= 0 {
 		log.Printf("plan USDT 回调缺少有效 actual_amount, order_no=%s", orderNo)
 		c.String(200, "fail")
 		return
@@ -644,6 +661,16 @@ func UsdtPlanOrderNotify(c *gin.Context) {
 			log.Printf("plan USDT 回调: 支付方式不匹配 got=%s, order_no=%s",
 				order.PaymentMethod, orderNo)
 			return errors.New("支付方式不匹配")
+		}
+
+		// 金额对账: actual_amount 必须 ≥ 下单时记录的预期 USDT (0.01 容差)。
+		// snapshot==0 表示老订单 (升级前创建)，退化为基本 sanity (actualUsdt > 0 已校验)。
+		if order.PaymentAmountSnapshot > 0 {
+			if actualUsdt+0.01 < order.PaymentAmountSnapshot {
+				log.Printf("plan USDT 回调实付低于预期: expected=%.4f, actual=%.4f, order_no=%s",
+					order.PaymentAmountSnapshot, actualUsdt, orderNo)
+				return errors.New("支付金额不匹配")
+			}
 		}
 
 		switch order.Status {

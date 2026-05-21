@@ -31,8 +31,14 @@ type PlanOrder struct {
 	PlanType         string `json:"plan_type" gorm:"type:varchar(20)"`          // Plan type snapshot (subscription/consumption/trial/enterprise)
 
 	// Payment information
-	PaymentMethod  string `json:"payment_method" gorm:"type:varchar(50)"`   // alipay, wechat, stripe, creem
+	PaymentMethod  string `json:"payment_method" gorm:"type:varchar(50)"`   // alipay, wechat, stripe, creem, usdt
 	PaymentTradeNo string `json:"payment_trade_no" gorm:"type:varchar(255);index"` // Payment gateway transaction ID
+
+	// Snapshot of expected payment amount in the gateway's currency.
+	// 仅 USDT 流程会写入：下单时记录预期 USDT 金额，回调时严格对账
+	// (signature 通过且 status 成功 ≠ 金额合法，仍需校验)。
+	// 其他网关 (epay/stripe/creem) 留 0 即可。
+	PaymentAmountSnapshot float64 `json:"payment_amount_snapshot" gorm:"type:decimal(18,6);default:0"`
 
 	// Status management
 	Status string `json:"status" gorm:"type:varchar(20);default:'pending';index"` // pending, paid, delivered, expired, cancelled

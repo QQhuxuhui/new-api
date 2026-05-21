@@ -25,8 +25,12 @@ type TopupOrder struct {
 	DiscountRate float64 `json:"discount_rate" gorm:"type:decimal(5,4);default:1"` // Discount rate (e.g., 0.9 for 10% off)
 
 	// Payment information
-	PaymentMethod  string `json:"payment_method" gorm:"type:varchar(50)"`         // alipay, wechat, stripe, creem
+	PaymentMethod  string `json:"payment_method" gorm:"type:varchar(50)"`         // alipay, wechat, stripe, creem, usdt
 	PaymentTradeNo string `json:"payment_trade_no" gorm:"type:varchar(255);index"` // Payment gateway transaction ID
+
+	// Snapshot of expected payment amount in the gateway's currency.
+	// 仅 USDT 流程写入：下单时记录预期 USDT 金额，回调里严格对账。
+	PaymentAmountSnapshot float64 `json:"payment_amount_snapshot" gorm:"type:decimal(18,6);default:0"`
 
 	// Status management
 	Status string `json:"status" gorm:"type:varchar(20);default:'pending';index"` // pending, paid, cancelled, expired
@@ -293,6 +297,29 @@ func UpdateTopupOrderPaymentMethod(orderId int, paymentMethod string) error {
 	return DB.Model(&TopupOrder{}).
 		Where("id = ? AND status = ?", orderId, TopupOrderStatusPending).
 		Update("payment_method", paymentMethod).Error
+}
+
+// UpdateTopupOrderUsdtPayment 写入 USDT 支付方式 + 预期金额快照 (原子)。
+// 仅在 pending 状态下生效, 防止覆盖已支付/已取消订单。
+func UpdateTopupOrderUsdtPayment(orderId int, expectedUsdt float64) error {
+	return DB.Model(&TopupOrder{}).
+		Where("id = ? AND status = ?", orderId, TopupOrderStatusPending).
+		Updates(map[string]interface{}{
+			"payment_method":          "usdt",
+			"payment_amount_snapshot": expectedUsdt,
+		}).Error
+}
+
+// ResetTopupOrderPayment 回滚 payment_method / snapshot, 仅 pending 时生效。
+// 网关下单失败时调用, 避免脏 payment_method 残留导致重试时其他渠道被阻塞。
+func ResetTopupOrderPayment(orderId int, fromMethod string) error {
+	return DB.Model(&TopupOrder{}).
+		Where("id = ? AND status = ? AND payment_method = ?",
+			orderId, TopupOrderStatusPending, fromMethod).
+		Updates(map[string]interface{}{
+			"payment_method":          "",
+			"payment_amount_snapshot": 0,
+		}).Error
 }
 
 // UpdateTopupOrderTradeNo updates the payment trade number
