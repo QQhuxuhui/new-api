@@ -301,13 +301,21 @@ func UpdateTopupOrderPaymentMethod(orderId int, paymentMethod string) error {
 
 // UpdateTopupOrderUsdtPayment 写入 USDT 支付方式 + 预期金额快照 (原子)。
 // 仅在 pending 状态下生效, 防止覆盖已支付/已取消订单。
+// RowsAffected==0 表示订单状态已变化, 返回 ErrOrderStateChanged 由调用方拦截。
 func UpdateTopupOrderUsdtPayment(orderId int, expectedUsdt float64) error {
-	return DB.Model(&TopupOrder{}).
+	result := DB.Model(&TopupOrder{}).
 		Where("id = ? AND status = ?", orderId, TopupOrderStatusPending).
 		Updates(map[string]interface{}{
 			"payment_method":          "usdt",
 			"payment_amount_snapshot": expectedUsdt,
-		}).Error
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrOrderStateChanged
+	}
+	return nil
 }
 
 // ResetTopupOrderPayment 回滚 payment_method / snapshot, 仅 pending 时生效。

@@ -519,14 +519,13 @@ func payPlanOrderViaUsdt(c *gin.Context, order *model.PlanOrder) {
 	// 先标记本地订单 payment_method=usdt + 写入预期 USDT 金额快照, 再调网关。
 	// 否则: 网关下单成功但本地 update 失败 → 后续回调因 PaymentMethod 不匹配被拒,
 	// 用户实际付款无法入账。
-	// snapshot 供回调对账, 防止低于订单金额的回调入账。
-	if err := model.DB.Model(order).
-		Where("status = ?", model.OrderStatusPending).
-		Updates(map[string]interface{}{
-			"payment_method":          model.PaymentMethodUSDT,
-			"payment_trade_no":        order.OrderNo,
-			"payment_amount_snapshot": usdtAmount,
-		}).Error; err != nil {
+	// 用 helper 保证 RowsAffected==0 时返回 ErrOrderStateChanged, 避免在订单
+	// 被取消/过期的窄竞态窗口里仍继续调用网关 → 用户付了链上 USDT 却入账失败。
+	if err := model.UpdatePlanOrderUsdtPayment(order.Id, order.OrderNo, usdtAmount); err != nil {
+		if errors.Is(err, model.ErrOrderStateChanged) {
+			common.ApiError(c, errors.New("订单状态已变化，请刷新后重试"))
+			return
+		}
 		common.ApiError(c, errors.New("更新订单失败"))
 		return
 	}
@@ -536,14 +535,7 @@ func payPlanOrderViaUsdt(c *gin.Context, order *model.PlanOrder) {
 		log.Printf("plan order USDT 下单失败: %v, order_no=%s", err, order.OrderNo)
 		// 网关失败回滚 payment_method / snapshot, 避免脏数据。
 		// 仅当订单仍 pending 且 payment_method 还是 usdt 时回滚 (防止竞态)。
-		if rerr := model.DB.Model(&model.PlanOrder{}).
-			Where("id = ? AND status = ? AND payment_method = ?",
-				order.Id, model.OrderStatusPending, model.PaymentMethodUSDT).
-			Updates(map[string]interface{}{
-				"payment_method":          "",
-				"payment_trade_no":        "",
-				"payment_amount_snapshot": 0,
-			}).Error; rerr != nil {
+		if rerr := model.ResetPlanOrderUsdtPayment(order.Id); rerr != nil {
 			log.Printf("plan order USDT 回滚 payment_method 失败: %v, order_no=%s",
 				rerr, order.OrderNo)
 		}

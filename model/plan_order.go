@@ -10,6 +10,11 @@ import (
 	"gorm.io/gorm"
 )
 
+// ErrOrderStateChanged 表示在 UPDATE WHERE status=pending 时
+// 命中 0 行 —— 通常是订单已被取消/过期/支付。调用方应当返"订单状态已变化"
+// 而不是继续调用网关。
+var ErrOrderStateChanged = errors.New("订单状态已变化")
+
 // PlanOrder represents a plan purchase order
 type PlanOrder struct {
 	Id            int     `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -426,4 +431,38 @@ func CancelOrder(orderId int, userId int) error {
 
 	common.SysLog(fmt.Sprintf("order cancelled: order_id=%d, user_id=%d", orderId, userId))
 	return nil
+}
+
+// UpdatePlanOrderUsdtPayment 把 pending 订单的 payment_method 改为 usdt 并写入金额快照。
+// 仅 pending 状态生效；RowsAffected==0 表示订单已被取消/过期/支付，返回 ErrOrderStateChanged
+// 由调用方在调网关前拦截。
+func UpdatePlanOrderUsdtPayment(orderId int, tradeNo string, expectedUsdt float64) error {
+	result := DB.Model(&PlanOrder{}).
+		Where("id = ? AND status = ?", orderId, OrderStatusPending).
+		Updates(map[string]interface{}{
+			"payment_method":          PaymentMethodUSDT,
+			"payment_trade_no":        tradeNo,
+			"payment_amount_snapshot": expectedUsdt,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrOrderStateChanged
+	}
+	return nil
+}
+
+// ResetPlanOrderUsdtPayment 网关下单失败后回滚 payment_method/snapshot/trade_no。
+// 仅当订单仍 pending 且 payment_method 还是 usdt 时执行 (防竞态)。
+// RowsAffected==0 视为良性 (说明并发其他流程已经处理),不返错。
+func ResetPlanOrderUsdtPayment(orderId int) error {
+	return DB.Model(&PlanOrder{}).
+		Where("id = ? AND status = ? AND payment_method = ?",
+			orderId, OrderStatusPending, PaymentMethodUSDT).
+		Updates(map[string]interface{}{
+			"payment_method":          "",
+			"payment_trade_no":        "",
+			"payment_amount_snapshot": 0,
+		}).Error
 }

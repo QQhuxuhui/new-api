@@ -596,8 +596,13 @@ func payTopupOrderViaUsdt(c *gin.Context, order *model.TopupOrder) {
 	}
 
 	// 先标记本地订单 payment_method=usdt + 写入预期 USDT 金额快照, 再调网关。
-	// 用 UpdateTopupOrderUsdtPayment 原子写入两个字段 (snapshot 供回调对账)。
+	// helper 在 RowsAffected==0 时返 ErrOrderStateChanged, 拦住竞态: 订单已被
+	// 取消/过期/支付时, 不应继续调用网关 (否则用户付了链上 USDT 却被回调拒入账)。
 	if err := model.UpdateTopupOrderUsdtPayment(order.Id, usdtAmount); err != nil {
+		if errors.Is(err, model.ErrOrderStateChanged) {
+			common.ApiError(c, errors.New("订单状态已变化，请刷新后重试"))
+			return
+		}
 		common.ApiError(c, errors.New("更新订单失败"))
 		return
 	}
