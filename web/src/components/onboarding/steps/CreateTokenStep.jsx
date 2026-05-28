@@ -17,12 +17,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
-import { Button, Typography, Space, Card } from '@douyinfe/semi-ui';
+import React, { useState, useEffect } from 'react';
+import {
+  Button,
+  Typography,
+  Space,
+  Card,
+  Tag,
+  Spin,
+  Empty,
+} from '@douyinfe/semi-ui';
 import { IconSetting } from '@douyinfe/semi-icons';
-import { Claude, OpenAI, Gemini } from '@lobehub/icons';
 import { useTranslation } from 'react-i18next';
 import QuickCreateTokenModal from '../../table/tokens/modals/QuickCreateTokenModal';
+import { getGroupIcon } from '../../table/tokens/modals/groupIcons';
+import { API } from '../../../helpers';
 import { OnboardingAnalytics } from '../../../helpers/analytics';
 
 const { Title, Text, Paragraph } = Typography;
@@ -34,13 +43,45 @@ const { Title, Text, Paragraph } = Typography;
 const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
   const { t } = useTranslation();
   const [showQuickCreate, setShowQuickCreate] = useState(false);
-  const [selectedTokenType, setSelectedTokenType] = useState(null);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  // availableGroups: [{ name, desc, ratio, is_parent, children }]
+  const [availableGroups, setAvailableGroups] = useState([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+
+  // Fetch the user's available groups; each becomes a selectable card
+  useEffect(() => {
+    const fetchGroups = async () => {
+      setGroupsLoading(true);
+      try {
+        const res = await API.get('/api/user/self/groups');
+        if (res && res.data && res.data.success && res.data.data) {
+          // GetUserGroups returns { groupName: { ratio, desc, is_parent?, children? } }
+          const groups = Object.entries(res.data.data).map(([name, info]) => ({
+            name,
+            desc: info?.desc || '',
+            ratio: info?.ratio,
+            is_parent: info?.is_parent || false,
+            children: info?.children || [],
+          }));
+          setAvailableGroups(groups);
+        } else {
+          setAvailableGroups([]);
+        }
+      } catch (error) {
+        console.warn('Failed to fetch groups:', error);
+        setAvailableGroups([]);
+      } finally {
+        setGroupsLoading(false);
+      }
+    };
+    fetchGroups();
+  }, []);
 
   /**
-   * Handle token type card click
+   * Handle group card click
    */
-  const handleTokenTypeClick = (type) => {
-    setSelectedTokenType(type);
+  const handleGroupClick = (groupName) => {
+    setSelectedGroup(groupName);
     setShowQuickCreate(true);
   };
 
@@ -60,7 +101,7 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
    */
   const handleQuickCreateClose = () => {
     setShowQuickCreate(false);
-    setSelectedTokenType(null);
+    setSelectedGroup(null);
   };
 
   /**
@@ -79,81 +120,74 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
     onSkip({ skipped: true });
   };
 
-  // Icon size for consistent display (24px matches Semi UI's extra-large)
-  const ICON_SIZE = 24;
-
-  const tokenTypes = [
-    {
-      id: 'claude-code',
-      name: 'Claude Code',
-      icon: <Claude.Color size={ICON_SIZE} />,
-      description: '用于 Claude Code 开发工具',
-      color: 'var(--semi-color-primary)',
-    },
-    {
-      id: 'codex',
-      name: 'Codex',
-      icon: <OpenAI size={ICON_SIZE} />,
-      description: '用于代码生成和补全',
-      color: 'var(--semi-color-success)',
-    },
-    {
-      id: 'gemini',
-      name: 'Gemini',
-      icon: <Gemini.Color size={ICON_SIZE} />,
-      description: '用于 Google Gemini',
-      color: 'var(--semi-color-warning)',
-    },
-  ];
-
   return (
     <div style={{ padding: '20px 0' }}>
       {/* Title */}
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <Title heading={4}>创建 API 令牌</Title>
+        <Title heading={4}>{t('创建 API 令牌')}</Title>
         <Paragraph type='tertiary' style={{ marginTop: 8 }}>
-          选择一个令牌类型快速创建
+          {t('选择一个分组快速创建')}
         </Paragraph>
       </div>
 
-      {/* Token type cards */}
-      <Space
-        vertical
-        spacing='medium'
-        style={{ width: '100%', marginBottom: 24 }}
-      >
-        {tokenTypes.map((type) => (
-          <Card
-            key={type.id}
-            shadows='hover'
-            style={{
-              border: '1px solid var(--semi-color-border)',
-              cursor: 'pointer',
-              transition: 'all 0.3s',
-            }}
-            bodyStyle={{ padding: 20 }}
-            onClick={() => handleTokenTypeClick(type.id)}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <div style={{ color: type.color }}>{type.icon}</div>
-              <div style={{ flex: 1 }}>
-                <Text
-                  strong
-                  style={{ fontSize: 16, display: 'block', marginBottom: 4 }}
-                >
-                  {type.name}
-                </Text>
-                <Text type='tertiary' size='small'>
-                  {type.description}
-                </Text>
+      {/* Group cards */}
+      {groupsLoading ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            padding: '32px 0',
+          }}
+        >
+          <Spin size='large' />
+        </div>
+      ) : availableGroups.length === 0 ? (
+        <Empty
+          style={{ padding: '24px 0' }}
+          description={t('暂无可用分组，请使用高级配置创建令牌')}
+        />
+      ) : (
+        <Space
+          vertical
+          spacing='medium'
+          style={{ width: '100%', marginBottom: 24 }}
+        >
+          {availableGroups.map((group) => (
+            <Card
+              key={group.name}
+              shadows='hover'
+              style={{
+                width: '100%',
+                border: '1px solid var(--semi-color-border)',
+                cursor: 'pointer',
+                transition: 'all 0.3s',
+              }}
+              bodyStyle={{ padding: 20 }}
+              onClick={() => handleGroupClick(group.name)}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{ color: 'var(--semi-color-primary)' }}>
+                  {getGroupIcon(group.name)}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Text
+                    strong
+                    style={{ fontSize: 16, display: 'block', marginBottom: 4 }}
+                  >
+                    {group.desc || group.name}
+                  </Text>
+                  <Tag color='blue' size='small'>
+                    {group.name}
+                  </Tag>
+                </div>
+                <Button theme='solid' type='primary'>
+                  {t('创建')}
+                </Button>
               </div>
-              <Button theme='solid' type='primary'>
-                创建
-              </Button>
-            </div>
-          </Card>
-        ))}
-      </Space>
+            </Card>
+          ))}
+        </Space>
+      )}
 
       {/* Advanced configuration link */}
       <div style={{ textAlign: 'center', marginBottom: 32 }}>
@@ -166,17 +200,17 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
             window.location.href = '/console/token';
           }}
         >
-          使用高级配置
+          {t('使用高级配置')}
         </Button>
       </div>
 
       {/* Navigation buttons */}
       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
         <Button theme='borderless' type='tertiary' onClick={onPrev}>
-          上一步
+          {t('上一步')}
         </Button>
         <Button theme='borderless' type='tertiary' onClick={handleSkip}>
-          跳过此步
+          {t('跳过此步')}
         </Button>
       </Space>
 
@@ -184,7 +218,7 @@ const CreateTokenStep = ({ onNext, onPrev, onSkip }) => {
       {showQuickCreate && (
         <QuickCreateTokenModal
           visible={showQuickCreate}
-          initialTokenType={selectedTokenType}
+          initialGroup={selectedGroup}
           onSuccess={handleTokenCreated}
           onCancel={handleQuickCreateClose}
           onSwitchMode={handleSwitchMode}

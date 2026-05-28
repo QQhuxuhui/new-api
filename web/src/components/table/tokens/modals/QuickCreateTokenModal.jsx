@@ -28,161 +28,91 @@ import {
   Card,
   Tag,
   Spin,
+  Empty,
 } from '@douyinfe/semi-ui';
-import { Claude, OpenAI, Gemini } from '@lobehub/icons';
 import { API, showError, showSuccess } from '../../../../helpers';
 import { TokenAnalytics } from '../../../../helpers/analytics';
+import { getGroupIcon } from './groupIcons';
 
 const { Title, Text } = Typography;
-
-// Icon size for consistent display (24px matches Semi UI's extra-large)
-const ICON_SIZE = 24;
-
-// Token type configurations with search keywords for group matching
-const TOKEN_TYPE_CONFIGS = {
-  'claude-code': {
-    id: 'claude-code',
-    name: 'Claude Code',
-    icon: <Claude.Color size={ICON_SIZE} />,
-    description: '用于 Claude Code 开发',
-    features: ['无限额度', '永不过期', '无访问限制'],
-    groupKeywords: ['claude code', 'claude-code', 'claude', 'code'], // Search keywords in order of preference (space and hyphen variants)
-  },
-  codex: {
-    id: 'codex',
-    name: 'Codex',
-    icon: <OpenAI size={ICON_SIZE} />,
-    description: '用于 Codex 开发',
-    features: ['无限额度', '永不过期', '无访问限制'],
-    groupKeywords: ['codex'], // Search keywords in order of preference
-  },
-  gemini: {
-    id: 'gemini',
-    name: 'Gemini',
-    icon: <Gemini.Color size={ICON_SIZE} />,
-    description: '用于 Google Gemini',
-    features: ['无限额度', '永不过期', '无访问限制'],
-    groupKeywords: ['gemini', 'google gemini', 'google'], // Search keywords in order of preference
-  },
-};
-
-/**
- * Find the best matching group for a token type
- * @param {string} tokenTypeId - Token type identifier
- * @param {string[]} availableGroups - List of available groups from API
- * @returns {string} - Best matching group name or 'default'
- */
-const findMatchingGroup = (tokenTypeId, availableGroups) => {
-  const config = TOKEN_TYPE_CONFIGS[tokenTypeId];
-  if (!config || !availableGroups || availableGroups.length === 0) {
-    return 'default';
-  }
-
-  // Try to find exact or partial match based on keywords
-  for (const keyword of config.groupKeywords) {
-    const match = availableGroups.find(
-      (group) => group.toLowerCase() === keyword.toLowerCase()
-    );
-    if (match) {
-      return match;
-    }
-  }
-
-  // If no exact match, try partial match
-  for (const keyword of config.groupKeywords) {
-    const match = availableGroups.find((group) =>
-      group.toLowerCase().includes(keyword.toLowerCase())
-    );
-    if (match) {
-      return match;
-    }
-  }
-
-  // Fallback to 'default' if no match found
-  return 'default';
-};
 
 const QuickCreateTokenModal = ({
   visible,
   onSuccess,
   onCancel,
   onSwitchMode,
-  initialTokenType,
+  initialGroup,
   t,
 }) => {
   const [currentStep, setCurrentStep] = useState(1);
-  const [selectedType, setSelectedType] = useState(null);
+  // selectedGroup is the group name, used directly as the token's group
+  const [selectedGroup, setSelectedGroup] = useState(null);
   const [tokenName, setTokenName] = useState('');
   const [loading, setLoading] = useState(false);
   const [nameError, setNameError] = useState('');
   const [startTime, setStartTime] = useState(null);
+  // availableGroups: [{ name, desc, ratio, is_parent, children }]
   const [availableGroups, setAvailableGroups] = useState([]);
-  const [matchedGroup, setMatchedGroup] = useState('default');
+  const [groupsLoading, setGroupsLoading] = useState(true);
 
-  // Fetch available groups from API
+  // Fetch the user's available groups and turn each into a selectable card
   const fetchGroups = async () => {
+    setGroupsLoading(true);
     try {
-      // Use user-accessible endpoint instead of admin-only /api/group/
+      // User-accessible endpoint (admin-only /api/group/ is not usable here)
       const res = await API.get('/api/user/self/groups');
       if (res && res.data && res.data.success && res.data.data) {
-        // GetUserGroups returns an object {groupName: {ratio, desc}}
-        // Extract the keys as group names
-        const groupNames = Object.keys(res.data.data);
-        setAvailableGroups(groupNames);
+        // GetUserGroups returns { groupName: { ratio, desc, is_parent?, children? } }
+        const groups = Object.entries(res.data.data).map(([name, info]) => ({
+          name,
+          desc: info?.desc || '',
+          ratio: info?.ratio,
+          is_parent: info?.is_parent || false,
+          children: info?.children || [],
+        }));
+        setAvailableGroups(groups);
       } else {
-        // If API call fails, fallback to empty array
         console.warn('Failed to fetch user groups, using fallback');
         setAvailableGroups([]);
       }
     } catch (error) {
-      // Handle 401/403 or network errors gracefully
       console.warn('Failed to fetch groups:', error);
-      // Fallback: use empty array, matching will use 'default'
       setAvailableGroups([]);
+    } finally {
+      setGroupsLoading(false);
     }
   };
 
-  // Fetch groups on component mount
+  // Re-fetch groups every time the modal opens. The modal stays mounted in
+  // some parents (e.g. TokensActions), so a one-shot mount fetch would mean a
+  // failed/empty first response is never retried on subsequent opens.
   useEffect(() => {
-    fetchGroups();
-  }, []);
-
-  // Re-calculate matched group when availableGroups changes and we have a selected type
-  useEffect(() => {
-    if (selectedType && availableGroups.length > 0) {
-      const group = findMatchingGroup(selectedType, availableGroups);
-      setMatchedGroup(group);
+    if (visible) {
+      fetchGroups();
     }
-  }, [availableGroups, selectedType]);
+  }, [visible]);
 
   // Reset state when modal opens/closes
   useEffect(() => {
     if (visible) {
-      // If initialTokenType is provided, skip step 1 and go directly to step 2
-      if (initialTokenType && TOKEN_TYPE_CONFIGS[initialTokenType]) {
+      // If an initial group is provided, skip step 1 and go directly to step 2
+      if (initialGroup) {
         setCurrentStep(2);
-        setSelectedType(initialTokenType);
-        // Find matching group for this token type
-        const group = findMatchingGroup(initialTokenType, availableGroups);
-        setMatchedGroup(group);
-        TokenAnalytics.trackTypeSelected(initialTokenType);
+        setSelectedGroup(initialGroup);
+        TokenAnalytics.trackTypeSelected(initialGroup);
       } else {
         setCurrentStep(1);
-        setSelectedType(null);
-        setMatchedGroup('default');
+        setSelectedGroup(null);
       }
       setTokenName('');
       setNameError('');
       setStartTime(Date.now()); // Track start time for analytics
     }
-  }, [visible, initialTokenType]);
+  }, [visible, initialGroup]);
 
-  const handleTypeSelect = (typeId) => {
-    TokenAnalytics.trackTypeSelected(typeId);
-    setSelectedType(typeId);
-    // Find and set matching group for this token type
-    const group = findMatchingGroup(typeId, availableGroups);
-    setMatchedGroup(group);
+  const handleGroupSelect = (groupName) => {
+    TokenAnalytics.trackTypeSelected(groupName);
+    setSelectedGroup(groupName);
     setCurrentStep(2);
   };
 
@@ -214,7 +144,7 @@ const QuickCreateTokenModal = ({
 
     const payload = {
       name: tokenName.trim(),
-      group: matchedGroup, // Use the dynamically matched group
+      group: selectedGroup || '', // Use the selected group directly
       unlimited_quota: true,
       remain_quota: 0,
       expired_time: -1,
@@ -231,19 +161,19 @@ const QuickCreateTokenModal = ({
         // Track success with time spent (convert milliseconds to seconds)
         const timeSpentMs = startTime ? Date.now() - startTime : 0;
         const timeSpentSeconds = Math.round(timeSpentMs / 1000);
-        TokenAnalytics.trackQuickCreateSuccess(selectedType, timeSpentSeconds);
+        TokenAnalytics.trackQuickCreateSuccess(selectedGroup, timeSpentSeconds);
 
         showSuccess(t('令牌创建成功！'));
         onSuccess(data);
       } else {
         // Track failure
-        TokenAnalytics.trackQuickCreateFailed(selectedType, message);
+        TokenAnalytics.trackQuickCreateFailed(selectedGroup, message);
         showError(t(message));
       }
     } catch (error) {
       // Track failure
       TokenAnalytics.trackQuickCreateFailed(
-        selectedType,
+        selectedGroup,
         error.message || 'Network error',
       );
       showError(error.message || t('创建失败'));
@@ -262,43 +192,51 @@ const QuickCreateTokenModal = ({
       </div>
 
       <Title heading={4} className='mb-4 text-center'>
-        {t('选择令牌类型')}
+        {t('选择分组')}
       </Title>
 
-      <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-        {Object.values(TOKEN_TYPE_CONFIGS).map((type) => (
-          <Card
-            key={type.id}
-            className='cursor-pointer transition-all hover:shadow-lg hover:border-blue-500'
-            onClick={() => handleTypeSelect(type.id)}
-            bodyStyle={{ padding: '20px' }}
-          >
-            <div className='flex flex-col items-center text-center'>
-              <div className='mb-3 p-3 bg-blue-50 rounded-full text-blue-500'>
-                {type.icon}
+      {groupsLoading ? (
+        <div className='flex justify-center py-8'>
+          <Spin size='large' />
+        </div>
+      ) : availableGroups.length === 0 ? (
+        <Empty
+          className='py-6'
+          description={t('暂无可用分组，请使用高级配置创建令牌')}
+        />
+      ) : (
+        <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
+          {availableGroups.map((group) => (
+            <Card
+              key={group.name}
+              className='cursor-pointer transition-all hover:shadow-lg hover:border-blue-500'
+              onClick={() => handleGroupSelect(group.name)}
+              bodyStyle={{ padding: '20px' }}
+            >
+              <div className='flex flex-col items-center text-center'>
+                <div className='mb-3 p-3 bg-blue-50 rounded-full text-blue-500'>
+                  {getGroupIcon(group.name)}
+                </div>
+                <Title heading={5} className='mb-2'>
+                  {group.desc || group.name}
+                </Title>
+                <Tag color='blue' size='small'>
+                  {group.name}
+                </Tag>
               </div>
-              <Title heading={5} className='mb-2'>
-                {t(type.name)}
-              </Title>
-              <Text type='tertiary' className='mb-3'>
-                {t(type.description)}
-              </Text>
-              <div className='space-y-1'>
-                {type.features.map((feature, idx) => (
-                  <Tag key={idx} color='blue' size='small'>
-                    {t(feature)}
-                  </Tag>
-                ))}
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 
   const renderStep2 = () => {
-    const tokenType = TOKEN_TYPE_CONFIGS[selectedType];
+    const groupInfo = availableGroups.find((g) => g.name === selectedGroup) || {
+      name: selectedGroup,
+      desc: '',
+    };
+    const displayName = groupInfo.desc || groupInfo.name;
 
     return (
       <div>
@@ -314,9 +252,11 @@ const QuickCreateTokenModal = ({
         </Title>
 
         <Card className='mb-4'>
-          <div className='mb-4'>
-            <Text strong>{t('令牌类型')}:</Text>
-            <Text className='ml-2'>{t(tokenType.name)}</Text>
+          <div className='mb-4 flex items-center'>
+            <span className='mr-2 text-blue-500'>
+              {getGroupIcon(selectedGroup)}
+            </span>
+            <Text strong>{displayName}</Text>
           </div>
 
           <div className='mb-4'>
@@ -327,7 +267,7 @@ const QuickCreateTokenModal = ({
               <div className='flex items-center'>
                 <Text type='tertiary'>• {t('分组')}:</Text>
                 <Tag color='blue' size='small' className='ml-2'>
-                  {matchedGroup}
+                  {selectedGroup}
                 </Tag>
               </div>
               <div className='flex items-center'>
@@ -357,8 +297,8 @@ const QuickCreateTokenModal = ({
             {t('令牌名称')} <Text type='danger'>*</Text>
           </Text>
           <Input
-            id="quick-create-token-name"
-            name="tokenName"
+            id='quick-create-token-name'
+            name='tokenName'
             placeholder={t('请输入令牌名称')}
             value={tokenName}
             onChange={(value) => {
@@ -371,7 +311,7 @@ const QuickCreateTokenModal = ({
             maxLength={30}
             showClear
             validateStatus={nameError ? 'error' : 'default'}
-            autoComplete="off"
+            autoComplete='off'
           />
           {nameError && (
             <Text type='danger' size='small' className='mt-1 block'>
