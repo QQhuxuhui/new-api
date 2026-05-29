@@ -21,7 +21,7 @@ import React, { lazy, Suspense, useContext, useMemo } from 'react';
 import { Route, Routes, useLocation } from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import User from './pages/User';
-import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers';
+import { AuthRedirect, PrivateRoute, AdminRoute, RootRoute } from './helpers';
 import RegisterForm from './components/auth/RegisterForm';
 import LoginForm from './components/auth/LoginForm';
 import NotFound from './pages/NotFound';
@@ -209,9 +209,9 @@ function App() {
         <Route
           path='/console/error-capture'
           element={
-            <AdminRoute>
+            <RootRoute>
               <ErrorCapture />
-            </AdminRoute>
+            </RootRoute>
           }
         />
         <Route
