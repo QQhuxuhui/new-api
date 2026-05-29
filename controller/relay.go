@@ -814,8 +814,8 @@ func captureErrorRequestIfMatched(c *gin.Context, err *types.NewAPIError) {
 		TokenName:   c.GetString("token_name"),
 		StatusCode:  err.StatusCode,
 		ErrorType:   string(err.GetErrorType()),
-		ErrorCode:   fmt.Sprintf("%v", err.GetErrorCode()),
-		RequestPath: requestPathOf(c),
+		ErrorCode:   string(err.GetErrorCode()),
+		RequestPath: errorCaptureRequestPath(c),
 		Content:     content,
 		RequestBody: body,
 		Other:       common.MapToJsonStr(other),
@@ -825,7 +825,7 @@ func captureErrorRequestIfMatched(c *gin.Context, err *types.NewAPIError) {
 	})
 }
 
-func requestPathOf(c *gin.Context) string {
+func errorCaptureRequestPath(c *gin.Context) string {
 	if c.Request != nil && c.Request.URL != nil {
 		return c.Request.URL.Path
 	}
