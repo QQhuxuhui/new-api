@@ -279,6 +279,14 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self/search", middleware.UserAuth(), controller.SearchUserLogs)
 		logRoute.GET("/plans", middleware.UserAuth(), controller.GetUserLogPlans)
 
+		errorCaptureRoute := apiRouter.Group("/error_capture")
+		errorCaptureRoute.Use(middleware.RootAuth())
+		{
+			errorCaptureRoute.GET("/logs", controller.GetErrorCaptureLogs)
+			errorCaptureRoute.GET("/logs/:id", controller.GetErrorCaptureLogDetail)
+			errorCaptureRoute.DELETE("/logs", controller.DeleteErrorCaptureLogs)
+		}
+
 		dataRoute := apiRouter.Group("/data")
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
 		dataRoute.GET("/self", middleware.UserAuth(), controller.GetUserQuotaDates)
