@@ -48,7 +48,7 @@ func GetErrorCaptureSetting() *ErrorCaptureSetting {
 func (s *ErrorCaptureSetting) ParsedRules() []ErrorCaptureRule {
 	rules, err := parseRules(s.Rules)
 	if err != nil {
-		return nil
+		return []ErrorCaptureRule{}
 	}
 	return rules
 }
@@ -102,8 +102,7 @@ func NormalizeRulesJSON(jsonStr string, genID func() string) (string, error) {
 		}
 		if r.MaxRecords <= 0 {
 			r.MaxRecords = errorCaptureMaxRecordsDefault
-		}
-		if r.MaxRecords < errorCaptureMaxRecordsMin {
+		} else if r.MaxRecords < errorCaptureMaxRecordsMin {
 			r.MaxRecords = errorCaptureMaxRecordsMin
 		}
 		if r.MaxRecords > errorCaptureMaxRecordsMax {

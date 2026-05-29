@@ -49,4 +49,7 @@ func TestNormalizeRulesJSON(t *testing.T) {
 	if rules[1].Id != "keep" || rules[1].MaxRecords != 1000 { // 夹紧到上限
 		t.Fatalf("rule1 not clamped: %+v", rules[1])
 	}
+	if n != 1 {
+		t.Fatalf("genID expected called once, got %d", n)
+	}
 }
