@@ -62,4 +62,6 @@ const (
 
 	ContextKeyClientErrorFlag   ContextKey = "client_error_rule_matched" // bool: current request matched a client-classified custom rule
 	ContextKeyReturnImmediately ContextKey = "return_immediately"        // bool: matched client rule requires immediate return
+
+	ContextKeyErrorCaptureDone ContextKey = "error_capture_done" // bool: 本请求已捕获过错误请求体，避免重试重复捕获
 )
