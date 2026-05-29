@@ -36,6 +36,34 @@ import { getGroupIcon } from './groupIcons';
 
 const { Title, Text } = Typography;
 
+// Group categories shown as columns. Each group is bucketed by matching its
+// name prefix (case-insensitive) against `prefixes`; anything that matches no
+// prefix falls into the trailing '其他' (other) category. Add a prefix here to
+// introduce a new column.
+const CATEGORIES = [
+  { key: 'claude', label: 'Claude', prefixes: ['claude'] },
+  { key: 'codex', label: 'Codex', prefixes: ['codex'] },
+  { key: 'gemini', label: 'Gemini', prefixes: ['gemini'] },
+  { key: 'other', label: '其他', prefixes: [] },
+];
+
+/**
+ * Bucket groups into the fixed categories by name prefix.
+ * @param {{name: string}[]} groups
+ * @returns {Record<string, object[]>} category key -> groups
+ */
+const categorizeGroups = (groups) => {
+  const buckets = Object.fromEntries(CATEGORIES.map((c) => [c.key, []]));
+  for (const group of groups) {
+    const name = (group.name || '').toLowerCase();
+    const matched = CATEGORIES.find(
+      (c) => c.prefixes.length && c.prefixes.some((p) => name.startsWith(p)),
+    );
+    buckets[matched ? matched.key : 'other'].push(group);
+  }
+  return buckets;
+};
+
 const QuickCreateTokenModal = ({
   visible,
   onSuccess,
@@ -182,54 +210,96 @@ const QuickCreateTokenModal = ({
     }
   };
 
-  const renderStep1 = () => (
-    <div>
-      <div className='text-center mb-6'>
-        <Progress percent={(1 / 2) * 100} showInfo={false} />
-        <Text type='tertiary' className='mt-2 block'>
-          {t('步骤')} 1/2
-        </Text>
-      </div>
+  const renderStep1 = () => {
+    const buckets = categorizeGroups(availableGroups);
 
-      <Title heading={4} className='mb-4 text-center'>
-        {t('选择分组')}
-      </Title>
-
-      {groupsLoading ? (
-        <div className='flex justify-center py-8'>
-          <Spin size='large' />
+    return (
+      <div>
+        <div className='text-center mb-6'>
+          <Progress percent={(1 / 2) * 100} showInfo={false} />
+          <Text type='tertiary' className='mt-2 block'>
+            {t('步骤')} 1/2
+          </Text>
         </div>
-      ) : availableGroups.length === 0 ? (
-        <Empty
-          className='py-6'
-          description={t('暂无可用分组，请使用高级配置创建令牌')}
-        />
-      ) : (
-        <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-          {availableGroups.map((group) => (
-            <Card
-              key={group.name}
-              className='cursor-pointer transition-all hover:shadow-lg hover:border-blue-500'
-              onClick={() => handleGroupSelect(group.name)}
-              bodyStyle={{ padding: '20px' }}
-            >
-              <div className='flex flex-col items-center text-center'>
-                <div className='mb-3 p-3 bg-blue-50 rounded-full text-blue-500'>
-                  {getGroupIcon(group.name)}
+
+        <Title heading={4} className='mb-4 text-center'>
+          {t('选择分组')}
+        </Title>
+
+        {groupsLoading ? (
+          <div className='flex justify-center py-8'>
+            <Spin size='large' />
+          </div>
+        ) : availableGroups.length === 0 ? (
+          <Empty
+            className='py-6'
+            description={t('暂无可用分组，请使用高级配置创建令牌')}
+          />
+        ) : (
+          <div className='grid grid-cols-2 md:grid-cols-4 gap-3'>
+            {CATEGORIES.map((category) => {
+              const groups = buckets[category.key];
+              return (
+                <div key={category.key} className='flex flex-col'>
+                  <div
+                    className='flex items-center justify-center gap-2 mb-3 pb-2'
+                    style={{
+                      borderBottom: '1px solid var(--semi-color-border)',
+                    }}
+                  >
+                    <span className='text-blue-500 flex items-center'>
+                      {getGroupIcon(category.key, 18)}
+                    </span>
+                    <Text strong>{t(category.label)}</Text>
+                  </div>
+
+                  {groups.length === 0 ? (
+                    <Text
+                      type='tertiary'
+                      size='small'
+                      className='block text-center py-4'
+                    >
+                      {t('暂无可用分组')}
+                    </Text>
+                  ) : (
+                    <div className='space-y-2'>
+                      {groups.map((group) => (
+                        <Card
+                          key={group.name}
+                          className='cursor-pointer transition-all hover:shadow-md hover:border-blue-500'
+                          onClick={() => handleGroupSelect(group.name)}
+                          bodyStyle={{ padding: '12px' }}
+                        >
+                          <div className='text-center'>
+                            <Text
+                              strong
+                              className='block'
+                              style={{ fontSize: 15 }}
+                            >
+                              {group.name}
+                            </Text>
+                            {group.desc && (
+                              <Text
+                                type='tertiary'
+                                size='small'
+                                className='block mt-1'
+                              >
+                                {group.desc}
+                              </Text>
+                            )}
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <Title heading={5} className='mb-2'>
-                  {group.desc || group.name}
-                </Title>
-                <Tag color='blue' size='small'>
-                  {group.name}
-                </Tag>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderStep2 = () => {
     const groupInfo = availableGroups.find((g) => g.name === selectedGroup) || {
@@ -342,7 +412,7 @@ const QuickCreateTokenModal = ({
       onCancel={onCancel}
       footer={null}
       closeOnEsc
-      width={600}
+      width={currentStep === 1 ? 920 : 600}
       bodyStyle={{ padding: '24px' }}
     >
       <Spin spinning={loading}>
