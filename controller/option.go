@@ -221,6 +221,16 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "error_capture_setting.rules":
+		normalized, nerr := console_setting.NormalizeRulesJSON(option.Value.(string), common.GetUUID)
+		if nerr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "错误抓取规则格式无效: " + nerr.Error(),
+			})
+			return
+		}
+		option.Value = normalized // 写回归一后的 JSON（已生成 id、夹紧 max_records）
 	case "GroupTree":
 		err = ratio_setting.CheckGroupTree(option.Value.(string))
 		if err != nil {
