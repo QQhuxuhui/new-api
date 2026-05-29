@@ -13,8 +13,8 @@ const (
 
 // ErrorCaptureLog 命中关键词规则时捕获的完整请求记录，存于 LOG_DB
 type ErrorCaptureLog struct {
-	Id          int    `json:"id"`
-	RuleId      string `json:"rule_id" gorm:"index:idx_ecl_rule_id_id,priority:1;index"`
+	Id          int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	RuleId      string `json:"rule_id" gorm:"index:idx_ecl_rule_id_id,priority:1"`
 	Keyword     string `json:"keyword"`
 	CreatedAt   int64  `json:"created_at" gorm:"bigint;index:idx_ecl_rule_id_id,priority:2"`
 	UserId      int    `json:"user_id" gorm:"index"`
@@ -124,6 +124,9 @@ func GetErrorCaptureLogs(ruleId string, page, pageSize int) (logs []*ErrorCaptur
 	}
 	if pageSize <= 0 {
 		pageSize = 20
+	}
+	if pageSize > 200 {
+		pageSize = 200
 	}
 	q := LOG_DB.Model(&ErrorCaptureLog{}).Where("rule_id = ?", ruleId)
 	if err = q.Count(&total).Error; err != nil {

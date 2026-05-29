@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -40,6 +41,28 @@ func TestTruncateBody(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, errorCaptureTruncateMark) {
 		t.Fatalf("missing truncate mark: ...%q", got[len(got)-20:])
+	}
+}
+
+func TestTruncateBodyMultibyte(t *testing.T) {
+	// '世' is 3 bytes; ErrorCaptureBodyMaxBytes (65536) is not divisible by 3,
+	// so cutting at the byte boundary splits a character and forces walk-back.
+	r := []byte("世")
+	n := (ErrorCaptureBodyMaxBytes/len(r) + 50) // enough to exceed the cap
+	big := make([]byte, 0, n*len(r))
+	for i := 0; i < n; i++ {
+		big = append(big, r...)
+	}
+	got := truncateBody(big)
+	if !strings.HasSuffix(got, errorCaptureTruncateMark) {
+		t.Fatalf("missing truncate mark")
+	}
+	body := strings.TrimSuffix(got, errorCaptureTruncateMark)
+	if !utf8.ValidString(body) {
+		t.Fatalf("truncated body is not valid UTF-8 (walk-back failed)")
+	}
+	if len(body) > ErrorCaptureBodyMaxBytes {
+		t.Fatalf("body exceeds max: %d", len(body))
 	}
 }
 
