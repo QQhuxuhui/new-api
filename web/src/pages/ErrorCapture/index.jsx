@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 import React, { useEffect, useState } from 'react';
 import {
   Button, Card, Table, Switch, Input, InputNumber, Space, Typography,
-  Modal, Banner, Popconfirm, Select, Empty, Tag,
+  Modal, Banner, Popconfirm, Select, Empty, Tag, Spin,
 } from '@douyinfe/semi-ui';
 import { IconPlus, IconDelete, IconRefresh } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
@@ -19,6 +19,7 @@ const ErrorCapture = () => {
   const [enabled, setEnabled] = useState(false);
   const [rules, setRules] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const [selectedRuleId, setSelectedRuleId] = useState('');
   const [logs, setLogs] = useState([]);
@@ -27,22 +28,29 @@ const ErrorCapture = () => {
   const [detail, setDetail] = useState(null);
 
   const loadConfig = async () => {
-    const res = await API.get('/api/option/');
-    if (!res.data.success) {
-      showError(res.data.message);
-      return;
-    }
-    const opts = res.data.data || [];
-    let en = false;
-    let rs = [];
-    opts.forEach((o) => {
-      if (o.key === 'error_capture_setting.enabled') en = o.value === 'true';
-      if (o.key === 'error_capture_setting.rules') {
-        try { rs = JSON.parse(o.value || '[]'); } catch (e) { rs = []; }
+    setLoading(true);
+    try {
+      const res = await API.get('/api/option/');
+      if (!res.data.success) {
+        showError(res.data.message);
+        return;
       }
-    });
-    setEnabled(en);
-    setRules(Array.isArray(rs) ? rs : []);
+      const opts = res.data.data || [];
+      let en = false;
+      let rs = [];
+      opts.forEach((o) => {
+        if (o.key === 'error_capture_setting.enabled') en = o.value === 'true';
+        if (o.key === 'error_capture_setting.rules') {
+          try { rs = JSON.parse(o.value || '[]'); } catch (e) { rs = []; }
+        }
+      });
+      setEnabled(en);
+      setRules(Array.isArray(rs) ? rs : []);
+    } catch (e) {
+      // 错误已由全局拦截器提示
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { loadConfig(); }, []);
@@ -55,7 +63,7 @@ const ErrorCapture = () => {
   const saveAll = async () => {
     setSaving(true);
     try {
-      await updateOption('error_capture_setting.enabled', enabled);
+      await updateOption('error_capture_setting.enabled', enabled ? 'true' : 'false');
       await updateOption('error_capture_setting.rules', JSON.stringify(rules));
       showSuccess(t('保存成功'));
       await loadConfig();
@@ -67,7 +75,7 @@ const ErrorCapture = () => {
   };
 
   const addRule = () => {
-    setRules([...rules, { id: genLocalId(), keyword: '', label: '', enabled: true, max_records: 100 }]);
+    setRules([...rules, { id: genLocalId(), keyword: '', label: '', enabled: true, max_records: 100, _local: true }]);
   };
   const updateRule = (idx, patch) => {
     const next = rules.slice();
@@ -82,24 +90,36 @@ const ErrorCapture = () => {
 
   const loadLogs = async (ruleId, page = 1) => {
     if (!ruleId) return;
-    const res = await API.get(`/api/error_capture/logs?rule_id=${encodeURIComponent(ruleId)}&p=${page}&page_size=20`);
-    if (!res.data.success) { showError(res.data.message); return; }
-    setLogs(res.data.data.items || []);
-    setLogTotal(res.data.data.total || 0);
-    setLogPage(page);
+    try {
+      const res = await API.get(`/api/error_capture/logs?rule_id=${encodeURIComponent(ruleId)}&p=${page}&page_size=20`);
+      if (!res.data.success) { showError(res.data.message); return; }
+      setLogs(res.data.data.items || []);
+      setLogTotal(res.data.data.total || 0);
+      setLogPage(page);
+    } catch (e) {
+      // handled globally
+    }
   };
 
   const openDetail = async (id) => {
-    const res = await API.get(`/api/error_capture/logs/${id}`);
-    if (!res.data.success) { showError(res.data.message); return; }
-    setDetail(res.data.data);
+    try {
+      const res = await API.get(`/api/error_capture/logs/${id}`);
+      if (!res.data.success) { showError(res.data.message); return; }
+      setDetail(res.data.data);
+    } catch (e) {
+      // handled globally
+    }
   };
 
   const clearRuleLogs = async (ruleId) => {
-    const res = await API.delete(`/api/error_capture/logs?rule_id=${encodeURIComponent(ruleId)}`);
-    if (!res.data.success) { showError(res.data.message); return; }
-    showSuccess(t('已清空'));
-    loadLogs(ruleId, 1);
+    try {
+      const res = await API.delete(`/api/error_capture/logs?rule_id=${encodeURIComponent(ruleId)}`);
+      if (!res.data.success) { showError(res.data.message); return; }
+      showSuccess(t('已清空'));
+      loadLogs(ruleId, 1);
+    } catch (e) {
+      // handled globally
+    }
   };
 
   const ruleColumns = [
@@ -132,7 +152,7 @@ const ErrorCapture = () => {
       render: (_, r) => <Button theme='borderless' onClick={() => openDetail(r.id)}>{t('查看请求')}</Button> },
   ];
 
-  const savedRules = rules.filter((r) => r.id);
+  const savedRules = rules.filter((r) => r.id && !r._local);
 
   return (
     <div style={{ padding: 16 }}>
@@ -144,7 +164,9 @@ const ErrorCapture = () => {
           <Button icon={<IconPlus />} onClick={addRule}>{t('添加规则')}</Button>
           <Button theme='solid' loading={saving} onClick={saveAll}>{t('保存配置')}</Button>
         </Space>
-        <Table columns={ruleColumns} dataSource={rules} pagination={false} rowKey={(r) => r.id || r.keyword} />
+        <Spin spinning={loading}>
+          <Table columns={ruleColumns} dataSource={rules} pagination={false} rowKey={(r) => r.id || r.keyword} />
+        </Spin>
       </Card>
 
       <Card title={t('抓取记录')}>
