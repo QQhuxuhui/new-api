@@ -21,7 +21,7 @@ import React, { lazy, Suspense, useContext, useMemo } from 'react';
 import { Route, Routes, useLocation } from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import User from './pages/User';
-import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers';
+import { AuthRedirect, PrivateRoute, AdminRoute, RootRoute } from './helpers';
 import RegisterForm from './components/auth/RegisterForm';
 import LoginForm from './components/auth/LoginForm';
 import NotFound from './pages/NotFound';
@@ -56,6 +56,7 @@ import MyOrders from './pages/MyOrders';
 import AdminOrders from './pages/AdminOrders';
 import AffMonthlyReport from './pages/AffMonthlyReport';
 import FailoverRules from './pages/FailoverRules';
+import ErrorCapture from './pages/ErrorCapture';
 
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -203,6 +204,14 @@ function App() {
             <AdminRoute>
               <FailoverRules />
             </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/error-capture'
+          element={
+            <RootRoute>
+              <ErrorCapture />
+            </RootRoute>
           }
         />
         <Route
