@@ -35,6 +35,7 @@ const routerMap = {
   home: '/',
   channel: '/console/channel',
   'failover-rules': '/console/failover-rules',
+  'error-capture': '/console/error-capture',
   token: '/console/token',
   redemption: '/console/redemption',
   plan: '/console/plan',
@@ -180,6 +181,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey: 'failover-rules',
         to: '/console/failover-rules',
         className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('错误抓取'),
+        itemKey: 'error-capture',
+        to: '/console/error-capture',
+        className: isRoot() ? '' : 'tableHiddle',
       },
       {
         text: t('模型管理'),

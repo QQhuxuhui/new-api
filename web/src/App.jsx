@@ -56,6 +56,7 @@ import MyOrders from './pages/MyOrders';
 import AdminOrders from './pages/AdminOrders';
 import AffMonthlyReport from './pages/AffMonthlyReport';
 import FailoverRules from './pages/FailoverRules';
+import ErrorCapture from './pages/ErrorCapture';
 
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -202,6 +203,14 @@ function App() {
           element={
             <AdminRoute>
               <FailoverRules />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/error-capture'
+          element={
+            <AdminRoute>
+              <ErrorCapture />
             </AdminRoute>
           }
         />
