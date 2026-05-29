@@ -42,3 +42,58 @@ func TestTruncateBody(t *testing.T) {
 		t.Fatalf("missing truncate mark: ...%q", got[len(got)-20:])
 	}
 }
+
+func TestRecordAndTrimErrorCapture(t *testing.T) {
+	setupErrorCaptureTestDB(t)
+
+	targets := []ErrorCaptureTarget{{RuleId: "r1", Keyword: "k", MaxRecords: 3}}
+	for i := 0; i < 5; i++ {
+		RecordErrorCaptureLogs(targets, ErrorCapturePayload{
+			CreatedAt:   int64(i),
+			Content:     "boom",
+			RequestBody: []byte(fmt.Sprintf("body-%d", i)),
+		})
+	}
+	// 另一个规则不受影响
+	RecordErrorCaptureLogs([]ErrorCaptureTarget{{RuleId: "r2", Keyword: "k", MaxRecords: 100}},
+		ErrorCapturePayload{RequestBody: []byte("other")})
+
+	// r1 应裁剪到最新 3 条
+	logs, total, err := GetErrorCaptureLogs("r1", 1, 50)
+	if err != nil {
+		t.Fatalf("list r1: %v", err)
+	}
+	if total != 3 || len(logs) != 3 {
+		t.Fatalf("expected 3 kept for r1, got total=%d len=%d", total, len(logs))
+	}
+	// 列表不返回 request_body
+	if logs[0].RequestBody != "" {
+		t.Fatalf("list should omit request_body, got %q", logs[0].RequestBody)
+	}
+	// 最新优先（id desc）：最后写入的 body-4 应在最前
+	detail, err := GetErrorCaptureLogDetail(logs[0].Id)
+	if err != nil {
+		t.Fatalf("detail: %v", err)
+	}
+	if detail.RequestBody != "body-4" {
+		t.Fatalf("expected newest body-4 first, got %q", detail.RequestBody)
+	}
+
+	// r2 不受 r1 裁剪影响，保留 1 条
+	logs2, total2, err := GetErrorCaptureLogs("r2", 1, 50)
+	if err != nil {
+		t.Fatalf("list r2: %v", err)
+	}
+	if total2 != 1 || len(logs2) != 1 {
+		t.Fatalf("r2 should keep 1, got total=%d len=%d", total2, len(logs2))
+	}
+
+	// 删除 r1 全部
+	n, err := DeleteErrorCaptureLogsByRule("r1")
+	if err != nil || n != 3 {
+		t.Fatalf("delete r1 expected 3, got n=%d err=%v", n, err)
+	}
+	if _, total3, _ := GetErrorCaptureLogs("r1", 1, 50); total3 != 0 {
+		t.Fatalf("r1 should be empty after delete, got total=%d", total3)
+	}
+}
