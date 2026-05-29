@@ -222,6 +222,13 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "error_capture_setting.rules":
+		// 记录旧规则 id（此时全局配置尚未更新）
+		oldIds := make(map[string]bool)
+		for _, r := range console_setting.GetErrorCaptureSetting().ParsedRules() {
+			if r.Id != "" {
+				oldIds[r.Id] = true
+			}
+		}
 		normalized, nerr := console_setting.NormalizeRulesJSON(option.Value.(string), common.GetUUID)
 		if nerr != nil {
 			c.JSON(http.StatusOK, gin.H{
@@ -231,6 +238,21 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 		option.Value = normalized // 写回归一后的 JSON（已生成 id、夹紧 max_records）
+		// 清理被删除规则遗留的捕获记录，避免孤儿数据无限增长
+		var newRules []console_setting.ErrorCaptureRule
+		if jerr := json.Unmarshal([]byte(normalized), &newRules); jerr == nil {
+			newIds := make(map[string]bool, len(newRules))
+			for _, r := range newRules {
+				newIds[r.Id] = true
+			}
+			for id := range oldIds {
+				if !newIds[id] {
+					if _, derr := model.DeleteErrorCaptureLogsByRule(id); derr != nil {
+						common.SysError("failed to purge error capture logs for removed rule " + id + ": " + derr.Error())
+					}
+				}
+			}
+		}
 	case "GroupTree":
 		err = ratio_setting.CheckGroupTree(option.Value.(string))
 		if err != nil {
