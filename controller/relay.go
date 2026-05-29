@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -336,6 +337,7 @@ retryLoop:
 				}
 
 				processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+				captureErrorRequestIfMatched(c, newAPIError)
 			}
 
 			// remainingRetries 用于 shouldRetry 的“次数”判定，这里用一个足够大的剩余额度，避免受 RetryTimes 限制
@@ -766,6 +768,68 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveError(), tokenId, 0, false, userGroup, other)
 	}
 
+}
+
+// captureErrorRequestIfMatched 当错误详情命中已启用的错误抓取规则时，
+// 异步保存该次请求的完整请求体与元数据。每个请求最多捕获一次。
+// 独立于全局 ErrorLogEnabled，仅受 error_capture_setting.Enabled 控制。
+func captureErrorRequestIfMatched(c *gin.Context, err *types.NewAPIError) {
+	if err == nil {
+		return
+	}
+	s := console_setting.GetErrorCaptureSetting()
+	if !s.Enabled || !types.IsRecordErrorLog(err) {
+		return
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyErrorCaptureDone) {
+		return
+	}
+	content := err.MaskSensitiveError()
+	matched := console_setting.MatchErrorCaptureRules(content, s.ParsedRules())
+	if len(matched) == 0 {
+		return
+	}
+	common.SetContextKey(c, constant.ContextKeyErrorCaptureDone, true)
+
+	targets := make([]model.ErrorCaptureTarget, 0, len(matched))
+	for _, r := range matched {
+		targets = append(targets, model.ErrorCaptureTarget{
+			RuleId:     r.Id,
+			Keyword:    r.Keyword,
+			MaxRecords: r.MaxRecords,
+		})
+	}
+
+	body, _ := common.GetRequestBody(c) // 已缓存，安全
+	other := map[string]interface{}{
+		"channel_name": c.GetString("channel_name"),
+		"channel_type": c.GetInt("channel_type"),
+	}
+	payload := model.ErrorCapturePayload{
+		CreatedAt:   common.GetTimestamp(),
+		UserId:      c.GetInt("id"),
+		Username:    c.GetString("username"),
+		ModelName:   c.GetString("original_model"),
+		ChannelId:   c.GetInt("channel_id"),
+		TokenName:   c.GetString("token_name"),
+		StatusCode:  err.StatusCode,
+		ErrorType:   string(err.GetErrorType()),
+		ErrorCode:   fmt.Sprintf("%v", err.GetErrorCode()),
+		RequestPath: requestPathOf(c),
+		Content:     content,
+		RequestBody: body,
+		Other:       common.MapToJsonStr(other),
+	}
+	gopool.Go(func() {
+		model.RecordErrorCaptureLogs(targets, payload)
+	})
+}
+
+func requestPathOf(c *gin.Context) string {
+	if c.Request != nil && c.Request.URL != nil {
+		return c.Request.URL.Path
+	}
+	return ""
 }
 
 // maskApiKeyForDebug 对 API Key 进行脱敏，显示前4位和后4位
