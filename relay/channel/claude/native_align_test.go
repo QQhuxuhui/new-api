@@ -3,11 +3,14 @@ package claude
 import (
 	"bytes"
 	"encoding/json"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 )
 
 func TestBuildNativeMessageStartFieldOrder(t *testing.T) {
@@ -218,5 +221,53 @@ func TestNativeAlignActiveGate(t *testing.T) {
 	info4 := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude}
 	if nativeAlignActive(info4) {
 		t.Fatalf("nil ChannelMeta must be inactive, not panic")
+	}
+}
+
+func newNativeAlignInfo() *relaycommon.RelayInfo {
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude}
+	info.ChannelMeta = &relaycommon.ChannelMeta{
+		ChannelSetting: dto.ChannelSettings{NativeAlign: true},
+	}
+	return info
+}
+
+func TestNativeAlignStreamRewritesEnvelope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	info := newNativeAlignInfo()
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}, ResponseText: strings.Builder{}}
+
+	events := []string{
+		`{"type":"message_start","message":{"content":[],"id":"req_vrtx_011ABC","model":"claude-opus-4-6","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"input_tokens":25543,"output_tokens":1}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":25543,"output_tokens":5}}`,
+		`{"type":"message_stop"}`,
+	}
+	for _, e := range events {
+		if err := HandleStreamResponseData(c, info, claudeInfo, e, RequestModeMessage); err != nil {
+			t.Fatalf("handle event err: %v", err)
+		}
+	}
+	body := w.Body.String()
+
+	if !contains(body, "msg_01") {
+		t.Fatalf("expected synthetic msg_ id, got body:\n%s", body)
+	}
+	if contains(body, "req_vrtx_") {
+		t.Fatalf("vertex id leaked into output:\n%s", body)
+	}
+	if !contains(body, `event: ping`) || !contains(body, `{"type": "ping"}`) {
+		t.Fatalf("expected injected ping:\n%s", body)
+	}
+	if !contains(body, `"service_tier":"standard"`) || !contains(body, `"inference_geo":"not_available"`) {
+		t.Fatalf("message_start.usage missing native fields:\n%s", body)
+	}
+	if !contains(body, `"context_management"`) || !contains(body, `"iterations"`) {
+		t.Fatalf("message_delta missing native fields:\n%s", body)
 	}
 }

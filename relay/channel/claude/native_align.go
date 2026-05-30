@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"math/rand"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 )
 
 // Ordered structs reproduce first-party Anthropic field order exactly.
@@ -215,4 +219,107 @@ func buildNativeMessageDelta(stopReason string, usage *dto.Usage, thinkingTokens
 		return nil
 	}
 	return b
+}
+
+const nativePingIntervalNano = int64(5 * time.Second)
+
+// handleNativeAlignStreamEvent rewrites/forwards a single upstream SSE event so
+// the client sees a first-party Anthropic envelope. It performs all writes and
+// returns. On any internal failure it falls back to forwarding raw padded bytes.
+func handleNativeAlignStreamEvent(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, claudeResponse *dto.ClaudeResponse, rawData string, requestMode int, nowUnixNano int64) {
+	FormatClaudeResponseInfo(requestMode, claudeResponse, nil, claudeInfo)
+
+	switch claudeResponse.Type {
+	case "message_start":
+		resolveNativeCache(info, claudeInfo)
+		if claudeInfo.NativeMsgID == "" {
+			claudeInfo.NativeMsgID = generateNativeMessageID()
+		}
+		model := claudeResponse.Message.Model
+		if model == "" {
+			model = claudeInfo.Model
+		}
+		payload := buildNativeMessageStart(model, claudeInfo.NativeMsgID, claudeInfo.Usage)
+		writeNativeEvent(c, "message_start", payload, rawData)
+
+	case "content_block_start":
+		writeNativeEvent(c, "content_block_start", applyNativePadding([]byte(rawData)), rawData)
+		if !claudeInfo.NativePingInjected {
+			helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "ping"}, nativePingPayload())
+			claudeInfo.NativePingInjected = true
+			claudeInfo.NativeLastPingUnixNano = nowUnixNano
+		}
+
+	case "content_block_delta":
+		if claudeResponse.Delta != nil && claudeResponse.Delta.Thinking != nil {
+			claudeInfo.NativeThinkingText.WriteString(*claudeResponse.Delta.Thinking)
+		}
+		writeNativeEvent(c, "content_block_delta", applyNativePadding([]byte(rawData)), rawData)
+		if claudeInfo.NativePingInjected && nowUnixNano-claudeInfo.NativeLastPingUnixNano >= nativePingIntervalNano {
+			helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "ping"}, nativePingPayload())
+			claudeInfo.NativeLastPingUnixNano = nowUnixNano
+		}
+
+	case "content_block_stop":
+		writeNativeEvent(c, "content_block_stop", applyNativePadding([]byte(rawData)), rawData)
+
+	case "message_delta":
+		resolveNativeCache(info, claudeInfo)
+		stopReason := ""
+		if claudeResponse.Delta != nil && claudeResponse.Delta.StopReason != nil {
+			stopReason = *claudeResponse.Delta.StopReason
+		}
+		thinkingTokens := 0
+		if claudeInfo.NativeThinkingText.Len() > 0 {
+			thinkingTokens = service.CountTextToken(claudeInfo.NativeThinkingText.String(), claudeInfo.Model)
+		}
+		var stu *nativeServerToolUse
+		if claudeResponse.Usage != nil && claudeResponse.Usage.ServerToolUse != nil && claudeResponse.Usage.ServerToolUse.WebSearchRequests > 0 {
+			stu = &nativeServerToolUse{WebSearchRequests: claudeResponse.Usage.ServerToolUse.WebSearchRequests}
+		}
+		payload := buildNativeMessageDelta(stopReason, claudeInfo.Usage, thinkingTokens, stu)
+		writeNativeEvent(c, "message_delta", payload, rawData)
+
+	case "message_stop":
+		writeNativeEvent(c, "message_stop", buildNativeMessageStop(), rawData)
+
+	case "ping":
+		// We manage pings ourselves; drop upstream pings to avoid duplicates.
+		return
+
+	default:
+		writeNativeEvent(c, claudeResponse.Type, applyNativePadding([]byte(rawData)), rawData)
+	}
+}
+
+// writeNativeEvent writes one SSE event. Rebuilt envelope payloads
+// (message_start/delta/stop) get padding here; content_block_* arrive already
+// padded by the caller. On nil/empty payload it falls back to raw upstream bytes.
+func writeNativeEvent(c *gin.Context, eventType string, payload []byte, rawFallback string) {
+	if len(payload) == 0 {
+		helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: eventType}, rawFallback)
+		return
+	}
+	switch eventType {
+	case "message_start", "message_delta", "message_stop":
+		payload = applyNativePadding(payload)
+	}
+	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: eventType}, string(payload))
+}
+
+// resolveNativeCache ensures claudeInfo.Usage carries cache numbers exactly once.
+// If session_prefix cache simulation is enabled it runs the simulation (which
+// also sets info.CacheSimulationApplied for billing); otherwise it leaves the
+// upstream values already mapped onto Usage by FormatClaudeResponseInfo.
+func resolveNativeCache(info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
+	if claudeInfo.NativeCacheResolved {
+		return
+	}
+	cfg := info.ChannelMeta.ChannelSetting.CacheSimulation
+	if cfg != nil && cfg.Enabled {
+		if applyCacheSimulation(info, claudeInfo.Usage) {
+			claudeInfo.CacheSimulationApplied = true
+		}
+	}
+	claudeInfo.NativeCacheResolved = true
 }

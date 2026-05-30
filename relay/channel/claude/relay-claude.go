@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -852,6 +853,10 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	}
 
 	if info.RelayFormat == types.RelayFormatClaude {
+		if nativeAlignActive(info) && requestMode != RequestModeCompletion {
+			handleNativeAlignStreamEvent(c, info, claudeInfo, &claudeResponse, data, requestMode, time.Now().UnixNano())
+			return nil
+		}
 		FormatClaudeResponseInfo(requestMode, &claudeResponse, nil, claudeInfo)
 
 		if requestMode == RequestModeCompletion {
