@@ -7,6 +7,8 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 )
 
 // Ordered structs reproduce first-party Anthropic field order exactly.
@@ -159,6 +161,18 @@ type nativeMessageDelta struct {
 	Delta             nativeDelta             `json:"delta"`
 	Usage             nativeDeltaUsage        `json:"usage"`
 	ContextManagement nativeContextManagement `json:"context_management"`
+}
+
+// nativeAlignActive reports whether native envelope alignment should run for
+// this request. Independent of cache simulation.
+func nativeAlignActive(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	if info.RelayFormat != types.RelayFormatClaude {
+		return false
+	}
+	return info.ChannelMeta.ChannelSetting.NativeAlign
 }
 
 // buildNativeMessageDelta renders the message_delta SSE data payload.

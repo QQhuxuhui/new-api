@@ -754,6 +754,20 @@ type ClaudeResponseInfo struct {
 	// observed during the stream so the final message_delta finish_reason
 	// can be rewritten from tool_calls back to stop.
 	StructuredOutputUsed bool
+	// --- native_align state ---
+	// NativeMsgID is the synthetic "msg_..." id generated at message_start and
+	// reused for the whole stream.
+	NativeMsgID string
+	// NativeCacheResolved marks that cache numbers (simulated or upstream) have
+	// been resolved onto Usage, so message_start and message_delta agree.
+	NativeCacheResolved bool
+	// NativePingInjected marks that the post-first-content_block_start ping was sent.
+	NativePingInjected bool
+	// NativeLastPingUnixNano is the wall-clock of the last emitted ping, for the
+	// long-stream periodic ping heuristic.
+	NativeLastPingUnixNano int64
+	// NativeThinkingText accumulates thinking deltas to estimate thinking_tokens.
+	NativeThinkingText strings.Builder
 }
 
 func FormatClaudeResponseInfo(requestMode int, claudeResponse *dto.ClaudeResponse, oaiResponse *dto.ChatCompletionsStreamResponse, claudeInfo *ClaudeResponseInfo) bool {

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 )
 
 func TestBuildNativeMessageStartFieldOrder(t *testing.T) {
@@ -190,5 +192,31 @@ func TestApplyNativePaddingDistributionInRange(t *testing.T) {
 func TestNativePingPayload(t *testing.T) {
 	if nativePingPayload() != `{"type": "ping"}` {
 		t.Fatalf("ping payload mismatch: %q", nativePingPayload())
+	}
+}
+
+func TestNativeAlignActiveGate(t *testing.T) {
+	// off when RelayFormat != Claude
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI}
+	info.ChannelMeta = &relaycommon.ChannelMeta{ChannelSetting: dto.ChannelSettings{NativeAlign: true}}
+	if nativeAlignActive(info) {
+		t.Fatalf("must be inactive for non-Claude format")
+	}
+	// off when flag false
+	info2 := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude}
+	info2.ChannelMeta = &relaycommon.ChannelMeta{ChannelSetting: dto.ChannelSettings{NativeAlign: false}}
+	if nativeAlignActive(info2) {
+		t.Fatalf("must be inactive when flag off")
+	}
+	// on
+	info3 := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude}
+	info3.ChannelMeta = &relaycommon.ChannelMeta{ChannelSetting: dto.ChannelSettings{NativeAlign: true}}
+	if !nativeAlignActive(info3) {
+		t.Fatalf("must be active when Claude + flag on")
+	}
+	// nil ChannelMeta is safe
+	info4 := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude}
+	if nativeAlignActive(info4) {
+		t.Fatalf("nil ChannelMeta must be inactive, not panic")
 	}
 }
