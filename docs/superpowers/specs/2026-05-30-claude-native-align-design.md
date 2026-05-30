@@ -98,7 +98,7 @@ data: {"type":"message_start","message":{"model":"claude-opus-4-6","id":"msg_01C
 
 ### ping
 
-- 首个 `content_block_start` 前注入:`data: {"type": "ping"}`(冒号后有空格,pad=0)
+- 首个 `content_block_start` **之后**注入:`data: {"type": "ping"}`(冒号后有空格,pad=0)。实测原生顺序为 `message_start → content_block_start → ping → content_block_delta`(见 docs/export/A/raw/resp_0*.sse)
 - 长流再按墙钟 ~每 5s 周期补注(`lastPingTime` 判定)
 
 ### content_block_*(正文)
@@ -156,7 +156,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":
 - 单元测试每个 transform 函数:id 前缀 `msg_01`、message_start/message_delta 字段顺序、usage 字段集、iterations 形状、stop_details=null、context_management 存在
 - **schema 对拍**:改写输出跑同样的 schema 提取,断言等于 `A/schema.json`(扣除任务相关的 `server_tool_use`/`web_search_tool_result` content 类型)
 - 填充分布测试:断言 0–15 近均匀、ping pad=0、行末字符为 `}`
-- ping 位置测试:首个 content_block_start 前存在 ping
+- ping 顺序测试:断言事件顺序为 message_start → content_block_start → ping → content_block_delta(ping 紧跟首个 content_block_start 之后)
 - 回退测试:构造坏输入,断言透传不崩、不改变原字节
 - 解耦测试:模拟缓存关闭时,断言非缓存指纹(id/ping/字段顺序/结构/padding)仍全部对齐,缓存字段以原生形状存在但值等于上游(如 0)
 
