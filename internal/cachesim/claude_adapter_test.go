@@ -256,3 +256,45 @@ func TestPerMessageSegmentsPrefixStabilityAcrossRequests(t *testing.T) {
 		t.Fatalf("system+msg1+msg2 prefix hash changed between requests")
 	}
 }
+
+func TestResolveRequestCacheTTL(t *testing.T) {
+	// ephemeral with no ttl -> 5m (Anthropic default; matches captured native A)
+	reqEphemeral := &dto.ClaudeRequest{
+		System: []any{
+			map[string]any{"type": "text", "text": "sys", "cache_control": map[string]any{"type": "ephemeral"}},
+		},
+	}
+	if got := ResolveRequestCacheTTL(reqEphemeral); got != TTL5m {
+		t.Fatalf("ephemeral without ttl: want 5m, got %s", got)
+	}
+
+	// explicit ttl=1h -> 1h
+	req1h := &dto.ClaudeRequest{
+		System: []any{
+			map[string]any{"type": "text", "text": "sys", "cache_control": map[string]any{"type": "ephemeral", "ttl": "1h"}},
+		},
+	}
+	if got := ResolveRequestCacheTTL(req1h); got != TTL1h {
+		t.Fatalf("ttl=1h: want 1h, got %s", got)
+	}
+
+	// ttl=1h on a tool definition is also detected
+	req1hTool := &dto.ClaudeRequest{
+		Tools: []any{
+			map[string]any{"name": "search", "cache_control": map[string]any{"type": "ephemeral", "ttl": "1h"}},
+		},
+	}
+	if got := ResolveRequestCacheTTL(req1hTool); got != TTL1h {
+		t.Fatalf("ttl=1h on tool: want 1h, got %s", got)
+	}
+
+	// no cache_control anywhere -> default 5m (don't emit the legacy 1h bucket)
+	if got := ResolveRequestCacheTTL(&dto.ClaudeRequest{System: "plain system"}); got != TTL5m {
+		t.Fatalf("no cache_control: want 5m, got %s", got)
+	}
+
+	// nil request -> 5m
+	if got := ResolveRequestCacheTTL(nil); got != TTL5m {
+		t.Fatalf("nil request: want 5m, got %s", got)
+	}
+}

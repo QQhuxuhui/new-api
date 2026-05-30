@@ -195,3 +195,47 @@ func TestSessionPrefixEngineRetainsContiguousPrefixWhenCheckpointLimitExceeded(t
 		t.Fatalf("expected current turn to remain uncached input = 5, got %d", result.InputTokens)
 	}
 }
+
+// TestSessionPrefixEngineReadStaysStableWhenPrefixTokenCountDrifts guards the
+// 1M-context consistency fix: when the same prefix (same fingerprint/hash) is
+// re-seen with a larger rebalanced token count, cache_read must return the
+// creation-time count, not the drifted current count. Native cache_read for an
+// unchanged prefix is constant across turns.
+func TestSessionPrefixEngineReadStaysStableWhenPrefixTokenCountDrifts(t *testing.T) {
+	store := NewMemoryStore(16, 16)
+	engine := NewSessionPrefixEngine(store)
+	scope := ScopeKey{UserID: 1, TokenID: 10, ChannelID: 100, Model: "claude-opus-4-6"}
+	start := time.Date(2026, 3, 19, 10, 0, 0, 0, time.UTC)
+
+	// Cold: cache a system prefix recorded at 100 tokens.
+	first := makeSnapshot(
+		scope,
+		start,
+		Segment{Kind: SegmentKindSystem, TTL: TTL5m, TokenCount: 100, Fingerprint: "system:v1"},
+		Segment{Kind: SegmentKindCurrent, TTL: TTLNone, TokenCount: 20, Fingerprint: "current:v1"},
+	)
+	if _, err := engine.Simulate(first); err != nil {
+		t.Fatalf("seed simulate returned error: %v", err)
+	}
+
+	// Warm: SAME system fingerprint, but the rebalancer now reports it as 500
+	// tokens because the conversation total ballooned (1M-style growth). The
+	// current message is also huge. cache_read must stay at the creation-time
+	// 100, not jump to 500.
+	second := makeSnapshot(
+		scope,
+		start.Add(1*time.Minute),
+		Segment{Kind: SegmentKindSystem, TTL: TTL5m, TokenCount: 500, Fingerprint: "system:v1"},
+		Segment{Kind: SegmentKindCurrent, TTL: TTLNone, TokenCount: 900000, Fingerprint: "current:v2"},
+	)
+	result, err := engine.Simulate(second)
+	if err != nil {
+		t.Fatalf("simulate returned error: %v", err)
+	}
+	if result.CacheReadTokens != 100 {
+		t.Fatalf("expected stable creation-time cache read = 100, got %d", result.CacheReadTokens)
+	}
+	if result.CacheWrite5mTokens != 0 || result.CacheWrite1hTokens != 0 {
+		t.Fatalf("expected no new writes for unchanged prefix, got 5m=%d 1h=%d", result.CacheWrite5mTokens, result.CacheWrite1hTokens)
+	}
+}

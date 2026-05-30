@@ -41,20 +41,28 @@ func (e *SessionPrefixEngine) Simulate(snapshot PromptSnapshot) (SimulationResul
 		TotalInputTokens: snapshot.TotalInputTokens,
 	}
 
-	for _, prefix := range prefixes {
+	lastMatched := -1
+	for i, prefix := range prefixes {
 		if prefix.segment.TTL == TTLNone {
 			continue
 		}
-		if _, ok := checkpointMap[prefix.hash]; !ok {
+		cp, ok := checkpointMap[prefix.hash]
+		if !ok {
 			break
 		}
-		result.CacheReadTokens = prefix.tokenCount
-		result.ReadPrefixTokens = prefix.tokenCount
+		// Use the token count recorded when the prefix was first cached, not the
+		// (possibly rebalanced) count of the current request. Native cache_read for
+		// an unchanged prefix stays constant across turns; recomputing it from the
+		// current total would make it drift — a detectable inconsistency, especially
+		// as long (1M) contexts grow turn over turn.
+		result.CacheReadTokens = cp.TokenCount
+		result.ReadPrefixTokens = cp.TokenCount
 		result.MatchedPrefixHash = prefix.hash
+		lastMatched = i
 	}
 
-	for _, prefix := range prefixes {
-		if prefix.segment.TTL == TTLNone || prefix.tokenCount <= result.CacheReadTokens {
+	for i, prefix := range prefixes {
+		if prefix.segment.TTL == TTLNone || i <= lastMatched {
 			continue
 		}
 		switch prefix.segment.TTL {
@@ -114,27 +122,27 @@ func mergeCheckpoints(existing []Checkpoint, prefixes []prefixEntry, now time.Ti
 	merged := make([]Checkpoint, 0, len(existing)+len(prefixes))
 	seen := make(map[string]int, len(existing)+len(prefixes))
 
-	appendCheckpoint := func(checkpoint Checkpoint) {
-		if idx, ok := seen[checkpoint.Hash]; ok {
-			merged[idx] = checkpoint
-			return
-		}
+	for _, checkpoint := range existing {
 		seen[checkpoint.Hash] = len(merged)
 		merged = append(merged, checkpoint)
-	}
-
-	for _, checkpoint := range existing {
-		appendCheckpoint(checkpoint)
 	}
 	for _, prefix := range prefixes {
 		if prefix.segment.TTL == TTLNone {
 			continue
 		}
-		appendCheckpoint(Checkpoint{
+		expiry := checkpointExpiry(now, prefix.segment.TTL)
+		if idx, ok := seen[prefix.hash]; ok {
+			// Preserve the creation-time TokenCount so cache_read stays stable
+			// across turns; a hit only refreshes the TTL window.
+			merged[idx].ExpiresAt = expiry
+			continue
+		}
+		seen[prefix.hash] = len(merged)
+		merged = append(merged, Checkpoint{
 			Hash:       prefix.hash,
 			TokenCount: prefix.tokenCount,
 			TTL:        prefix.segment.TTL,
-			ExpiresAt:  checkpointExpiry(now, prefix.segment.TTL),
+			ExpiresAt:  expiry,
 		})
 	}
 	return merged

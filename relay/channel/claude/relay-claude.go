@@ -1306,6 +1306,22 @@ func applySessionPrefixCacheSimulation(info *relaycommon.RelayInfo, usage *dto.U
 		return false
 	}
 	cachesim.ProjectClaudeUsage(usage, result)
+	// Emit the cache_creation ephemeral_5m/1h split in the bucket the client
+	// actually requested via cache_control, instead of the engine's internal
+	// kind-derived TTL. First-party Anthropic reports the whole prefix in the
+	// 5m bucket by default (ephemeral with no ttl); only an explicit "1h" ttl
+	// uses the 1h bucket. The total (CachedCreationTokens) is unchanged — only
+	// the split is corrected so it matches a real native response.
+	totalCreation := usage.ClaudeCacheCreation5mTokens + usage.ClaudeCacheCreation1hTokens
+	if totalCreation > 0 {
+		if cachesim.ResolveRequestCacheTTL(request) == cachesim.TTL1h {
+			usage.ClaudeCacheCreation1hTokens = totalCreation
+			usage.ClaudeCacheCreation5mTokens = 0
+		} else {
+			usage.ClaudeCacheCreation5mTokens = totalCreation
+			usage.ClaudeCacheCreation1hTokens = 0
+		}
+	}
 	return true
 }
 

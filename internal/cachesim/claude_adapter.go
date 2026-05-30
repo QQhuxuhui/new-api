@@ -2,11 +2,36 @@ package cachesim
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 )
+
+// ResolveRequestCacheTTL inspects the request's cache_control directives and
+// returns the cache TTL the client actually requested. Anthropic defaults
+// ephemeral breakpoints to 5 minutes when no ttl is given, so a request that
+// caches without an explicit ttl maps to 5m (matching first-party behaviour);
+// only an explicit "1h" ttl maps to 1h. The relay layer uses this to emit the
+// cache_creation ephemeral_5m/1h split in the bucket the client really used,
+// instead of a value hard-coded by segment kind.
+func ResolveRequestCacheTTL(req *dto.ClaudeRequest) SegmentTTL {
+	if req == nil {
+		return TTL5m
+	}
+	var b strings.Builder
+	b.WriteString(marshalFingerprint(req.System))
+	b.WriteString(marshalFingerprint(req.Tools))
+	for i := range req.Messages {
+		b.WriteString(marshalFingerprint(req.Messages[i]))
+	}
+	blob := b.String()
+	if strings.Contains(blob, `"ttl":"1h"`) || strings.Contains(blob, `"ttl": "1h"`) {
+		return TTL1h
+	}
+	return TTL5m
+}
 
 func BuildClaudeSnapshot(
 	req *dto.ClaudeRequest,

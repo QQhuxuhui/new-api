@@ -310,11 +310,12 @@ func TestHandleClaudeResponseDataPatchesSplitCacheUsageFields(t *testing.T) {
 	if patched.Usage.CacheCreation == nil {
 		t.Fatalf("expected nested cache_creation to be present")
 	}
+	// No cache_control on the request → 5m bucket (native default); 1h empty.
 	if patched.Usage.CacheCreation.Ephemeral5mInputTokens <= 0 {
 		t.Fatalf("expected 5m cache creation > 0, got %d", patched.Usage.CacheCreation.Ephemeral5mInputTokens)
 	}
-	if patched.Usage.CacheCreation.Ephemeral1hInputTokens <= 0 {
-		t.Fatalf("expected 1h cache creation > 0, got %d", patched.Usage.CacheCreation.Ephemeral1hInputTokens)
+	if patched.Usage.CacheCreation.Ephemeral1hInputTokens != 0 {
+		t.Fatalf("expected 1h cache creation = 0 (default 5m bucket), got %d", patched.Usage.CacheCreation.Ephemeral1hInputTokens)
 	}
 	if patched.Usage.ClaudeCacheCreation5mTokens != patched.Usage.CacheCreation.Ephemeral5mInputTokens {
 		t.Fatalf("5m flat field mismatch: flat=%d nested=%d",
@@ -406,8 +407,10 @@ func TestHandleStreamResponseDataPatchesClaudeStreamUsage(t *testing.T) {
 	if patched.Usage.CacheCreation == nil {
 		t.Fatalf("expected nested cache_creation in stream payload")
 	}
-	if patched.Usage.CacheCreation.Ephemeral5mInputTokens <= 0 || patched.Usage.CacheCreation.Ephemeral1hInputTokens <= 0 {
-		t.Fatalf("expected split cache creation fields > 0, got 5m=%d 1h=%d",
+	// No cache_control on the request → 5m bucket (native default); the whole
+	// creation total lands in 5m, 1h stays empty.
+	if patched.Usage.CacheCreation.Ephemeral5mInputTokens <= 0 || patched.Usage.CacheCreation.Ephemeral1hInputTokens != 0 {
+		t.Fatalf("expected creation in 5m bucket only, got 5m=%d 1h=%d",
 			patched.Usage.CacheCreation.Ephemeral5mInputTokens,
 			patched.Usage.CacheCreation.Ephemeral1hInputTokens,
 		)
@@ -576,11 +579,13 @@ func TestApplyCacheSimulationSessionPrefixCreatesSplitCacheLayers(t *testing.T) 
 	if usage.PromptTokensDetails.CachedTokens != 0 {
 		t.Fatalf("expected cold start cached read = 0, got %d", usage.PromptTokensDetails.CachedTokens)
 	}
-	if usage.ClaudeCacheCreation1hTokens <= 0 {
-		t.Fatalf("expected 1h cache creation > 0, got %d", usage.ClaudeCacheCreation1hTokens)
-	}
+	// No cache_control on the request → bucket defaults to 5m (native default),
+	// so the whole cache_creation total lands in 5m and the 1h bucket is empty.
 	if usage.ClaudeCacheCreation5mTokens <= 0 {
-		t.Fatalf("expected 5m cache creation > 0, got %d", usage.ClaudeCacheCreation5mTokens)
+		t.Fatalf("expected 5m cache creation > 0 on cold start, got %d", usage.ClaudeCacheCreation5mTokens)
+	}
+	if usage.ClaudeCacheCreation1hTokens != 0 {
+		t.Fatalf("expected 1h cache creation = 0 (default 5m bucket), got %d", usage.ClaudeCacheCreation1hTokens)
 	}
 }
 
@@ -905,11 +910,64 @@ func TestApplyCacheSimulationSessionPrefixUsesCapturedCompatibleClaudeRequest(t 
 
 	applyCacheSimulation(info, usage)
 
-	if usage.ClaudeCacheCreation1hTokens <= 0 {
-		t.Fatalf("expected 1h cache creation > 0, got %d", usage.ClaudeCacheCreation1hTokens)
-	}
+	// This request has no cache_control directive, so the bucket defaults to 5m
+	// (Anthropic's ephemeral default, matching captured native channel A). The
+	// whole cache_creation total must land in the 5m bucket, with the 1h bucket
+	// empty — not the legacy kind-derived 1h split.
 	if usage.ClaudeCacheCreation5mTokens <= 0 {
 		t.Fatalf("expected 5m cache creation > 0, got %d", usage.ClaudeCacheCreation5mTokens)
+	}
+	if usage.ClaudeCacheCreation1hTokens != 0 {
+		t.Fatalf("expected 1h cache creation = 0 (default 5m bucket), got %d", usage.ClaudeCacheCreation1hTokens)
+	}
+}
+
+func TestApplyCacheSimulationSessionPrefixUses1hBucketWhenRequestUses1hTTL(t *testing.T) {
+	sessionPrefixSimulationStore = cachesim.NewMemoryStore(16, 16)
+	cfg := &dto.CacheSimulationConfig{
+		Enabled:        true,
+		Mode:           dto.CacheSimulationModeSessionPrefix,
+		MinInputTokens: 1,
+	}
+	info := &relaycommon.RelayInfo{
+		UserId:          2,
+		TokenId:         10,
+		OriginModelName: "claude-3-7-sonnet-20250219",
+		PromptTokens:    200,
+		StartTime:       time.Date(2026, 3, 19, 10, 0, 0, 0, time.UTC),
+		Request:         &dto.GeneralOpenAIRequest{Model: "claude-3-7-sonnet-20250219"},
+		CacheSimulationRequest: &dto.ClaudeRequest{
+			Model: "claude-3-7-sonnet-20250219",
+			System: []any{
+				map[string]any{
+					"type":          "text",
+					"text":          "system prompt",
+					"cache_control": map[string]any{"type": "ephemeral", "ttl": "1h"},
+				},
+			},
+			Messages: []dto.ClaudeMessage{
+				{Role: "user", Content: "history question"},
+				{Role: "assistant", Content: "history answer"},
+				{Role: "user", Content: "current question"},
+			},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 101,
+			ChannelSetting: dto.ChannelSettings{
+				CacheSimulation: cfg,
+			},
+		},
+	}
+	usage := &dto.Usage{CompletionTokens: 50, TotalTokens: 50}
+
+	applyCacheSimulation(info, usage)
+
+	// Request explicitly requested a 1h ttl, so the creation must land in the 1h bucket.
+	if usage.ClaudeCacheCreation1hTokens <= 0 {
+		t.Fatalf("expected 1h cache creation > 0 for ttl=1h request, got %d", usage.ClaudeCacheCreation1hTokens)
+	}
+	if usage.ClaudeCacheCreation5mTokens != 0 {
+		t.Fatalf("expected 5m cache creation = 0 for ttl=1h request, got %d", usage.ClaudeCacheCreation5mTokens)
 	}
 }
 
