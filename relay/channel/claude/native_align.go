@@ -54,6 +54,20 @@ type nativeMessageStart struct {
 	Message nativeStartMessage `json:"message"`
 }
 
+// claudeNonCachedInput returns the value to report as input_tokens, mirroring
+// first-party Anthropic: input_tokens counts only NON-cached tokens and is never
+// 0. After cache simulation usage.PromptTokens holds the TOTAL input, so the
+// cached portion is subtracted; without simulation the upstream cache fields are
+// 0 and this is a no-op. Floored at 1 — a real response always bills at least
+// one input token (the content after the last cache breakpoint can't be cached).
+func claudeNonCachedInput(usage *dto.Usage) int {
+	n := usage.PromptTokens - usage.PromptTokensDetails.CachedTokens - usage.PromptTokensDetails.CachedCreationTokens
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
 // buildNativeMessageStart renders the message_start SSE data payload (no
 // "data: " prefix, no padding) using usage numbers already resolved on the
 // gateway-side Usage object.
@@ -67,7 +81,7 @@ func buildNativeMessageStart(model, id string, usage *dto.Usage) []byte {
 			Role:    "assistant",
 			Content: []any{},
 			Usage: nativeStartUsage{
-				InputTokens:              usage.PromptTokens,
+				InputTokens:              claudeNonCachedInput(usage),
 				CacheCreationInputTokens: usage.PromptTokensDetails.CachedCreationTokens,
 				CacheReadInputTokens:     usage.PromptTokensDetails.CachedTokens,
 				CacheCreation: nativeCacheCreation{
@@ -189,12 +203,12 @@ func buildNativeMessageDelta(stopReason string, usage *dto.Usage, thinkingTokens
 		stopReason = "end_turn"
 	}
 	du := nativeDeltaUsage{
-		InputTokens:              usage.PromptTokens,
+		InputTokens:              claudeNonCachedInput(usage),
 		CacheCreationInputTokens: usage.PromptTokensDetails.CachedCreationTokens,
 		CacheReadInputTokens:     usage.PromptTokensDetails.CachedTokens,
 		OutputTokens:             usage.CompletionTokens,
 		Iterations: []nativeIteration{{
-			InputTokens:              usage.PromptTokens,
+			InputTokens:              claudeNonCachedInput(usage),
 			OutputTokens:             usage.CompletionTokens,
 			CacheReadInputTokens:     usage.PromptTokensDetails.CachedTokens,
 			CacheCreationInputTokens: usage.PromptTokensDetails.CachedCreationTokens,
@@ -269,7 +283,7 @@ func rewriteNativeNonStream(data []byte, msgID string, usage *dto.Usage) ([]byte
 		StopSequence: nil,
 		StopDetails:  nil,
 		Usage: nativeStartUsage{
-			InputTokens:              usage.PromptTokens,
+			InputTokens:              claudeNonCachedInput(usage),
 			CacheCreationInputTokens: usage.PromptTokensDetails.CachedCreationTokens,
 			CacheReadInputTokens:     usage.PromptTokensDetails.CachedTokens,
 			CacheCreation: nativeCacheCreation{

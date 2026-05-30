@@ -239,3 +239,50 @@ func TestSessionPrefixEngineReadStaysStableWhenPrefixTokenCountDrifts(t *testing
 		t.Fatalf("expected no new writes for unchanged prefix, got 5m=%d 1h=%d", result.CacheWrite5mTokens, result.CacheWrite1hTokens)
 	}
 }
+
+// TestSessionPrefixEngineReservesAtLeastOneInputToken guards that the simulation
+// never reports input_tokens == 0 (native always bills >= 1 non-cached token).
+// When the whole prompt is cacheable, 1 token is taken back from the cache.
+func TestSessionPrefixEngineReservesAtLeastOneInputToken(t *testing.T) {
+	store := NewMemoryStore(16, 16)
+	engine := NewSessionPrefixEngine(store)
+	scope := ScopeKey{UserID: 1, TokenID: 10, ChannelID: 100, Model: "claude-opus-4-6"}
+	start := time.Date(2026, 3, 19, 10, 0, 0, 0, time.UTC)
+
+	// Entire prompt is a single cacheable segment, no uncached tail → naive input
+	// would be 0.
+	result, err := engine.Simulate(makeSnapshot(
+		scope,
+		start,
+		Segment{Kind: SegmentKindSystem, TTL: TTL5m, TokenCount: 1000, Fingerprint: "system:v1"},
+	))
+	if err != nil {
+		t.Fatalf("simulate returned error: %v", err)
+	}
+	if result.InputTokens != 1 {
+		t.Fatalf("expected input clamped to 1, got %d", result.InputTokens)
+	}
+	if result.CacheWrite5mTokens != 999 {
+		t.Fatalf("expected creation reduced by 1 to 999, got %d", result.CacheWrite5mTokens)
+	}
+	if got := result.InputTokens + result.CacheReadTokens + result.CacheWrite5mTokens + result.CacheWrite1hTokens; got != 1000 {
+		t.Fatalf("parts must still sum to total, got %d", got)
+	}
+
+	// Warm hit on the same fully-cacheable prefix: read would equal total → reserve
+	// 1 from read instead, so input stays >= 1.
+	warm, err := engine.Simulate(makeSnapshot(
+		scope,
+		start.Add(1*time.Minute),
+		Segment{Kind: SegmentKindSystem, TTL: TTL5m, TokenCount: 1000, Fingerprint: "system:v1"},
+	))
+	if err != nil {
+		t.Fatalf("warm simulate returned error: %v", err)
+	}
+	if warm.InputTokens != 1 {
+		t.Fatalf("expected warm input clamped to 1, got %d", warm.InputTokens)
+	}
+	if warm.CacheReadTokens != 999 {
+		t.Fatalf("expected warm read reduced by 1 to 999, got %d", warm.CacheReadTokens)
+	}
+}

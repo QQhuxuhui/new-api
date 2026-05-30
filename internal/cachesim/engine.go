@@ -77,6 +77,23 @@ func (e *SessionPrefixEngine) Simulate(snapshot PromptSnapshot) (SimulationResul
 	if result.InputTokens < 0 {
 		result.InputTokens = 0
 	}
+	// First-party Anthropic always bills at least 1 non-cached input token — the
+	// final token(s) after the last cache breakpoint can never be cached, so a
+	// real response never reports input_tokens == 0. When the simulation would
+	// cache the entire prompt, reserve 1 token of input and take it back from the
+	// cached portion (creation first, then read) so the parts still sum to total.
+	if result.InputTokens == 0 && snapshot.TotalInputTokens > 0 {
+		switch {
+		case result.CacheWrite5mTokens > 0:
+			result.CacheWrite5mTokens--
+		case result.CacheWrite1hTokens > 0:
+			result.CacheWrite1hTokens--
+		case result.CacheReadTokens > 0:
+			result.CacheReadTokens--
+			result.ReadPrefixTokens = result.CacheReadTokens
+		}
+		result.InputTokens = 1
+	}
 
 	state.Checkpoints = mergeCheckpoints(checkpoints, prefixes, snapshot.RequestedAt)
 	state.LastSeenAt = snapshot.RequestedAt

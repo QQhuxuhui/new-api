@@ -442,3 +442,59 @@ func TestNativeAlignStreamStripsPlaceholders(t *testing.T) {
 		t.Fatalf("zero-width placeholder leaked into output:\n%q", body)
 	}
 }
+
+func TestNativeInputTokensIsNonCachedAndAtLeastOne(t *testing.T) {
+	// Cache-sim style usage: PromptTokens holds the TOTAL input; cached split present.
+	usage := &dto.Usage{}
+	usage.PromptTokens = 25457 // total = 379 non-cached + 25078 cached creation
+	usage.PromptTokensDetails.CachedCreationTokens = 25078
+	usage.ClaudeCacheCreation5mTokens = 25078
+	usage.CompletionTokens = 31
+
+	start := buildNativeMessageStart("claude-opus-4-6", "msg_01x", usage)
+	var ev struct {
+		Message struct {
+			Usage struct {
+				InputTokens int `json:"input_tokens"`
+			} `json:"usage"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(start, &ev); err != nil {
+		t.Fatalf("unmarshal message_start: %v", err)
+	}
+	if ev.Message.Usage.InputTokens != 379 {
+		t.Fatalf("message_start input_tokens: want 379 (non-cached), got %d", ev.Message.Usage.InputTokens)
+	}
+
+	delta := buildNativeMessageDelta("end_turn", usage, 0, nil)
+	var d struct {
+		Usage struct {
+			InputTokens int `json:"input_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(delta, &d); err != nil {
+		t.Fatalf("unmarshal message_delta: %v", err)
+	}
+	if d.Usage.InputTokens != 379 {
+		t.Fatalf("message_delta input_tokens: want 379 (non-cached), got %d", d.Usage.InputTokens)
+	}
+
+	// Fully cached prompt -> input_tokens floored at 1, never 0.
+	full := &dto.Usage{}
+	full.PromptTokens = 1000
+	full.PromptTokensDetails.CachedTokens = 1000
+	b := buildNativeMessageStart("m", "id", full)
+	var f struct {
+		Message struct {
+			Usage struct {
+				InputTokens int `json:"input_tokens"`
+			} `json:"usage"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(b, &f); err != nil {
+		t.Fatalf("unmarshal fully-cached: %v", err)
+	}
+	if f.Message.Usage.InputTokens != 1 {
+		t.Fatalf("fully-cached input_tokens: want 1 (floor), got %d", f.Message.Usage.InputTokens)
+	}
+}
