@@ -230,6 +230,7 @@ const EditChannelModal = (props) => {
     // 缓存模拟
     cache_simulation_enabled: false,
     cache_simulation_mode: 'session_prefix',
+    native_align: false,
     cache_sim_cost_ratio: 47,
     cache_sim_min_input_tokens: 0,
     cache_sim_shared_scope: false,
@@ -624,6 +625,7 @@ const EditChannelModal = (props) => {
           data.cache_sim_shared_scope = cs.shared_scope || false;
           data.strip_placeholders = parsedSettings.strip_placeholders || false;
           data.text_tool_call_conversion = parsedSettings.text_tool_call_conversion || false;
+          data.native_align = parsedSettings.native_align || false;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -640,6 +642,7 @@ const EditChannelModal = (props) => {
           data.cache_sim_shared_scope = false;
           data.strip_placeholders = false;
           data.text_tool_call_conversion = false;
+          data.native_align = false;
         }
       } else {
         data.force_format = false;
@@ -656,6 +659,7 @@ const EditChannelModal = (props) => {
         data.cache_sim_shared_scope = false;
         data.strip_placeholders = false;
         data.text_tool_call_conversion = false;
+        data.native_align = false;
       }
 
       if (data.settings) {
@@ -1408,6 +1412,7 @@ const EditChannelModal = (props) => {
       ...(cacheSimulation ? { cache_simulation: cacheSimulation } : {}),
       ...(localInputs.strip_placeholders ? { strip_placeholders: true } : {}),
       ...(localInputs.text_tool_call_conversion ? { text_tool_call_conversion: true } : {}),
+      ...(localInputs.native_align ? { native_align: true } : {}),
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1479,6 +1484,7 @@ const EditChannelModal = (props) => {
     delete localInputs.strip_placeholders;
     // 清理文本工具调用转换的临时字段
     delete localInputs.text_tool_call_conversion;
+    delete localInputs.native_align;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -3662,6 +3668,18 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         '开启后自动检测并转换文本中的工具调用为标准 tool_use 格式，适用于上游模型（如 Gemini）偶尔在文本中输出工具调用而非使用结构化 FunctionCall 的场景',
+                      )}
+                    />
+                    <Form.Switch
+                      field='native_align'
+                      label={t('模拟原生')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('native_align', value)
+                      }
+                      extraText={t(
+                        '开启后将 Claude 原生响应信封（消息ID前缀、ping、usage字段、字段顺序、stop_details、SSE填充）向第一方 Anthropic 对齐。缓存命中指纹需同时开启"缓存模拟"才能完整对齐。',
                       )}
                     />
 
