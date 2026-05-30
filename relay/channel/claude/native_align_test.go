@@ -292,6 +292,85 @@ func TestRewriteNativeNonStream(t *testing.T) {
 	}
 }
 
+func TestNativeStartUsageKeysMatchGolden(t *testing.T) {
+	// Golden key set from docs/export/A/schema.json -> message_start.usage.keys
+	want := map[string]bool{
+		"cache_creation": true, "cache_creation_input_tokens": true,
+		"cache_read_input_tokens": true, "inference_geo": true,
+		"input_tokens": true, "output_tokens": true, "service_tier": true,
+	}
+	b := buildNativeMessageStart("claude-opus-4-6", generateNativeMessageID(), &dto.Usage{})
+	var outer struct {
+		Message struct {
+			Usage map[string]json.RawMessage `json:"usage"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(b, &outer); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(outer.Message.Usage) != len(want) {
+		t.Fatalf("usage key count %d != %d: %v", len(outer.Message.Usage), len(want), keysOf(outer.Message.Usage))
+	}
+	for k := range want {
+		if _, ok := outer.Message.Usage[k]; !ok {
+			t.Fatalf("missing usage key %q", k)
+		}
+	}
+}
+
+func TestNativeDeltaUsageKeysMatchGolden(t *testing.T) {
+	// docs/export/A/schema.json -> message_delta.usage.keys (with thinking + no server tool)
+	b := buildNativeMessageDelta("end_turn", &dto.Usage{}, 10, nil)
+	var ev struct {
+		Usage map[string]json.RawMessage `json:"usage"`
+	}
+	_ = json.Unmarshal(b, &ev)
+	for _, k := range []string{"cache_creation_input_tokens", "cache_read_input_tokens", "input_tokens", "iterations", "output_tokens", "output_tokens_details"} {
+		if _, ok := ev.Usage[k]; !ok {
+			t.Fatalf("missing delta usage key %q in %v", k, keysOf(ev.Usage))
+		}
+	}
+}
+
+// TestNativeDeltaUsageFieldOrder locks the message_delta.usage field ORDER
+// (not just presence) since field order is itself a fingerprint.
+func TestNativeDeltaUsageFieldOrder(t *testing.T) {
+	usage := &dto.Usage{}
+	usage.PromptTokens = 743
+	usage.CompletionTokens = 2851
+	// thinking>0 and a server tool present so output_tokens_details + server_tool_use appear
+	b := buildNativeMessageDelta("end_turn", usage, 1783, &nativeServerToolUse{WebSearchRequests: 1})
+	var ev struct {
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal(b, &ev); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got := topLevelKeyOrder(t, ev.Usage)
+	want := []string{"input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens", "output_tokens_details", "server_tool_use", "iterations"}
+	assertOrder(t, got, want)
+}
+
+// TestNativeServerToolUseShape confirms web_fetch_requests is emitted alongside
+// web_search_requests when a server tool use is present (matches native).
+func TestNativeServerToolUseShape(t *testing.T) {
+	b := buildNativeMessageDelta("end_turn", &dto.Usage{}, 0, &nativeServerToolUse{WebSearchRequests: 1})
+	if !contains(string(b), `"web_search_requests":1`) {
+		t.Fatalf("missing web_search_requests: %s", b)
+	}
+	if !contains(string(b), `"web_fetch_requests":0`) {
+		t.Fatalf("missing web_fetch_requests: %s", b)
+	}
+}
+
+func keysOf(m map[string]json.RawMessage) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func TestNativeAlignStreamStripsPlaceholders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
