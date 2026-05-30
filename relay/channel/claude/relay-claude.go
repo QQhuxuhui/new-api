@@ -854,7 +854,13 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 
 	if info.RelayFormat == types.RelayFormatClaude {
 		if nativeAlignActive(info) && requestMode != RequestModeCompletion {
-			handleNativeAlignStreamEvent(c, info, claudeInfo, &claudeResponse, data, requestMode, time.Now().UnixNano())
+			nativeRaw := data
+			if needsReMarshal {
+				if b, merr := common.Marshal(&claudeResponse); merr == nil {
+					nativeRaw = string(b)
+				}
+			}
+			handleNativeAlignStreamEvent(c, info, claudeInfo, &claudeResponse, nativeRaw, requestMode, time.Now().UnixNano())
 			return nil
 		}
 		FormatClaudeResponseInfo(requestMode, &claudeResponse, nil, claudeInfo)
