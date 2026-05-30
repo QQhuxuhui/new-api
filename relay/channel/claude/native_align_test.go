@@ -363,6 +363,48 @@ func TestNativeServerToolUseShape(t *testing.T) {
 	}
 }
 
+func TestNativeAlignStreamEventOrder(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	info := newNativeAlignInfo()
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}, ResponseText: strings.Builder{}}
+
+	events := []string{
+		`{"type":"message_start","message":{"content":[],"id":"req_vrtx_1","model":"claude-opus-4-6","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"input_tokens":10,"output_tokens":1}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":10,"output_tokens":3}}`,
+		`{"type":"message_stop"}`,
+	}
+	for _, e := range events {
+		if err := HandleStreamResponseData(c, info, claudeInfo, e, RequestModeMessage); err != nil {
+			t.Fatalf("handle event err: %v", err)
+		}
+	}
+
+	// Collect event types in emission order from the "event: X" SSE lines.
+	var got []string
+	for _, line := range strings.Split(w.Body.String(), "\n") {
+		if strings.HasPrefix(line, "event: ") {
+			got = append(got, strings.TrimSpace(strings.TrimPrefix(line, "event: ")))
+		}
+	}
+	// The first four emitted events must be exactly this order; ping must come
+	// immediately AFTER the first content_block_start (matches first-party native).
+	want := []string{"message_start", "content_block_start", "ping", "content_block_delta"}
+	if len(got) < len(want) {
+		t.Fatalf("too few events: got %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("event order mismatch at %d: got %v want prefix %v", i, got, want)
+		}
+	}
+}
+
 func keysOf(m map[string]json.RawMessage) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

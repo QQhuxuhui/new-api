@@ -2,12 +2,15 @@ package claude
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -287,6 +290,8 @@ func rewriteNativeNonStream(data []byte, msgID string, usage *dto.Usage) ([]byte
 
 const nativePingIntervalNano = int64(5 * time.Second)
 
+var nativeAlignNoSimOnce sync.Once
+
 // handleNativeAlignStreamEvent rewrites/forwards a single upstream SSE event so
 // the client sees a first-party Anthropic envelope. It performs all writes and
 // returns. On any internal failure it falls back to forwarding raw padded bytes.
@@ -384,6 +389,10 @@ func resolveNativeCache(info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseI
 		if applyCacheSimulation(info, claudeInfo.Usage) {
 			claudeInfo.CacheSimulationApplied = true
 		}
+	} else {
+		nativeAlignNoSimOnce.Do(func() {
+			logger.LogInfo(context.Background(), "[Claude] native_align enabled without cache simulation: cache-hit fingerprint not aligned; enable session_prefix cache simulation for full alignment")
+		})
 	}
 	claudeInfo.NativeCacheResolved = true
 }
