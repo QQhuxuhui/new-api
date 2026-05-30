@@ -221,6 +221,70 @@ func buildNativeMessageDelta(stopReason string, usage *dto.Usage, thinkingTokens
 	return b
 }
 
+// nativeNonStreamMessage mirrors nativeStartMessage but carries the real content.
+type nativeNonStreamMessage struct {
+	Model        string           `json:"model"`
+	Id           string           `json:"id"`
+	Type         string           `json:"type"`
+	Role         string           `json:"role"`
+	Content      json.RawMessage  `json:"content"`
+	StopReason   *string          `json:"stop_reason"`
+	StopSequence *string          `json:"stop_sequence"`
+	StopDetails  *string          `json:"stop_details"`
+	Usage        nativeStartUsage `json:"usage"`
+}
+
+// rewriteNativeNonStream rebuilds a non-streaming Claude response body in native
+// field order with a synthetic id and full usage. content/stop_reason are taken
+// from the upstream body verbatim. Returns (nil,false) on parse failure so the
+// caller can fall back to the original bytes.
+func rewriteNativeNonStream(data []byte, msgID string, usage *dto.Usage) ([]byte, bool) {
+	var src struct {
+		Content    json.RawMessage `json:"content"`
+		Model      string          `json:"model"`
+		Role       string          `json:"role"`
+		StopReason *string         `json:"stop_reason"`
+	}
+	if err := json.Unmarshal(data, &src); err != nil {
+		return nil, false
+	}
+	role := src.Role
+	if role == "" {
+		role = "assistant"
+	}
+	content := src.Content
+	if len(content) == 0 {
+		content = json.RawMessage("[]")
+	}
+	msg := nativeNonStreamMessage{
+		Model:        src.Model,
+		Id:           msgID,
+		Type:         "message",
+		Role:         role,
+		Content:      content,
+		StopReason:   src.StopReason,
+		StopSequence: nil,
+		StopDetails:  nil,
+		Usage: nativeStartUsage{
+			InputTokens:              usage.PromptTokens,
+			CacheCreationInputTokens: usage.PromptTokensDetails.CachedCreationTokens,
+			CacheReadInputTokens:     usage.PromptTokensDetails.CachedTokens,
+			CacheCreation: nativeCacheCreation{
+				Ephemeral5m: usage.ClaudeCacheCreation5mTokens,
+				Ephemeral1h: usage.ClaudeCacheCreation1hTokens,
+			},
+			OutputTokens: usage.CompletionTokens,
+			ServiceTier:  "standard",
+			InferenceGeo: "not_available",
+		},
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
 const nativePingIntervalNano = int64(5 * time.Second)
 
 // handleNativeAlignStreamEvent rewrites/forwards a single upstream SSE event so

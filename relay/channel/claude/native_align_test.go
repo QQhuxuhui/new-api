@@ -272,6 +272,26 @@ func TestNativeAlignStreamRewritesEnvelope(t *testing.T) {
 	}
 }
 
+func TestRewriteNativeNonStream(t *testing.T) {
+	usage := &dto.Usage{}
+	usage.PromptTokens = 100
+	usage.CompletionTokens = 20
+	in := []byte(`{"content":[{"type":"text","text":"hi"}],"id":"req_vrtx_99","model":"claude-opus-4-6","role":"assistant","stop_reason":"end_turn","stop_sequence":null,"type":"message","usage":{"input_tokens":100,"output_tokens":20}}`)
+
+	out, ok := rewriteNativeNonStream(in, "msg_01TESTTESTTESTTESTTEST", usage)
+	if !ok {
+		t.Fatalf("rewrite returned ok=false")
+	}
+	if contains(string(out), "req_vrtx_") {
+		t.Fatalf("vertex id leaked: %s", out)
+	}
+	keys := topLevelKeyOrder(t, out)
+	assertOrder(t, keys, []string{"model", "id", "type", "role", "content", "stop_reason", "stop_sequence", "stop_details", "usage"})
+	if !contains(string(out), `"service_tier":"standard"`) {
+		t.Fatalf("missing service_tier: %s", out)
+	}
+}
+
 func TestNativeAlignStreamStripsPlaceholders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

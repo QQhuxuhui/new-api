@@ -1118,6 +1118,19 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 				responseData = patched
 			}
 		}
+		// Native envelope alignment: rebuild response body in first-party field
+		// order with a synthetic msg id and full native usage fields.
+		// applyCacheSimulation already ran above (unconditionally), so claudeInfo.Usage
+		// already carries simulated cache numbers — we must NOT call resolveNativeCache
+		// here to avoid double-applying the simulation.
+		if nativeAlignActive(info) && requestMode != RequestModeCompletion {
+			if claudeInfo.NativeMsgID == "" {
+				claudeInfo.NativeMsgID = generateNativeMessageID()
+			}
+			if rewritten, ok := rewriteNativeNonStream(responseData, claudeInfo.NativeMsgID, claudeInfo.Usage); ok {
+				responseData = rewritten
+			}
+		}
 	}
 
 	if claudeResponse.Usage != nil && claudeResponse.Usage.ServerToolUse != nil && claudeResponse.Usage.ServerToolUse.WebSearchRequests > 0 {
