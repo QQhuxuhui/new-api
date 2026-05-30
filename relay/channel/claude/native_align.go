@@ -79,3 +79,92 @@ func buildNativeMessageStart(model, id string, usage *dto.Usage) []byte {
 func buildNativeMessageStop() []byte {
 	return []byte(`{"type":"message_stop"}`)
 }
+
+type nativeDelta struct {
+	StopReason   string  `json:"stop_reason"`
+	StopSequence *string `json:"stop_sequence"`
+	StopDetails  *string `json:"stop_details"`
+}
+
+type nativeIteration struct {
+	InputTokens              int                 `json:"input_tokens"`
+	OutputTokens             int                 `json:"output_tokens"`
+	CacheReadInputTokens     int                 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int                 `json:"cache_creation_input_tokens"`
+	CacheCreation            nativeCacheCreation `json:"cache_creation"`
+	Type                     string              `json:"type"`
+}
+
+type nativeOutputTokensDetails struct {
+	ThinkingTokens int `json:"thinking_tokens"`
+}
+
+// nativeServerToolUse mirrors first-party which carries BOTH counters;
+// dto.ClaudeServerToolUse only models web_search_requests.
+type nativeServerToolUse struct {
+	WebSearchRequests int `json:"web_search_requests"`
+	WebFetchRequests  int `json:"web_fetch_requests"`
+}
+
+type nativeDeltaUsage struct {
+	InputTokens              int                        `json:"input_tokens"`
+	CacheCreationInputTokens int                        `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int                        `json:"cache_read_input_tokens"`
+	OutputTokens             int                        `json:"output_tokens"`
+	OutputTokensDetails      *nativeOutputTokensDetails `json:"output_tokens_details,omitempty"`
+	ServerToolUse            *nativeServerToolUse       `json:"server_tool_use,omitempty"`
+	Iterations               []nativeIteration          `json:"iterations"`
+}
+
+type nativeContextManagement struct {
+	AppliedEdits []any `json:"applied_edits"`
+}
+
+type nativeMessageDelta struct {
+	Type              string                  `json:"type"`
+	Delta             nativeDelta             `json:"delta"`
+	Usage             nativeDeltaUsage        `json:"usage"`
+	ContextManagement nativeContextManagement `json:"context_management"`
+}
+
+// buildNativeMessageDelta renders the message_delta SSE data payload.
+// thinkingTokens > 0 emits output_tokens_details; serverToolUse non-nil emits it.
+func buildNativeMessageDelta(stopReason string, usage *dto.Usage, thinkingTokens int, serverToolUse *nativeServerToolUse) []byte {
+	if stopReason == "" {
+		stopReason = "end_turn"
+	}
+	du := nativeDeltaUsage{
+		InputTokens:              usage.PromptTokens,
+		CacheCreationInputTokens: usage.PromptTokensDetails.CachedCreationTokens,
+		CacheReadInputTokens:     usage.PromptTokensDetails.CachedTokens,
+		OutputTokens:             usage.CompletionTokens,
+		Iterations: []nativeIteration{{
+			InputTokens:              usage.PromptTokens,
+			OutputTokens:             usage.CompletionTokens,
+			CacheReadInputTokens:     usage.PromptTokensDetails.CachedTokens,
+			CacheCreationInputTokens: usage.PromptTokensDetails.CachedCreationTokens,
+			CacheCreation: nativeCacheCreation{
+				Ephemeral5m: usage.ClaudeCacheCreation5mTokens,
+				Ephemeral1h: usage.ClaudeCacheCreation1hTokens,
+			},
+			Type: "message",
+		}},
+	}
+	if thinkingTokens > 0 {
+		du.OutputTokensDetails = &nativeOutputTokensDetails{ThinkingTokens: thinkingTokens}
+	}
+	if serverToolUse != nil {
+		du.ServerToolUse = serverToolUse
+	}
+	ev := nativeMessageDelta{
+		Type:              "message_delta",
+		Delta:             nativeDelta{StopReason: stopReason},
+		Usage:             du,
+		ContextManagement: nativeContextManagement{AppliedEdits: []any{}},
+	}
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return nil
+	}
+	return b
+}
