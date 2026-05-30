@@ -85,6 +85,12 @@ type ChannelSettings struct {
 	// Enable when the upstream (e.g. Gemini via sub2api) sometimes outputs tool calls as
 	// plain text instead of structured FunctionCall/tool_use blocks.
 	TextToolCallConversion bool `json:"text_tool_call_conversion,omitempty"`
+	// NativeAlign: when true and the response is relayed as native Claude SSE/JSON
+	// (RelayFormatClaude), the response envelope is rewritten to match first-party
+	// Anthropic fingerprints (msg_ id, ping, usage fields, field order, stop_details,
+	// iterations, SSE padding). Independent of cache simulation; cache *values* are
+	// layered in only when session_prefix cache simulation is enabled.
+	NativeAlign bool `json:"native_align,omitempty"`
 }
 
 type VertexKeyType string

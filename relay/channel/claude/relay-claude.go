@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -754,6 +755,20 @@ type ClaudeResponseInfo struct {
 	// observed during the stream so the final message_delta finish_reason
 	// can be rewritten from tool_calls back to stop.
 	StructuredOutputUsed bool
+	// --- native_align state ---
+	// NativeMsgID is the synthetic "msg_..." id generated at message_start and
+	// reused for the whole stream.
+	NativeMsgID string
+	// NativeCacheResolved marks that cache numbers (simulated or upstream) have
+	// been resolved onto Usage, so message_start and message_delta agree.
+	NativeCacheResolved bool
+	// NativePingInjected marks that the post-first-content_block_start ping was sent.
+	NativePingInjected bool
+	// NativeLastPingUnixNano is the wall-clock of the last emitted ping, for the
+	// long-stream periodic ping heuristic.
+	NativeLastPingUnixNano int64
+	// NativeThinkingText accumulates thinking deltas to estimate thinking_tokens.
+	NativeThinkingText strings.Builder
 }
 
 func FormatClaudeResponseInfo(requestMode int, claudeResponse *dto.ClaudeResponse, oaiResponse *dto.ChatCompletionsStreamResponse, claudeInfo *ClaudeResponseInfo) bool {
@@ -838,6 +853,16 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	}
 
 	if info.RelayFormat == types.RelayFormatClaude {
+		if nativeAlignActive(info) && requestMode != RequestModeCompletion {
+			nativeRaw := data
+			if needsReMarshal {
+				if b, merr := common.Marshal(&claudeResponse); merr == nil {
+					nativeRaw = string(b)
+				}
+			}
+			handleNativeAlignStreamEvent(c, info, claudeInfo, &claudeResponse, nativeRaw, requestMode, time.Now().UnixNano())
+			return nil
+		}
 		FormatClaudeResponseInfo(requestMode, &claudeResponse, nil, claudeInfo)
 
 		if requestMode == RequestModeCompletion {
@@ -1091,6 +1116,19 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens > 0) {
 			if patched, ok := patchClaudeResponseUsagePayload(responseData, claudeInfo.Usage); ok {
 				responseData = patched
+			}
+		}
+		// Native envelope alignment: rebuild response body in first-party field
+		// order with a synthetic msg id and full native usage fields.
+		// applyCacheSimulation already ran above (unconditionally), so claudeInfo.Usage
+		// already carries simulated cache numbers — we must NOT call resolveNativeCache
+		// here to avoid double-applying the simulation.
+		if nativeAlignActive(info) && requestMode != RequestModeCompletion {
+			if claudeInfo.NativeMsgID == "" {
+				claudeInfo.NativeMsgID = generateNativeMessageID()
+			}
+			if rewritten, ok := rewriteNativeNonStream(responseData, claudeInfo.NativeMsgID, claudeInfo.Usage); ok {
+				responseData = rewritten
 			}
 		}
 	}
