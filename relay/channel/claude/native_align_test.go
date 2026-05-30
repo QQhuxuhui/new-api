@@ -148,3 +148,47 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestGenerateNativeMessageID(t *testing.T) {
+	id := generateNativeMessageID()
+	if len(id) != 28 { // "msg_" (4) + "01" (2) + 22
+		t.Fatalf("id length: got %d (%q)", len(id), id)
+	}
+	if id[:6] != "msg_01" {
+		t.Fatalf("id prefix: %q", id)
+	}
+}
+
+func TestApplyNativePaddingInsertsBeforeLastBrace(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		out := applyNativePadding([]byte(`{"type":"message_stop"}`))
+		if out[len(out)-1] != '}' {
+			t.Fatalf("last char must be '}': %q", out)
+		}
+		var v map[string]interface{}
+		if err := json.Unmarshal(out, &v); err != nil {
+			t.Fatalf("padded output not valid JSON: %q (%v)", out, err)
+		}
+	}
+}
+
+func TestApplyNativePaddingDistributionInRange(t *testing.T) {
+	seen := map[int]bool{}
+	for i := 0; i < 2000; i++ {
+		out := applyNativePadding([]byte(`{"type":"message_stop"}`))
+		pad := len(out) - len(`{"type":"message_stop"}`)
+		if pad < 0 || pad > 15 {
+			t.Fatalf("pad out of [0,15]: %d", pad)
+		}
+		seen[pad] = true
+	}
+	if len(seen) < 10 { // expect a good spread across 0..15
+		t.Fatalf("padding not spread enough: %d distinct values", len(seen))
+	}
+}
+
+func TestNativePingPayload(t *testing.T) {
+	if nativePingPayload() != `{"type": "ping"}` {
+		t.Fatalf("ping payload mismatch: %q", nativePingPayload())
+	}
+}

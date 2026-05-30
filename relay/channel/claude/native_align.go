@@ -1,8 +1,11 @@
 package claude
 
 import (
+	"bytes"
 	"encoding/json"
+	"math/rand"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 )
 
@@ -79,6 +82,37 @@ func buildNativeMessageStart(model, id string, usage *dto.Usage) []byte {
 func buildNativeMessageStop() []byte {
 	return []byte(`{"type":"message_stop"}`)
 }
+
+// generateNativeMessageID returns a first-party-shaped id: "msg_01" + 22 base62.
+// Total length 28 chars, matching observed native ids (e.g. msg_01CiGHaJJhbSGbNTEYrW9AHa).
+func generateNativeMessageID() string {
+	return "msg_01" + common.GetRandomString(22)
+}
+
+// applyNativePadding inserts a uniform-random 0..15 spaces immediately before
+// the LAST '}' in the payload, reproducing Anthropic's SSE whitespace padding
+// (which is itself ~uniform random 0..15). The final byte stays '}'. Returns
+// input unchanged if there is no '}'.
+func applyNativePadding(payload []byte) []byte {
+	idx := bytes.LastIndexByte(payload, '}')
+	if idx < 0 {
+		return payload
+	}
+	n := rand.Intn(16) // 0..15
+	if n == 0 {
+		return payload
+	}
+	out := make([]byte, 0, len(payload)+n)
+	out = append(out, payload[:idx]...)
+	for i := 0; i < n; i++ {
+		out = append(out, ' ')
+	}
+	out = append(out, payload[idx:]...)
+	return out
+}
+
+// nativePingPayload is the exact first-party ping body (note the space after the colon).
+func nativePingPayload() string { return `{"type": "ping"}` }
 
 type nativeDelta struct {
 	StopReason   string  `json:"stop_reason"`
