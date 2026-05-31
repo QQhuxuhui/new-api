@@ -65,6 +65,7 @@ export const useSidebar = () => {
       enabled: true,
       channel: true,
       'failover-rules': true,
+      'error-capture': true,
       models: true,
       plan: true,
       'plan-orders': true,
