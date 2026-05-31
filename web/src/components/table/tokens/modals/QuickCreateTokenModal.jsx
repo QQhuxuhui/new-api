@@ -262,11 +262,11 @@ const QuickCreateTokenModal = ({
                       {t('暂无可用分组')}
                     </Text>
                   ) : (
-                    <div className='space-y-2'>
+                    <div className='space-y-3'>
                       {groups.map((group) => (
                         <Card
                           key={group.name}
-                          className='cursor-pointer transition-all hover:shadow-md hover:border-blue-500'
+                          className='cursor-pointer transition-all shadow-sm hover:shadow-md hover:border-blue-500'
                           onClick={() => handleGroupSelect(group.name)}
                           bodyStyle={{ padding: '12px' }}
                         >
@@ -278,6 +278,18 @@ const QuickCreateTokenModal = ({
                             >
                               {group.name}
                             </Text>
+                            {group.ratio !== undefined && group.ratio !== null && (
+                              <Text
+                                size='small'
+                                className='block mt-1'
+                                style={{
+                                  color: 'var(--semi-color-primary)',
+                                  fontWeight: 500,
+                                }}
+                              >
+                                {t('分组倍率')}：{group.ratio}
+                              </Text>
+                            )}
                             {group.desc && (
                               <Text
                                 type='tertiary'
