@@ -266,6 +266,7 @@ func migrateDB() error {
 		&Redemption{},
 		&Ability{},
 		&Log{},
+		&ErrorCaptureLog{},
 		&Midjourney{},
 		&TopUp{},
 		&QuotaData{},
