@@ -40,6 +40,16 @@ i18n
       ja: jaTranslation,
     },
     fallbackLng: 'zh',
+    // 默认语言策略：探测顺序移除浏览器语言(navigator)，使无历史选择的新访客
+    // 一律回退到 <html lang="zh"> = 中文；用户手动切换仍由 localStorage 记住，
+    // URL 查询参数 ?lng=xx 也依然有效。避免英文浏览器首次访问被探测成英文。
+    detection: {
+      order: ['querystring', 'localStorage', 'cookie', 'htmlTag'],
+      lookupQuerystring: 'lng',
+      lookupLocalStorage: 'i18nextLng',
+      lookupCookie: 'i18next',
+      caches: ['localStorage'],
+    },
     interpolation: {
       escapeValue: false,
     },

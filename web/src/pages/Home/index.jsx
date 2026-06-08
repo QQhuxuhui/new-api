@@ -84,7 +84,7 @@ const Home = () => {
         localStorage.setItem('home_page_content', content);
       } else {
         showError(message);
-        setHomePageContent('加载首页内容失败...');
+        setHomePageContent(t('加载首页内容失败...'));
       }
     } catch (error) {
       console.error('获取首页内容失败:', error);
