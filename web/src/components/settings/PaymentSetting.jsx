@@ -48,6 +48,8 @@ const PaymentSetting = () => {
     StripeUnitPrice: 8.0,
     StripeMinTopUp: 1,
     StripePromotionCodesEnabled: false,
+
+    RechargeDisabled: false,
   });
 
   let [loading, setLoading] = useState(false);
@@ -94,6 +96,9 @@ const PaymentSetting = () => {
               console.error('解析AmountDiscount出错:', error);
               newInputs['AmountDiscount'] = item.value;
             }
+            break;
+          case 'RechargeDisabled':
+            newInputs[item.key] = toBoolean(item.value);
             break;
           case 'Price':
           case 'MinTopUp':

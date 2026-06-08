@@ -74,14 +74,20 @@ const PlanPricing = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [statusState] = useContext(StatusContext);
+  const rechargeDisabled = statusState?.status?.recharge_disabled || false;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [plans, setPlans] = useState([]);
   // Tab state: 'subscription' or 'payg'
-  const initialTab = searchParams.get('category') === 'payg' ? 'payg' : 'subscription';
+  // 充值总开关开启时，禁止通过 ?category=payg 直链进入「钱包充值」标签
+  const urlCategory = searchParams.get('category');
+  const initialTab =
+    urlCategory === 'payg' && !rechargeDisabled ? 'payg' : 'subscription';
   const [activeTab, setActiveTab] = useState(initialTab);
   // 从 URL 参数读取初始分类，支持 ?category=payg 预选
-  const [filter, setFilter] = useState(searchParams.get('category') || 'all');
+  const [filter, setFilter] = useState(
+    urlCategory === 'payg' && rechargeDisabled ? 'all' : urlCategory || 'all',
+  );
   // FAQ展开状态
   const [expandedFaq, setExpandedFaq] = useState(null);
 
@@ -93,24 +99,31 @@ const PlanPricing = () => {
 
   // 从系统配置获取套餐分类配置
   const categoriesConfig = useMemo(() => {
+    let cfg;
     try {
       const config = statusState?.status?.PlanCategoriesConfig;
       if (config) {
-        const parsed = typeof config === 'string' ? JSON.parse(config) : config;
-        return parsed;
+        cfg = typeof config === 'string' ? JSON.parse(config) : config;
       }
     } catch (e) {
       // 忽略解析错误
     }
-    // 默认配置
-    return {
-      daily: { label: t('日卡'), enabled: true },
-      weekly: { label: t('周卡'), enabled: true },
-      biweekly: { label: t('双周卡'), enabled: true },
-      monthly: { label: t('月卡'), enabled: true },
-      payg: { label: t('按量付费'), enabled: true },
-    };
-  }, [statusState?.status?.PlanCategoriesConfig, t]);
+    if (!cfg) {
+      // 默认配置
+      cfg = {
+        daily: { label: t('日卡'), enabled: true },
+        weekly: { label: t('周卡'), enabled: true },
+        biweekly: { label: t('双周卡'), enabled: true },
+        monthly: { label: t('月卡'), enabled: true },
+        payg: { label: t('按量付费'), enabled: true },
+      };
+    }
+    // 充值总开关开启时，隐藏「按量付费-钱包充值」分类入口
+    if (rechargeDisabled && cfg.payg) {
+      cfg = { ...cfg, payg: { ...cfg.payg, enabled: false } };
+    }
+    return cfg;
+  }, [statusState?.status?.PlanCategoriesConfig, t, rechargeDisabled]);
 
   // 从系统配置获取推荐套餐 ID
   const recommendedPlanId = useMemo(() => {
@@ -165,7 +178,8 @@ const PlanPricing = () => {
           discount: data.discount?.[amount] || 1.0,
         }));
         // If no custom amounts, generate defaults
-        if (amounts.length === 0) {
+        // 充值总开关开启时，后端会清空 amount_options，这里不得再合成默认金额
+        if (amounts.length === 0 && !rechargeDisabled) {
           const minTopup = data.min_topup || 1;
           const multipliers = [1, 5, 10, 30, 50, 100];
           amounts.push(...multipliers.map((m) => ({
@@ -213,10 +227,19 @@ const PlanPricing = () => {
 
   // Load topup info when filter changes to payg
   useEffect(() => {
-    if (filter === 'payg' && !topupInfo) {
+    if (filter === 'payg' && !topupInfo && !rechargeDisabled) {
       loadTopupInfo();
     }
   }, [filter]);
+
+  // 充值总开关开启时，强制离开「钱包充值」标签
+  // （兜底直链进入或 /api/status 异步加载后 rechargeDisabled 才变真的竞态）
+  useEffect(() => {
+    if (rechargeDisabled) {
+      setActiveTab((prev) => (prev === 'payg' ? 'subscription' : prev));
+      setFilter((prev) => (prev === 'payg' ? 'all' : prev));
+    }
+  }, [rechargeDisabled]);
 
   // 同步标签页与过滤条件，避免进入 payg 后切换回来仍按 payg 过滤导致订阅列表为空
   useEffect(() => {
@@ -723,6 +746,7 @@ const PlanPricing = () => {
               type='primary'
               size='large'
               block
+              disabled={rechargeDisabled}
               onClick={() => handlePurchase(plan)}
               style={{
                 borderRadius: '12px',
@@ -730,7 +754,7 @@ const PlanPricing = () => {
                 fontWeight: 600,
               }}
             >
-              {t('立即购买')}
+              {rechargeDisabled ? t('暂停购买') : t('立即购买')}
             </Button>
           </div>
         </Card>
@@ -899,6 +923,7 @@ const PlanPricing = () => {
               type='primary'
               size='large'
               block
+              disabled={rechargeDisabled}
               onClick={() => handlePurchase(plan)}
               className='cursor-pointer'
               style={{

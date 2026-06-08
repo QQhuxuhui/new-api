@@ -92,12 +92,12 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/aff/summary", controller.GetMyAffSummary)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
 				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
-				selfRoute.POST("/pay", middleware.CriticalRateLimit(), controller.RequestEpay)
+				selfRoute.POST("/pay", middleware.RechargeDisabledGuard(), middleware.CriticalRateLimit(), controller.RequestEpay)
 				selfRoute.POST("/amount", controller.RequestAmount)
-				selfRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.RequestStripePay)
+				selfRoute.POST("/stripe/pay", middleware.RechargeDisabledGuard(), middleware.CriticalRateLimit(), controller.RequestStripePay)
 				selfRoute.POST("/stripe/amount", controller.RequestStripeAmount)
-				selfRoute.POST("/creem/pay", middleware.CriticalRateLimit(), controller.RequestCreemPay)
-				selfRoute.POST("/pay/usdt", middleware.CriticalRateLimit(), controller.RequestEpUsdtPay)
+				selfRoute.POST("/creem/pay", middleware.RechargeDisabledGuard(), middleware.CriticalRateLimit(), controller.RequestCreemPay)
+				selfRoute.POST("/pay/usdt", middleware.RechargeDisabledGuard(), middleware.CriticalRateLimit(), controller.RequestEpUsdtPay)
 				selfRoute.POST("/aff_transfer", controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 
@@ -115,16 +115,16 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/notifications/read-all", controller.MarkAllNotificationsAsRead)
 
 				// Plan purchase routes (user)
-				selfRoute.POST("/plan/purchase/create", controller.CreatePlanOrder)
-				selfRoute.POST("/plan/purchase/pay", middleware.CriticalRateLimit(), controller.PayPlanOrder)
+				selfRoute.POST("/plan/purchase/create", middleware.RechargeDisabledGuard(), controller.CreatePlanOrder)
+				selfRoute.POST("/plan/purchase/pay", middleware.RechargeDisabledGuard(), middleware.CriticalRateLimit(), controller.PayPlanOrder)
 				selfRoute.GET("/plan/purchase/my-orders", controller.GetMyPlanOrders)
 				selfRoute.GET("/plan/purchase/order/:id", controller.GetMyPlanOrderDetail)
 				selfRoute.POST("/plan/purchase/cancel", controller.CancelPlanOrder)
 
 				// Topup order routes (user) - for pricing page pay-as-you-go
-				selfRoute.POST("/topup/order/create", controller.CreateTopupOrder)
+				selfRoute.POST("/topup/order/create", middleware.RechargeDisabledGuard(), controller.CreateTopupOrder)
 				selfRoute.GET("/topup/order/:id", controller.GetTopupOrderDetail)
-				selfRoute.POST("/topup/order/pay", middleware.CriticalRateLimit(), controller.PayTopupOrder)
+				selfRoute.POST("/topup/order/pay", middleware.RechargeDisabledGuard(), middleware.CriticalRateLimit(), controller.PayTopupOrder)
 				selfRoute.GET("/topup/order/my-orders", controller.GetMyTopupOrders)
 				selfRoute.POST("/topup/order/cancel", controller.CancelTopupOrder)
 			}

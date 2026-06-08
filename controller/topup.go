@@ -80,6 +80,20 @@ func GetTopUpInfo(c *gin.Context) {
 		"amount_options":      operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":            operation_setting.GetPaymentSetting().AmountDiscount,
 	}
+
+	// 充值总开关开启时，对外一律呈现「未配置充值」的空状态：
+	// 所有支付方式禁用、支付方式列表与按量付费金额清空，钱包管理页据此渲染既有空状态 Banner。
+	// 注意：仅影响在线/USDT 等充值入口，不涉及兑换码（兑换码由独立接口处理）。
+	if operation_setting.RechargeDisabled {
+		data["enable_online_topup"] = false
+		data["enable_stripe_topup"] = false
+		data["enable_creem_topup"] = false
+		data["enable_usdt_topup"] = false
+		data["pay_methods"] = []map[string]string{}
+		data["creem_products"] = "[]"
+		data["amount_options"] = []any{}
+	}
+
 	common.ApiSuccess(c, data)
 }
 

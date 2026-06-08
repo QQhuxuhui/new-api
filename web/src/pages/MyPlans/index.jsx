@@ -59,6 +59,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess, renderQuota } from '../../helpers';
 import { UserContext } from '../../context/User';
+import { StatusContext } from '../../context/Status';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -66,6 +67,8 @@ const MyPlans = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [userState] = useContext(UserContext);
+  const [statusState] = useContext(StatusContext);
+  const rechargeDisabled = statusState?.status?.recharge_disabled || false;
   const [loading, setLoading] = useState(true);
   const [userPlans, setUserPlans] = useState([]);
   const [quotaStatus, setQuotaStatus] = useState(null);
@@ -938,20 +941,22 @@ const MyPlans = () => {
             </div>
 
             {/* Topup Button */}
-            <Button
-              theme='solid'
-              type='primary'
-              icon={<IconPlus />}
-              onClick={() => navigate('/plans?category=payg')}
-              className='hidden md:flex'
-              style={{
-                borderRadius: '12px',
-                backgroundColor: '#10b981',
-                borderColor: '#10b981',
-              }}
-            >
-              {t('充值')}
-            </Button>
+            {!rechargeDisabled && (
+              <Button
+                theme='solid'
+                type='primary'
+                icon={<IconPlus />}
+                onClick={() => navigate('/plans?category=payg')}
+                className='hidden md:flex'
+                style={{
+                  borderRadius: '12px',
+                  backgroundColor: '#10b981',
+                  borderColor: '#10b981',
+                }}
+              >
+                {t('充值')}
+              </Button>
+            )}
           </div>
 
           <Divider className='mb-6 opacity-50' />
@@ -990,23 +995,25 @@ const MyPlans = () => {
           </div>
 
           {/* Mobile Topup Button */}
-          <div className='mt-6 md:hidden'>
-            <Button
-              theme='solid'
-              type='primary'
-              block
-              icon={<IconPlus />}
-              onClick={() => navigate('/plans?category=payg')}
-              style={{
-                borderRadius: '12px',
-                height: '44px',
-                backgroundColor: '#10b981',
-                borderColor: '#10b981',
-              }}
-            >
-              {t('充值')}
-            </Button>
-          </div>
+          {!rechargeDisabled && (
+            <div className='mt-6 md:hidden'>
+              <Button
+                theme='solid'
+                type='primary'
+                block
+                icon={<IconPlus />}
+                onClick={() => navigate('/plans?category=payg')}
+                style={{
+                  borderRadius: '12px',
+                  height: '44px',
+                  backgroundColor: '#10b981',
+                  borderColor: '#10b981',
+                }}
+              >
+                {t('充值')}
+              </Button>
+            </div>
+          )}
         </Card>
       </div>
     );

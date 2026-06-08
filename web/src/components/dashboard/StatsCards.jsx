@@ -17,13 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import { Card, Avatar, Skeleton, Tag, Progress, Button, Banner } from '@douyinfe/semi-ui';
 import { VChart } from '@visactor/react-vchart';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { TrendingUp } from 'lucide-react';
 import { API } from '../../helpers';
+import { StatusContext } from '../../context/Status';
 import AffiliateRewardCard from './AffiliateRewardCard';
 
 const StatsCards = ({
@@ -39,6 +40,8 @@ const StatsCards = ({
 }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const [statusState] = useContext(StatusContext);
+  const rechargeDisabled = statusState?.status?.recharge_disabled || false;
 
   // Affiliate reward summary (for the third dashboard slot)
   // NOTE: only fetch the read-only summary here. The aff code endpoint
@@ -337,13 +340,15 @@ const StatsCards = ({
               title={
                 <div className="flex items-center justify-between w-full">
                   {accountData.title}
-                  <Button
-                    theme="solid"
-                    type="primary"
-                    onClick={() => navigate('/console/topup')}
-                  >
-                    {t('充值')}
-                  </Button>
+                  {!rechargeDisabled && (
+                    <Button
+                      theme="solid"
+                      type="primary"
+                      onClick={() => navigate('/console/topup')}
+                    >
+                      {t('充值')}
+                    </Button>
+                  )}
                 </div>
               }
             >

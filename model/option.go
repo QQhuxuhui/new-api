@@ -177,6 +177,7 @@ func InitOptionMap() {
 	common.OptionMap["CheckSensitiveEnabled"] = strconv.FormatBool(setting.CheckSensitiveEnabled)
 	common.OptionMap["DemoSiteEnabled"] = strconv.FormatBool(operation_setting.DemoSiteEnabled)
 	common.OptionMap["SelfUseModeEnabled"] = strconv.FormatBool(operation_setting.SelfUseModeEnabled)
+	common.OptionMap["RechargeDisabled"] = strconv.FormatBool(operation_setting.RechargeDisabled)
 	common.OptionMap["ModelRequestRateLimitEnabled"] = strconv.FormatBool(setting.ModelRequestRateLimitEnabled)
 	common.OptionMap["CheckSensitiveOnPromptEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnPromptEnabled)
 	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
@@ -623,6 +624,8 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.StreamCacheQueueLength, _ = strconv.Atoi(value)
 	case "PayMethods":
 		err = operation_setting.UpdatePayMethodsByJsonString(value)
+	case "RechargeDisabled":
+		operation_setting.RechargeDisabled = value == "true"
 	}
 	return err
 }
