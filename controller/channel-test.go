@@ -97,6 +97,14 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 		if channel.Type == constant.ChannelTypeVolcEngine && strings.Contains(testModel, "seedream") {
 			requestPath = "/v1/images/generations"
 		}
+
+		// 通用图像生成模型(gpt-image / dall-e / flux / imagen 等)走图像端点。
+		// 否则会被当成 chat 请求发到上游 /v1/chat/completions，部分上游(如基于
+		// ChatGPT/Codex 账号的中转)会拒绝图像模型。relayFormat 在下方据此路径
+		// 自动识别为 RelayFormatOpenAIImage。
+		if common.IsImageGenerationModel(testModel) {
+			requestPath = "/v1/images/generations"
+		}
 	}
 
 	c.Request = &http.Request{
@@ -466,6 +474,18 @@ func buildTestRequest(model string, endpointType string) dto.Request {
 		return &dto.EmbeddingRequest{
 			Model: model,
 			Input: []any{"hello world"},
+		}
+	}
+
+	// 图像生成模型(gpt-image / dall-e / flux / imagen 等)走图像端点，
+	// 不能当成 chat 请求：部分上游(如基于 ChatGPT/Codex 账号的中转)会在
+	// /v1/chat/completions 拒绝图像模型并返回 "model is not supported when using Codex"。
+	if common.IsImageGenerationModel(model) {
+		return &dto.ImageRequest{
+			Model:  model,
+			Prompt: "a cute cat",
+			N:      1,
+			Size:   "1024x1024",
 		}
 	}
 
