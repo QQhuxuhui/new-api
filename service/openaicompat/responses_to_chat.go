@@ -88,9 +88,10 @@ func ResponsesResponseToChatCompletionsResponse(
 		choice.Message.ToolCalls = tcJSON
 	}
 
-	// Set reasoning content (ReasoningContent is string, NOT *string)
+	// Set reasoning content (ReasoningContent is *string after upstream 8ca103342)
 	if len(reasoningParts) > 0 {
-		choice.Message.ReasoningContent = strings.Join(reasoningParts, "\n")
+		rc := strings.Join(reasoningParts, "\n")
+		choice.Message.ReasoningContent = &rc
 	}
 
 	// Determine finish_reason
