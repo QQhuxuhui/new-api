@@ -152,7 +152,7 @@ const StatsCards = ({
       return (
         <Card
           {...CARD_PROPS}
-          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
+          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full h-full hover:shadow-lg transition-all duration-200"
         >
           <div className="space-y-4">
             <Skeleton.Title style={{ width: 120, height: 16 }} />
@@ -168,7 +168,7 @@ const StatsCards = ({
       return (
         <Card
           {...CARD_PROPS}
-          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
+          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full h-full hover:shadow-lg transition-all duration-200"
         >
           <Banner
             type="danger"
@@ -185,7 +185,7 @@ const StatsCards = ({
       return (
         <Card
           {...CARD_PROPS}
-          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
+          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full h-full hover:shadow-lg transition-all duration-200"
         >
           <div className="flex flex-col items-center justify-center py-6 px-4">
             <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3">
@@ -231,7 +231,7 @@ const StatsCards = ({
     return (
       <Card
         {...CARD_PROPS}
-        className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200"
+        className="bg-gradient-to-br from-blue-50 to-indigo-50 border-0 !rounded-2xl w-full h-full hover:shadow-lg transition-all duration-200"
         title={
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center gap-2">
@@ -321,7 +321,7 @@ const StatsCards = ({
     }))
   );
 
-  const mainSpanClass = showAffSlot ? 'lg:col-span-2' : '';
+  const mainSpanClass = showAffSlot ? 'lg:col-span-2 h-full' : 'h-full';
   const gridColsClass = showAffSlot ? 'lg:grid-cols-5' : 'lg:grid-cols-2';
 
   return (
@@ -336,7 +336,7 @@ const StatsCards = ({
           <div className={mainSpanClass}>
             <Card
               {...CARD_PROPS}
-              className={`${accountData.color} border-0 !rounded-2xl w-full hover:shadow-lg transition-all duration-200`}
+              className={`${accountData.color} border-0 !rounded-2xl w-full h-full hover:shadow-lg transition-all duration-200`}
               title={
                 <div className="flex items-center justify-between w-full">
                   {accountData.title}
@@ -396,7 +396,7 @@ const StatsCards = ({
 
         {/* Affiliate Reward Card (3rd slot) */}
         {showAffSlot && (
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 h-full">
             <AffiliateRewardCard
               summary={affSummary}
               loading={affLoading}
