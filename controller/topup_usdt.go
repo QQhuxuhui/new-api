@@ -27,7 +27,7 @@ import (
 
 const (
 	PaymentMethodUSDT      = "usdt"
-	usdtNotifySuccessReply = "ok"   // assimon/epusdt 期望收到 "ok"
+	usdtNotifySuccessReply = "ok" // assimon/epusdt 期望收到 "ok"
 	usdtNotifyFailReply    = "fail"
 )
 
@@ -72,9 +72,33 @@ func (r *EpUsdtCreateResponse) ok() bool {
 	return r.Data.PaymentURL != ""
 }
 
+// epUsdtCreateOrderPath 返回规范化后的下单路径。
+// 空配置按 GMPay v1 默认路径处理, 与 requestEpUsdtCreateOrder 保持一致。
+func epUsdtCreateOrderPath() string {
+	path := strings.TrimSpace(setting.EpUsdtCreateOrderPath)
+	if path == "" {
+		path = "/payments/gmpay/v1/order/create-transaction"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return path
+}
+
+func epUsdtCreateOrderRequiresMerchantID() bool {
+	return strings.Contains(strings.ToLower(epUsdtCreateOrderPath()), "/payments/gmpay/")
+}
+
 // epUsdtConfigured 网关地址 + token 都配置才视为启用。
+// 默认 GMPay v1 路径还必须配置 pid, 否则前台会展示 USDT 但下单必然被网关拒绝。
 func epUsdtConfigured() bool {
-	return setting.EpUsdtApiUrl != "" && setting.EpUsdtApiToken != ""
+	if strings.TrimSpace(setting.EpUsdtApiUrl) == "" || strings.TrimSpace(setting.EpUsdtApiToken) == "" {
+		return false
+	}
+	if epUsdtCreateOrderRequiresMerchantID() && strings.TrimSpace(setting.EpUsdtMerchantId) == "" {
+		return false
+	}
+	return true
 }
 
 // signEpUsdt 按 key 字典序拼接 v 后追加 token, MD5 取小写。
@@ -323,33 +347,43 @@ func RequestEpUsdtPay(c *gin.Context) {
 // 旧版会忽略 pid/currency/token/network 等多余字段, 因此请求体保持一致即可。
 func requestEpUsdtCreateOrder(orderID string, amount float64, notifyURL, redirectURL string) (*EpUsdtCreateResponse, error) {
 	base := strings.TrimRight(setting.EpUsdtApiUrl, "/")
-	path := setting.EpUsdtCreateOrderPath
-	if path == "" {
-		path = "/payments/gmpay/v1/order/create-transaction"
-	}
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
+	path := epUsdtCreateOrderPath()
 	url := base + path
 
-	// 用 map 一处定义所有字段, 既参与签名又作为最终 body, 杜绝两边漂移。
-	// 数字按 GMPay 规范用定点 2 位字符串 (避免 9.0 / 9 序列化歧义)。
-	fields := map[string]string{
+	// GMPay v1 的 CreateTransactionRequest.Amount 是 float64, body 里必须是 JSON 数字;
+	// 把 amount 当字符串发会触发 ctx.Bind 失败 → status_code 10009。
+	// 同时签名要与网关 sign.MapToParams 一致: float64 用 strconv.FormatFloat(f,'f',-1,64)
+	// (无尾零), 因此 amount=9.50 应签 "amount=9.5" 而非 "amount=9.50"。
+	amountSign := strconv.FormatFloat(amount, 'f', -1, 64)
+	signFields := map[string]string{
 		"pid":        setting.EpUsdtMerchantId,
 		"order_id":   orderID,
 		"currency":   setting.EpUsdtCurrency,
 		"token":      setting.EpUsdtAsset,
 		"network":    setting.EpUsdtNetwork,
-		"amount":     strconv.FormatFloat(amount, 'f', 2, 64),
+		"amount":     amountSign,
 		"notify_url": notifyURL,
 	}
-	// 旧版 v0.x 还要 redirect_url, 一并放入 (新版会忽略多余字段)
 	if redirectURL != "" {
-		fields["redirect_url"] = redirectURL
+		signFields["redirect_url"] = redirectURL
 	}
-	fields["signature"] = signEpUsdt(fields, setting.EpUsdtApiToken)
+	sig := signEpUsdt(signFields, setting.EpUsdtApiToken)
 
-	buf, err := json.Marshal(fields)
+	body := map[string]any{
+		"pid":        setting.EpUsdtMerchantId,
+		"order_id":   orderID,
+		"currency":   setting.EpUsdtCurrency,
+		"token":      setting.EpUsdtAsset,
+		"network":    setting.EpUsdtNetwork,
+		"amount":     amount,
+		"notify_url": notifyURL,
+		"signature":  sig,
+	}
+	if redirectURL != "" {
+		body["redirect_url"] = redirectURL
+	}
+
+	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}

@@ -118,7 +118,7 @@ Content-Type: application/json
   "currency": "cny",
   "token": "usdt",
   "network": "tron",
-  "amount": "9.99",
+  "amount": 9.99,
   "notify_url": "{server}/api/user/epay/usdt-notify",
   "signature": "abc...xyz"
 }
