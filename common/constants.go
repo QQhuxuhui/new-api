@@ -105,8 +105,8 @@ var QuotaForNewUser = 0
 var QuotaForInviter = 0
 var InviterRewardDefaultPercent float64 = 10 // 一级分销返佣比例,百分比 (0-100);新自动结算与旧 admin 手动 payout 共享此变量
 var InviterRewardCooldownDays = 7            // 新一级分销:充值成功 → audit log 进入 pending → N 天后自动结算
-var EnableAffAutoSettle = true                // 新一级分销:自动结算总开关,出问题一键关停
-var InviterRewardCutoffMs int64 = 0           // 新一级分销:历史截断点(ms);用于"摆脱历史包袱",该时间之前 created_at 的 pending log 可被批量迁移为 legacy 不参与结算。0 = 未启用
+var EnableAffAutoSettle = true               // 新一级分销:自动结算总开关,出问题一键关停
+var InviterRewardCutoffMs int64 = 0          // 新一级分销:历史截断点(ms);用于"摆脱历史包袱",该时间之前 created_at 的 pending log 可被批量迁移为 legacy 不参与结算。0 = 未启用
 
 // 阿里云 OSS 配置(海报弹窗使用)。详见 add-poster-popup-system change。
 // OSSAccessKeySecret 在 GetOptions 接口返回时脱敏为 ***;updateOption 时若收到字面量 *** 则不覆盖原值。
@@ -152,7 +152,8 @@ var WarningProbePercent = 20 // probability (0-100) to use a warning-state chann
 var WarningTTLSeconds = 60   // warning flag TTL for degraded channels
 
 const (
-	RequestIdKey = "X-Oneapi-Request-Id"
+	RequestIdKey         = "X-Oneapi-Request-Id"
+	UpstreamRequestIdKey = "X-Upstream-Request-Id"
 )
 
 const (
