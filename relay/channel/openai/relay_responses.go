@@ -126,6 +126,17 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		} else {
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
+
+			// 即使无法完整反序列化(如 tool_search_call 的对象型 arguments 撞 string 字段),
+			// 也要把上游事件原样透传,避免吞掉 output item 导致 codex 等客户端拿不到工具调用。
+			var probe struct {
+				Type string `json:"type"`
+			}
+			if probeErr := common.UnmarshalJsonStr(data, &probe); probeErr == nil && probe.Type != "" {
+				helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: probe.Type}, data)
+			} else {
+				helper.StringData(c, data)
+			}
 		}
 		return true
 	})
