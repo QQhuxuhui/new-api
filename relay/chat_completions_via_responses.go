@@ -81,7 +81,7 @@ func chatCompletionsViaResponses(
 		if err != nil {
 			info.RelayMode = origRelayMode
 			info.RequestURLPath = origURLPath
-			return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+			return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid)
 		}
 	}
 

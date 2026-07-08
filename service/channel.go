@@ -52,9 +52,13 @@ func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 		return false
 	}
 	if types.IsChannelError(err) {
-		return true
-	}
-	if types.IsSkipRetryError(err) {
+		// 仅由用户自定义规则升级的 channel: 错误不走直通禁用：规则契约是
+		// "记录健康窗口、临时暂停、不永久禁用"。是否禁用交给下方的
+		// 状态码/错误码/关键词判定（如 Anthropic 欠费文案仍会命中关键词表）。
+		if !types.IsRuleTriggeredFailover(err) {
+			return true
+		}
+	} else if types.IsSkipRetryError(err) {
 		return false
 	}
 	if err.StatusCode == http.StatusUnauthorized {
@@ -93,7 +97,9 @@ func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 		return true
 	}
 
-	lowerMessage := strings.ToLower(err.Error())
+	// 用完整规则匹配输入（含不可解析的原始 body），保证关键词判定
+	// 对非标准格式上游与规则匹配看到同一份文本
+	lowerMessage := strings.ToLower(err.RuleMatchInput())
 	search, _ := AcSearch(lowerMessage, operation_setting.AutomaticDisableKeywords, true)
 	return search
 }

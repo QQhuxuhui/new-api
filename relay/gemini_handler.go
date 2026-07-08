@@ -67,7 +67,7 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	// model mapped 模型映射
 	err := helper.ModelMappedHelper(c, info, request)
 	if err != nil {
-		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+		return types.NewError(err, types.ErrorCodeChannelModelMappedError)
 	}
 
 	if model_setting.GetGeminiSettings().ThinkingAdapterEnabled {
@@ -172,7 +172,7 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		if len(info.ParamOverride) > 0 {
 			jsonData, err = relaycommon.ApplyParamOverride(jsonData, info.ParamOverride)
 			if err != nil {
-				return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+				return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid)
 			}
 		}
 
@@ -251,7 +251,7 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo) (newAPI
 
 	err = helper.ModelMappedHelper(c, info, req)
 	if err != nil {
-		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+		return types.NewError(err, types.ErrorCodeChannelModelMappedError)
 	}
 
 	req.SetModelName("models/" + info.UpstreamModelName)
@@ -277,7 +277,7 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo) (newAPI
 		}
 		jsonData, err = common.Marshal(reqMap)
 		if err != nil {
-			return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+			return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid)
 		}
 	}
 	logger.LogDebug(c, "Gemini embedding request body: "+string(jsonData))

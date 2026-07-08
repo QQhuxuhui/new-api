@@ -64,4 +64,9 @@ const (
 	ContextKeyReturnImmediately ContextKey = "return_immediately"        // bool: matched client rule requires immediate return
 
 	ContextKeyErrorCaptureDone ContextKey = "error_capture_done" // bool: 本请求已捕获过错误请求体，避免重试重复捕获
+
+	ContextKeyPayloadWritten ContextKey = "relay_payload_written" // bool: 已有业务字节写回客户端，跨渠道重试/降级必须停止
+	ContextKeyPingWritten    ContextKey = "relay_ping_written"    // bool: 仅写出过 SSE ping 注释（不算 payload，可安全重放）
+
+	ContextKeyWarningChannelSkipped ContextKey = "warning_channel_skipped" // bool: 本请求曾有渠道仅因 warning 掷骰被跳过，优先级耗尽时值得关骰补扫
 )

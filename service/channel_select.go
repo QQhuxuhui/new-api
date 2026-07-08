@@ -12,10 +12,30 @@ import (
 )
 
 func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName string, retry int) (*model.Channel, string, error) {
+	return cacheGetRandomSatisfiedChannel(c, group, modelName, retry, false)
+}
+
+// CacheGetRandomSatisfiedChannelWarmup 关闭 warning 掷骰的兜底补扫变体：
+// 仅在所有优先级耗尽、且本请求曾有渠道仅因掷骰被跳过时调用
+// （全局无其它选择时可用性压过降流量探测）。
+func CacheGetRandomSatisfiedChannelWarmup(c *gin.Context, group string, modelName string, retry int) (*model.Channel, string, error) {
+	return cacheGetRandomSatisfiedChannel(c, group, modelName, retry, true)
+}
+
+func cacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName string, retry int, includeWarning bool) (*model.Channel, string, error) {
 	var channel *model.Channel
 	var err error
 	selectGroup := group
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+
+	// selectFrom 统一记录"有渠道仅因 warning 掷骰被跳过"标记，供耗尽时补扫决策
+	selectFrom := func(g string) (*model.Channel, error) {
+		ch, warned, selErr := model.GetRandomSatisfiedChannelDetailed(g, modelName, retry, includeWarning)
+		if warned {
+			common.SetContextKey(c, constant.ContextKeyWarningChannelSkipped, true)
+		}
+		return ch, selErr
+	}
 
 	// Check if this is a plan-based request with multiple channel groups
 	// Priority: plan groups > auto mode > single group
@@ -26,7 +46,7 @@ func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 			var needsRetry bool // Track if any group returned nil (needs retry at next priority)
 			for _, planGroup := range groups {
 				logger.LogDebug(c, "Plan selecting group:", planGroup)
-				channel, lastErr = model.GetRandomSatisfiedChannel(planGroup, modelName, retry)
+				channel, lastErr = selectFrom(planGroup)
 
 				// Priority exhaustion is expected - try next group
 				if lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
@@ -74,7 +94,7 @@ func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 		var lastErr error
 		for _, autoGroup := range GetUserAutoGroup(userGroup) {
 			logger.LogDebug(c, "Auto selecting group:", autoGroup)
-			channel, lastErr = model.GetRandomSatisfiedChannel(autoGroup, modelName, retry)
+			channel, lastErr = selectFrom(autoGroup)
 			// If we hit priority exhaustion, track it but continue checking other auto groups
 			if lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
 				continue
@@ -93,7 +113,7 @@ func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 			return nil, selectGroup, lastErr
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(group, modelName, retry)
+		channel, err = selectFrom(group)
 		if err != nil {
 			return nil, group, err
 		}
@@ -105,10 +125,28 @@ func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 // excludes channels that have already been tried. This ensures all channels at the
 // same priority level are attempted before moving to the next priority.
 func CacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, modelName string, retry int, excludeIds map[int]bool) (*model.Channel, string, error) {
+	return cacheGetRandomSatisfiedChannelExcluding(c, group, modelName, retry, excludeIds, false)
+}
+
+// CacheGetRandomSatisfiedChannelExcludingWarmup 关闭 warning 掷骰的兜底补扫变体，
+// 语义同 CacheGetRandomSatisfiedChannelWarmup，额外排除本请求已尝试渠道。
+func CacheGetRandomSatisfiedChannelExcludingWarmup(c *gin.Context, group string, modelName string, retry int, excludeIds map[int]bool) (*model.Channel, string, error) {
+	return cacheGetRandomSatisfiedChannelExcluding(c, group, modelName, retry, excludeIds, true)
+}
+
+func cacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, modelName string, retry int, excludeIds map[int]bool, includeWarning bool) (*model.Channel, string, error) {
 	var channel *model.Channel
 	var err error
 	selectGroup := group
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+
+	selectFrom := func(g string) (*model.Channel, error) {
+		ch, warned, selErr := model.GetRandomSatisfiedChannelExcludingDetailed(g, modelName, retry, excludeIds, includeWarning)
+		if warned {
+			common.SetContextKey(c, constant.ContextKeyWarningChannelSkipped, true)
+		}
+		return ch, selErr
+	}
 
 	// Check if this is a plan-based request with multiple channel groups
 	// Priority: plan groups > auto mode > single group
@@ -119,7 +157,7 @@ func CacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 			var needsRetry bool // Track if any group returned nil (needs retry at next priority)
 			for _, planGroup := range groups {
 				logger.LogDebug(c, "Plan selecting group (excluding tried):", planGroup)
-				channel, lastErr = model.GetRandomSatisfiedChannelExcluding(planGroup, modelName, retry, excludeIds)
+				channel, lastErr = selectFrom(planGroup)
 
 				// Priority exhaustion is expected - try next group
 				if lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
@@ -167,7 +205,7 @@ func CacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 		var lastErr error
 		for _, autoGroup := range GetUserAutoGroup(userGroup) {
 			logger.LogDebug(c, "Auto selecting group (excluding tried):", autoGroup)
-			channel, lastErr = model.GetRandomSatisfiedChannelExcluding(autoGroup, modelName, retry, excludeIds)
+			channel, lastErr = selectFrom(autoGroup)
 			// If we hit priority exhaustion, track it but continue checking other auto groups
 			if lastErr != nil && errors.Is(lastErr, model.ErrPriorityExhausted) {
 				continue
@@ -186,7 +224,7 @@ func CacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 			return nil, selectGroup, lastErr
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannelExcluding(group, modelName, retry, excludeIds)
+		channel, err = selectFrom(group)
 		if err != nil {
 			return nil, group, err
 		}

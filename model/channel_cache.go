@@ -150,9 +150,21 @@ func SyncChannelCache(frequency int) {
 }
 
 func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel, error) {
+	channel, _, err := GetRandomSatisfiedChannelDetailed(group, model, retry, false)
+	return channel, err
+}
+
+// GetRandomSatisfiedChannelDetailed 在基础版之上：
+//   - includeWarning=true 时关闭 warning 掷骰（用于优先级耗尽后的兜底补扫，
+//     "全局无其它选择时可用性压过降流量探测"）；
+//   - 第二个返回值上报本次选择是否有渠道仅因 warning 掷骰被跳过，
+//     供上层决定耗尽时是否值得补扫。
+func GetRandomSatisfiedChannelDetailed(group string, model string, retry int, includeWarning bool) (*Channel, bool, error) {
+	warningSkipped := false
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry)
+		channel, err := GetChannel(group, model, retry)
+		return channel, warningSkipped, err
 	}
 
 	channelSyncLock.RLock()
@@ -170,7 +182,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	if len(channels) == 0 {
 		// Return ErrPriorityExhausted to indicate no channels support this model
 		// This prevents infinite retry loops when calling non-existent models
-		return nil, ErrPriorityExhausted
+		return nil, warningSkipped, ErrPriorityExhausted
 	}
 
 	if len(channels) == 1 {
@@ -180,11 +192,11 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 				common.SysLog(fmt.Sprintf("single channel %d is suspended for group: %s, model: %s", channels[0], group, model))
 				// For single channel, return ErrPriorityExhausted directly to trigger failover
 				// (no other priorities to try)
-				return nil, ErrPriorityExhausted
+				return nil, warningSkipped, ErrPriorityExhausted
 			}
-			return channel, nil
+			return channel, warningSkipped, nil
 		}
-		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
+		return nil, warningSkipped, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
 	}
 
 	uniquePriorities := make(map[int]bool)
@@ -192,7 +204,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 		if channel, ok := channelsIDM[channelId]; ok {
 			uniquePriorities[int(channel.GetPriority())] = true
 		} else {
-			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
+			return nil, warningSkipped, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
 		}
 	}
 	var sortedUniquePriorities []int
@@ -203,7 +215,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 
 	// If retry exceeds available priority levels, all priorities have been tried
 	if retry >= len(uniquePriorities) {
-		return nil, ErrPriorityExhausted
+		return nil, warningSkipped, ErrPriorityExhausted
 	}
 	targetPriority := int64(sortedUniquePriorities[retry])
 
@@ -223,9 +235,10 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 				}
 				// Probabilistic filter for warning-state channels
 				// Each warning channel independently rolls for eligibility this round
-				if IsChannelWarning(channelId) {
+				if !includeWarning && IsChannelWarning(channelId) {
 					if rand.Intn(100) >= common.WarningProbePercent {
 						warningSkippedCount++
+						warningSkipped = true
 						continue // Skip this warning channel, try others at same priority
 					}
 				}
@@ -235,7 +248,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 				targetWeights = append(targetWeights, weight)
 			}
 		} else {
-			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
+			return nil, warningSkipped, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
 		}
 	}
 
@@ -246,7 +259,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, warning_skipped=%d)",
 				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, warningSkippedCount))
 		}
-		return nil, nil
+		return nil, warningSkipped, nil
 	}
 
 	// smoothing factor and adjustment
@@ -273,21 +286,31 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	for idx, channel := range targetChannels {
 		randomWeight -= targetWeights[idx]*smoothingFactor + smoothingAdjustment
 		if randomWeight < 0 {
-			return channel, nil
+			return channel, warningSkipped, nil
 		}
 	}
 	// return null if no channel is not found
-	return nil, errors.New("channel not found")
+	return nil, warningSkipped, errors.New("channel not found")
 }
 
 // GetRandomSatisfiedChannelExcluding is like GetRandomSatisfiedChannel but excludes
 // channels that have already been tried. This ensures all channels at the same
 // priority level are attempted before moving to the next priority.
 func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, excludeIds map[int]bool) (*Channel, error) {
+	channel, _, err := GetRandomSatisfiedChannelExcludingDetailed(group, model, retry, excludeIds, false)
+	return channel, err
+}
+
+// GetRandomSatisfiedChannelExcludingDetailed 见 GetRandomSatisfiedChannelDetailed：
+// includeWarning=true 关闭 warning 掷骰（耗尽后兜底补扫），第二个返回值上报
+// 本次选择是否有渠道仅因 warning 掷骰被跳过。
+func GetRandomSatisfiedChannelExcludingDetailed(group string, model string, retry int, excludeIds map[int]bool, includeWarning bool) (*Channel, bool, error) {
+	warningSkipped := false
 	if !common.MemoryCacheEnabled {
 		// For non-cached mode, fall back to basic selection
 		// TODO: implement exclusion for database queries if needed
-		return GetChannel(group, model, retry)
+		channel, err := GetChannel(group, model, retry)
+		return channel, warningSkipped, err
 	}
 
 	channelSyncLock.RLock()
@@ -305,14 +328,14 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 	if len(channels) == 0 {
 		// Return ErrPriorityExhausted to indicate no channels support this model
 		// This prevents infinite retry loops when calling non-existent models
-		return nil, ErrPriorityExhausted
+		return nil, warningSkipped, ErrPriorityExhausted
 	}
 
 	// For single channel, check if it's excluded or suspended
 	if len(channels) == 1 {
 		if excludeIds != nil && excludeIds[channels[0]] {
 			// 单渠道且已在本次请求中尝试过，视为该优先级耗尽，触发后续降级
-			return nil, ErrPriorityExhausted
+			return nil, warningSkipped, ErrPriorityExhausted
 		}
 		if channel, ok := channelsIDM[channels[0]]; ok {
 			// Check health status for single channel (fix: previously skipped health check)
@@ -320,11 +343,11 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 				common.SysLog(fmt.Sprintf("single channel %d is suspended for group: %s, model: %s (excluding)", channels[0], group, model))
 				// For single channel, return ErrPriorityExhausted directly to trigger failover
 				// (no other priorities to try)
-				return nil, ErrPriorityExhausted
+				return nil, warningSkipped, ErrPriorityExhausted
 			}
-			return channel, nil
+			return channel, warningSkipped, nil
 		}
-		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
+		return nil, warningSkipped, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
 	}
 
 	uniquePriorities := make(map[int]bool)
@@ -332,7 +355,7 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 		if channel, ok := channelsIDM[channelId]; ok {
 			uniquePriorities[int(channel.GetPriority())] = true
 		} else {
-			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
+			return nil, warningSkipped, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
 		}
 	}
 	var sortedUniquePriorities []int
@@ -343,7 +366,7 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 
 	// If retry exceeds available priority levels, all priorities have been tried
 	if retry >= len(uniquePriorities) {
-		return nil, ErrPriorityExhausted
+		return nil, warningSkipped, ErrPriorityExhausted
 	}
 	targetPriority := int64(sortedUniquePriorities[retry])
 
@@ -369,9 +392,10 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 				}
 				// Probabilistic filter for warning-state channels
 				// Each warning channel independently rolls for eligibility this round
-				if IsChannelWarning(channelId) {
+				if !includeWarning && IsChannelWarning(channelId) {
 					if rand.Intn(100) >= common.WarningProbePercent {
 						warningSkippedCount++
+						warningSkipped = true
 						continue // Skip this warning channel, try others at same priority
 					}
 				}
@@ -381,7 +405,7 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 				targetWeights = append(targetWeights, weight)
 			}
 		} else {
-			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
+			return nil, warningSkipped, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
 		}
 	}
 
@@ -392,7 +416,7 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d, warning_skipped=%d)",
 				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount, warningSkippedCount))
 		}
-		return nil, nil
+		return nil, warningSkipped, nil
 	}
 
 	// smoothing factor and adjustment
@@ -412,10 +436,10 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 	for idx, channel := range targetChannels {
 		randomWeight -= targetWeights[idx]*smoothingFactor + smoothingAdjustment
 		if randomWeight < 0 {
-			return channel, nil
+			return channel, warningSkipped, nil
 		}
 	}
-	return nil, errors.New("channel not found")
+	return nil, warningSkipped, errors.New("channel not found")
 }
 
 func CacheGetChannel(id int) (*Channel, error) {

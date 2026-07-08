@@ -111,6 +111,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	var (
 		newAPIError *types.NewAPIError
 		ws          *websocket.Conn
+		// lastUpstreamErr 记录最后一次真实上游调用的错误。渠道耗尽时
+		// newAPIError 会被 get_channel_failed 覆盖（降级控制流令牌），
+		// 渲染前用它换回真实错误，客户端拿到 A 的状态码而非泛化耗尽消息。
+		lastUpstreamErr *types.NewAPIError
 	)
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
@@ -134,6 +138,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 			logger.LogError(c, fmt.Sprintf("relay error: %s", newAPIError.Error()))
 			newAPIError.SetMessage(service.BuildRelayClientErrorMessage(newAPIError, requestId))
+			// 响应已提交（状态码/头已发出，含仅写过 ping 的流）：不能再 c.JSON
+			// （会拼进 SSE 流并触发 superfluous WriteHeader），以 SSE error 事件收尾。
+			// 注意判据是"响应是否已提交"(Written)，与"能否安全重放"(IsPayloadWritten) 不同
+			if relayFormat != types.RelayFormatOpenAIRealtime && c.Writer != nil && c.Writer.Written() {
+				writeStreamErrorEvent(c, relayFormat, newAPIError)
+				return
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -318,6 +329,9 @@ retryLoop:
 			// 故障转移流程，保持原有语义。
 			newAPIError = executeSameChannelRetry(c, defaultRetryRuleLookup, doUpstreamCall)
 			attempts++
+			if newAPIError != nil && newAPIError.GetErrorCode() != types.ErrorCodeContextCanceled {
+				lastUpstreamErr = newAPIError
+			}
 
 			// Record channel health based on result
 			if newAPIError == nil {
@@ -332,12 +346,21 @@ retryLoop:
 				// Record timeout errors (504/524) to health tracker for statistical analysis
 				// Timeouts won't trigger immediate retry but will accumulate in health stats
 				// If timeouts occur frequently (>30% failure rate), the channel will be suspended
-				if shouldRecordChannelFailure(c, newAPIError.StatusCode, newAPIError.Error()) {
+				if shouldRecordChannelFailure(c, newAPIError.StatusCode, newAPIError.RuleMatchInput()) {
 					service.RecordChannelFailure(channel.Id, newAPIError.StatusCode, newAPIError.Error())
 				}
 
 				processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 				captureErrorRequestIfMatched(c, newAPIError)
+			}
+
+			// 已写响应即放弃（全局不变式）：业务字节已写回客户端后禁止切换渠道重放，
+			// 否则第二个渠道的响应会追加进同一条 SSE 流（双写）。
+			// realtime 例外：WebSocket 升级(Hijack)后 Written() 恒真，但 WSS 消息级
+			// 重放语义由其自身协议处理，保持升级前的重试能力
+			if relayFormat != types.RelayFormatOpenAIRealtime && helper.IsPayloadWritten(c) {
+				logger.LogWarn(c, "response already written to client, stopping cross-channel retry")
+				break retryLoop
 			}
 
 			// remainingRetries 用于 shouldRetry 的“次数”判定，这里用一个足够大的剩余额度，避免受 RetryTimes 限制
@@ -352,8 +375,10 @@ retryLoop:
 
 	// 仅对“可重试/可切换”的错误进行后续降级尝试（跨计划/钱包）。
 	// 例如：指定渠道诊断请求、skip-retry 错误、典型客户端参数错误都不应触发降级。
+	// 已写响应的流同样禁止降级重放（“已写即放弃”不变式覆盖降级层）。
 	shouldAttemptPostRetryFailover := newAPIError != nil &&
 		c.Request.Context().Err() == nil &&
+		(relayFormat == types.RelayFormatOpenAIRealtime || !helper.IsPayloadWritten(c)) &&
 		shouldRetry(c, newAPIError, 1)
 
 	// After all retries within current plan failed, attempt cross-plan failover
@@ -439,7 +464,10 @@ retryLoop:
 				}
 
 				// Failover channel also failed - record health and continue to error response
-				if shouldRecordChannelFailure(c, newAPIError.StatusCode, newAPIError.Error()) {
+				if newAPIError.GetErrorCode() != types.ErrorCodeContextCanceled {
+					lastUpstreamErr = newAPIError
+				}
+				if shouldRecordChannelFailure(c, newAPIError.StatusCode, newAPIError.RuleMatchInput()) {
 					service.RecordChannelFailure(failoverChannel.Id, newAPIError.StatusCode, newAPIError.Error())
 				}
 				logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failover channel=%d also failed: %s", failoverChannel.Id, newAPIError.Error()))
@@ -494,7 +522,7 @@ retryLoop:
 				// 从 retryCount=1 开始，避免 getChannel 返回初始上下文渠道
 				attemptsWallet := 1
 				for priorityIndex := 0; priorityIndex < maxPriorityLevelsWallet; priorityIndex++ {
-					if !shouldContinueWalletRetry(c, nil) {
+					if !shouldContinueWalletRetry(c, nil, relayFormat == types.RelayFormatOpenAIRealtime) {
 						break
 					}
 					// 获取渠道（避免重复使用已尝试渠道）
@@ -502,7 +530,7 @@ retryLoop:
 					if chErr != nil {
 						logger.LogError(c, chErr.Error())
 						newAPIError = chErr
-						if !shouldContinueWalletRetry(c, chErr) {
+						if !shouldContinueWalletRetry(c, chErr, relayFormat == types.RelayFormatOpenAIRealtime) {
 							break
 						}
 						continue
@@ -535,10 +563,13 @@ retryLoop:
 					}
 
 					newAPIError = err
-					if !shouldContinueWalletRetry(c, err) {
+					if err.GetErrorCode() != types.ErrorCodeContextCanceled {
+						lastUpstreamErr = err
+					}
+					if !shouldContinueWalletRetry(c, err, relayFormat == types.RelayFormatOpenAIRealtime) {
 						break
 					}
-					if shouldRecordChannelFailure(c, err.StatusCode, err.Error()) {
+					if shouldRecordChannelFailure(c, err.StatusCode, err.RuleMatchInput()) {
 						service.RecordChannelFailure(channel.Id, err.StatusCode, err.Error())
 					}
 					// 继续尝试钱包分组下一优先级
@@ -547,6 +578,11 @@ retryLoop:
 		}
 	}
 failoverEnd:
+
+	// 渲染期替换：降级判定已全部完成，若最终错误是渠道耗尽/选择失败的
+	// 控制流令牌（get_channel_failed），换回最后一次真实上游错误。
+	// 循环内的 newAPIError 赋值与降级门控输入保持原样，此处仅影响客户端可见错误。
+	newAPIError = resolveFinalRelayError(newAPIError, lastUpstreamErr)
 
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {
@@ -559,6 +595,60 @@ failoverEnd:
 		err := types.NewError(fmt.Errorf("当前分组无可用渠道"), types.ErrorCodeGetChannelFailed)
 		c.JSON(http.StatusServiceUnavailable, err)
 	}
+}
+
+// writeStreamErrorEvent 在流已开始写出后，以 SSE error 事件向客户端收尾。
+// 此时状态码与响应头已发出，c.JSON 会把 JSON 拼进 SSE 流并触发
+// "superfluous WriteHeader" 告警，因此按各协议的流错误事件格式写出。
+func writeStreamErrorEvent(c *gin.Context, relayFormat types.RelayFormat, err *types.NewAPIError) {
+	switch relayFormat {
+	case types.RelayFormatClaude:
+		payload, marshalErr := common.Marshal(gin.H{
+			"type":  "error",
+			"error": err.ToClaudeError(),
+		})
+		if marshalErr != nil {
+			return
+		}
+		helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "error"}, string(payload))
+	case types.RelayFormatOpenAIResponses, types.RelayFormatOpenAIResponsesCompaction:
+		// Responses 协议以 event: error 事件收尾，客户端按事件类型分发
+		payload, marshalErr := common.Marshal(gin.H{
+			"type":  "error",
+			"code":  err.GetErrorCode(),
+			"message": err.Error(),
+		})
+		if marshalErr != nil {
+			return
+		}
+		helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: "error"}, string(payload))
+	case types.RelayFormatGemini:
+		// Gemini SSE 错误约定：data: {"error":{code,message,status}}
+		_ = helper.ObjectData(c, gin.H{
+			"error": gin.H{
+				"code":    err.StatusCode,
+				"message": err.Error(),
+				"status":  "UNAVAILABLE",
+			},
+		})
+	default:
+		_ = helper.ObjectData(c, gin.H{
+			"error": err.ToOpenAIError(),
+		})
+	}
+}
+
+// resolveFinalRelayError 决定最终返回客户端的错误：渠道耗尽产生的
+// ErrorCodeGetChannelFailed 只是驱动跨计划/钱包降级的控制流令牌，
+// 对客户端而言最后一次真实上游错误（状态码、错误体）信息量更大。
+func resolveFinalRelayError(finalErr, lastUpstreamErr *types.NewAPIError) *types.NewAPIError {
+	if finalErr == nil || lastUpstreamErr == nil {
+		return finalErr
+	}
+	if finalErr.GetErrorCode() != types.ErrorCodeGetChannelFailed {
+		return finalErr
+	}
+	return lastUpstreamErr
 }
 
 var upgrader = websocket.Upgrader{
@@ -601,8 +691,14 @@ func getChannel(c *gin.Context, group, originalModel string, retryCount int, pri
 	// 使用 priorityIndex 而不是 retryCount，从中间件停止的位置继续遍历优先级
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannelExcluding(c, group, originalModel, priorityIndex, excludeIds)
 	if err != nil {
-		// 优先级耗尽：不标记 SkipRetry，交由上层进行计划/钱包降级
+		// 优先级耗尽：先做 warning 关骰补扫；仍无渠道时不标记 SkipRetry，
+		// 交由上层进行计划/钱包降级
 		if errors.Is(err, model.ErrPriorityExhausted) {
+			if warmChannel, warmErr := warmupRescanChannel(c, group, originalModel, excludeIds); warmErr != nil {
+				return nil, warmErr
+			} else if warmChannel != nil {
+				return warmChannel, nil
+			}
 			return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道耗尽: %w", selectGroup, originalModel, err), types.ErrorCodeGetChannelFailed)
 		}
 		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %w", selectGroup, originalModel, err), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
@@ -619,6 +715,36 @@ func getChannel(c *gin.Context, group, originalModel string, retryCount int, pri
 		return nil, newAPIError
 	}
 	return channel, nil
+}
+
+// warmupRescanChannel 在所有优先级耗尽后做 warning 关骰补扫：
+// 若本请求曾有渠道仅因 warning 掷骰（WarningProbePercent 降流量探测）被跳过，
+// 关闭掷骰从最高优先级重扫一遍。设计边界与单渠道路径（不掷骰）一致：
+// "全局无其它选择时可用性压过降流量"，不改变常态下的探测流量比例。
+// 返回 (nil, nil) 表示补扫无果，调用方按原耗尽路径处理。
+func warmupRescanChannel(c *gin.Context, group, originalModel string, excludeIds map[int]bool) (*model.Channel, *types.NewAPIError) {
+	if !common.GetContextKeyBool(c, constant.ContextKeyWarningChannelSkipped) {
+		return nil, nil
+	}
+	const maxWarmupPriorityLevels = 1000
+	for warmIdx := 0; warmIdx < maxWarmupPriorityLevels; warmIdx++ {
+		channel, _, err := service.CacheGetRandomSatisfiedChannelExcludingWarmup(c, group, originalModel, warmIdx, excludeIds)
+		if err != nil {
+			// 补扫同样耗尽或查询失败：交回上层按原耗尽路径处理
+			return nil, nil
+		}
+		if channel == nil {
+			continue
+		}
+		if setupErr := middleware.SetupContextForSelectedChannel(c, channel, originalModel); setupErr != nil {
+			// 标记已尝试，避免下一轮补扫再次选中同一条受限渠道
+			addUsedChannel(c, channel.Id)
+			return nil, setupErr
+		}
+		logger.LogInfo(c, fmt.Sprintf("[WarningRescan] 优先级耗尽，关闭 warning 掷骰补扫命中渠道 #%d (%s)", channel.Id, channel.Name))
+		return channel, nil
+	}
+	return nil, nil
 }
 
 func applyClientRuleState(c *gin.Context, statusCode int, errorMessage string) bool {
@@ -674,7 +800,7 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return true
 	}
 
-	if isClient, _ := service.CheckClientErrorRule(openaiErr.StatusCode, openaiErr.Error()); isClient {
+	if isClient, _ := service.CheckClientErrorRule(openaiErr.StatusCode, openaiErr.RuleMatchInput()); isClient {
 		return retryTimes > 0
 	}
 
@@ -712,9 +838,14 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return true
 }
 
-func shouldContinueWalletRetry(c *gin.Context, err *types.NewAPIError) bool {
+func shouldContinueWalletRetry(c *gin.Context, err *types.NewAPIError, isRealtime bool) bool {
 	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
 		logger.LogWarn(c, "client disconnected, stopping wallet retry loop")
+		return false
+	}
+
+	// 已写响应即放弃：钱包降级层同样禁止对已写流重放（realtime 例外，见 retryLoop 注释）
+	if !isRealtime && helper.IsPayloadWritten(c) {
 		return false
 	}
 

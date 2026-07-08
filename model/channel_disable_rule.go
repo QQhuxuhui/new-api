@@ -1,11 +1,13 @@
 package model
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
 )
 
 // Match type constants for channel disable (failover) rules.
@@ -241,6 +243,63 @@ func InvalidateDisableRulesCache() {
 	disableRulesCacheTime = time.Time{}
 }
 
+// SeedDefaultDisableRules 播种内置故障转移规则：部分上游把渠道特有故障
+// （密钥无效、账户欠费）包装成 400 返回，而硬编码判定对 400 一律不切换
+// （设计原则：基于状态码判断）。这里用设计预留的规则机制补上高特异例外。
+// 仅在首次启动播种一次（Option 行守卫），管理员删除/停用后不会复活；
+// 关键词必须是厂商原文的高特异短语，严禁 "quota"/"api key" 之类泛化词。
+func SeedDefaultDisableRules() error {
+	const optionKey = "DefaultChannelDisableRulesSeeded"
+
+	var existing Option
+	if err := DB.Where(&Option{Key: optionKey}).First(&existing).Error; err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	seeds := []*ChannelDisableRule{
+		{
+			Name:        "内置：Gemini 无效密钥 400 切换渠道",
+			StatusCodes: []int{400},
+			Keywords:    []string{"api key not valid", "api key expired"},
+			MatchType:   MatchTypeAND,
+			Enabled:     true,
+			ErrorType:   RuleErrorTypeServer,
+			Description: "Gemini 对无效/过期密钥返回 400，属渠道自身问题，换渠道可成功。命中后临时暂停渠道并切换重试，不会永久禁用。可停用。",
+		},
+		{
+			Name:        "内置：Anthropic 余额不足 400 切换渠道",
+			StatusCodes: []int{400},
+			Keywords:    []string{"credit balance is too low"},
+			MatchType:   MatchTypeAND,
+			Enabled:     true,
+			ErrorType:   RuleErrorTypeServer,
+			Description: "Anthropic 对账户欠费返回 400，属渠道自身问题，换渠道可成功。永久禁用仍由自动禁用关键词表独立判定。可停用。",
+		},
+	}
+
+	for _, rule := range seeds {
+		var count int64
+		if err := DB.Model(&ChannelDisableRule{}).Where("name = ?", rule.Name).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		if err := DB.Create(rule).Error; err != nil {
+			return err
+		}
+	}
+	InvalidateDisableRulesCache()
+
+	if err := DB.Create(&Option{Key: optionKey, Value: "true"}).Error; err != nil {
+		return err
+	}
+	common.SysLog("seeded default channel disable rules (400 channel-specific failover)")
+	return nil
+}
+
 // CreateDisableRule creates a new rule and invalidates cache.
 func CreateDisableRule(rule *ChannelDisableRule) error {
 	if err := DB.Create(rule).Error; err != nil {
@@ -309,7 +368,7 @@ func TestDisableRules(statusCode int, errorMessage string) (*TestDisableRulesRes
 		matches = append(matches, detail)
 	}
 
-	hardcodedMatch := matchHardcodedFailoverRules(statusCode, errorMessage)
+	hardcodedMatch := MatchHardcodedFailoverRules(statusCode, errorMessage)
 	wouldTrigger := hardcodedMatch
 	isClientError := false
 	returnImmediately := false
@@ -332,9 +391,11 @@ func TestDisableRules(statusCode int, errorMessage string) (*TestDisableRulesRes
 	}, nil
 }
 
-// matchHardcodedFailoverRules replicates existing hardcoded logic in ShouldTriggerChannelFailover
+// MatchHardcodedFailoverRules 是基于状态码的硬编码故障转移判定的唯一实现，
+// service.ShouldTriggerChannelFailover 与测试面板均委托此函数，避免双份维护漂移。
+// (replicates existing hardcoded logic in ShouldTriggerChannelFailover)
 // without invoking user-defined rules. Keep in sync with service.ShouldTriggerChannelFailover.
-func matchHardcodedFailoverRules(statusCode int, errorMessage string) bool {
+func MatchHardcodedFailoverRules(statusCode int, errorMessage string) bool {
 	if statusCode >= 200 && statusCode < 300 {
 		return false
 	}

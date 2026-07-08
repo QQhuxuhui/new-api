@@ -68,6 +68,29 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	return &usage, nil
 }
 
+// extractResponsesStreamError 从 /v1/responses 流事件中提取失败信息：
+// 顶层 {"type":"error",...} 事件，或 response.failed / response.status=="failed"
+// 携带的 response.error 对象。正常事件（error 为 null/空对象）返回 nil。
+func extractResponsesStreamError(streamResponse *dto.ResponsesStreamResponse) *types.OpenAIError {
+	if streamResponse == nil {
+		return nil
+	}
+	if streamResponse.Type == dto.ResponsesEventFailed || streamResponse.Type == "error" ||
+		(streamResponse.Response != nil && streamResponse.Response.Status == "failed") {
+		if streamResponse.Response != nil {
+			if oaiErr := dto.GetOpenAIError(streamResponse.Response.Error); isMeaningfulOpenAIError(oaiErr) {
+				return oaiErr
+			}
+		}
+		// 顶层 error 事件或 failed 但无 error 详情：给出通用错误
+		return &types.OpenAIError{
+			Type:    "upstream_stream_failed",
+			Message: fmt.Sprintf("upstream responses stream reported %s", streamResponse.Type),
+		}
+	}
+	return nil
+}
+
 func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
@@ -79,11 +102,22 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
 
-	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
+	var streamEventCount int
+	var streamError *types.OpenAIError
+	exitReason := helper.StreamScannerHandlerWithReason(c, resp, info, func(data string) bool {
 
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
+			// response.failed / error 事件：上游把失败塞进 200 流。
+			// 不转发错误事件本身，交给外层按错误处理（未写出过业务字节时可切换渠道）
+			if streamError == nil {
+				if oaiErr := extractResponsesStreamError(&streamResponse); oaiErr != nil {
+					streamError = oaiErr
+					return false
+				}
+			}
+			streamEventCount++
 			sendResponsesStreamData(c, streamResponse, data)
 			switch streamResponse.Type {
 			case "response.completed":
@@ -137,9 +171,22 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			} else {
 				helper.StringData(c, data)
 			}
+			streamEventCount++
 		}
 		return true
 	})
+
+	// 流内失败事件：不计费，按错误内容映射状态码（非 channel: 码）让外层决定是否切换
+	if streamError != nil {
+		logger.LogError(c, fmt.Sprintf("upstream responses stream failed: type=%s, code=%v, message=%s",
+			streamError.Type, streamError.Code, streamError.Message))
+		return nil, types.WithOpenAIError(*streamError, pseudoErrorStatusCode(streamError))
+	}
+
+	// 零事件流：上游 200 后无任何事件
+	if streamEventCount == 0 {
+		return nil, helper.NewEmptyStreamError(exitReason)
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量

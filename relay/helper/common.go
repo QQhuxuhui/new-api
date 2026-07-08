@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
@@ -13,6 +14,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+// MarkPayloadWritten 标记已有业务字节（SSE 数据/响应体）写回客户端。
+// 一旦置位，跨渠道重试与降级必须停止（"已写响应即放弃"原则的全局化）。
+func MarkPayloadWritten(c *gin.Context) {
+	if c == nil || c.GetBool(string(constant.ContextKeyPayloadWritten)) {
+		return
+	}
+	c.Set(string(constant.ContextKeyPayloadWritten), true)
+}
+
+// IsPayloadWritten 判断是否已有业务字节写回客户端。
+// 仅写出过 ping 注释（": PING"）不算 payload，可安全重放；
+// 存在未经标记的写出来源时保守视为已写，宁可少重试也不双写。
+func IsPayloadWritten(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	if c.GetBool(string(constant.ContextKeyPayloadWritten)) {
+		return true
+	}
+	if c.Writer == nil || !c.Writer.Written() {
+		return false
+	}
+	return !c.GetBool(string(constant.ContextKeyPingWritten))
+}
 
 func FlushWriter(c *gin.Context) error {
 	if c.Writer == nil {
@@ -46,6 +72,7 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 	if err != nil {
 		common.SysError("error marshalling stream response: " + err.Error())
 	} else {
+		MarkPayloadWritten(c)
 		c.Render(-1, &common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 		c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonData)})
 	}
@@ -54,12 +81,14 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 }
 
 func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
+	MarkPayloadWritten(c)
 	c.Render(-1, &common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, &common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
 	_ = FlushWriter(c)
 }
 
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) {
+	MarkPayloadWritten(c)
 	c.Render(-1, &common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, &common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
 	_ = FlushWriter(c)
@@ -68,12 +97,16 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 func StringData(c *gin.Context, str string) error {
 	//str = strings.TrimPrefix(str, "data: ")
 	//str = strings.TrimSuffix(str, "\r")
+	MarkPayloadWritten(c)
 	c.Render(-1, &common.CustomEvent{Data: "data: " + str})
 	_ = FlushWriter(c)
 	return nil
 }
 
 func PingData(c *gin.Context) error {
+	if c != nil {
+		c.Set(string(constant.ContextKeyPingWritten), true)
+	}
 	c.Writer.Write([]byte(": PING\n\n"))
 	_ = FlushWriter(c)
 	return nil

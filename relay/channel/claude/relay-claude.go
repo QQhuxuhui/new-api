@@ -1042,7 +1042,9 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		TextToolCallConverter: NewTextToolCallConverter(shouldConvertTextToolCalls(info)),
 	}
 	var err *types.NewAPIError
-	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
+	var streamEventCount int
+	exitReason := helper.StreamScannerHandlerWithReason(c, resp, info, func(data string) bool {
+		streamEventCount++
 		err = HandleStreamResponseData(c, info, claudeInfo, data, requestMode)
 		if err != nil {
 			return false
@@ -1051,6 +1053,12 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// 零事件流：上游 200 后一条事件都没发。此前按成功返回并对空响应计费，
+	// 现改为报错（与 Gemini "空补全报错不计费" 先例一致），可切换渠道
+	if streamEventCount == 0 {
+		return nil, helper.NewEmptyStreamError(exitReason)
 	}
 
 	HandleStreamFinalResponse(c, info, claudeInfo, requestMode)

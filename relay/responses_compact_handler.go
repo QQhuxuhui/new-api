@@ -40,7 +40,7 @@ func ResponsesCompactHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPI
 
 	err := helper.ModelMappedHelper(c, info, compactReq)
 	if err != nil {
-		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+		return types.NewError(err, types.ErrorCodeChannelModelMappedError)
 	}
 
 	// Restore compact suffix for billing
@@ -68,7 +68,7 @@ func ResponsesCompactHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPI
 	if len(info.ParamOverride) > 0 {
 		jsonData, err = relaycommon.ApplyParamOverride(jsonData, info.ParamOverride)
 		if err != nil {
-			return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+			return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid)
 		}
 	}
 

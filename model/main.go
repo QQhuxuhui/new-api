@@ -299,6 +299,10 @@ func migrateDB() error {
 	if err := SeedDefaultPlans(); err != nil {
 		common.SysLog("failed to seed default plans: " + err.Error())
 	}
+	// Seed built-in channel failover rules (idempotent, one-time)
+	if err := SeedDefaultDisableRules(); err != nil {
+		common.SysLog("failed to seed default disable rules: " + err.Error())
+	}
 	// Migrate UserPlan snapshots after schema migration
 	if err := migrateUserPlanSnapshots(); err != nil {
 		common.SysLog("failed to migrate user plan snapshots: " + err.Error())

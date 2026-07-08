@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
 
@@ -41,10 +42,41 @@ type writeResult struct {
 	err     error
 }
 
+// StreamExitReason 标记流扫描的退出原因，供 handler 区分零事件流的性质：
+// 上游立即断开（可安全切换渠道）与首包超时（按 504 保守处理）语义不同。
+type StreamExitReason string
+
+const (
+	StreamExitNormal     StreamExitReason = "finished"    // EOF / [DONE] / 写失败停止
+	StreamExitTimeout    StreamExitReason = "timeout"     // 首包或块间超时（STREAMING_TIMEOUT）
+	StreamExitClientGone StreamExitReason = "client_gone" // 客户端断开
+)
+
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string) bool) {
+	_ = StreamScannerHandlerWithReason(c, resp, info, dataHandler)
+}
+
+// NewEmptyStreamError 按扫描退出原因为零事件流构造统一错误：
+// 客户端先断开不归咎渠道；首包超时按 504 保守语义（记健康、剩余额度内切换）；
+// 上游立即断开/空流按 500 可重试。与 Gemini "空补全报错不计费" 先例一致。
+func NewEmptyStreamError(reason StreamExitReason) *types.NewAPIError {
+	switch reason {
+	case StreamExitClientGone:
+		return types.NewError(fmt.Errorf("client disconnected before any stream data"),
+			types.ErrorCodeContextCanceled, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+	case StreamExitTimeout:
+		return types.NewErrorWithStatusCode(fmt.Errorf("upstream first-byte timeout with no stream events"),
+			types.ErrorCodeEmptyResponse, http.StatusGatewayTimeout)
+	default:
+		return types.NewErrorWithStatusCode(fmt.Errorf("upstream returned 200 but closed stream with no events"),
+			types.ErrorCodeEmptyResponse, http.StatusInternalServerError)
+	}
+}
+
+func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string) bool) StreamExitReason {
 
 	if resp == nil || dataHandler == nil {
-		return
+		return StreamExitNormal
 	}
 
 	// 确保响应体总是被关闭
@@ -411,11 +443,14 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	case <-ticker.C:
 		// 超时处理逻辑
 		logger.LogError(c, "streaming timeout")
+		return StreamExitTimeout
 	case <-stopChan:
 		// 正常结束
 		logger.LogInfo(c, "streaming finished")
+		return StreamExitNormal
 	case <-c.Request.Context().Done():
 		// 客户端断开连接
 		logger.LogInfo(c, "client disconnected")
+		return StreamExitClientGone
 	}
 }

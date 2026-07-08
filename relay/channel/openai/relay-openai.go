@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -134,7 +135,16 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	var streamItemCount int
-	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
+	var streamError *types.OpenAIError
+	exitReason := helper.StreamScannerHandlerWithReason(c, resp, info, func(data string) bool {
+		// 识别伪 200 流内错误块（Azure/中转常见：HTTP 200 + data: {"error":{...}}）。
+		// 检测到即停止扫描且不转发该块；若此前未写出任何业务字节，外层可切换渠道。
+		if streamError == nil && strings.Contains(data, "\"error\"") {
+			if oaiErr := parseStreamErrorChunk(data); oaiErr != nil {
+				streamError = oaiErr
+				return false
+			}
+		}
 		if lastStreamData != "" {
 			err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
 			if err != nil {
@@ -156,11 +166,31 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	// 诊断日志：记录流处理结果
 	if streamItemCount == 0 {
-		logger.LogWarn(c, fmt.Sprintf("stream processing completed with 0 items, model=%s, lastStreamData=[%s]",
-			model, lastStreamData))
+		logger.LogWarn(c, fmt.Sprintf("stream processing completed with 0 items, model=%s, exitReason=%s, lastStreamData=[%s]",
+			model, exitReason, lastStreamData))
 	} else if common.DebugEnabled {
 		logger.LogDebug(c, fmt.Sprintf("stream processing completed: items=%d, model=%s",
 			streamItemCount, model))
+	}
+
+	// 伪 200 流内错误：未转发过任何内容块时不计费、按映射状态码报错
+	// （非 channel: 码），让 shouldRetry 正常决定是否切换渠道；
+	// 已转发过内容块时无法重试（外层守卫也会阻止），按既有语义收尾并对
+	// 已输出文本计费，仅记日志供排障（避免退还已消耗的输出）。
+	if streamError != nil {
+		if streamItemCount == 0 {
+			logger.LogError(c, fmt.Sprintf("upstream embedded error object in 200 stream: type=%s, code=%v, message=%s",
+				streamError.Type, streamError.Code, streamError.Message))
+			return nil, types.WithOpenAIError(*streamError, pseudoErrorStatusCode(streamError))
+		}
+		logger.LogWarn(c, fmt.Sprintf("upstream embedded error after %d stream items (finishing as truncated stream): type=%s, code=%v, message=%s",
+			streamItemCount, streamError.Type, streamError.Code, streamError.Message))
+	}
+
+	// 零事件流：上游 200 后一条数据都没发。此前一律按成功返回并按 prompt 计费，
+	// 现改为报错（与 Gemini "空补全报错不计费" 先例一致），可切换渠道
+	if streamItemCount == 0 {
+		return nil, helper.NewEmptyStreamError(exitReason)
 	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
@@ -211,6 +241,90 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	return usage, nil
 }
 
+// parseStreamErrorChunk 尝试把 SSE 数据块解析为上游塞进流里的错误对象。
+// 仅当块中存在有效 error（message/type/code 至少一项非空）且无 choices 时
+// 判定为错误块；带 "error":null 或空对象的正常块不受影响。
+func parseStreamErrorChunk(data string) *types.OpenAIError {
+	var chunk struct {
+		Error   any               `json:"error"`
+		Choices []json.RawMessage `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		return nil
+	}
+	if len(chunk.Choices) > 0 || !isStructuredErrorField(chunk.Error) {
+		return nil
+	}
+	oaiErr := dto.GetOpenAIError(chunk.Error)
+	if oaiErr == nil {
+		return nil
+	}
+	if !isMeaningfulOpenAIError(oaiErr) {
+		return nil
+	}
+	return oaiErr
+}
+
+// isMeaningfulOpenAIError 判断解析出的 error 对象是否携带真实错误信息，
+// 过滤 {"error":{}} 之类的空对象。
+func isMeaningfulOpenAIError(e *types.OpenAIError) bool {
+	if e == nil {
+		return false
+	}
+	if e.Type != "" || e.Message != "" {
+		return true
+	}
+	if e.Code == nil {
+		return false
+	}
+	if s, ok := e.Code.(string); ok {
+		return s != ""
+	}
+	return true
+}
+
+// isStructuredErrorField 仅接受对象或非空字符串形态的 error 字段。
+// "error": false / 0 / "" / null 等占位值不视为错误
+// （dto.GetOpenAIError 会为未知类型合成 unknown_error，需在此拦截）。
+func isStructuredErrorField(v any) bool {
+	switch e := v.(type) {
+	case map[string]interface{}:
+		return len(e) > 0
+	case string:
+		return e != ""
+	default:
+		return false
+	}
+}
+
+// pseudoErrorStatusCode 为伪 200 中的上游错误挑选改写状态码：
+// 数字型 code 直接采用（限 4xx/5xx，保留 429 等原生重试语义）；
+// 内容过滤/上下文超限等用户请求问题归 400（不重试、不记渠道健康）；
+// 其余按 500 处理让 shouldRetry 切换渠道。
+func pseudoErrorStatusCode(e *types.OpenAIError) int {
+	if e == nil {
+		return http.StatusInternalServerError
+	}
+	switch code := e.Code.(type) {
+	case string:
+		if n, err := strconv.Atoi(code); err == nil && n >= 400 && n < 600 {
+			return n
+		}
+	case float64:
+		if n := int(code); n >= 400 && n < 600 {
+			return n
+		}
+	}
+	lower := strings.ToLower(fmt.Sprintf("%v %s %s", e.Code, e.Type, e.Message))
+	if strings.Contains(lower, "content_filter") || strings.Contains(lower, "content filter") ||
+		strings.Contains(lower, "content management policy") ||
+		strings.Contains(lower, "context_length") || strings.Contains(lower, "context length") ||
+		strings.Contains(lower, "string too long") || strings.Contains(lower, "maximum context") {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
+}
+
 func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
@@ -243,8 +357,24 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
-	if oaiError := simpleResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
-		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	if oaiError := simpleResponse.GetOpenAIError(); oaiError != nil {
+		isError := oaiError.Type != "" // 既有判定：有 type 字段的标准错误
+		if !isError && len(simpleResponse.Choices) == 0 &&
+			isStructuredErrorField(simpleResponse.Error) && isMeaningfulOpenAIError(oaiError) {
+			// Azure 风格 {"error":{"code":"...","message":"..."}} 无 type 字段，
+			// 此前被当作完全成功原样转发并计费；仅在无 choices 且 error 为
+			// 对象/非空字符串时判错，避免误伤 "error":false/0 之类占位值
+			isError = true
+		}
+		if isError {
+			statusCode := resp.StatusCode
+			if statusCode/100 == 2 {
+				// 伪 200：按错误内容映射状态码（数字 code 采用之，内容过滤/超长归 400，
+				// 其余 500），2xx 会被 shouldRetry 拒绝切换
+				statusCode = pseudoErrorStatusCode(oaiError)
+			}
+			return nil, types.WithOpenAIError(*oaiError, statusCode)
+		}
 	}
 
 	forceFormat := false

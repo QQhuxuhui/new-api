@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -47,13 +48,14 @@ func executeSameChannelRetry(
 		return nil
 	}
 
-	// Cannot retry if bytes have already been written to the client
+	// Cannot retry if payload bytes have already been written to the client
 	// (e.g. an SSE stream that emitted a chunk before failing).
-	if c.Writer != nil && c.Writer.Written() {
+	// ping 注释不算 payload，与跨渠道重试的豁免语义保持一致。
+	if helper.IsPayloadWritten(c) {
 		return err
 	}
 
-	count, intervalMs, matched := lookup(err.StatusCode, err.Error())
+	count, intervalMs, matched := lookup(err.StatusCode, err.RuleMatchInput())
 	if !matched || count <= 0 {
 		return err
 	}
@@ -73,8 +75,8 @@ func executeSameChannelRetry(
 			return err
 		}
 
-		// Bail out if the response started writing between attempts.
-		if c.Writer != nil && c.Writer.Written() {
+		// Bail out if payload started writing between attempts.
+		if helper.IsPayloadWritten(c) {
 			return err
 		}
 

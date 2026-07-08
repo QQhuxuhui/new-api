@@ -96,6 +96,12 @@ type NewAPIError struct {
 	errorType      ErrorType
 	errorCode      ErrorCode
 	StatusCode     int
+	// ruleMatchInput 保存故障转移/客户端错误规则匹配所用的完整文本
+	// （上游响应体不可解析时 Err 只保留状态码摘要，规则需按原始 body 匹配）
+	ruleMatchInput string
+	// ruleTriggeredFailover 标记该错误仅因用户自定义规则（而非硬编码状态码
+	// 判定）被升级为 channel: 错误；规则契约是只触发临时暂停，不永久禁用
+	ruleTriggeredFailover bool
 }
 
 func (e *NewAPIError) GetErrorCode() ErrorCode {
@@ -139,6 +145,46 @@ func (e *NewAPIError) MaskSensitiveError() string {
 
 func (e *NewAPIError) SetMessage(message string) {
 	e.Err = errors.New(message)
+}
+
+// RuleMatchInput returns the text failover/client-error rules should match
+// against; falls back to the error message when no richer input was recorded.
+func (e *NewAPIError) RuleMatchInput() string {
+	if e == nil {
+		return ""
+	}
+	if e.ruleMatchInput != "" {
+		return e.ruleMatchInput
+	}
+	return e.Error()
+}
+
+// ruleMatchInputMaxBytes 限制规则匹配输入的驻留内存：关键词规则命中
+// 无需完整超大 body，截断尾部即可。
+const ruleMatchInputMaxBytes = 8 << 10
+
+func (e *NewAPIError) SetRuleMatchInput(input string) {
+	if e == nil {
+		return
+	}
+	if len(input) > ruleMatchInputMaxBytes {
+		input = input[:ruleMatchInputMaxBytes]
+	}
+	e.ruleMatchInput = input
+}
+
+func (e *NewAPIError) SetRuleTriggeredFailover() {
+	if e == nil {
+		return
+	}
+	e.ruleTriggeredFailover = true
+}
+
+func IsRuleTriggeredFailover(err *NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	return err.ruleTriggeredFailover
 }
 
 func (e *NewAPIError) ToOpenAIError() OpenAIError {

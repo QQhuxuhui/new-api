@@ -32,7 +32,7 @@ func EmbeddingHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
-		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+		return types.NewError(err, types.ErrorCodeChannelModelMappedError)
 	}
 
 	adaptor := GetAdaptor(info.ApiType)

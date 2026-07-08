@@ -98,9 +98,17 @@ func ShouldImmediateFailover(statusCode int, errorMessage string) bool {
 //  2. 上游错误消息格式不统一（中文/英文/各厂商格式不同），关键词匹配容易遗漏
 //  3. 健康系统有滑动窗口机制兜底，单次失败不会暂停渠道，需要失败率>30%才触发
 func ShouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
+	trigger, _ := ShouldTriggerChannelFailoverWithReason(statusCode, errorMessage)
+	return trigger
+}
+
+// ShouldTriggerChannelFailoverWithReason 额外返回 byRuleOnly：触发仅由用户自定义
+// 规则决定（硬编码状态码判定不会触发）。规则契约是"匹配成功记录健康窗口、触发
+// 临时暂停、不永久禁用"，调用方据此把规则升级的错误排除出自动禁用直通路径。
+func ShouldTriggerChannelFailoverWithReason(statusCode int, errorMessage string) (trigger bool, byRuleOnly bool) {
 	// 2xx 成功 - 不触发故障转移
 	if statusCode >= 200 && statusCode < 300 {
-		return false
+		return false, false
 	}
 
 	// 用户自定义规则优先：在硬编码规则之前执行，允许用户覆盖默认行为
@@ -109,48 +117,20 @@ func ShouldTriggerChannelFailover(statusCode int, errorMessage string) bool {
 		if rule.Match(statusCode, errorMessage) {
 			if rule.GetErrorType() == model.RuleErrorTypeClient {
 				common.SysLog(fmt.Sprintf("客户端错误规则「%s」匹配成功 (状态码=%d)", rule.Name, statusCode))
-				return false
+				return false, false
 			}
 			common.SysLog(fmt.Sprintf("故障转移规则「%s」匹配成功 (状态码=%d)", rule.Name, statusCode))
-			return true
+			return true, !hardcodedFailoverMatch(statusCode, errorMessage)
 		}
 	}
 
-	// 4xx 客户端错误
-	if statusCode >= 400 && statusCode < 500 {
-		// 400 Bad Request - 通常是客户端请求格式问题，不是渠道问题
-		if statusCode == 400 {
-			return false
-		}
-		// 401 Unauthorized - 认证失败（密钥无效、过期、余额不足等）
-		// 403 Forbidden - 禁止访问（用户被禁用、权限不足等）
-		// 429 Too Many Requests - 请求过多（速率限制、配额耗尽等）
-		// 其他4xx - 也应记录到健康系统
-		return true
-	}
+	return hardcodedFailoverMatch(statusCode, errorMessage), false
+}
 
-	// 5xx 服务器错误
-	if statusCode >= 500 && statusCode < 600 {
-		// 504/524 超时在调用处单独处理，这里返回false避免重复
-		if statusCode == 504 || statusCode == 524 {
-			return false
-		}
-		return true
-	}
-
-	// 网络错误等（状态码可能是0或其他非标准值）
-	// 保留关键词匹配作为兜底
-	errorMessageLower := strings.ToLower(errorMessage)
-	if strings.Contains(errorMessageLower, "connection") ||
-		strings.Contains(errorMessageLower, "timeout") ||
-		strings.Contains(errorMessageLower, "dns") ||
-		strings.Contains(errorMessageLower, "tls") ||
-		strings.Contains(errorMessageLower, "ssl") ||
-		strings.Contains(errorMessageLower, "network") {
-		return true
-	}
-
-	return false
+// hardcodedFailoverMatch 委托 model.MatchHardcodedFailoverRules（单一实现，
+// 测试面板使用同一份逻辑，避免双份维护漂移）。
+func hardcodedFailoverMatch(statusCode int, errorMessage string) bool {
+	return model.MatchHardcodedFailoverRules(statusCode, errorMessage)
 }
 
 func CheckClientErrorRule(statusCode int, errorMessage string) (isClient bool, returnImmediately bool) {
@@ -233,10 +213,16 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		if len(responseBody) > 0 {
 			matchMsg += "\n" + string(responseBody)
 		}
-		if ShouldTriggerChannelFailover(resp.StatusCode, matchMsg) {
+		if trigger, byRuleOnly := ShouldTriggerChannelFailoverWithReason(resp.StatusCode, matchMsg); trigger {
 			newApiErr = types.NewError(newApiErr.Err, types.ErrorCodeChannelUpstreamError)
 			newApiErr.StatusCode = resp.StatusCode
+			if byRuleOnly {
+				newApiErr.SetRuleTriggeredFailover()
+			}
 		}
+		// 保留完整匹配输入（含原始 body）：后续 shouldRetry / 健康记录 / 同渠道
+		// 重试规则用它重新匹配，避免 body 被截断后规则失配
+		newApiErr.SetRuleMatchInput(matchMsg)
 		return
 	}
 	if errResponse.Error.Message != "" {
@@ -248,10 +234,13 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 
 	// Check if error message indicates channel-level issues
 	errorMessage := strings.ToLower(newApiErr.Error())
-	if ShouldTriggerChannelFailover(resp.StatusCode, errorMessage) {
+	if trigger, byRuleOnly := ShouldTriggerChannelFailoverWithReason(resp.StatusCode, errorMessage); trigger {
 		// Mark as channel error to trigger failover regardless of RetryTimes setting
 		newApiErr = types.NewError(newApiErr.Err, types.ErrorCodeChannelUpstreamError)
 		newApiErr.StatusCode = resp.StatusCode
+		if byRuleOnly {
+			newApiErr.SetRuleTriggeredFailover()
+		}
 	}
 
 	return

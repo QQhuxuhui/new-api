@@ -157,6 +157,7 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				common.SysLog("error marshalling stream response: " + err.Error())
 				return true
 			}
+			helper.MarkPayloadWritten(c)
 			c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonStr)})
 			return true
 		case <-stopChan:

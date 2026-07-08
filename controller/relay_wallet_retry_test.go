@@ -25,7 +25,7 @@ func TestShouldContinueWalletRetry_ContextCanceled(t *testing.T) {
 	cancel()
 	c := newTestContextWithRequest(ctx)
 
-	if shouldContinueWalletRetry(c, nil) {
+	if shouldContinueWalletRetry(c, nil, false) {
 		t.Fatal("expected wallet retry to stop when request context is canceled")
 	}
 }
@@ -38,7 +38,7 @@ func TestShouldContinueWalletRetry_SkipRetryError(t *testing.T) {
 		types.ErrOptionWithSkipRetry(),
 	)
 
-	if shouldContinueWalletRetry(c, err) {
+	if shouldContinueWalletRetry(c, err, false) {
 		t.Fatal("expected wallet retry to stop on skipRetry error")
 	}
 }
@@ -47,7 +47,7 @@ func TestShouldContinueWalletRetry_NormalRetriableError(t *testing.T) {
 	c := newTestContextWithRequest(context.Background())
 	err := types.NewError(errors.New("temporary upstream error"), types.ErrorCodeDoRequestFailed)
 
-	if !shouldContinueWalletRetry(c, err) {
+	if !shouldContinueWalletRetry(c, err, false) {
 		t.Fatal("expected wallet retry to continue for retriable error")
 	}
 }

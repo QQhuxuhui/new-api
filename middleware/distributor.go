@@ -639,8 +639,28 @@ func Distribute() func(c *gin.Context) {
 
 					// If still no channel after all attempts
 					if channel == nil {
-						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", usingGroup, modelRequest.Model), string(types.ErrorCodeModelNotFound))
-						return
+						// warning 关骰补扫：与重试路径口径一致——本请求曾有渠道
+						// 仅因 warning 掷骰被跳过时，宣告无可用渠道前关骰重扫一遍
+						if common.GetContextKeyBool(c, constant.ContextKeyWarningChannelSkipped) {
+							for warmIdx := 0; warmIdx < 1000; warmIdx++ {
+								warmChannel, _, warmErr := service.CacheGetRandomSatisfiedChannelWarmup(c, usingGroup, modelRequest.Model, warmIdx)
+								if warmErr != nil {
+									break
+								}
+								if warmChannel == nil {
+									continue
+								}
+								channel = warmChannel
+								common.SetContextKey(c, constant.ContextKeyChannelPriorityIndex, warmIdx)
+								setAutoGroupContext(c, usingGroup, channel)
+								logger.LogInfo(c, fmt.Sprintf("[WarningRescan] 首选无可用渠道，关闭 warning 掷骰补扫命中渠道 #%d", channel.Id))
+								break
+							}
+						}
+						if channel == nil {
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", usingGroup, modelRequest.Model), string(types.ErrorCodeModelNotFound))
+							return
+						}
 					}
 				}
 			}

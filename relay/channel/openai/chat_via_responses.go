@@ -78,12 +78,26 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	nextToolIndex := 0
 	sentInitialRole := false
 
-	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
+	var streamEventCount int
+	var streamError *types.OpenAIError
+	exitReason := helper.StreamScannerHandlerWithReason(c, resp, info, func(data string) bool {
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 			logger.LogError(c, "failed to unmarshal responses stream event: "+err.Error())
+			// 仍计入事件数：解析失败的上游事件不代表零事件流
+			streamEventCount++
 			return true
 		}
+
+		// response.failed / error 事件：按错误处理而非伪装成 finish_reason=stop，
+		// 未写出过业务字节时外层可切换渠道
+		if streamError == nil {
+			if oaiErr := extractResponsesStreamError(&streamResponse); oaiErr != nil {
+				streamError = oaiErr
+				return false
+			}
+		}
+		streamEventCount++
 
 		switch streamResponse.Type {
 		case dto.ResponsesEventCreated:
@@ -250,19 +264,6 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				_ = helper.ObjectData(c, usageChunk)
 			}
 
-		case dto.ResponsesEventFailed:
-			// Map to "stop" — "error" is not a standard chat completions finish_reason
-			finishReason := "stop"
-			chunk := newStreamChunk(responseID)
-			chunk.Created = createdAt
-			chunk.Model = model
-			chunk.Choices = []dto.ChatCompletionsStreamResponseChoice{
-				{
-					FinishReason: &finishReason,
-				},
-			}
-			_ = helper.ObjectData(c, chunk)
-
 		case dto.ResponsesEventIncomplete:
 			// Send length finish_reason
 			finishReason := "length"
@@ -291,6 +292,18 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 		return true
 	})
+
+	// 流内失败事件：不计费、不发 [DONE]，按错误内容映射状态码交给外层处理
+	if streamError != nil {
+		logger.LogError(c, fmt.Sprintf("upstream responses stream failed (chat conversion): type=%s, code=%v, message=%s",
+			streamError.Type, streamError.Code, streamError.Message))
+		return nil, types.WithOpenAIError(*streamError, pseudoErrorStatusCode(streamError))
+	}
+
+	// 零事件流：上游 200 后无任何事件
+	if streamEventCount == 0 {
+		return nil, helper.NewEmptyStreamError(exitReason)
+	}
 
 	// Send [DONE] marker. StreamScannerHandler does NOT forward [DONE] to the client.
 	helper.Done(c)
