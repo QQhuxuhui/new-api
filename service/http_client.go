@@ -16,9 +16,10 @@ import (
 )
 
 var (
-	httpClient      *http.Client
-	proxyClientLock sync.Mutex
-	proxyClients    = make(map[string]*http.Client)
+	httpClient              *http.Client
+	ssrfProtectedHTTPClient *http.Client
+	proxyClientLock         sync.Mutex
+	proxyClients            = make(map[string]*http.Client)
 )
 
 func applyHTTPTransportTuning(t *http.Transport) {
@@ -77,6 +78,27 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+func checkProtectedFetchRedirect(req *http.Request, via []*http.Request) error {
+	urlStr := req.URL.String()
+	if err := ValidateSSRFProtectedFetchURL(urlStr); err != nil {
+		return fmt.Errorf("redirect to %s blocked: %v", urlStr, err)
+	}
+	if len(via) >= 10 {
+		return fmt.Errorf("stopped after 10 redirects")
+	}
+	return nil
+}
+
+func validateURLWithCurrentFetchSetting(urlStr string, applyDomainIPFilter bool) error {
+	fetchSetting := system_setting.GetFetchSetting()
+	return common.ValidateURLWithFetchSetting(urlStr, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, applyDomainIPFilter && fetchSetting.ApplyIPFilterForDomain)
+}
+
+// ValidateSSRFProtectedFetchURL 对用户可控的抓取 URL 做请求前的一次性 SSRF 校验。
+func ValidateSSRFProtectedFetchURL(urlStr string) error {
+	return validateURLWithCurrentFetchSetting(urlStr, true)
+}
+
 func InitHttpClient() {
 	client := &http.Client{
 		Transport:     newTunedTransport(),
@@ -88,6 +110,7 @@ func InitHttpClient() {
 	}
 
 	httpClient = client
+	ssrfProtectedHTTPClient = newProtectedFetchHTTPClient()
 }
 
 func GetHttpClient() *http.Client {
@@ -95,6 +118,19 @@ func GetHttpClient() *http.Client {
 		InitHttpClient()
 	}
 	return httpClient
+}
+
+// GetSSRFProtectedHTTPClient 返回带拨号时 SSRF 校验的客户端，用于抓取用户可控的 URL
+// （图片下载、webhook、通知等）。当 SSRF 防护被关闭时回退到普通客户端。
+// 注意：provider/relay 的上游 baseURL 属于运维可信目标，不应使用该客户端。
+func GetSSRFProtectedHTTPClient() *http.Client {
+	if ssrfProtectedHTTPClient == nil {
+		InitHttpClient()
+	}
+	if fetchSetting := system_setting.GetFetchSetting(); fetchSetting != nil && !fetchSetting.EnableSSRFProtection {
+		return GetHttpClient()
+	}
+	return ssrfProtectedHTTPClient
 }
 
 // ResetProxyClientCache 清空代理客户端缓存，确保下次使用时重新初始化

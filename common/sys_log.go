@@ -29,6 +29,13 @@ func LogStartupSuccess(startTime time.Time, port string) {
 	duration := time.Since(startTime)
 	durationMs := duration.Milliseconds()
 
+	if !SessionCookieSecure {
+		// log warning if session cookie is not secure
+		fmt.Fprintf(gin.DefaultWriter, "\n")
+		fmt.Fprintf(gin.DefaultWriter, "  \033[33mWarning: Session cookie is not secure. Please set SESSION_COOKIE_SECURE=true in production.\033[0m\n")
+		fmt.Fprintf(gin.DefaultWriter, "\n")
+	}
+
 	// Get network IPs
 	networkIps := GetNetworkIps()
 

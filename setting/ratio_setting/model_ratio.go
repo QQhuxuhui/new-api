@@ -99,6 +99,10 @@ var defaultModelRatio = map[string]float64{
 	"gpt-5-mini-2025-08-07":            0.125,
 	"gpt-5-nano":                       0.025,
 	"gpt-5-nano-2025-08-07":            0.025,
+	"gpt-5.5":                          2.5, // $5 / 1M tokens
+	"gpt-5.6-sol":                      2.5,
+	"gpt-5.6-terra":                    1.25,
+	"gpt-5.6-luna":                     0.5,
 	//"gpt-3.5-turbo-0301":           0.75, //deprecated
 	"gpt-3.5-turbo":          0.25,
 	"gpt-3.5-turbo-0613":     0.75,
@@ -148,6 +152,23 @@ var defaultModelRatio = map[string]float64{
 	"claude-3-opus-20240229":                    7.5, // $15 / 1M tokens
 	"claude-opus-4-20250514":                    7.5,
 	"claude-opus-4-1-20250805":                  7.5,
+	"claude-opus-4-6":                           2.5,
+	"claude-opus-4-6-max":                       2.5,
+	"claude-opus-4-6-high":                      2.5,
+	"claude-opus-4-6-medium":                    2.5,
+	"claude-opus-4-6-low":                       2.5,
+	"claude-opus-4-7":                           2.5,
+	"claude-opus-4-7-max":                       2.5,
+	"claude-opus-4-7-xhigh":                     2.5,
+	"claude-opus-4-7-high":                      2.5,
+	"claude-opus-4-7-medium":                    2.5,
+	"claude-opus-4-7-low":                       2.5,
+	"claude-opus-4-8":                           2.5,
+	"claude-opus-4-8-max":                       2.5,
+	"claude-opus-4-8-xhigh":                     2.5,
+	"claude-opus-4-8-high":                      2.5,
+	"claude-opus-4-8-medium":                    2.5,
+	"claude-opus-4-8-low":                       2.5,
 	"ERNIE-4.0-8K":                              0.120 * RMB,
 	"ERNIE-3.5-8K":                              0.012 * RMB,
 	"ERNIE-3.5-8K-0205":                         0.024 * RMB,
@@ -571,7 +592,17 @@ func getHardcodedCompletionModelRatio(name string) (float64, bool) {
 		}
 		// gpt-5 匹配
 		if strings.HasPrefix(name, "gpt-5") {
-			return 8, true
+			if !strings.Contains(name, ".") {
+				return 8, true
+			}
+			if strings.HasPrefix(name, "gpt-5.4") {
+				if strings.HasPrefix(name, "gpt-5.4-nano") {
+					return 6.25, true
+				}
+				return 6, true
+			}
+			// gpt-5.5 and later models are unlocked
+			return 6, false
 		}
 		// gpt-4.5-preview匹配
 		if strings.HasPrefix(name, "gpt-4.5-preview") {
