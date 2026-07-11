@@ -37,6 +37,10 @@ var defaultCacheRatio = map[string]float64{
 	"gpt-5-mini-2025-08-07":               0.1,
 	"gpt-5-nano":                          0.1,
 	"gpt-5-nano-2025-08-07":               0.1,
+	"gpt-5.5":                             0.1,
+	"gpt-5.6-sol":                         0.1, // 缓存读取九折（$0.50/1M，输入 $5）
+	"gpt-5.6-terra":                       0.1, // $0.25/1M，输入 $2.50
+	"gpt-5.6-luna":                        0.1, // $0.10/1M，输入 $1.00
 	"deepseek-chat":                       0.25,
 	"deepseek-reasoner":                   0.25,
 	"deepseek-coder":                      0.25,
@@ -82,6 +86,11 @@ var defaultCacheRatio = map[string]float64{
 }
 
 var defaultCreateCacheRatio = map[string]float64{
+	// GPT-5.6 及以后引入显式 prompt cache 断点，缓存写入按 1.25x 输入价计费
+	// （OpenAI 官方，与 Claude 相同倍率；gpt-5.5 及更早无写入缓存计费）
+	"gpt-5.6-sol":                         1.25,
+	"gpt-5.6-terra":                       1.25,
+	"gpt-5.6-luna":                        1.25,
 	"claude-3-sonnet-20240229":            1.25,
 	"claude-3-opus-20240229":              1.25,
 	"claude-3-haiku-20240307":             1.25,
