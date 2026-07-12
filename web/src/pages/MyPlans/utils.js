@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 const inactiveStatuses = new Set([2, 3, 4, 5, 6]);
 
 const number = (value) => {
@@ -74,16 +93,12 @@ export const quotaSummary = (plan) => {
   const used = Math.max(0, number(plan.used_quota));
   const total = remaining + used;
   const remainingPercent =
-    total === 0
-      ? 0
-      : Math.min(100, Math.max(0, (remaining / total) * 100));
+    total === 0 ? 0 : Math.min(100, Math.max(0, (remaining / total) * 100));
   return { total, used, remaining, remainingPercent };
 };
 
 export const enrichPlansWithQueueMetadata = (plans = [], queuedPlans = []) => {
-  const byId = new Map(
-    queuedPlans.map((plan) => [number(plan.id), plan]),
-  );
+  const byId = new Map(queuedPlans.map((plan) => [number(plan.id), plan]));
   return plans.map((plan) => {
     const queued = byId.get(number(plan.id));
     return queued
