@@ -102,7 +102,6 @@ localStorage.setItem('quota_display_type', 'TOKENS');
 localStorage.setItem('quota_per_unit', '500000');
 localStorage.setItem('i18nextLng', requestedLanguage);
 document.documentElement.lang = requestedLanguage;
-await i18n.changeLanguage(requestedLanguage);
 
 const makePlan = (id, fields = {}) => ({
   id,
@@ -549,23 +548,28 @@ const FixtureShell = ({ children }) => {
   );
 };
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <LocaleProvider locale={zh_CN}>
-    <StatusContext.Provider value={[statusState, noop]}>
-      <UserContext.Provider value={[userState, noop]}>
-        <MemoryRouter
-          initialEntries={['/console/myplans']}
-          future={{
-            v7_startTransition: false,
-            v7_relativeSplatPath: true,
-          }}
-        >
-          <LocationProbe />
-          <FixtureShell>
-            <MyPlans />
-          </FixtureShell>
-        </MemoryRouter>
-      </UserContext.Provider>
-    </StatusContext.Provider>
-  </LocaleProvider>,
-);
+const mountFixture = async () => {
+  await i18n.changeLanguage(requestedLanguage);
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <LocaleProvider locale={zh_CN}>
+      <StatusContext.Provider value={[statusState, noop]}>
+        <UserContext.Provider value={[userState, noop]}>
+          <MemoryRouter
+            initialEntries={['/console/myplans']}
+            future={{
+              v7_startTransition: false,
+              v7_relativeSplatPath: true,
+            }}
+          >
+            <LocationProbe />
+            <FixtureShell>
+              <MyPlans />
+            </FixtureShell>
+          </MemoryRouter>
+        </UserContext.Provider>
+      </StatusContext.Provider>
+    </LocaleProvider>,
+  );
+};
+
+mountFixture();
