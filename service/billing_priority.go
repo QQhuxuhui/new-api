@@ -456,13 +456,15 @@ func ProcessPlanExpiry() error {
 
 // GetUserBillingStatus returns the current billing status for a user
 // Useful for displaying in the frontend
+type DailyPoolBillingStatus struct {
+	Available int64  `json:"available"`
+	Total     int64  `json:"total"`
+	Used      int64  `json:"used"`
+	ExpiresAt string `json:"expires_at"` // Today 23:59:59
+}
+
 type UserBillingStatus struct {
-	DailyPool struct {
-		Available  int64  `json:"available"`
-		Total      int64  `json:"total"`
-		Used       int64  `json:"used"`
-		ExpiresAt  string `json:"expires_at"` // Today 23:59:59
-	} `json:"daily_pool"`
+	DailyPool *DailyPoolBillingStatus `json:"daily_pool"`
 	CurrentPlan struct {
 		Id              int    `json:"id"`
 		Name            string `json:"name"`
@@ -490,10 +492,12 @@ func GetUserBillingStatus(userId int) (*UserBillingStatus, error) {
 	// Daily Pool
 	dailyPool, err := model.GetTodayDailyPool(userId)
 	if err == nil && dailyPool != nil {
-		status.DailyPool.Total = dailyPool.TotalQuota
-		status.DailyPool.Used = dailyPool.UsedQuota
-		status.DailyPool.Available = dailyPool.GetRemainingQuota()
-		status.DailyPool.ExpiresAt = fmt.Sprintf("%s 23:59:59", model.GetTodayDate())
+		status.DailyPool = &DailyPoolBillingStatus{
+			Total:     dailyPool.TotalQuota,
+			Used:      dailyPool.UsedQuota,
+			Available: dailyPool.GetRemainingQuota(),
+			ExpiresAt: fmt.Sprintf("%s 23:59:59", model.GetTodayDate()),
+		}
 	}
 
 	// Current Plan
