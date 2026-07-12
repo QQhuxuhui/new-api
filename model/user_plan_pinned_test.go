@@ -20,10 +20,11 @@ func seedPinnedSwitchPlans(t *testing.T) (userID int, current, target, stale *Us
 		Pinned:    1,
 	}
 	target = &UserPlan{
-		UserId:     user.Id,
-		Quota:      100,
-		Status:     UserPlanStatusActive,
-		AutoSwitch: 1,
+		UserId:          user.Id,
+		Quota:           100,
+		Status:          UserPlanStatusActive,
+		AutoSwitch:      1,
+		AllowUserSwitch: 1,
 	}
 	stale = &UserPlan{
 		UserId: user.Id,
@@ -177,6 +178,67 @@ func TestSwitchToUserPlan_RejectsExpiredTargetWithoutMutation(t *testing.T) {
 			gotCurrent.Pinned,
 			gotTarget.IsCurrent,
 			gotTarget.Pinned,
+		)
+	}
+}
+
+func TestSwitchToUserPlan_UserSwitchRejectsDisallowedTargetWithoutMutation(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	userID, current, target, _ := seedPinnedSwitchPlans(t)
+	if err := DB.Model(&UserPlan{}).Where("id = ?", target.Id).
+		UpdateColumn("allow_user_switch", 0).Error; err != nil {
+		t.Fatalf("disable user switch: %v", err)
+	}
+
+	if err := SwitchToUserPlan(userID, target.Id, true); err == nil {
+		t.Fatal("expected disallowed manual target rejection")
+	}
+
+	var gotCurrent, gotTarget UserPlan
+	if err := DB.First(&gotCurrent, current.Id).Error; err != nil {
+		t.Fatalf("reload current: %v", err)
+	}
+	if err := DB.First(&gotTarget, target.Id).Error; err != nil {
+		t.Fatalf("reload target: %v", err)
+	}
+	if gotCurrent.IsCurrent != 1 || gotCurrent.Pinned != 1 || gotTarget.IsCurrent != 0 {
+		t.Fatalf(
+			"permission rejection mutated current=(%d,%d) target current=%d",
+			gotCurrent.IsCurrent,
+			gotCurrent.Pinned,
+			gotTarget.IsCurrent,
+		)
+	}
+}
+
+func TestSwitchToUserPlan_UserSwitchRejectsQueuedTargetWithoutMutation(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	userID, current, target, _ := seedPinnedSwitchPlans(t)
+	if err := DB.Model(&UserPlan{}).Where("id = ?", target.Id).Updates(map[string]interface{}{
+		"queue_position": 1,
+		"started_at":     0,
+	}).Error; err != nil {
+		t.Fatalf("queue target: %v", err)
+	}
+
+	if err := SwitchToUserPlan(userID, target.Id, true); err == nil {
+		t.Fatal("expected queued manual target rejection")
+	}
+
+	var gotCurrent, gotTarget UserPlan
+	if err := DB.First(&gotCurrent, current.Id).Error; err != nil {
+		t.Fatalf("reload current: %v", err)
+	}
+	if err := DB.First(&gotTarget, target.Id).Error; err != nil {
+		t.Fatalf("reload target: %v", err)
+	}
+	if gotCurrent.IsCurrent != 1 || gotCurrent.Pinned != 1 || gotTarget.IsCurrent != 0 || gotTarget.QueuePosition != 1 {
+		t.Fatalf(
+			"queue rejection mutated current=(%d,%d) target=(%d,%d)",
+			gotCurrent.IsCurrent,
+			gotCurrent.Pinned,
+			gotTarget.IsCurrent,
+			gotTarget.QueuePosition,
 		)
 	}
 }
@@ -350,6 +412,43 @@ func TestActivateNextQueuedPlan_NoEligibleQueuePreservesCurrentPin(t *testing.T)
 	}
 }
 
+func TestActivateNextQueuedPlan_DepletedQueuePreservesCurrentPin(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	current := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		IsCurrent: 1, Pinned: 1,
+	})
+	depleted := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 0, Status: UserPlanStatusActive,
+		QueuePosition: 1, Pinned: 1,
+	})
+
+	activated, err := ActivateNextQueuedPlan(1)
+	if err != nil {
+		t.Fatalf("activate next queued plan: %v", err)
+	}
+	if activated != nil {
+		t.Fatalf("expected no eligible activation, got %#v", activated)
+	}
+
+	var gotCurrent, gotDepleted UserPlan
+	if err := DB.First(&gotCurrent, current.Id).Error; err != nil {
+		t.Fatalf("reload current: %v", err)
+	}
+	if err := DB.First(&gotDepleted, depleted.Id).Error; err != nil {
+		t.Fatalf("reload depleted: %v", err)
+	}
+	if gotCurrent.IsCurrent != 1 || gotCurrent.Pinned != 1 || gotDepleted.IsCurrent != 0 || gotDepleted.Pinned != 1 {
+		t.Fatalf(
+			"no-op activation mutated current=(%d,%d) depleted=(%d,%d)",
+			gotCurrent.IsCurrent,
+			gotCurrent.Pinned,
+			gotDepleted.IsCurrent,
+			gotDepleted.Pinned,
+		)
+	}
+}
+
 func TestCompleteUserPlanIfDepleted_ClearsOldAndActivatedPins(t *testing.T) {
 	setupUserPlanSwitchTestDB(t)
 	current := insertPinnedTransitionPlan(t, &UserPlan{
@@ -384,6 +483,44 @@ func TestCompleteUserPlanIfDepleted_ClearsOldAndActivatedPins(t *testing.T) {
 	}
 }
 
+func TestCompleteUserPlanIfDepleted_AutoSwitchOffCompletesWithoutActivation(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	current := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 0, Status: UserPlanStatusActive,
+		IsCurrent: 1, Pinned: 1,
+	})
+	if err := DB.Model(&UserPlan{}).Where("id = ?", current.Id).
+		UpdateColumn("auto_switch", 0).Error; err != nil {
+		t.Fatalf("disable auto switch: %v", err)
+	}
+	next := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 1, Pinned: 1,
+	})
+
+	activated, err := CompleteUserPlanIfDepleted(1, current.Id)
+	if err != nil {
+		t.Fatalf("complete depleted plan: %v", err)
+	}
+	if activated != nil {
+		t.Fatalf("auto-switch off activated %#v", activated)
+	}
+
+	var oldRow, nextRow UserPlan
+	if err := DB.First(&oldRow, current.Id).Error; err != nil {
+		t.Fatalf("reload old row: %v", err)
+	}
+	if err := DB.First(&nextRow, next.Id).Error; err != nil {
+		t.Fatalf("reload next row: %v", err)
+	}
+	if oldRow.Status != UserPlanStatusCompleted || oldRow.IsCurrent != 0 || oldRow.Pinned != 0 {
+		t.Fatalf("old status=%d current=%d pinned=%d", oldRow.Status, oldRow.IsCurrent, oldRow.Pinned)
+	}
+	if nextRow.IsCurrent != 0 || nextRow.QueuePosition != 1 || nextRow.Pinned != 1 {
+		t.Fatalf("next current=%d queue=%d pinned=%d", nextRow.IsCurrent, nextRow.QueuePosition, nextRow.Pinned)
+	}
+}
+
 func TestCompleteCurrentPlan_ClearsExpiredAndActivatedPins(t *testing.T) {
 	setupUserPlanSwitchTestDB(t)
 	current := insertPinnedTransitionPlan(t, &UserPlan{
@@ -415,6 +552,36 @@ func TestCompleteCurrentPlan_ClearsExpiredAndActivatedPins(t *testing.T) {
 	}
 	if nextRow.IsCurrent != 1 || nextRow.Pinned != 0 {
 		t.Fatalf("next current=%d pinned=%d", nextRow.IsCurrent, nextRow.Pinned)
+	}
+}
+
+func TestCompleteCurrentPlanById_StaleTargetDoesNotReplaceNewCurrent(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	userID, oldCurrent, target, _ := seedPinnedSwitchPlans(t)
+	if err := SwitchToUserPlan(userID, target.Id, true); err != nil {
+		t.Fatalf("switch to new current: %v", err)
+	}
+
+	activated, err := CompleteCurrentPlanById(userID, oldCurrent.Id, UserPlanStatusExpired)
+	if err != nil {
+		t.Fatalf("complete stale current: %v", err)
+	}
+	if activated != nil {
+		t.Fatalf("stale completion activated %#v", activated)
+	}
+
+	var oldRow, targetRow UserPlan
+	if err := DB.First(&oldRow, oldCurrent.Id).Error; err != nil {
+		t.Fatalf("reload old current: %v", err)
+	}
+	if err := DB.First(&targetRow, target.Id).Error; err != nil {
+		t.Fatalf("reload target: %v", err)
+	}
+	if oldRow.Status != UserPlanStatusActive || oldRow.IsCurrent != 0 {
+		t.Fatalf("stale row status=%d current=%d", oldRow.Status, oldRow.IsCurrent)
+	}
+	if targetRow.Status != UserPlanStatusActive || targetRow.IsCurrent != 1 || targetRow.Pinned != 1 {
+		t.Fatalf("new current status=%d current=%d pinned=%d", targetRow.Status, targetRow.IsCurrent, targetRow.Pinned)
 	}
 }
 

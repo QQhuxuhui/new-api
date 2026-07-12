@@ -1912,8 +1912,8 @@ func TestPostConsumeQuota_PoolOverflowRespectsDisabledAutoSwitch(t *testing.T) {
 	altPlan := &model.UserPlan{
 		UserId: user.Id, PlanId: &planId,
 		Quota: 500, OriginalQuota: 500,
-		IsCurrent:  0,
-		AutoSwitch: 1, // irrelevant - what matters is the CURRENT plan's flag
+		IsCurrent:     0,
+		AutoSwitch:    1, // irrelevant - what matters is the CURRENT plan's flag
 		QueuePosition: 0,
 		StartedAt:     time.Now().UnixMilli(),
 		Status:        model.UserPlanStatusActive,
@@ -2129,5 +2129,103 @@ func TestPostConsumeQuota_PoolOverflowPromotesAlternatePlan_AndQueueAdvancesOnDe
 	}
 	if reloadedNext.StartedAt == 0 {
 		t.Fatalf("activated plan must set started_at, got 0")
+	}
+}
+
+func TestPostConsumeQuota_PlanDepletionWithAutoSwitchOffDoesNotAdvanceQueue(t *testing.T) {
+	db := setupTestDB(t)
+	user := &model.User{Username: "plan-auto-off", Password: "12345678", Status: 1}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	current := &model.UserPlan{
+		UserId: user.Id, Quota: 100, OriginalQuota: 100,
+		IsCurrent: 1, Pinned: 1, Status: model.UserPlanStatusActive,
+	}
+	if err := db.Create(current).Error; err != nil {
+		t.Fatalf("create current plan: %v", err)
+	}
+	if err := db.Model(current).UpdateColumn("auto_switch", 0).Error; err != nil {
+		t.Fatalf("disable auto switch: %v", err)
+	}
+	next := &model.UserPlan{
+		UserId: user.Id, Quota: 500, OriginalQuota: 500,
+		QueuePosition: 1, Pinned: 1, Status: model.UserPlanStatusActive,
+	}
+	if err := db.Create(next).Error; err != nil {
+		t.Fatalf("create queued plan: %v", err)
+	}
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: user.Id, UserPlanId: current.Id,
+		BillingSource: BillingSourcePlan, IsPlayground: true,
+	}
+	if err := PostConsumeQuota(relayInfo, 100, 0, false); err != nil {
+		t.Fatalf("post-consume: %v", err)
+	}
+
+	var oldRow, nextRow model.UserPlan
+	if err := db.First(&oldRow, current.Id).Error; err != nil {
+		t.Fatalf("reload current: %v", err)
+	}
+	if err := db.First(&nextRow, next.Id).Error; err != nil {
+		t.Fatalf("reload queued: %v", err)
+	}
+	if oldRow.Quota != 0 || oldRow.Status != model.UserPlanStatusCompleted || oldRow.IsCurrent != 0 || oldRow.Pinned != 0 {
+		t.Fatalf("old quota=%d status=%d current=%d pinned=%d", oldRow.Quota, oldRow.Status, oldRow.IsCurrent, oldRow.Pinned)
+	}
+	if nextRow.IsCurrent != 0 || nextRow.QueuePosition != 1 || nextRow.Pinned != 1 {
+		t.Fatalf("queued current=%d queue=%d pinned=%d", nextRow.IsCurrent, nextRow.QueuePosition, nextRow.Pinned)
+	}
+}
+
+func TestPostConsumeQuota_MixedDepletionWithAutoSwitchOffDoesNotAdvanceQueue(t *testing.T) {
+	db := setupTestDB(t)
+	user := &model.User{Username: "mixed-auto-off", Password: "12345678", Status: 1, Quota: 960}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	current := &model.UserPlan{
+		UserId: user.Id, Quota: 60, OriginalQuota: 60,
+		IsCurrent: 1, Pinned: 1, Status: model.UserPlanStatusActive,
+	}
+	if err := db.Create(current).Error; err != nil {
+		t.Fatalf("create current plan: %v", err)
+	}
+	if err := db.Model(current).UpdateColumn("auto_switch", 0).Error; err != nil {
+		t.Fatalf("disable auto switch: %v", err)
+	}
+	next := &model.UserPlan{
+		UserId: user.Id, Quota: 500, OriginalQuota: 500,
+		QueuePosition: 1, Pinned: 1, Status: model.UserPlanStatusActive,
+	}
+	if err := db.Create(next).Error; err != nil {
+		t.Fatalf("create queued plan: %v", err)
+	}
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: user.Id, UserPlanId: current.Id,
+		BillingSource:               BillingSourcePlanAndUserBalance,
+		PlanPreConsumeQuota:         60,
+		UserBalancePreConsumedQuota: 40,
+		FinalPreConsumedQuota:       100,
+		IsPlayground:                true,
+	}
+	if err := PostConsumeQuota(relayInfo, 0, 100, false); err != nil {
+		t.Fatalf("post-consume: %v", err)
+	}
+
+	var oldRow, nextRow model.UserPlan
+	if err := db.First(&oldRow, current.Id).Error; err != nil {
+		t.Fatalf("reload current: %v", err)
+	}
+	if err := db.First(&nextRow, next.Id).Error; err != nil {
+		t.Fatalf("reload queued: %v", err)
+	}
+	if oldRow.Quota != 0 || oldRow.Status != model.UserPlanStatusCompleted || oldRow.IsCurrent != 0 || oldRow.Pinned != 0 {
+		t.Fatalf("old quota=%d status=%d current=%d pinned=%d", oldRow.Quota, oldRow.Status, oldRow.IsCurrent, oldRow.Pinned)
+	}
+	if nextRow.IsCurrent != 0 || nextRow.QueuePosition != 1 || nextRow.Pinned != 1 {
+		t.Fatalf("queued current=%d queue=%d pinned=%d", nextRow.IsCurrent, nextRow.QueuePosition, nextRow.Pinned)
 	}
 }

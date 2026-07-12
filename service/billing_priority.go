@@ -12,10 +12,10 @@ import (
 
 // BillingSource constants for tracking where quota is deducted from
 const (
-	BillingSourceDailyPool   = "daily_pool"
-	BillingSourcePlan        = "plan"
+	BillingSourceDailyPool          = "daily_pool"
+	BillingSourcePlan               = "plan"
 	BillingSourcePlanAndUserBalance = "plan_and_user_balance"
-	BillingSourceUserBalance = "user_balance"
+	BillingSourceUserBalance        = "user_balance"
 )
 
 // Package-level function variables wrapping the two model functions that the
@@ -418,13 +418,13 @@ func CheckAndTriggerPlanSwitch(userId int, userPlanId int) (*model.UserPlan, err
 	// Check if plan is exhausted (quota = 0)
 	if userPlan.Quota <= 0 {
 		common.SysLog(fmt.Sprintf("用户 %d 套餐 %d 额度耗尽，触发自动切换", userId, userPlanId))
-		return model.CompleteCurrentPlan(userId, model.UserPlanStatusCompleted)
+		return model.CompleteUserPlanIfDepleted(userId, userPlanId)
 	}
 
 	// Check if plan is expired
 	if userPlan.ExpiresAt > 0 && time.Now().UnixMilli() > userPlan.ExpiresAt {
 		common.SysLog(fmt.Sprintf("用户 %d 套餐 %d 已过期，触发自动切换，剩余额度 %d 作废", userId, userPlanId, userPlan.Quota))
-		return model.CompleteCurrentPlan(userId, model.UserPlanStatusExpired)
+		return model.CompleteCurrentPlanById(userId, userPlanId, model.UserPlanStatusExpired)
 	}
 
 	return nil, nil
@@ -445,7 +445,7 @@ func ProcessPlanExpiry() error {
 
 	for _, plan := range expiredPlans {
 		common.SysLog(fmt.Sprintf("处理过期套餐: 用户 %d, 套餐 %d, 剩余额度 %d", plan.UserId, plan.Id, plan.Quota))
-		_, err := model.CompleteCurrentPlan(plan.UserId, model.UserPlanStatusExpired)
+		_, err := model.CompleteCurrentPlanById(plan.UserId, plan.Id, model.UserPlanStatusExpired)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("处理过期套餐失败: %v", err))
 		}
@@ -464,16 +464,16 @@ type DailyPoolBillingStatus struct {
 }
 
 type UserBillingStatus struct {
-	DailyPool *DailyPoolBillingStatus `json:"daily_pool"`
+	DailyPool   *DailyPoolBillingStatus `json:"daily_pool"`
 	CurrentPlan struct {
-		Id              int    `json:"id"`
-		Name            string `json:"name"`
-		Quota           int64  `json:"quota"`
-		UsedQuota       int64  `json:"used_quota"`
-		ExpiresAt       int64  `json:"expires_at"`
-		DaysRemaining   int    `json:"days_remaining"`
-		IsLocked        bool   `json:"is_locked"`
-		IsPaused        bool   `json:"is_paused"`
+		Id            int    `json:"id"`
+		Name          string `json:"name"`
+		Quota         int64  `json:"quota"`
+		UsedQuota     int64  `json:"used_quota"`
+		ExpiresAt     int64  `json:"expires_at"`
+		DaysRemaining int    `json:"days_remaining"`
+		IsLocked      bool   `json:"is_locked"`
+		IsPaused      bool   `json:"is_paused"`
 	} `json:"current_plan"`
 	QueuedPlans []struct {
 		Id                      int    `json:"id"`

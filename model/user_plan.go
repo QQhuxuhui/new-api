@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // UserPlan represents a user-plan assignment with individual quota and permissions
@@ -611,11 +612,17 @@ func SwitchToUserPlan(userId int, userPlanId int, setPinned bool) error {
 	defer InvalidateUserPlanCache(userId)
 
 	return DB.Transaction(func(tx *gorm.DB) error {
-		// First verify the target user plan is valid
+		// Verify and lock the target so its eligibility cannot change while the
+		// current plan and pins are being replaced.
 		nowMs := time.Now().UnixMilli()
 		var targetPlan UserPlan
-		err := tx.Where("id = ? AND user_id = ? AND status = ? AND quota > 0 AND locked != 1 AND ((queue_position > 0 AND started_at = 0) OR expires_at = 0 OR expires_at > ?)",
-			userPlanId, userId, UserPlanStatusActive, nowMs).
+		targetQuery := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND status = ? AND quota > 0 AND locked != 1 AND ((queue_position > 0 AND started_at = 0) OR expires_at = 0 OR expires_at > ?)",
+				userPlanId, userId, UserPlanStatusActive, nowMs)
+		if setPinned {
+			targetQuery = targetQuery.Where("queue_position = 0 AND allow_user_switch = 1")
+		}
+		err := targetQuery.
 			First(&targetPlan).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -662,12 +669,20 @@ func SwitchToUserPlan(userId int, userPlanId int, setPinned bool) error {
 		}
 
 		// Set new plan as current
-		result := tx.Model(&UserPlan{}).
-			Where("id = ?", userPlanId).
+		updateQuery := tx.Model(&UserPlan{}).
+			Where("id = ? AND user_id = ? AND status = ? AND quota > 0 AND locked != 1 AND ((queue_position > 0 AND started_at = 0) OR expires_at = 0 OR expires_at > ?)",
+				userPlanId, userId, UserPlanStatusActive, nowMs)
+		if setPinned {
+			updateQuery = updateQuery.Where("queue_position = 0 AND allow_user_switch = 1")
+		}
+		result := updateQuery.
 			Updates(updates)
 
 		if result.Error != nil {
 			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("目标套餐状态已变化，请重试")
 		}
 
 		return nil
@@ -1587,10 +1602,11 @@ func ActivateNextQueuedPlan(userId int) (*UserPlan, error) {
 
 // activateNextQueuedPlanWithTx activates the next plan in queue within a transaction
 func activateNextQueuedPlanWithTx(tx *gorm.DB, userId int) (*UserPlan, error) {
-	// Get next plan in queue
+	// Lock the next eligible row before clearing pins. The conditional update
+	// below is retained as a final guard for databases with weaker lock support.
 	var nextPlan UserPlan
-	err := tx.Preload("Plan").
-		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND locked != 1", userId, UserPlanStatusActive).
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Plan").
+		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND started_at = 0 AND locked != 1 AND quota > 0", userId, UserPlanStatusActive).
 		Order("queue_position ASC").
 		First(&nextPlan).Error
 	if err != nil {
@@ -1628,8 +1644,15 @@ func activateNextQueuedPlanWithTx(tx *gorm.DB, userId int) (*UserPlan, error) {
 		"updated_at":          now.UnixMilli(),
 	}
 
-	if err := tx.Model(&UserPlan{}).Where("id = ?", nextPlan.Id).Updates(updates).Error; err != nil {
-		return nil, err
+	result := tx.Model(&UserPlan{}).
+		Where("id = ? AND user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND started_at = 0 AND locked != 1 AND quota > 0",
+			nextPlan.Id, userId, UserPlanStatusActive).
+		Updates(updates)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return nil, errors.New("队列套餐状态已变化，请重试")
 	}
 
 	// Recalculate queue positions within the same transaction
@@ -1646,36 +1669,73 @@ func activateNextQueuedPlanWithTx(tx *gorm.DB, userId int) (*UserPlan, error) {
 	return &updatedPlan, nil
 }
 
-// CompleteCurrentPlan marks the current plan as completed and activates next
+// CompleteCurrentPlan marks the current plan as completed and activates next.
+// Callers that already know the observed plan ID should use
+// CompleteCurrentPlanById to avoid acting on a replacement current plan.
 func CompleteCurrentPlan(userId int, completionStatus int) (*UserPlan, error) {
-	// Get current plan
-	currentPlan, err := GetUserCurrentPlan(userId)
+	var current UserPlan
+	err := DB.Select("id").
+		Where("user_id = ? AND is_current = 1 AND status = ?", userId, UserPlanStatusActive).
+		First(&current).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("用户没有当前套餐")
+		}
+		return nil, err
+	}
+	return CompleteCurrentPlanById(userId, current.Id, completionStatus)
+}
+
+// CompleteCurrentPlanById transitions only the observed current plan and
+// activates its queued replacement in the same transaction.
+func CompleteCurrentPlanById(userId int, userPlanId int, completionStatus int) (*UserPlan, error) {
+	if userId <= 0 || userPlanId <= 0 {
+		return nil, nil
+	}
+
+	var next *UserPlan
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var current UserPlan
+		findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND is_current = 1 AND status = ?",
+				userPlanId, userId, UserPlanStatusActive).
+			First(&current).Error
+		if findErr != nil {
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return findErr
+		}
+
+		result := tx.Model(&UserPlan{}).
+			Where("id = ? AND user_id = ? AND is_current = 1 AND status = ?",
+				userPlanId, userId, UserPlanStatusActive).
+			Updates(map[string]interface{}{
+				"is_current": 0,
+				"pinned":     0,
+				"status":     completionStatus,
+				"updated_at": time.Now().UnixMilli(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+
+		activated, activateErr := activateNextQueuedPlanWithTx(tx, userId)
+		if activateErr != nil {
+			return activateErr
+		}
+		next = activated
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if currentPlan == nil {
-		return nil, errors.New("用户没有当前套餐")
-	}
 
-	now := time.Now().UnixMilli()
-
-	// Mark as completed/expired
-	updates := map[string]interface{}{
-		"is_current": 0,
-		"pinned":     0,
-		"status":     completionStatus,
-		"updated_at": now,
-	}
-
-	if err := DB.Model(&UserPlan{}).Where("id = ?", currentPlan.Id).Updates(updates).Error; err != nil {
-		return nil, err
-	}
-
-	// Invalidate cache
 	InvalidateUserPlanCache(userId)
-
-	// Activate next plan
-	return ActivateNextQueuedPlan(userId)
+	return next, nil
 }
 
 // CompleteUserPlanIfDepleted marks the specified user plan as completed (quota exhausted)
@@ -1689,6 +1749,17 @@ func CompleteUserPlanIfDepleted(userId int, userPlanId int) (*UserPlan, error) {
 	var next *UserPlan
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UnixMilli()
+		var current UserPlan
+		findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND is_current = 1 AND status = ? AND quota <= 0",
+				userPlanId, userId, UserPlanStatusActive).
+			First(&current).Error
+		if findErr != nil {
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return findErr
+		}
 
 		// Only complete if:
 		// - this is still the current plan
@@ -1708,6 +1779,9 @@ func CompleteUserPlanIfDepleted(userId int, userPlanId int) (*UserPlan, error) {
 		}
 		if result.RowsAffected == 0 {
 			// Not current anymore or not depleted; no-op.
+			return nil
+		}
+		if current.AutoSwitch != 1 {
 			return nil
 		}
 

@@ -144,7 +144,7 @@ func OnUnban(userId int, adminId int, adminUsername string, ipAddress string) er
 		// Check if plan expired even after extending (use newExpiresAt, not old ExpiresAt)
 		if newExpiresAt > 0 && newExpiresAt < now {
 			// Plan expired during ban even after extension, need to switch to next
-			_, _ = model.CompleteCurrentPlan(userId, model.UserPlanStatusExpired)
+			_, _ = model.CompleteCurrentPlanById(userId, currentPlan.Id, model.UserPlanStatusExpired)
 		}
 	}
 
@@ -211,9 +211,9 @@ func OnPermanentBan(userId int, adminId int, adminUsername string, reason string
 			model.AdminActionForfeitPlan,
 			"作废套餐",
 			map[string]interface{}{
-				"status":    currentPlan.Status,
-				"quota":     currentPlan.Quota,
-				"reason":    "永久封禁前",
+				"status": currentPlan.Status,
+				"quota":  currentPlan.Quota,
+				"reason": "永久封禁前",
 			},
 			map[string]interface{}{
 				"status":      model.UserPlanStatusForfeited,
