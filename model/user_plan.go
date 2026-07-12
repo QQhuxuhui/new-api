@@ -531,76 +531,23 @@ func GetAllUserPlans(userId int) ([]*UserPlan, error) {
 // SwitchUserCurrentPlan atomically switches the current plan for a user
 // DEPRECATED: Use SwitchToUserPlan instead, especially when plan_id might be NULL
 func SwitchUserCurrentPlan(userId int, newPlanId int) error {
-	// Invalidate cache after switch
-	defer InvalidateUserPlanCache(userId)
-
-	return DB.Transaction(func(tx *gorm.DB) error {
-		nowMs := time.Now().UnixMilli()
-
-		// Deprecated path by plan_id can be ambiguous when user has multiple active instances
-		// of the same plan template. We must reject ambiguity to avoid switching the wrong plan.
-		var targetPlans []UserPlan
-		err := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND quota > 0 AND locked != 1 AND ((queue_position > 0 AND started_at = 0) OR expires_at = 0 OR expires_at > ?)",
-			userId, newPlanId, UserPlanStatusActive, nowMs).
-			Order("queue_position ASC, purchase_order ASC, id ASC").
-			Limit(2).
-			Find(&targetPlans).Error
-		if err != nil {
-			return err
-		}
-
-		if len(targetPlans) == 0 {
-			return errors.New("未找到指定的用户套餐或套餐不可用")
-		}
-		if len(targetPlans) > 1 {
-			return errors.New("检测到多个同模板套餐，请使用 user_plan_id 进行切换")
-		}
-		targetPlan := targetPlans[0]
-
-		// Clear current state and stale pins before selecting the system target.
-		if err := tx.Model(&UserPlan{}).
-			Where("user_id = ? AND is_current = 1", userId).
-			Updates(map[string]interface{}{"is_current": 0, "pinned": 0}).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&UserPlan{}).
-			Where("user_id = ? AND status = ? AND pinned = 1", userId, UserPlanStatusActive).
-			Update("pinned", 0).Error; err != nil {
-			return err
-		}
-
-		// Build update fields
-		now := time.Now()
-		updates := map[string]interface{}{
-			"is_current": 1,
-			"pinned":     0,
-			"updated_at": now.UnixMilli(),
-		}
-
-		// If the target plan was never activated (queued plan), set started_at and calculate expires_at
-		if targetPlan.StartedAt == 0 {
-			updates["started_at"] = now.UnixMilli()
-			updates["queue_position"] = 0
-
-			// Calculate expiration based on plan_validity_days snapshot
-			if targetPlan.PlanValidityDays > 0 {
-				expiresAt := now.Add(time.Duration(targetPlan.PlanValidityDays) * 24 * time.Hour).UnixMilli()
-				updates["expires_at"] = expiresAt
-				updates["original_expires_at"] = expiresAt
-			}
-		}
-
-		// Set new plan as current
-		result := tx.Model(&UserPlan{}).
-			Where("id = ?", targetPlan.Id).
-			Updates(updates)
-
-		if result.Error != nil {
-			return result.Error
-		}
-
-		return nil
-	})
+	nowMs := time.Now().UnixMilli()
+	var targetPlans []UserPlan
+	err := DB.Where("user_id = ? AND plan_id = ? AND status = ? AND quota > 0 AND locked != 1 AND ((queue_position > 0 AND started_at = 0) OR expires_at = 0 OR expires_at > ?)",
+		userId, newPlanId, UserPlanStatusActive, nowMs).
+		Order("queue_position ASC, purchase_order ASC, id ASC").
+		Limit(2).
+		Find(&targetPlans).Error
+	if err != nil {
+		return err
+	}
+	if len(targetPlans) == 0 {
+		return errors.New("未找到指定的用户套餐或套餐不可用")
+	}
+	if len(targetPlans) > 1 {
+		return errors.New("检测到多个同模板套餐，请使用 user_plan_id 进行切换")
+	}
+	return SwitchToUserPlan(userId, targetPlans[0].Id, false)
 }
 
 // SwitchToUserPlan atomically switches to a user plan by user_plan.id
