@@ -43,7 +43,7 @@ const CurrentPlanHero = ({
   onToggleAutoSwitch,
   onClearPinned,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   if (!plan) return null;
 
   const quota = quotaSummary(plan);
@@ -57,7 +57,9 @@ const CurrentPlanHero = ({
       ? Math.min(100, Math.max(0, (dailyUsed / dailyLimit) * 100))
       : 0;
   const resetText = quotaStatus?.daily_reset_time
-    ? new Date(quotaStatus.daily_reset_time * 1000).toLocaleTimeString()
+    ? new Date(quotaStatus.daily_reset_time * 1000).toLocaleTimeString(
+        i18n.language,
+      )
     : t('明日 00:00');
   const waitSeconds = Number(quotaStatus?.rate_limit_wait_seconds || 0);
   const rateLimitMessage =

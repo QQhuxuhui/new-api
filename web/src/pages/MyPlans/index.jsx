@@ -27,181 +27,25 @@ import React, {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import {
-  Button,
-  Card,
-  Empty,
-  Popconfirm,
-  Progress,
-  Spin,
-  Tag,
-  Tooltip,
-  Typography,
-} from '@douyinfe/semi-ui';
-import { ArrowRight, Box, Clock3, Lock, RefreshCw, Unlock } from 'lucide-react';
-import { API, renderQuota, showError, showSuccess } from '../../helpers';
+import { Button, Empty, Spin, Typography } from '@douyinfe/semi-ui';
+import { Box, RefreshCw } from 'lucide-react';
+import { API, showError, showSuccess } from '../../helpers';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
+import CompactPlanCard from './components/CompactPlanCard';
 import CurrentPlanHero from './components/CurrentPlanHero';
 import DailyPoolCard from './components/DailyPoolCard';
+import ExpiredPlansFold from './components/ExpiredPlansFold';
+import PlanDetailModal from './components/PlanDetailModal';
+import PlanSection from './components/PlanSection';
 import WalletCard from './components/WalletCard';
 import {
-  canLockPlan,
-  canSetCurrent,
   enrichPlansWithQueueMetadata,
-  getInactiveKind,
   groupPlans,
   isPlansRouteEnabled,
-  isQueuedPlan,
-  isUserLocked,
-  planDisplayName,
-  quotaSummary,
 } from './utils';
 
 const { Text, Title } = Typography;
-const actionPending = (action, planId, type) =>
-  action?.planId === planId && action?.type === type;
-
-const inactiveLabels = {
-  expired: '已过期',
-  disabled: '已停用',
-  completed: '已用完',
-  forfeited: '已作废',
-  revoked: '已回收',
-};
-
-const TemporaryPlanCard = ({
-  plan,
-  pendingAction,
-  onSwitch,
-  onLock,
-  onUnlock,
-}) => {
-  const { t } = useTranslation();
-  const quota = quotaSummary(plan);
-  const queued = isQueuedPlan(plan) || Number(plan.queue_position) > 0;
-  const inactiveKind = getInactiveKind(plan);
-  const userLocked = isUserLocked(plan);
-  const adminLocked = plan.locked === 1 && !userLocked;
-  const switchEligible = canSetCurrent(plan);
-  const switchAllowed = switchEligible && plan.can_switch === 1;
-  const lockEligible = canLockPlan(plan);
-  const switchPending = actionPending(pendingAction, plan.id, 'switch');
-  const lockPending = actionPending(pendingAction, plan.id, 'lock');
-  const unlockPending = actionPending(pendingAction, plan.id, 'unlock');
-  const actionBusy = Boolean(pendingAction);
-  const switchButton = (
-    <Button
-      className='!min-h-10'
-      type='primary'
-      theme={switchAllowed ? 'solid' : 'light'}
-      icon={<ArrowRight size={15} />}
-      disabled={!switchAllowed || (actionBusy && !switchPending)}
-      loading={switchPending}
-    >
-      {t('设为当前')}
-    </Button>
-  );
-
-  return (
-    <Card className='!rounded-lg border border-semi-color-border shadow-sm'>
-      <article className='flex flex-col gap-4'>
-        <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-          <div className='min-w-0'>
-            <Title heading={6} className='m-0 break-words'>
-              {planDisplayName(plan) || t('未知套餐')}
-            </Title>
-            <div className='mt-2 flex flex-wrap gap-2'>
-              {inactiveKind && <Tag>{t(inactiveLabels[inactiveKind])}</Tag>}
-              {queued && (
-                <Tag color='blue'>
-                  <Clock3 size={14} />{' '}
-                  {t('队列 #{{position}}', {
-                    position: plan.queue_position,
-                  })}
-                </Tag>
-              )}
-              {userLocked && <Tag color='orange'>{t('你已锁定')}</Tag>}
-              {adminLocked && <Tag color='red'>{t('管理员锁定')}</Tag>}
-              <Tag>
-                {t('优先级')} {plan.plan_priority ?? plan.plan?.priority ?? 0}
-              </Tag>
-            </div>
-          </div>
-          <Text strong>{renderQuota(quota.remaining)}</Text>
-        </div>
-
-        <div>
-          <div className='mb-1 flex justify-between gap-3 text-xs text-semi-color-text-2'>
-            <span>{t('剩余')}</span>
-            <span>{renderQuota(quota.total)}</span>
-          </div>
-          <Progress percent={quota.remainingPercent} showInfo={false} />
-        </div>
-
-        {!inactiveKind && (
-          <div className='flex flex-wrap gap-2'>
-            {switchEligible &&
-              (switchAllowed ? (
-                <Popconfirm
-                  title={t('确认切换到此套餐？')}
-                  content={t('切换后将使用此套餐的额度和渠道配置')}
-                  onConfirm={() => onSwitch(plan.id)}
-                >
-                  {switchButton}
-                </Popconfirm>
-              ) : (
-                <Tooltip content={t('管理员已禁止切换')}>
-                  <span tabIndex={0}>{switchButton}</span>
-                </Tooltip>
-              ))}
-            {lockEligible && (
-              <Popconfirm
-                title={t('确认锁定此套餐？')}
-                content={t('锁定期间将不会消费此套餐的额度，也不会被自动切换')}
-                onConfirm={() => onLock(plan.id)}
-              >
-                <Button
-                  className='!min-h-10'
-                  icon={<Lock size={15} />}
-                  disabled={actionBusy && !lockPending}
-                  loading={lockPending}
-                >
-                  {t('锁定')}
-                </Button>
-              </Popconfirm>
-            )}
-            {userLocked && (
-              <Button
-                className='!min-h-10'
-                icon={<Unlock size={15} />}
-                disabled={actionBusy && !unlockPending}
-                loading={unlockPending}
-                onClick={() => onUnlock(plan.id)}
-              >
-                {t('解锁')}
-              </Button>
-            )}
-            {adminLocked && (
-              <Tooltip
-                content={
-                  plan.locked_reason || t('该套餐由管理员锁定，无法自行解锁')
-                }
-              >
-                <span tabIndex={0} className='min-w-0'>
-                  <Text type='tertiary' size='small' ellipsis>
-                    {plan.locked_reason ||
-                      t('该套餐由管理员锁定，无法自行解锁')}
-                  </Text>
-                </span>
-              </Tooltip>
-            )}
-          </div>
-        )}
-      </article>
-    </Card>
-  );
-};
 
 const MyPlans = () => {
   const { t } = useTranslation();
@@ -214,6 +58,7 @@ const MyPlans = () => {
   const [userPlans, setUserPlans] = useState([]);
   const [quotaStatus, setQuotaStatus] = useState(null);
   const [billingStatus, setBillingStatus] = useState(null);
+  const [selectedPlanId, setSelectedPlanId] = useState(null);
   const refreshEpoch = useRef(0);
 
   const rechargeDisabled = Boolean(statusState?.status?.recharge_disabled);
@@ -409,14 +254,9 @@ const MyPlans = () => {
       ),
     [statusState?.status],
   );
-  const nonCurrentPlans = useMemo(
-    () => [
-      ...groupedPlans.available,
-      ...groupedPlans.queued,
-      ...groupedPlans.locked,
-      ...groupedPlans.inactive,
-    ],
-    [groupedPlans],
+  const selectedPlan = useMemo(
+    () => enrichedPlans.find((plan) => plan.id === selectedPlanId) || null,
+    [enrichedPlans, selectedPlanId],
   );
   const interactionPending =
     refreshing && !pendingAction
@@ -475,18 +315,66 @@ const MyPlans = () => {
                 )}
               </Empty>
             ) : (
-              <div className='space-y-4'>
-                {nonCurrentPlans.map((plan) => (
-                  <TemporaryPlanCard
-                    key={plan.id}
-                    plan={plan}
-                    pendingAction={interactionPending}
-                    onSwitch={handleSwitchPlan}
-                    onLock={handleLockPlan}
-                    onUnlock={handleUnlockPlan}
-                  />
-                ))}
-              </div>
+              <>
+                <PlanSection
+                  id='available-plans'
+                  title={t('可用套餐')}
+                  count={groupedPlans.available.length}
+                >
+                  {groupedPlans.available.map((plan) => (
+                    <CompactPlanCard
+                      key={plan.id}
+                      plan={plan}
+                      section='available'
+                      pendingAction={interactionPending}
+                      onSwitch={handleSwitchPlan}
+                      onLock={handleLockPlan}
+                      onUnlock={handleUnlockPlan}
+                      onOpenDetails={setSelectedPlanId}
+                    />
+                  ))}
+                </PlanSection>
+                <PlanSection
+                  id='queued-plans'
+                  title={t('排队中')}
+                  count={groupedPlans.queued.length}
+                >
+                  {groupedPlans.queued.map((plan) => (
+                    <CompactPlanCard
+                      key={plan.id}
+                      plan={plan}
+                      section='queued'
+                      pendingAction={interactionPending}
+                      onSwitch={handleSwitchPlan}
+                      onLock={handleLockPlan}
+                      onUnlock={handleUnlockPlan}
+                      onOpenDetails={setSelectedPlanId}
+                    />
+                  ))}
+                </PlanSection>
+                <PlanSection
+                  id='locked-plans'
+                  title={t('已锁定')}
+                  count={groupedPlans.locked.length}
+                >
+                  {groupedPlans.locked.map((plan) => (
+                    <CompactPlanCard
+                      key={plan.id}
+                      plan={plan}
+                      section='locked'
+                      pendingAction={interactionPending}
+                      onSwitch={handleSwitchPlan}
+                      onLock={handleLockPlan}
+                      onUnlock={handleUnlockPlan}
+                      onOpenDetails={setSelectedPlanId}
+                    />
+                  ))}
+                </PlanSection>
+                <ExpiredPlansFold
+                  plans={groupedPlans.inactive}
+                  onOpenDetails={setSelectedPlanId}
+                />
+              </>
             )}
 
             <WalletCard
@@ -501,6 +389,11 @@ const MyPlans = () => {
           {t('套餐额度仅供参考，具体扣费以实际使用量为准')}
         </footer>
       </main>
+      <PlanDetailModal
+        visible={selectedPlan !== null}
+        plan={selectedPlan}
+        onClose={() => setSelectedPlanId(null)}
+      />
     </div>
   );
 };
