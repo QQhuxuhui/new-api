@@ -299,6 +299,9 @@ func migrateDB() error {
 	if err := SeedDefaultPlans(); err != nil {
 		common.SysLog("failed to seed default plans: " + err.Error())
 	}
+	if err := backfillUserPlanAllowSwitch(); err != nil {
+		common.SysLog("failed to backfill user plan switch permissions: " + err.Error())
+	}
 	// Seed built-in channel failover rules (idempotent, one-time)
 	if err := SeedDefaultDisableRules(); err != nil {
 		common.SysLog("failed to seed default disable rules: " + err.Error())
