@@ -234,7 +234,7 @@ func AdminForceSwitch(c *gin.Context) {
 	var err error
 	if req.UserPlanId > 0 {
 		// Use user_plan_id (works even when plan template is deleted)
-		err = model.SwitchToUserPlan(req.UserId, req.UserPlanId)
+		err = model.SwitchToUserPlan(req.UserId, req.UserPlanId, false)
 	} else if req.PlanId > 0 {
 		// Fallback to plan_id for backwards compatibility
 		err = model.SwitchUserCurrentPlan(req.UserId, req.PlanId)

@@ -539,7 +539,7 @@ func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 		// Deprecated path by plan_id can be ambiguous when user has multiple active instances
 		// of the same plan template. We must reject ambiguity to avoid switching the wrong plan.
 		var targetPlans []UserPlan
-		err := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND quota > 0 AND ((queue_position > 0 AND started_at = 0) OR expires_at = 0 OR expires_at > ?)",
+		err := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND quota > 0 AND locked != 1 AND ((queue_position > 0 AND started_at = 0) OR expires_at = 0 OR expires_at > ?)",
 			userId, newPlanId, UserPlanStatusActive, nowMs).
 			Order("queue_position ASC, purchase_order ASC, id ASC").
 			Limit(2).
@@ -556,10 +556,15 @@ func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 		}
 		targetPlan := targetPlans[0]
 
-		// Clear current flag on all user plans
+		// Clear current state and stale pins before selecting the system target.
 		if err := tx.Model(&UserPlan{}).
 			Where("user_id = ? AND is_current = 1", userId).
-			Update("is_current", 0).Error; err != nil {
+			Updates(map[string]interface{}{"is_current": 0, "pinned": 0}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&UserPlan{}).
+			Where("user_id = ? AND status = ? AND pinned = 1", userId, UserPlanStatusActive).
+			Update("pinned", 0).Error; err != nil {
 			return err
 		}
 
@@ -567,6 +572,7 @@ func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 		now := time.Now()
 		updates := map[string]interface{}{
 			"is_current": 1,
+			"pinned":     0,
 			"updated_at": now.UnixMilli(),
 		}
 
@@ -600,15 +606,16 @@ func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 // This function works correctly even when plan_id is NULL (plan template deleted)
 // BUG FIX: When switching to a queued plan (started_at=0), properly set started_at,
 // expires_at and queue_position to avoid the plan becoming "permanent" unexpectedly.
-func SwitchToUserPlan(userId int, userPlanId int) error {
+func SwitchToUserPlan(userId int, userPlanId int, setPinned bool) error {
 	// Invalidate cache after switch
 	defer InvalidateUserPlanCache(userId)
 
 	return DB.Transaction(func(tx *gorm.DB) error {
 		// First verify the target user plan is valid
+		nowMs := time.Now().UnixMilli()
 		var targetPlan UserPlan
-		err := tx.Where("id = ? AND user_id = ? AND status = ? AND quota > 0",
-			userPlanId, userId, UserPlanStatusActive).
+		err := tx.Where("id = ? AND user_id = ? AND status = ? AND quota > 0 AND locked != 1 AND ((queue_position > 0 AND started_at = 0) OR expires_at = 0 OR expires_at > ?)",
+			userPlanId, userId, UserPlanStatusActive, nowMs).
 			First(&targetPlan).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -617,17 +624,27 @@ func SwitchToUserPlan(userId int, userPlanId int) error {
 			return err
 		}
 
-		// Clear current flag on all user plans
+		// Clear current state and every stale active pin before selecting the target.
 		if err := tx.Model(&UserPlan{}).
 			Where("user_id = ? AND is_current = 1", userId).
-			Update("is_current", 0).Error; err != nil {
+			Updates(map[string]interface{}{"is_current": 0, "pinned": 0}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&UserPlan{}).
+			Where("user_id = ? AND status = ? AND pinned = 1", userId, UserPlanStatusActive).
+			Update("pinned", 0).Error; err != nil {
 			return err
 		}
 
 		// Build update fields
 		now := time.Now()
+		pinned := 0
+		if setPinned {
+			pinned = 1
+		}
 		updates := map[string]interface{}{
 			"is_current": 1,
+			"pinned":     pinned,
 			"updated_at": now.UnixMilli(),
 		}
 

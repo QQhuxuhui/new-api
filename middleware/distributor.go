@@ -258,7 +258,7 @@ func Distribute() func(c *gin.Context) {
 
 										if failoverChannel != nil && failoverPlan != nil {
 											// Successfully found alternative plan with the token group
-											if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id); switchErr != nil {
+											if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id, false); switchErr != nil {
 												logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
 											} else {
 												planName := failoverPlan.GetDisplayName()
@@ -472,7 +472,7 @@ func Distribute() func(c *gin.Context) {
 						if failoverChannel != nil && failoverPlan != nil {
 							// Successfully found alternative plan with working channel
 							// Switch user to the new plan using SwitchToUserPlan (supports NULL plan_id)
-							if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id); switchErr != nil {
+							if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id, false); switchErr != nil {
 								logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
 							} else {
 								planName := failoverPlan.GetDisplayName()
@@ -1183,7 +1183,7 @@ func executePlanFailover(c *gin.Context, userId int, currentUserPlanId int, mode
 	}
 
 	// Switch user to the new plan
-	if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id); switchErr != nil {
+	if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id, false); switchErr != nil {
 		logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
 		return nil, nil, false
 	}

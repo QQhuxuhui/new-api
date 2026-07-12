@@ -159,7 +159,7 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 					if !hasPlanAvailableQuota(candidate) {
 						continue
 					}
-					if err := model.SwitchToUserPlan(relayInfo.UserId, candidate.Id); err != nil {
+					if err := model.SwitchToUserPlan(relayInfo.UserId, candidate.Id, false); err != nil {
 						// Candidate became unavailable (or was stale); try next.
 						common.SysLog(fmt.Sprintf("failed to switch to re-selected plan user=%d user_plan=%d err=%v", relayInfo.UserId, candidate.Id, err))
 						continue
@@ -571,7 +571,7 @@ func trySwitchToPlanForRequiredQuota(c *gin.Context, relayInfo *relaycommon.Rela
 			continue
 		}
 
-		if err := model.SwitchToUserPlan(relayInfo.UserId, candidate.Id); err != nil {
+		if err := model.SwitchToUserPlan(relayInfo.UserId, candidate.Id, false); err != nil {
 			// Candidate became unavailable or was invalidated concurrently; try next.
 			continue
 		}

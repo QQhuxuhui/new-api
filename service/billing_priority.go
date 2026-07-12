@@ -374,7 +374,7 @@ func billDailyPoolOverflow(relayInfo *relaycommon.RelayInfo, amount int64) {
 	// 3. Alternate plan — only if currentPlan allows auto-switch.
 	if currentPlan != nil && currentPlan.AutoSwitch == 1 {
 		if alt := findAlternatePlanForOverflow(userId, currentPlan.Id, usingGroup, amount); alt != nil {
-			if switchErr := model.SwitchToUserPlan(userId, alt.Id); switchErr != nil {
+			if switchErr := model.SwitchToUserPlan(userId, alt.Id, false); switchErr != nil {
 				common.SysLog(fmt.Sprintf("pool-overflow fallback: failed to activate alt plan user=%d plan=%d: %v",
 					userId, alt.Id, switchErr))
 			} else if chargeExistingPlanForOverflow(relayInfo, alt, amount) {

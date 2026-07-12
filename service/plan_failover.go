@@ -323,9 +323,9 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 
 	// Successfully found alternative plan - switch user to it
 	// Use SwitchToUserPlan which works with user_plan.id (supports NULL plan_id)
-	if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id); switchErr != nil {
+	if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id, false); switchErr != nil {
 		logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
-		// Continue anyway - channel was found, we can still use it even if plan switch failed
+		return nil, nil, "", false
 	}
 
 	// Get plan name for logging - use snapshot fields first (works even when Plan is deleted)

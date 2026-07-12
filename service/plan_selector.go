@@ -8,7 +8,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
-	"gorm.io/gorm"
 )
 
 // PlanSelectionResult contains the result of plan selection
@@ -101,7 +100,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 		}
 
 		// Set as current - use SwitchToUserPlan (works with NULL plan_id)
-		if err := model.SwitchToUserPlan(userId, selectedPlan.Id); err != nil {
+		if err := model.SwitchToUserPlan(userId, selectedPlan.Id, false); err != nil {
 			common.SysLog(fmt.Sprintf("failed to set initial current plan: %v", err))
 		}
 
@@ -123,7 +122,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 				// DB verification: confirm the candidate actually has quota (cache may be stale)
 				freshPlan, freshErr := model.GetUserPlanById(higherPlan.Id)
 				if freshErr == nil && freshPlan != nil && freshPlan.IsValid() && freshPlan.Quota > 0 {
-					if err := model.SwitchToUserPlan(userId, freshPlan.Id); err != nil {
+					if err := model.SwitchToUserPlan(userId, freshPlan.Id, false); err != nil {
 						common.SysLog(fmt.Sprintf("failed to auto-switch to higher priority plan: %v", err))
 					} else {
 						common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to higher priority plan %d",
@@ -139,7 +138,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 				// DB verification: confirm the candidate actually has quota (cache may be stale)
 				freshPlan, freshErr := model.GetUserPlanById(anyPlanWithQuota.Id)
 				if freshErr == nil && freshPlan != nil && freshPlan.IsValid() && freshPlan.Quota > 0 {
-					if err := model.SwitchToUserPlan(userId, freshPlan.Id); err != nil {
+					if err := model.SwitchToUserPlan(userId, freshPlan.Id, false); err != nil {
 						common.SysLog(fmt.Sprintf("failed to auto-switch to available plan: %v", err))
 					} else {
 						common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to available plan %d",
@@ -165,7 +164,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 			// DB verification: confirm the candidate actually has quota (cache may be stale)
 			freshPlan, freshErr := model.GetUserPlanById(higherPlan.Id)
 			if freshErr == nil && freshPlan != nil && freshPlan.IsValid() && freshPlan.Quota > 0 {
-				if err := model.SwitchToUserPlan(userId, freshPlan.Id); err != nil {
+				if err := model.SwitchToUserPlan(userId, freshPlan.Id, false); err != nil {
 					common.SysLog(fmt.Sprintf("failed to auto-switch plan: %v", err))
 					// Continue with current plan on error
 				} else {
@@ -249,57 +248,9 @@ func GetPlanChannelGroup(userId int) (string, error) {
 	return result.ChannelGroup, nil
 }
 
-// UserSwitchPlan allows a user to manually switch their current plan
-// Returns error if user doesn't have permission
-func UserSwitchPlan(userId int, targetPlanId int) error {
-	// Get current plan to check permissions
-	currentPlan, err := model.GetUserCurrentPlan(userId)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return fmt.Errorf("failed to get current plan: %w", err)
-	}
-
-	// Get target plan
-	targetUserPlan, err := model.GetUserPlanByUserAndPlan(userId, targetPlanId)
-	if err != nil {
-		return fmt.Errorf("target plan not found: %w", err)
-	}
-
-	// Check if target plan is valid
-	if !targetUserPlan.IsValid() {
-		return errors.New("target plan is not available")
-	}
-
-	// CRITICAL: Check if target plan is in queue - queued plans cannot be manually switched
-	if targetUserPlan.QueuePosition > 0 {
-		return errors.New("cannot switch to a queued plan - queued plans will automatically activate when ready")
-	}
-
-	// Check permission - either from current plan or target plan
-	canSwitch := false
-	if currentPlan != nil && currentPlan.CanUserSwitch() {
-		canSwitch = true
-	}
-	if targetUserPlan.CanUserSwitch() {
-		canSwitch = true
-	}
-
-	if !canSwitch {
-		return errors.New("you don't have permission to switch plans")
-	}
-
-	// Perform switch
-	return model.SwitchUserCurrentPlan(userId, targetPlanId)
-}
-
 // UserSwitchPlanByUserPlanId allows a user to manually switch to a specific user_plan instance
-// This is preferred over UserSwitchPlan as it supports plans where the template was deleted
+// This supports plans where the template was deleted.
 func UserSwitchPlanByUserPlanId(userId int, targetUserPlanId int) error {
-	// Get current plan to check permissions
-	currentPlan, err := model.GetUserCurrentPlan(userId)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return fmt.Errorf("failed to get current plan: %w", err)
-	}
-
 	// Get target user plan by ID
 	targetUserPlan, err := model.GetUserPlanById(targetUserPlanId)
 	if err != nil {
@@ -321,21 +272,15 @@ func UserSwitchPlanByUserPlanId(userId int, targetUserPlanId int) error {
 		return errors.New("cannot switch to a queued plan - queued plans will automatically activate when ready")
 	}
 
-	// Check permission - either from current plan or target plan
-	canSwitch := false
-	if currentPlan != nil && currentPlan.CanUserSwitch() {
-		canSwitch = true
+	if !targetUserPlan.HasQuota() {
+		return errors.New("target plan has no available quota")
 	}
-	if targetUserPlan.CanUserSwitch() {
-		canSwitch = true
-	}
-
-	if !canSwitch {
+	if !targetUserPlan.CanUserSwitch() {
 		return errors.New("you don't have permission to switch plans")
 	}
 
 	// Perform switch using user_plan_id (supports NULL plan_id)
-	return model.SwitchToUserPlan(userId, targetUserPlanId)
+	return model.SwitchToUserPlan(userId, targetUserPlanId, true)
 }
 
 // UserToggleAutoSwitch allows a user to toggle auto-switch on their current plan
