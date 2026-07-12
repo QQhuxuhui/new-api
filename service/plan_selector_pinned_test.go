@@ -141,6 +141,54 @@ func TestSelectPlanForRequest_UnavailableHigherPriorityDoesNotUpgrade(t *testing
 	}
 }
 
+func TestSelectPlanForRequestWithGroup_DoesNotUpgradeOutsideTokenGroup(t *testing.T) {
+	db := setupTestDB(t)
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate channel tables: %v", err)
+	}
+	enableSelectorRedis(t)
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+	})
+
+	user := &model.User{Username: "token-group-upgrade", Password: "12345678", Status: 1}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	current := createSelectablePlan(t, user.Id, 10, func(plan *model.UserPlan) {
+		plan.IsCurrent = 1
+		plan.PlanChannelGroups = `["token-a"]`
+	})
+	higher := createSelectablePlan(t, user.Id, 20, func(plan *model.UserPlan) {
+		plan.PlanChannelGroups = `["token-b"]`
+	})
+	priority := int64(10)
+	channel := &model.Channel{
+		Name: "token-b-channel", Key: "test",
+		Status: common.ChannelStatusEnabled, Group: "token-b", Models: "gpt-test", Priority: &priority,
+	}
+	if err := db.Create(channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := db.Create(&model.Ability{
+		Group: "token-b", Model: "gpt-test", ChannelId: channel.Id,
+		Enabled: true, Priority: &priority, Weight: 100,
+	}).Error; err != nil {
+		t.Fatalf("create ability: %v", err)
+	}
+	model.InitChannelCache()
+
+	result, err := SelectPlanForRequestWithGroup(user.Id, "gpt-test", "token-a")
+	if err != nil {
+		t.Fatalf("select plan: %v", err)
+	}
+	if result.UserPlan.Id != current.Id || result.Switched {
+		t.Fatalf("upgraded outside token group: result=%d switched=%v higher=%d", result.UserPlan.Id, result.Switched, higher.Id)
+	}
+}
+
 func TestSelectPlanForRequest_PinnedTotalExhaustionStillRescuesAndClearsPin(t *testing.T) {
 	db := setupTestDB(t)
 	enableSelectorRedis(t)

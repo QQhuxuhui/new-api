@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 // PlanSelectionResult contains the result of plan selection
@@ -72,6 +73,16 @@ func newPlanSelectionResult(up *model.UserPlan, switched bool) *PlanSelectionRes
 // SelectPlanForRequest selects the appropriate plan for a user request
 // This is the main entry point for plan-based routing
 func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, error) {
+	return selectPlanForRequest(userId, modelName, "")
+}
+
+// SelectPlanForRequestWithGroup applies the effective token group when
+// evaluating a healthy higher-priority upgrade.
+func SelectPlanForRequestWithGroup(userId int, modelName string, requiredGroup string) (*PlanSelectionResult, error) {
+	return selectPlanForRequest(userId, modelName, requiredGroup)
+}
+
+func selectPlanForRequest(userId int, modelName string, requiredGroup string) (*PlanSelectionResult, error) {
 	// 1. Get user's valid plans (active, not expired, not locked)
 	// Use cached version for better performance
 	validPlans, err := model.CachedGetUserValidPlans(userId)
@@ -159,7 +170,7 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 
 	// 6. Check for smart auto-switch (upgrade to higher priority if available)
 	if currentPlan.AutoSwitch == 1 && currentPlan.Pinned != 1 {
-		higherPlan := findHigherPriorityPlanWithQuotaForModel(validPlans, currentPlan, modelName)
+		higherPlan := findHigherPriorityPlanWithQuotaForModel(validPlans, currentPlan, modelName, requiredGroup)
 		if higherPlan != nil {
 			// DB verification: confirm the candidate actually has quota (cache may be stale)
 			freshPlan, freshErr := model.GetUserPlanById(higherPlan.Id)
@@ -209,24 +220,46 @@ func findHigherPriorityPlanWithQuota(plans []*model.UserPlan, current *model.Use
 	return nil
 }
 
-func findHigherPriorityPlanWithQuotaForModel(plans []*model.UserPlan, current *model.UserPlan, modelName string) *model.UserPlan {
+func findHigherPriorityPlanWithQuotaForModel(plans []*model.UserPlan, current *model.UserPlan, modelName string, requiredGroup string) *model.UserPlan {
 	if current == nil {
 		return nil
 	}
 	currentPriority := current.GetPriority()
 	for _, plan := range plans {
-		if plan.GetPriority() > currentPriority && plan.IsValid() && hasPlanAvailableQuota(plan) && planCanServeModel(plan, modelName) {
+		if plan.GetPriority() > currentPriority && plan.IsValid() && hasPlanAvailableQuota(plan) && planCanServeModel(plan, modelName, requiredGroup) {
 			return plan
 		}
 	}
 	return nil
 }
 
-func planCanServeModel(plan *model.UserPlan, modelName string) bool {
+func planCanServeModel(plan *model.UserPlan, modelName string, requiredGroup string) bool {
+	planGroups := expandChannelGroupsToSet(plan.GetChannelGroups())
+	groups := make([]string, 0, len(planGroups))
+	if requiredGroup == "" || requiredGroup == "auto" {
+		if modelName == "" {
+			return true
+		}
+		for group := range planGroups {
+			groups = append(groups, group)
+		}
+	} else if ratio_setting.IsParentGroup(requiredGroup) {
+		for _, child := range ratio_setting.GetChildGroups(requiredGroup) {
+			if planGroups[child] {
+				groups = append(groups, child)
+			}
+		}
+	} else if planGroups[requiredGroup] {
+		groups = append(groups, requiredGroup)
+	}
+
+	if len(groups) == 0 {
+		return false
+	}
 	if modelName == "" {
 		return true
 	}
-	for group := range expandChannelGroupsToSet(plan.GetChannelGroups()) {
+	for _, group := range groups {
 		for retry := 0; ; retry++ {
 			channel, _, err := model.GetRandomSatisfiedChannelDetailed(group, modelName, retry, false)
 			if err == nil && channel != nil {

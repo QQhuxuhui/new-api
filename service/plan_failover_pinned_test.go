@@ -2,6 +2,7 @@ package service
 
 import (
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -118,6 +119,79 @@ func TestAttemptCrossplanFailoverAfterRetry_PinnedCurrentSwitchesAndClearsPins(t
 			gotTarget.IsCurrent,
 			gotTarget.Pinned,
 			gotStale.Pinned,
+		)
+	}
+}
+
+func TestAttemptPlanFailover_RestoresProbeContextAfterFindingCandidate(t *testing.T) {
+	db := setupTestDB(t)
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate failover tables: %v", err)
+	}
+	enableSelectorRedis(t)
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousUsingSQLite := common.UsingSQLite
+	common.MemoryCacheEnabled = true
+	common.UsingSQLite = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.UsingSQLite = previousUsingSQLite
+	})
+
+	user := &model.User{Username: "failover-context", Password: "12345678", Status: 1}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	current := makeUserPlan(t, user.Id, 1, func(plan *model.UserPlan) {
+		plan.IsCurrent = 1
+		plan.AutoSwitch = 1
+		plan.PlanName = "original-plan"
+		plan.PlanType = model.PlanTypeSubscription
+		plan.PlanChannelGroups = `["original"]`
+	})
+	target := makeUserPlan(t, user.Id, 2, func(plan *model.UserPlan) {
+		plan.PlanName = "backup-plan"
+		plan.PlanType = model.PlanTypeSubscription
+		plan.PlanChannelGroups = `["backup"]`
+	})
+	priority := int64(10)
+	channel := &model.Channel{
+		Name: "backup-context-channel", Key: "test",
+		Status: common.ChannelStatusEnabled, Group: "backup", Models: "gpt-test", Priority: &priority,
+	}
+	if err := db.Create(channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := db.Create(&model.Ability{
+		Group: "backup", Model: "gpt-test", ChannelId: channel.Id,
+		Enabled: true, Priority: &priority, Weight: 100,
+	}).Error; err != nil {
+		t.Fatalf("create ability: %v", err)
+	}
+	model.InitChannelCache()
+
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	originalGroups := []string{"original", "fallback"}
+	common.SetContextKey(context, constant.ContextKeyPlanGroups, originalGroups)
+	common.SetContextKey(context, constant.ContextKeyPlanGroup, "original")
+	common.SetContextKey(context, constant.ContextKeyUsingGroup, "original")
+
+	selectedChannel, selectedPlan, selectedGroup, err := AttemptPlanFailover(context, user.Id, current.Id, "gpt-test")
+	if err != nil {
+		t.Fatalf("attempt failover: %v", err)
+	}
+	if selectedChannel == nil || selectedChannel.Id != channel.Id || selectedPlan == nil || selectedPlan.Id != target.Id || selectedGroup != "backup" {
+		t.Fatalf("candidate result channel=%#v plan=%#v group=%q", selectedChannel, selectedPlan, selectedGroup)
+	}
+	gotGroups, _ := context.Get(string(constant.ContextKeyPlanGroups))
+	if !reflect.DeepEqual(gotGroups, originalGroups) ||
+		common.GetContextKeyString(context, constant.ContextKeyPlanGroup) != "original" ||
+		common.GetContextKeyString(context, constant.ContextKeyUsingGroup) != "original" {
+		t.Fatalf(
+			"probe context leaked groups=%#v plan_group=%q using_group=%q",
+			gotGroups,
+			common.GetContextKeyString(context, constant.ContextKeyPlanGroup),
+			common.GetContextKeyString(context, constant.ContextKeyUsingGroup),
 		)
 	}
 }

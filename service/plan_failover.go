@@ -91,9 +91,16 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 	hasTokenGroupConstraint := tokenGroup != "" && tokenGroup != "auto"
 
 	// Save original context to restore on failure
-	originalGroups, _ := c.Get("plan_groups")
-	originalGroup, _ := c.Get("plan_group")
-	originalUsingGroup, _ := c.Get("using_group")
+	originalGroups, _ := c.Get(string(constant.ContextKeyPlanGroups))
+	originalGroup, _ := c.Get(string(constant.ContextKeyPlanGroup))
+	originalUsingGroup, _ := c.Get(string(constant.ContextKeyUsingGroup))
+	originalLegacyUsingGroup, _ := c.Get("using_group")
+	defer func() {
+		c.Set(string(constant.ContextKeyPlanGroups), originalGroups)
+		c.Set(string(constant.ContextKeyPlanGroup), originalGroup)
+		c.Set(string(constant.ContextKeyUsingGroup), originalUsingGroup)
+		c.Set("using_group", originalLegacyUsingGroup)
+	}()
 
 	// Try each candidate plan in priority order
 	for _, candidate := range candidates {
@@ -204,27 +211,6 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 			}
 		}
 
-		// Restore original context before trying next candidate
-		if originalGroups != nil {
-			c.Set("plan_groups", originalGroups)
-		}
-		if originalGroup != nil {
-			c.Set("plan_group", originalGroup)
-		}
-		if originalUsingGroup != nil {
-			c.Set("using_group", originalUsingGroup)
-		}
-	}
-
-	// All candidates exhausted - restore original context
-	if originalGroups != nil {
-		c.Set("plan_groups", originalGroups)
-	}
-	if originalGroup != nil {
-		c.Set("plan_group", originalGroup)
-	}
-	if originalUsingGroup != nil {
-		c.Set("using_group", originalUsingGroup)
 	}
 
 	triedUserPlanIds := make([]int, 0, len(candidates))

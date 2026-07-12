@@ -107,7 +107,8 @@ func Distribute() func(c *gin.Context) {
 				// Try to select a plan for this request (only if plan system is enabled)
 				userId := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 				if common.PlanSystemEnabled && userId > 0 {
-					planResult, planErr := service.SelectPlanForRequest(userId, modelRequest.Model)
+					tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+					planResult, planErr := service.SelectPlanForRequestWithGroup(userId, modelRequest.Model, tokenGroup)
 					if planErr != nil {
 						// Plan selection failed - check if it's a critical error
 						// If user has plans configured, this is an error
