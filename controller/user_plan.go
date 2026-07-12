@@ -646,6 +646,7 @@ type UserPlanResponse struct {
 	UsedQuota               int64       `json:"used_quota"`
 	IsCurrent               int         `json:"is_current"`
 	AutoSwitch              int         `json:"auto_switch"`
+	Pinned                  int         `json:"pinned"`
 	CanSwitch               int         `json:"can_switch"`      // Mapped from AllowUserSwitch
 	CanToggleAuto           int         `json:"can_toggle_auto"` // Mapped from AllowUserToggle
 	Locked                  int         `json:"locked"`
@@ -691,6 +692,7 @@ func convertToUserPlanResponse(up *model.UserPlan) *UserPlanResponse {
 		UsedQuota:               up.UsedQuota,
 		IsCurrent:               up.IsCurrent,
 		AutoSwitch:              up.AutoSwitch,
+		Pinned:                  up.Pinned,
 		CanSwitch:               up.AllowUserSwitch, // Map field name
 		CanToggleAuto:           up.AllowUserToggle, // Map field name
 		Locked:                  up.Locked,

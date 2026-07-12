@@ -21,6 +21,7 @@ type UserPlan struct {
 	OriginalQuota     int64  `json:"original_quota" gorm:"default:0"`    // Original quota when assigned
 	IsCurrent         int    `json:"is_current" gorm:"default:0"`        // 1 = current active plan
 	AutoSwitch        int    `json:"auto_switch" gorm:"default:1"`       // 1 = auto switch to higher priority when available
+	Pinned            int    `json:"pinned" gorm:"default:0"`            // 1 = keep current plan during healthy smart upgrades
 	AllowUserSwitch   int    `json:"allow_user_switch" gorm:"default:0"` // Admin permission: allow user to manually switch
 	AllowUserToggle   int    `json:"allow_user_toggle" gorm:"default:1"` // Admin permission: allow user to toggle auto-switch
 	Locked            int    `json:"locked" gorm:"default:0"`                                  // 1 = locked

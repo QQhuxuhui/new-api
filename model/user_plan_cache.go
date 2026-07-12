@@ -18,6 +18,7 @@ type UserPlanCacheEntry struct {
 	UsedQuota       int64  `json:"used_quota"`
 	IsCurrent       int    `json:"is_current"`
 	AutoSwitch      int    `json:"auto_switch"`
+	Pinned          int    `json:"pinned"`
 	AllowUserSwitch int    `json:"allow_user_switch"`
 	AllowUserToggle int    `json:"allow_user_toggle"`
 	Locked          int    `json:"locked"`
@@ -54,6 +55,7 @@ func (e *UserPlanCacheEntry) ToUserPlan() *UserPlan {
 		UsedQuota:               e.UsedQuota,
 		IsCurrent:               e.IsCurrent,
 		AutoSwitch:              e.AutoSwitch,
+		Pinned:                  e.Pinned,
 		AllowUserSwitch:         e.AllowUserSwitch,
 		AllowUserToggle:         e.AllowUserToggle,
 		Locked:                  e.Locked,
@@ -104,6 +106,7 @@ func FromUserPlan(up *UserPlan) *UserPlanCacheEntry {
 		UsedQuota:               up.UsedQuota,
 		IsCurrent:               up.IsCurrent,
 		AutoSwitch:              up.AutoSwitch,
+		Pinned:                  up.Pinned,
 		AllowUserSwitch:         up.AllowUserSwitch,
 		AllowUserToggle:         up.AllowUserToggle,
 		Locked:                  up.Locked,
