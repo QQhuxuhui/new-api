@@ -15,17 +15,17 @@ import (
 type UserPlan struct {
 	Id                int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	UserId            int    `json:"user_id" gorm:"not null;index"`
-	PlanId            *int   `json:"plan_id" gorm:"index"`               // Nullable after snapshot migration - for admin reference only
-	Quota             int64  `json:"quota" gorm:"default:0"`             // Current available quota
-	UsedQuota         int64  `json:"used_quota" gorm:"default:0"`        // Total used quota
-	OriginalQuota     int64  `json:"original_quota" gorm:"default:0"`    // Original quota when assigned
-	IsCurrent         int    `json:"is_current" gorm:"default:0"`        // 1 = current active plan
-	AutoSwitch        int    `json:"auto_switch" gorm:"default:1"`       // 1 = auto switch to higher priority when available
-	Pinned            int    `json:"pinned" gorm:"default:0"`            // 1 = keep current plan during healthy smart upgrades
-	AllowUserSwitch   int    `json:"allow_user_switch" gorm:"default:0"` // Admin permission: allow user to manually switch
-	AllowUserToggle   int    `json:"allow_user_toggle" gorm:"default:1"` // Admin permission: allow user to toggle auto-switch
-	Locked            int    `json:"locked" gorm:"default:0"`                                  // 1 = locked
-	LockedBy          string `json:"locked_by" gorm:"type:varchar(16);default:'';index"`       // "" / "admin" / "user"
+	PlanId            *int   `json:"plan_id" gorm:"index"`                               // Nullable after snapshot migration - for admin reference only
+	Quota             int64  `json:"quota" gorm:"default:0"`                             // Current available quota
+	UsedQuota         int64  `json:"used_quota" gorm:"default:0"`                        // Total used quota
+	OriginalQuota     int64  `json:"original_quota" gorm:"default:0"`                    // Original quota when assigned
+	IsCurrent         int    `json:"is_current" gorm:"default:0"`                        // 1 = current active plan
+	AutoSwitch        int    `json:"auto_switch" gorm:"default:1"`                       // 1 = auto switch to higher priority when available
+	Pinned            int    `json:"pinned" gorm:"default:0"`                            // 1 = keep current plan during healthy smart upgrades
+	AllowUserSwitch   int    `json:"allow_user_switch" gorm:"default:0"`                 // Admin permission: allow user to manually switch
+	AllowUserToggle   int    `json:"allow_user_toggle" gorm:"default:1"`                 // Admin permission: allow user to toggle auto-switch
+	Locked            int    `json:"locked" gorm:"default:0"`                            // 1 = locked
+	LockedBy          string `json:"locked_by" gorm:"type:varchar(16);default:'';index"` // "" / "admin" / "user"
 	LockedReason      string `json:"locked_reason" gorm:"type:varchar(255)"`
 	LockedAt          int64  `json:"locked_at" gorm:"default:0"`
 	AdminNote         string `json:"admin_note" gorm:"type:text"`
@@ -958,7 +958,11 @@ func ExpireUserPlans() (int64, error) {
 // AssignPlanToUser assigns a plan to a user with default settings from the plan
 // If user has a current plan, the new plan is added to queue (expires_at calculated when activated)
 // If user has no current plan, the new plan is activated immediately (expires_at calculated now)
-func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPlan, error) {
+func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64, allowUserSwitchOverride *int) (*UserPlan, error) {
+	if allowUserSwitchOverride != nil && *allowUserSwitchOverride != 0 && *allowUserSwitchOverride != 1 {
+		return nil, errors.New("切换权限值必须为0或1")
+	}
+
 	// Get plan details
 	plan, err := GetPlanById(planId)
 	if err != nil {
@@ -971,6 +975,10 @@ func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPl
 	// Use default quota if not specified
 	if quota == 0 {
 		quota = plan.DefaultQuota
+	}
+	allowUserSwitch := plan.GetDefaultAllowSwitch()
+	if allowUserSwitchOverride != nil {
+		allowUserSwitch = *allowUserSwitchOverride
 	}
 
 	now := time.Now()
@@ -993,7 +1001,7 @@ func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPl
 		OriginalQuota:   quota,
 		IsCurrent:       0, // Will be set to 1 if no current plan
 		AutoSwitch:      1,
-		AllowUserSwitch: plan.GetDefaultAllowSwitch(),
+		AllowUserSwitch: allowUserSwitch,
 		AllowUserToggle: plan.DefaultAllowToggle,
 		Locked:          0,
 		Status:          UserPlanStatusActive,

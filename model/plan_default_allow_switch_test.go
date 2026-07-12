@@ -48,6 +48,30 @@ func TestPlanInsert_OmittedDefaultAllowSwitchUsesOne(t *testing.T) {
 	}
 }
 
+func TestPlanInsert_PreservesExplicitDefaultAllowSwitchOne(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+
+	one := 1
+	plan := &Plan{
+		Name:               "explicit-switch",
+		DisplayName:        "Explicit Switch",
+		Type:               PlanTypeSubscription,
+		Status:             PlanStatusEnabled,
+		DefaultAllowSwitch: &one,
+	}
+	if err := plan.Insert(); err != nil {
+		t.Fatalf("insert plan: %v", err)
+	}
+
+	var stored Plan
+	if err := DB.First(&stored, plan.Id).Error; err != nil {
+		t.Fatalf("reload plan: %v", err)
+	}
+	if stored.DefaultAllowSwitch == nil || *stored.DefaultAllowSwitch != 1 {
+		t.Fatalf("expected explicit 1, got %#v", stored.DefaultAllowSwitch)
+	}
+}
+
 func TestSeedDefaultPlans_KeepsTrialSwitchingDisabled(t *testing.T) {
 	setupUserPlanSwitchTestDB(t)
 
@@ -60,6 +84,65 @@ func TestSeedDefaultPlans_KeepsTrialSwitchingDisabled(t *testing.T) {
 	}
 	if trial.GetDefaultAllowSwitch() != 0 {
 		t.Fatalf("expected trial default_allow_switch=0, got %d", trial.GetDefaultAllowSwitch())
+	}
+}
+
+func TestSeedDefaultPlans_PreservesExistingTrialSettings(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+
+	one := 1
+	trial := &Plan{
+		Name:               "trial",
+		DisplayName:        "Administrator Trial",
+		Type:               PlanTypeTrial,
+		Status:             PlanStatusEnabled,
+		DefaultAllowSwitch: &one,
+	}
+	if err := trial.Insert(); err != nil {
+		t.Fatalf("insert existing trial: %v", err)
+	}
+	if err := SeedDefaultPlans(); err != nil {
+		t.Fatalf("seed plans: %v", err)
+	}
+
+	var stored Plan
+	if err := DB.First(&stored, trial.Id).Error; err != nil {
+		t.Fatalf("reload trial: %v", err)
+	}
+	if stored.GetDefaultAllowSwitch() != 1 || stored.Status != PlanStatusEnabled {
+		t.Fatalf(
+			"existing trial was overwritten: switch=%d status=%d",
+			stored.GetDefaultAllowSwitch(),
+			stored.Status,
+		)
+	}
+}
+
+func TestPlanUpdate_PreservesStoredDefaultAllowSwitchZero(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+
+	zero := 0
+	plan := &Plan{
+		Name:               "update-no-switch",
+		DisplayName:        "Before Update",
+		Type:               PlanTypeSubscription,
+		Status:             PlanStatusEnabled,
+		DefaultAllowSwitch: &zero,
+	}
+	if err := plan.Insert(); err != nil {
+		t.Fatalf("insert plan: %v", err)
+	}
+	plan.DisplayName = "After Update"
+	if err := plan.Update(); err != nil {
+		t.Fatalf("update plan: %v", err)
+	}
+
+	var stored Plan
+	if err := DB.First(&stored, plan.Id).Error; err != nil {
+		t.Fatalf("reload plan: %v", err)
+	}
+	if stored.GetDefaultAllowSwitch() != 0 {
+		t.Fatalf("expected update to preserve 0, got %d", stored.GetDefaultAllowSwitch())
 	}
 }
 
@@ -83,7 +166,7 @@ func TestAssignPlanToUser_InheritsExplicitDefaultAllowSwitchZero(t *testing.T) {
 		t.Fatalf("insert plan: %v", err)
 	}
 
-	userPlan, err := AssignPlanToUser(user.Id, plan.Id, 0, 0)
+	userPlan, err := AssignPlanToUser(user.Id, plan.Id, 0, 0, nil)
 	if err != nil {
 		t.Fatalf("assign plan: %v", err)
 	}
@@ -93,5 +176,39 @@ func TestAssignPlanToUser_InheritsExplicitDefaultAllowSwitchZero(t *testing.T) {
 	}
 	if stored.AllowUserSwitch != 0 {
 		t.Fatalf("expected assignment to inherit allow_user_switch=0, got %d", stored.AllowUserSwitch)
+	}
+}
+
+func TestAssignPlanToUser_ExplicitAllowSwitchOverridesPlanDefault(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+
+	user := &User{Username: "override-switch-user", Password: "12345678", Status: 1}
+	if err := DB.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	zero := 0
+	one := 1
+	plan := &Plan{
+		Name:               "assignment-switch-override",
+		DisplayName:        "Assignment Switch Override",
+		Type:               PlanTypeSubscription,
+		Status:             PlanStatusEnabled,
+		DefaultQuota:       100,
+		DefaultAllowSwitch: &zero,
+	}
+	if err := plan.Insert(); err != nil {
+		t.Fatalf("insert plan: %v", err)
+	}
+
+	userPlan, err := AssignPlanToUser(user.Id, plan.Id, 0, 0, &one)
+	if err != nil {
+		t.Fatalf("assign plan with override: %v", err)
+	}
+	var stored UserPlan
+	if err := DB.First(&stored, userPlan.Id).Error; err != nil {
+		t.Fatalf("reload user plan: %v", err)
+	}
+	if stored.AllowUserSwitch != 1 {
+		t.Fatalf("expected explicit allow_user_switch=1, got %d", stored.AllowUserSwitch)
 	}
 }

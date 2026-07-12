@@ -68,10 +68,11 @@ func GetUserPlan(c *gin.Context) {
 
 // AssignPlanToUserRequest is the request body for assigning a plan to a user
 type AssignPlanToUserRequest struct {
-	UserId    int   `json:"user_id" binding:"required"`
-	PlanId    int   `json:"plan_id" binding:"required"`
-	Quota     int64 `json:"quota"`
-	ExpiresAt int64 `json:"expires_at"`
+	UserId          int   `json:"user_id" binding:"required"`
+	PlanId          int   `json:"plan_id" binding:"required"`
+	Quota           int64 `json:"quota"`
+	ExpiresAt       int64 `json:"expires_at"`
+	AllowUserSwitch *int  `json:"allow_user_switch"`
 }
 
 // AdminAssignPlan assigns a plan to a user (admin)
@@ -82,7 +83,13 @@ func AdminAssignPlan(c *gin.Context) {
 		return
 	}
 
-	userPlan, err := model.AssignPlanToUser(req.UserId, req.PlanId, req.Quota, req.ExpiresAt)
+	userPlan, err := model.AssignPlanToUser(
+		req.UserId,
+		req.PlanId,
+		req.Quota,
+		req.ExpiresAt,
+		req.AllowUserSwitch,
+	)
 	if err != nil {
 		common.ApiError(c, err)
 		return

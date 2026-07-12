@@ -7,25 +7,25 @@ import (
 	"github.com/QuantumNous/new-api/model"
 )
 
-func TestMergeDefaultAllowSwitch_DistinguishesOmittedAndExplicitZero(t *testing.T) {
-	one := 1
-	existing := &model.Plan{DefaultAllowSwitch: &one}
+func TestMergeDefaultAllowSwitch_DistinguishesOmittedAndExplicitValues(t *testing.T) {
+	zero := 0
+	existing := &model.Plan{DefaultAllowSwitch: &zero}
 
 	var omitted model.Plan
 	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
 		t.Fatalf("unmarshal omitted request: %v", err)
 	}
 	mergeDefaultAllowSwitch(existing, &omitted)
-	if existing.GetDefaultAllowSwitch() != 1 {
-		t.Fatalf("expected omitted field to preserve 1, got %d", existing.GetDefaultAllowSwitch())
+	if existing.GetDefaultAllowSwitch() != 0 {
+		t.Fatalf("expected omitted field to preserve 0, got %d", existing.GetDefaultAllowSwitch())
 	}
 
-	var explicitZero model.Plan
-	if err := json.Unmarshal([]byte(`{"default_allow_switch":0}`), &explicitZero); err != nil {
-		t.Fatalf("unmarshal explicit-zero request: %v", err)
+	var explicitOne model.Plan
+	if err := json.Unmarshal([]byte(`{"default_allow_switch":1}`), &explicitOne); err != nil {
+		t.Fatalf("unmarshal explicit-one request: %v", err)
 	}
-	mergeDefaultAllowSwitch(existing, &explicitZero)
-	if existing.GetDefaultAllowSwitch() != 0 {
-		t.Fatalf("expected explicit zero to replace value, got %d", existing.GetDefaultAllowSwitch())
+	mergeDefaultAllowSwitch(existing, &explicitOne)
+	if existing.GetDefaultAllowSwitch() != 1 {
+		t.Fatalf("expected explicit one to replace value, got %d", existing.GetDefaultAllowSwitch())
 	}
 }
