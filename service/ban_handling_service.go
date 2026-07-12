@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/model"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // BanHandlingService handles plan behavior during account bans
@@ -177,98 +179,66 @@ func OnPermanentBan(userId int, adminId int, adminUsername string, reason string
 		return errors.New("用户ID不能为空")
 	}
 
-	// Create asset snapshot before forfeit
-	snapshot, err := model.CreateAssetSnapshot(userId, model.SnapshotTypePermanentBan)
-	if err != nil {
-		return fmt.Errorf("创建资产快照失败: %v", err)
-	}
+	var snapshot *model.UserAssetSnapshot
+	var snapshotData *model.AssetSnapshotData
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&user, userId).Error; err != nil {
+			return err
+		}
 
-	now := time.Now().UnixMilli()
+		var createErr error
+		snapshot, createErr = model.CreateAssetSnapshotWithTx(tx, userId, model.SnapshotTypePermanentBan)
+		if createErr != nil {
+			return fmt.Errorf("创建资产快照失败: %w", createErr)
+		}
+		snapshotData, createErr = snapshot.GetSnapshotData()
+		if createErr != nil {
+			return fmt.Errorf("解析资产快照失败: %w", createErr)
+		}
 
-	// Forfeit current plan
-	currentPlan, err := model.GetUserCurrentPlan(userId)
-	if err == nil && currentPlan != nil {
-		err = model.DB.Model(&model.UserPlan{}).
-			Where("id = ?", currentPlan.Id).
+		expectedPlans := snapshotPlanCount(snapshotData)
+		result := tx.Model(&model.UserPlan{}).
+			Where("user_id = ? AND status = ?", userId, model.UserPlanStatusActive).
 			Updates(map[string]interface{}{
-				"is_current": 0,
-				"pinned":     0,
-				"status":     model.UserPlanStatusForfeited,
-				"updated_at": now,
-			}).Error
-		if err != nil {
-			return fmt.Errorf("作废当前套餐失败: %v", err)
+				"is_current":     0,
+				"queue_position": 0,
+				"pinned":         0,
+				"status":         model.UserPlanStatusForfeited,
+				"updated_at":     time.Now().UnixMilli(),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("作废套餐失败: %w", result.Error)
+		}
+		if result.RowsAffected != int64(expectedPlans) {
+			return fmt.Errorf("作废套餐数量不一致: expected=%d actual=%d", expectedPlans, result.RowsAffected)
 		}
 
-		// Log admin action
-		_ = model.LogAdminAction(
-			adminId,
-			adminUsername,
-			model.AdminLogTargetUserPlan,
-			currentPlan.Id,
-			userId,
-			"",
-			model.AdminActionForfeitPlan,
-			"作废套餐",
-			map[string]interface{}{
-				"status": currentPlan.Status,
-				"quota":  currentPlan.Quota,
-				"reason": "永久封禁前",
-			},
-			map[string]interface{}{
-				"status":      model.UserPlanStatusForfeited,
-				"reason":      reason,
-				"snapshot_id": snapshot.Id,
-			},
-			fmt.Sprintf("因永久封禁作废套餐，剩余额度 %d 作废，快照ID: %d", currentPlan.Quota, snapshot.Id),
-			ipAddress,
-			"",
-		)
-	}
-
-	// Forfeit all queue plans
-	queuedPlans, err := model.GetUserQueuedPlans(userId)
-	if err == nil && len(queuedPlans) > 0 {
-		for _, plan := range queuedPlans {
-			model.DB.Model(&model.UserPlan{}).
-				Where("id = ?", plan.Id).
-				Updates(map[string]interface{}{
-					"queue_position": 0,
-					"pinned":         0,
-					"status":         model.UserPlanStatusForfeited,
-					"updated_at":     now,
-				})
-
-			// Log each plan forfeit
-			_ = model.LogAdminAction(
-				adminId,
-				adminUsername,
-				model.AdminLogTargetUserPlan,
-				plan.Id,
-				userId,
-				"",
-				model.AdminActionForfeitPlan,
-				"作废队列套餐",
-				map[string]interface{}{
-					"status":         plan.Status,
-					"quota":          plan.Quota,
-					"queue_position": plan.QueuePosition,
-				},
-				map[string]interface{}{
-					"status":      model.UserPlanStatusForfeited,
-					"reason":      reason,
-					"snapshot_id": snapshot.Id,
-				},
-				fmt.Sprintf("因永久封禁作废队列套餐，位置 %d，额度 %d", plan.QueuePosition, plan.Quota),
-				ipAddress,
-				"",
-			)
+		if err := tx.Where("user_id = ? AND date = ?", userId, model.GetTodayDate()).
+			Delete(&model.UserDailyPool{}).Error; err != nil {
+			return fmt.Errorf("清理每日额度池失败: %w", err)
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
-	// Clear daily pool
-	today := model.GetTodayDate()
-	model.DB.Where("user_id = ? AND date = ?", userId, today).Delete(&model.UserDailyPool{})
+	_ = model.LogAdminAction(
+		adminId,
+		adminUsername,
+		model.AdminLogTargetUserAsset,
+		snapshot.Id,
+		userId,
+		"",
+		model.AdminActionForfeitPlan,
+		"作废套餐资产",
+		map[string]interface{}{"active_plan_count": snapshotPlanCount(snapshotData)},
+		map[string]interface{}{"snapshot_id": snapshot.Id, "reason": reason},
+		fmt.Sprintf("因永久封禁作废全部有效套餐，快照ID: %d", snapshot.Id),
+		ipAddress,
+		"",
+	)
 
 	// Invalidate cache
 	model.InvalidateUserPlanCache(userId)
@@ -288,95 +258,111 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 	if snapshotId == 0 {
 		return errors.New("快照ID不能为空")
 	}
-
-	// Get snapshot
-	snapshot, err := model.GetAssetSnapshotById(snapshotId)
-	if err != nil {
-		return errors.New("快照不存在")
-	}
-	if snapshot.IsRestored() {
-		return errors.New("快照已被恢复")
+	if options == nil {
+		return errors.New("恢复选项不能为空")
 	}
 
-	snapshotData, err := snapshot.GetSnapshotData()
-	if err != nil {
-		return fmt.Errorf("解析快照数据失败: %v", err)
-	}
-
-	userId := snapshot.UserId
-	now := time.Now().UnixMilli()
-
-	// Calculate time since snapshot for expiry adjustment
-	var banDuration int64
-	if options.AdjustExpiry {
-		banDuration = now - snapshotData.SnapshotTime
-	}
-
-	// Restore current plan
-	if options.RestoreCurrentPlan && snapshotData.CurrentPlan != nil {
-		cp := snapshotData.CurrentPlan
-		newExpiresAt := cp.ExpiresAt
-		if options.AdjustExpiry && newExpiresAt > 0 {
-			newExpiresAt += banDuration
+	var userId int
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var snapshot model.UserAssetSnapshot
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&snapshot, snapshotId).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("快照不存在")
+			}
+			return err
 		}
-
-		// Reactivate the plan
-		err = model.DB.Model(&model.UserPlan{}).
-			Where("id = ?", cp.UserPlanId).
-			Updates(map[string]interface{}{
-				"is_current": 1,
-				"pinned":     0,
-				"status":     model.UserPlanStatusActive,
-				"expires_at": newExpiresAt,
-				"updated_at": now,
-			}).Error
+		if snapshot.IsRestored() {
+			return errors.New("快照已被恢复")
+		}
+		snapshotData, err := snapshot.GetSnapshotData()
 		if err != nil {
-			return fmt.Errorf("恢复当前套餐失败: %v", err)
+			return fmt.Errorf("解析快照数据失败: %w", err)
 		}
-	}
+		userId = snapshot.UserId
+		now := time.Now().UnixMilli()
+		banDuration := int64(0)
+		if options.AdjustExpiry {
+			banDuration = now - snapshotData.SnapshotTime
+		}
 
-	// Restore queue plans
-	if snapshotData.QueuePlans != nil {
+		if options.RestoreCurrentPlan && snapshotData.CurrentPlan != nil {
+			if err := tx.Model(&model.UserPlan{}).
+				Where("user_id = ? AND status = ?", userId, model.UserPlanStatusActive).
+				Updates(map[string]interface{}{"is_current": 0, "pinned": 0, "updated_at": now}).Error; err != nil {
+				return fmt.Errorf("清理当前套餐状态失败: %w", err)
+			}
+			cp := snapshotData.CurrentPlan
+			expiresAt := cp.ExpiresAt
+			if options.AdjustExpiry && expiresAt > 0 {
+				expiresAt += banDuration
+			}
+			if err := restoreSnapshotPlanWithTx(tx, userId, cp.UserPlanId, map[string]interface{}{
+				"is_current": 1, "queue_position": 0, "expires_at": expiresAt,
+				"pinned": 0, "status": model.UserPlanStatusActive, "updated_at": now,
+			}); err != nil {
+				return fmt.Errorf("恢复当前套餐失败: %w", err)
+			}
+		}
+
+		selectedQueuePlans := make(map[int]bool, len(options.RestoreQueuePlans))
+		for _, id := range options.RestoreQueuePlans {
+			selectedQueuePlans[id] = true
+		}
+		seenSelected := make(map[int]bool, len(selectedQueuePlans))
 		for _, qp := range snapshotData.QueuePlans {
-			// Check if this plan should be restored
-			shouldRestore := len(options.RestoreQueuePlans) == 0 // Restore all if empty
-			if !shouldRestore {
-				for _, id := range options.RestoreQueuePlans {
-					if id == qp.UserPlanId {
-						shouldRestore = true
-						break
-					}
-				}
+			if len(selectedQueuePlans) > 0 && !selectedQueuePlans[qp.UserPlanId] {
+				continue
 			}
-
-			if shouldRestore {
-				err = model.DB.Model(&model.UserPlan{}).
-					Where("id = ?", qp.UserPlanId).
-					Updates(map[string]interface{}{
-						"status":         model.UserPlanStatusActive,
-						"pinned":         0,
-						"queue_position": qp.QueuePosition,
-						"updated_at":     now,
-					}).Error
-				if err != nil {
-					fmt.Printf("Warning: failed to restore queue plan %d: %v\n", qp.UserPlanId, err)
-				}
+			seenSelected[qp.UserPlanId] = true
+			if err := restoreSnapshotPlanWithTx(tx, userId, qp.UserPlanId, map[string]interface{}{
+				"is_current": 0, "queue_position": qp.QueuePosition,
+				"pinned": 0, "status": model.UserPlanStatusActive, "updated_at": now,
+			}); err != nil {
+				return fmt.Errorf("恢复队列套餐 %d 失败: %w", qp.UserPlanId, err)
 			}
 		}
-	}
-
-	// Restore user balance (if applicable)
-	if options.RestoreBalance && snapshotData.UserBalance > 0 {
-		err = model.IncreaseUserQuota(userId, int(snapshotData.UserBalance), false)
-		if err != nil {
-			fmt.Printf("Warning: failed to restore user balance: %v\n", err)
+		for id := range selectedQueuePlans {
+			if !seenSelected[id] {
+				return fmt.Errorf("快照中不存在队列套餐 %d", id)
+			}
 		}
-	}
 
-	// Mark snapshot as restored
-	err = model.MarkSnapshotRestored(snapshotId, adminId)
+		for _, plan := range snapshotData.AvailablePlans {
+			if err := restoreSnapshotPlanWithTx(tx, userId, plan.UserPlanId, map[string]interface{}{
+				"is_current": 0, "queue_position": 0,
+				"pinned": 0, "status": model.UserPlanStatusActive, "updated_at": now,
+			}); err != nil {
+				return fmt.Errorf("恢复可用套餐 %d 失败: %w", plan.UserPlanId, err)
+			}
+		}
+
+		if err := recalculateRestoredQueueWithTx(tx, userId); err != nil {
+			return fmt.Errorf("重排队列失败: %w", err)
+		}
+		if options.RestoreBalance && snapshotData.UserBalance > 0 {
+			result := tx.Model(&model.User{}).Where("id = ?", userId).
+				UpdateColumn("quota", gorm.Expr("quota + ?", snapshotData.UserBalance))
+			if result.Error != nil {
+				return fmt.Errorf("恢复用户余额失败: %w", result.Error)
+			}
+			if result.RowsAffected != 1 {
+				return errors.New("恢复用户余额失败: 用户不存在")
+			}
+		}
+
+		marker := tx.Model(&model.UserAssetSnapshot{}).
+			Where("id = ? AND restored_at = 0", snapshotId).
+			Updates(map[string]interface{}{"restored_at": now, "restored_by": adminId})
+		if marker.Error != nil {
+			return fmt.Errorf("标记快照已恢复失败: %w", marker.Error)
+		}
+		if marker.RowsAffected != 1 {
+			return errors.New("快照已被恢复")
+		}
+		return nil
+	})
 	if err != nil {
-		fmt.Printf("Warning: failed to mark snapshot as restored: %v\n", err)
+		return err
 	}
 
 	// Log admin action
@@ -403,24 +389,58 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 		"",
 	)
 
-	// Recalculate queue positions to ensure sequential numbering
-	// while preserving restored queue_position order
-	_ = model.DB.Exec(`
-		WITH ranked AS (
-			SELECT id, ROW_NUMBER() OVER (ORDER BY queue_position ASC, purchase_order ASC) as new_pos
-			FROM user_plans
-			WHERE user_id = ? AND is_current = 0 AND status = ?
-		)
-		UPDATE user_plans
-		SET queue_position = ranked.new_pos
-		FROM ranked
-		WHERE user_plans.id = ranked.id
-	`, userId, model.UserPlanStatusActive)
-
 	// Invalidate cache
 	model.InvalidateUserPlanCache(userId)
+	model.InvalidateUserCache(userId)
 
 	return nil
+}
+
+func restoreSnapshotPlanWithTx(tx *gorm.DB, userId int, userPlanId int, updates map[string]interface{}) error {
+	result := tx.Model(&model.UserPlan{}).
+		Where("id = ? AND user_id = ? AND status = ?", userPlanId, userId, model.UserPlanStatusForfeited).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("套餐不存在或状态已变化")
+	}
+	return nil
+}
+
+func recalculateRestoredQueueWithTx(tx *gorm.DB, userId int) error {
+	var queued []model.UserPlan
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0", userId, model.UserPlanStatusActive).
+		Order("queue_position ASC, purchase_order ASC, id ASC").
+		Find(&queued).Error; err != nil {
+		return err
+	}
+	for index, plan := range queued {
+		if plan.QueuePosition == index+1 {
+			continue
+		}
+		result := tx.Model(&model.UserPlan{}).
+			Where("id = ? AND user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0",
+				plan.Id, userId, model.UserPlanStatusActive).
+			Update("queue_position", index+1)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("队列套餐状态已变化")
+		}
+	}
+	return nil
+}
+
+func snapshotPlanCount(snapshotData *model.AssetSnapshotData) int {
+	count := len(snapshotData.QueuePlans) + len(snapshotData.AvailablePlans)
+	if snapshotData.CurrentPlan != nil {
+		count++
+	}
+	return count
 }
 
 // CheckBanStatus checks if a user is banned and returns appropriate error

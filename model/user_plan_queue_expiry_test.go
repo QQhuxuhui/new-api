@@ -1,9 +1,33 @@
 package model
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	miniredis "github.com/alicebob/miniredis/v2"
+	"github.com/go-redis/redis/v8"
 )
+
+func enableUserPlanExpiryRedis(t *testing.T) {
+	t.Helper()
+
+	server, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	previousClient := common.RDB
+	previousEnabled := common.RedisEnabled
+	common.RDB = redis.NewClient(&redis.Options{Addr: server.Addr()})
+	common.RedisEnabled = true
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		server.Close()
+		common.RDB = previousClient
+		common.RedisEnabled = previousEnabled
+	})
+}
 
 func TestUserPlan_IsExpired_QueuedUnactivatedIgnoresPrecomputedExpiry(t *testing.T) {
 	up := &UserPlan{
@@ -155,5 +179,72 @@ func TestExpireUserPlans_ClearsPinsOnlyOnRowsItExpires(t *testing.T) {
 	}
 	if startedRow.Status != UserPlanStatusExpired || startedRow.Pinned != 0 {
 		t.Fatalf("expired status=%d pinned=%d", startedRow.Status, startedRow.Pinned)
+	}
+}
+
+func TestExpireUserPlans_InvalidatesOnlyAffectedUserCaches(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	enableUserPlanExpiryRedis(t)
+
+	now := time.Now()
+	expired := &UserPlan{
+		UserId: 101, Quota: 100, Status: UserPlanStatusActive, IsCurrent: 1,
+		StartedAt: now.Add(-2 * time.Hour).UnixMilli(), ExpiresAt: now.Add(-time.Hour).UnixMilli(),
+	}
+	unexpired := &UserPlan{
+		UserId: 202, Quota: 100, Status: UserPlanStatusActive, IsCurrent: 1,
+		StartedAt: now.Add(-time.Hour).UnixMilli(), ExpiresAt: now.Add(time.Hour).UnixMilli(),
+	}
+	if err := DB.Create(expired).Error; err != nil {
+		t.Fatalf("create expired plan: %v", err)
+	}
+	if err := DB.Create(unexpired).Error; err != nil {
+		t.Fatalf("create unexpired plan: %v", err)
+	}
+
+	cacheValues := map[string]string{
+		getUserValidPlansCacheKey(expired.UserId):    "affected-valid",
+		getUserCurrentPlanCacheKey(expired.UserId):   "affected-current",
+		getUserValidPlansCacheKey(unexpired.UserId):  "unrelated-valid",
+		getUserCurrentPlanCacheKey(unexpired.UserId): "unrelated-current",
+	}
+	for key, value := range cacheValues {
+		if err := common.RedisSet(key, value, time.Minute); err != nil {
+			t.Fatalf("seed cache %s: %v", key, err)
+		}
+	}
+
+	count, err := ExpireUserPlans()
+	if err != nil {
+		t.Fatalf("ExpireUserPlans: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expired count = %d, want 1", count)
+	}
+
+	ctx := context.Background()
+	for _, key := range []string{
+		getUserValidPlansCacheKey(expired.UserId),
+		getUserCurrentPlanCacheKey(expired.UserId),
+	} {
+		exists, err := common.RDB.Exists(ctx, key).Result()
+		if err != nil {
+			t.Fatalf("check affected cache %s: %v", key, err)
+		}
+		if exists != 0 {
+			t.Fatalf("affected cache %s was not invalidated", key)
+		}
+	}
+	for key, want := range map[string]string{
+		getUserValidPlansCacheKey(unexpired.UserId):  "unrelated-valid",
+		getUserCurrentPlanCacheKey(unexpired.UserId): "unrelated-current",
+	} {
+		got, err := common.RedisGet(key)
+		if err != nil {
+			t.Fatalf("read unrelated cache %s: %v", key, err)
+		}
+		if got != want {
+			t.Fatalf("unrelated cache %s = %q, want %q", key, got, want)
+		}
 	}
 }

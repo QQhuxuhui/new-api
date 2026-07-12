@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // UserAssetSnapshot stores a snapshot of user's plan assets before forfeiture
@@ -30,6 +33,8 @@ type AssetSnapshotData struct {
 	CurrentPlan *UserPlanSnapshot `json:"current_plan,omitempty"`
 	// Queue plans
 	QueuePlans []*UserPlanSnapshot `json:"queue_plans,omitempty"`
+	// Active plans that are neither current nor queued
+	AvailablePlans []*UserPlanSnapshot `json:"available_plans,omitempty"`
 	// Daily pool
 	DailyPool *DailyPoolSnapshot `json:"daily_pool,omitempty"`
 	// User balance
@@ -40,17 +45,17 @@ type AssetSnapshotData struct {
 
 // UserPlanSnapshot represents a snapshot of a user plan
 type UserPlanSnapshot struct {
-	UserPlanId      int    `json:"user_plan_id"`
-	PlanId          int    `json:"plan_id"`
-	PlanName        string `json:"plan_name"`
-	Quota           int64  `json:"quota"`
-	UsedQuota       int64  `json:"used_quota"`
-	OriginalQuota   int64  `json:"original_quota"`
-	QueuePosition   int    `json:"queue_position"`
-	StartedAt       int64  `json:"started_at"`
-	ExpiresAt       int64  `json:"expires_at"`
-	RemainingDays   int    `json:"remaining_days"`
-	Status          int    `json:"status"`
+	UserPlanId    int    `json:"user_plan_id"`
+	PlanId        int    `json:"plan_id"`
+	PlanName      string `json:"plan_name"`
+	Quota         int64  `json:"quota"`
+	UsedQuota     int64  `json:"used_quota"`
+	OriginalQuota int64  `json:"original_quota"`
+	QueuePosition int    `json:"queue_position"`
+	StartedAt     int64  `json:"started_at"`
+	ExpiresAt     int64  `json:"expires_at"`
+	RemainingDays int    `json:"remaining_days"`
+	Status        int    `json:"status"`
 }
 
 // DailyPoolSnapshot represents a snapshot of a daily pool
@@ -106,111 +111,92 @@ func CreateAssetSnapshot(userId int, snapshotType string) (*UserAssetSnapshot, e
 		return nil, errors.New("用户ID不能为空")
 	}
 
+	var snapshot *UserAssetSnapshot
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var createErr error
+		snapshot, createErr = CreateAssetSnapshotWithTx(tx, userId, snapshotType)
+		return createErr
+	})
+	return snapshot, err
+}
+
+// CreateAssetSnapshotWithTx captures every active plan assignment and inserts
+// the snapshot using the caller's transaction.
+func CreateAssetSnapshotWithTx(tx *gorm.DB, userId int, snapshotType string) (*UserAssetSnapshot, error) {
+	if userId == 0 {
+		return nil, errors.New("用户ID不能为空")
+	}
+	if snapshotType == "" {
+		return nil, errors.New("快照类型不能为空")
+	}
+
 	now := time.Now()
+	snapshotData := &AssetSnapshotData{SnapshotTime: now.UnixMilli()}
 
-	// Gather all data
-	snapshotData := &AssetSnapshotData{
-		SnapshotTime: now.UnixMilli(),
+	var plans []*UserPlan
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Plan").
+		Where("user_id = ? AND status = ?", userId, UserPlanStatusActive).
+		Order("is_current DESC, queue_position ASC, purchase_order ASC, id ASC").
+		Find(&plans).Error; err != nil {
+		return nil, err
 	}
-
-	// Get current plan
-	currentPlan, err := GetUserCurrentPlan(userId)
-	if err == nil && currentPlan != nil {
-		planName := ""
-		if currentPlan.Plan != nil {
-			planName = currentPlan.Plan.DisplayName
-		}
-		remainingDays := 0
-		if currentPlan.ExpiresAt > 0 {
-			remainingDays = int(time.Until(time.UnixMilli(currentPlan.ExpiresAt)).Hours() / 24)
-			if remainingDays < 0 {
-				remainingDays = 0
-			}
-		}
-		planId := 0
-		if currentPlan.PlanId != nil {
-			planId = *currentPlan.PlanId
-		}
-		snapshotData.CurrentPlan = &UserPlanSnapshot{
-			UserPlanId:    currentPlan.Id,
-			PlanId:        planId,
-			PlanName:      planName,
-			Quota:         currentPlan.Quota,
-			UsedQuota:     currentPlan.UsedQuota,
-			OriginalQuota: currentPlan.OriginalQuota,
-			QueuePosition: 0,
-			StartedAt:     currentPlan.StartedAt,
-			ExpiresAt:     currentPlan.ExpiresAt,
-			RemainingDays: remainingDays,
-			Status:        currentPlan.Status,
+	for _, plan := range plans {
+		planSnapshot := snapshotUserPlan(plan, now)
+		switch {
+		case plan.IsCurrent == 1 && snapshotData.CurrentPlan == nil:
+			snapshotData.CurrentPlan = planSnapshot
+		case plan.QueuePosition > 0:
+			snapshotData.QueuePlans = append(snapshotData.QueuePlans, planSnapshot)
+		default:
+			snapshotData.AvailablePlans = append(snapshotData.AvailablePlans, planSnapshot)
 		}
 	}
 
-	// Get queue plans
-	queuePlans, err := GetUserQueuedPlans(userId)
-	if err == nil && len(queuePlans) > 0 {
-		snapshotData.QueuePlans = make([]*UserPlanSnapshot, 0, len(queuePlans))
-		for _, qp := range queuePlans {
-			planName := ""
-			if qp.Plan != nil {
-				planName = qp.Plan.DisplayName
-			}
-			remainingDays := 0
-			if qp.ExpiresAt > 0 {
-				remainingDays = int(time.Until(time.UnixMilli(qp.ExpiresAt)).Hours() / 24)
-				if remainingDays < 0 {
-					remainingDays = 0
-				}
-			}
-			qpPlanId := 0
-			if qp.PlanId != nil {
-				qpPlanId = *qp.PlanId
-			}
-			snapshotData.QueuePlans = append(snapshotData.QueuePlans, &UserPlanSnapshot{
-				UserPlanId:    qp.Id,
-				PlanId:        qpPlanId,
-				PlanName:      planName,
-				Quota:         qp.Quota,
-				UsedQuota:     qp.UsedQuota,
-				OriginalQuota: qp.OriginalQuota,
-				QueuePosition: qp.QueuePosition,
-				StartedAt:     qp.StartedAt,
-				ExpiresAt:     qp.ExpiresAt,
-				RemainingDays: remainingDays,
-				Status:        qp.Status,
-			})
-		}
-	}
-
-	// Get daily pool
-	dailyPool, err := GetTodayDailyPool(userId)
-	if err == nil && dailyPool != nil {
+	var dailyPool UserDailyPool
+	if err := tx.Where("user_id = ? AND date = ?", userId, GetTodayDate()).First(&dailyPool).Error; err == nil {
 		snapshotData.DailyPool = &DailyPoolSnapshot{
-			Date:       dailyPool.Date,
-			TotalQuota: dailyPool.TotalQuota,
-			UsedQuota:  dailyPool.UsedQuota,
+			Date: dailyPool.Date, TotalQuota: dailyPool.TotalQuota, UsedQuota: dailyPool.UsedQuota,
 		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 
-	// Get user balance
-	user, err := GetUserById(userId, false)
-	if err == nil && user != nil {
-		snapshotData.UserBalance = int64(user.Quota)
+	var user User
+	if err := tx.Select("id", "quota").First(&user, userId).Error; err != nil {
+		return nil, err
 	}
+	snapshotData.UserBalance = int64(user.Quota)
 
-	// Create snapshot
 	snapshot := &UserAssetSnapshot{
-		UserId:       userId,
-		SnapshotType: snapshotType,
+		UserId: userId, SnapshotType: snapshotType, CreatedAt: now.UnixMilli(),
 	}
 	if err := snapshot.SetSnapshotData(snapshotData); err != nil {
 		return nil, err
 	}
-	if err := snapshot.Insert(); err != nil {
+	if err := tx.Create(snapshot).Error; err != nil {
 		return nil, err
 	}
-
 	return snapshot, nil
+}
+
+func snapshotUserPlan(plan *UserPlan, now time.Time) *UserPlanSnapshot {
+	remainingDays := 0
+	if plan.ExpiresAt > 0 {
+		remainingDays = int(time.UnixMilli(plan.ExpiresAt).Sub(now).Hours() / 24)
+		if remainingDays < 0 {
+			remainingDays = 0
+		}
+	}
+	planId := 0
+	if plan.PlanId != nil {
+		planId = *plan.PlanId
+	}
+	return &UserPlanSnapshot{
+		UserPlanId: plan.Id, PlanId: planId, PlanName: plan.GetDisplayName(),
+		Quota: plan.Quota, UsedQuota: plan.UsedQuota, OriginalQuota: plan.OriginalQuota,
+		QueuePosition: plan.QueuePosition, StartedAt: plan.StartedAt, ExpiresAt: plan.ExpiresAt,
+		RemainingDays: remainingDays, Status: plan.Status,
+	}
 }
 
 // GetUserAssetSnapshots retrieves all snapshots for a user

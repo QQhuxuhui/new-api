@@ -863,54 +863,10 @@ func AdminRevokePlan(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 
-	// Get user plan before revocation for logging
-	userPlan, err := model.GetUserPlanById(id)
+	userPlan, nextPlan, err := model.RevokeUserPlan(id)
 	if err != nil {
 		common.ApiError(c, err)
 		return
-	}
-
-	now := time.Now().UnixMilli()
-	wasCurrent := userPlan.IsCurrent == 1
-
-	// Update plan to revoked status
-	updates := map[string]interface{}{
-		"status":     model.UserPlanStatusRevoked,
-		"is_current": 0,
-		"pinned":     0,
-		"updated_at": now,
-	}
-	if userPlan.QueuePosition > 0 {
-		updates["queue_position"] = 0
-	}
-
-	err = model.DB.Model(&model.UserPlan{}).
-		Where("id = ?", id).
-		Updates(updates).Error
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-
-	// Invalidate cache
-	model.InvalidateUserPlanCache(userPlan.UserId)
-
-	// If this was the current plan, activate next in queue
-	var nextPlan *model.UserPlan
-	if wasCurrent {
-		nextPlan, _ = model.ActivateNextQueuedPlan(userPlan.UserId)
-	} else {
-		// Recalculate queue positions
-		model.DB.Exec(`
-			UPDATE user_plans
-			SET queue_position = (
-				SELECT COUNT(*) FROM (
-					SELECT id FROM user_plans
-					WHERE user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND purchase_order < user_plans.purchase_order
-				) AS t
-			) + 1
-			WHERE user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0
-		`, userPlan.UserId, model.UserPlanStatusActive, userPlan.UserId, model.UserPlanStatusActive)
 	}
 
 	// Log admin action

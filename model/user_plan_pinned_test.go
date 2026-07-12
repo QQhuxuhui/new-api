@@ -1,8 +1,11 @@
 package model
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 func seedPinnedSwitchPlans(t *testing.T) (userID int, current, target, stale *UserPlan) {
@@ -449,6 +452,33 @@ func TestActivateNextQueuedPlan_DepletedQueuePreservesCurrentPin(t *testing.T) {
 	}
 }
 
+func TestActivateNextQueuedPlan_LeavesAvailablePlansOutsideQueue(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	available := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 0,
+	})
+	queued := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 2,
+	})
+
+	activated, err := ActivateNextQueuedPlan(1)
+	if err != nil {
+		t.Fatalf("activate next queued plan: %v", err)
+	}
+	if activated == nil || activated.Id != queued.Id {
+		t.Fatalf("expected queued activation %d, got %#v", queued.Id, activated)
+	}
+	var gotAvailable UserPlan
+	if err := DB.First(&gotAvailable, available.Id).Error; err != nil {
+		t.Fatalf("reload available plan: %v", err)
+	}
+	if gotAvailable.IsCurrent != 0 || gotAvailable.QueuePosition != 0 {
+		t.Fatalf("available plan current=%d queue=%d", gotAvailable.IsCurrent, gotAvailable.QueuePosition)
+	}
+}
+
 func TestCompleteUserPlanIfDepleted_ClearsOldAndActivatedPins(t *testing.T) {
 	setupUserPlanSwitchTestDB(t)
 	current := insertPinnedTransitionPlan(t, &UserPlan{
@@ -582,6 +612,49 @@ func TestCompleteCurrentPlanById_StaleTargetDoesNotReplaceNewCurrent(t *testing.
 	}
 	if targetRow.Status != UserPlanStatusActive || targetRow.IsCurrent != 1 || targetRow.Pinned != 1 {
 		t.Fatalf("new current status=%d current=%d pinned=%d", targetRow.Status, targetRow.IsCurrent, targetRow.Pinned)
+	}
+}
+
+func TestRevokeUserPlan_ActivationFailureRollsBackRevocationAndPins(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	current := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		IsCurrent: 1, Pinned: 1,
+	})
+	next := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 1, Pinned: 1,
+	})
+
+	callbackName := "test:fail_revoke_queue_activation"
+	if err := DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		updates, ok := tx.Statement.Dest.(map[string]interface{})
+		if tx.Statement.Table == "user_plans" && ok && updates["is_current"] == 1 {
+			tx.AddError(errors.New("injected activation failure"))
+		}
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = DB.Callback().Update().Remove(callbackName)
+	})
+
+	if _, _, err := RevokeUserPlan(current.Id); err == nil {
+		t.Fatal("expected revoke failure")
+	}
+
+	var gotCurrent, gotNext UserPlan
+	if err := DB.First(&gotCurrent, current.Id).Error; err != nil {
+		t.Fatalf("reload current: %v", err)
+	}
+	if err := DB.First(&gotNext, next.Id).Error; err != nil {
+		t.Fatalf("reload queued: %v", err)
+	}
+	if gotCurrent.Status != UserPlanStatusActive || gotCurrent.IsCurrent != 1 || gotCurrent.Pinned != 1 {
+		t.Fatalf("revocation leaked status=%d current=%d pinned=%d", gotCurrent.Status, gotCurrent.IsCurrent, gotCurrent.Pinned)
+	}
+	if gotNext.IsCurrent != 0 || gotNext.QueuePosition != 1 || gotNext.Pinned != 1 {
+		t.Fatalf("activation leaked current=%d queue=%d pinned=%d", gotNext.IsCurrent, gotNext.QueuePosition, gotNext.Pinned)
 	}
 }
 

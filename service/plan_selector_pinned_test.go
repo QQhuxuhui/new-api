@@ -1,8 +1,11 @@
 package service
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -82,6 +85,47 @@ func TestSelectPlanForRequest_PinnedBlocksHealthyUpgrade(t *testing.T) {
 	}
 	if result.UserPlan.Id != pinnedCurrent.Id || result.Switched {
 		t.Fatalf("pinned current was upgraded: result=%d switched=%v", result.UserPlan.Id, result.Switched)
+	}
+}
+
+func TestSelectPlanForRequest_DoesNotServeExpiredPinnedPlanFromCache(t *testing.T) {
+	db := setupTestDB(t)
+	enableSelectorRedis(t)
+	user := &model.User{Username: "expired-cached-current", Password: "12345678", Status: 1}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	expiredCurrent := createSelectablePlan(t, user.Id, 20, func(plan *model.UserPlan) {
+		plan.IsCurrent = 1
+		plan.Pinned = 1
+		plan.ExpiresAt = time.Now().Add(-time.Hour).UnixMilli()
+	})
+	alternative := createSelectablePlan(t, user.Id, 10, nil)
+
+	entries := []*model.UserPlanCacheEntry{
+		model.FromUserPlan(expiredCurrent),
+		model.FromUserPlan(alternative),
+	}
+	data, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatalf("marshal stale cache: %v", err)
+	}
+	cacheKey := fmt.Sprintf("user_valid_plans:%d", user.Id)
+	if err := common.RedisSet(cacheKey, string(data), time.Minute); err != nil {
+		t.Fatalf("seed stale cache: %v", err)
+	}
+
+	result, err := SelectPlanForRequest(user.Id, "")
+	if err != nil {
+		t.Fatalf("select plan: %v", err)
+	}
+	if result.UserPlan.Id != alternative.Id || !result.Switched {
+		t.Fatalf(
+			"expired cached plan %d was served: result=%d switched=%v",
+			expiredCurrent.Id,
+			result.UserPlan.Id,
+			result.Switched,
+		)
 	}
 }
 

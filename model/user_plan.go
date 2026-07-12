@@ -612,6 +612,9 @@ func SwitchToUserPlan(userId int, userPlanId int, setPinned bool) error {
 	defer InvalidateUserPlanCache(userId)
 
 	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockUserPlanSelectionRows(tx, userId); err != nil {
+			return err
+		}
 		// Verify and lock the target so its eligibility cannot change while the
 		// current plan and pins are being replaced.
 		nowMs := time.Now().UnixMilli()
@@ -687,6 +690,16 @@ func SwitchToUserPlan(userId int, userPlanId int, setPinned bool) error {
 
 		return nil
 	})
+}
+
+func lockUserPlanSelectionRows(tx *gorm.DB, userId int) error {
+	var ids []int
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Model(&UserPlan{}).
+		Select("id").
+		Where("user_id = ?", userId).
+		Order("id ASC").
+		Find(&ids).Error
 }
 
 // DecreaseUserPlanQuota decreases quota from a user plan
@@ -916,21 +929,55 @@ func UpdateUserPlanPermissions(userPlanId int, allowSwitch, allowToggle int) err
 		}).Error
 }
 
-// ToggleUserPlanAutoSwitch toggles the auto-switch setting for a user plan
-func ToggleUserPlanAutoSwitch(userPlanId int, autoSwitch int) error {
-	// Get user_id before update for cache invalidation
-	var userPlan UserPlan
-	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
-		defer InvalidateUserPlanCache(userPlan.UserId)
+// ToggleUserPlanAutoSwitch validates user ownership and toggle permission in
+// the same transaction as the setting update.
+func ToggleUserPlanAutoSwitch(userId int, userPlanId int, autoSwitch int) error {
+	if autoSwitch != 0 && autoSwitch != 1 {
+		return errors.New("自动切换值必须为0或1")
 	}
 
-	updates := map[string]interface{}{"auto_switch": autoSwitch}
-	if autoSwitch == 1 {
-		updates["pinned"] = 0
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var userPlan UserPlan
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ?", userPlanId, userId).
+			First(&userPlan).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("套餐不存在或不属于该用户")
+			}
+			return err
+		}
+
+		restorePinnedScheduling := autoSwitch == 1 && userPlan.Pinned == 1 && !userPlan.IsLocked()
+		if !userPlan.CanUserToggleAuto() && !restorePinnedScheduling {
+			return errors.New("you don't have permission to toggle auto-switch")
+		}
+
+		updates := map[string]interface{}{"auto_switch": autoSwitch}
+		if autoSwitch == 1 {
+			updates["pinned"] = 0
+		}
+		query := tx.Model(&UserPlan{}).
+			Where("id = ? AND user_id = ? AND locked != 1", userPlanId, userId)
+		if restorePinnedScheduling {
+			query = query.Where("pinned = 1")
+		} else {
+			query = query.Where("allow_user_toggle = 1")
+		}
+		result := query.Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("套餐权限或状态已变化，请重试")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	return DB.Model(&UserPlan{}).
-		Where("id = ?", userPlanId).
-		Updates(updates).Error
+	InvalidateUserPlanCache(userId)
+	return nil
 }
 
 // GetUserPlansByPlanId retrieves all user plans for a specific plan
@@ -960,14 +1007,37 @@ func GetUserPlansByPlanId(planId int, pageInfo *common.PageInfo) ([]*UserPlan, i
 // ExpireUserPlans marks expired user plans as expired (for background job)
 func ExpireUserPlans() (int64, error) {
 	now := time.Now().UnixMilli()
+	expiryCondition := "status = ? AND expires_at > 0 AND expires_at < ? AND NOT (queue_position > 0 AND started_at = 0)"
+
+	var userIds []int
+	if err := DB.Model(&UserPlan{}).
+		Where(expiryCondition, UserPlanStatusActive, now).
+		Distinct("user_id").
+		Pluck("user_id", &userIds).Error; err != nil {
+		return 0, err
+	}
+	if len(userIds) == 0 {
+		return 0, nil
+	}
+
 	result := DB.Model(&UserPlan{}).
 		// Do not expire queued unactivated plans: their expires_at may be a display precompute value.
-		Where("status = ? AND expires_at > 0 AND expires_at < ? AND NOT (queue_position > 0 AND started_at = 0)", UserPlanStatusActive, now).
+		Where(expiryCondition, UserPlanStatusActive, now).
+		Where("user_id IN ?", userIds).
 		Updates(map[string]interface{}{
 			"status": UserPlanStatusExpired,
 			"pinned": 0,
 		})
-	return result.RowsAffected, result.Error
+	if result.Error != nil {
+		return result.RowsAffected, result.Error
+	}
+
+	for _, userId := range userIds {
+		if err := InvalidateUserPlanCache(userId); err != nil {
+			return result.RowsAffected, err
+		}
+	}
+	return result.RowsAffected, nil
 }
 
 // AssignPlanToUser assigns a plan to a user with default settings from the plan
@@ -1443,8 +1513,8 @@ func recalculateQueuePositions(userId int) error {
 // recalculateQueuePositionsWithTx reorders queue positions within a transaction
 func recalculateQueuePositionsWithTx(tx *gorm.DB, userId int) error {
 	var plans []*UserPlan
-	err := tx.Where("user_id = ? AND is_current = 0 AND status = ?", userId, UserPlanStatusActive).
-		Order("queue_position ASC, purchase_order ASC").
+	err := tx.Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0", userId, UserPlanStatusActive).
+		Order("queue_position ASC, purchase_order ASC, id ASC").
 		Find(&plans).Error
 	if err != nil {
 		return err
@@ -1460,6 +1530,69 @@ func recalculateQueuePositionsWithTx(tx *gorm.DB, userId int) error {
 	}
 
 	return nil
+}
+
+// RevokeUserPlan revokes one assignment and performs any resulting queue
+// activation or compaction in the same transaction.
+func RevokeUserPlan(userPlanId int) (*UserPlan, *UserPlan, error) {
+	if userPlanId <= 0 {
+		return nil, nil, errors.New("套餐ID不能为空")
+	}
+
+	var owner UserPlan
+	if err := DB.Select("id", "user_id").First(&owner, userPlanId).Error; err != nil {
+		return nil, nil, err
+	}
+
+	var revoked UserPlan
+	var next *UserPlan
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockUserPlanSelectionRows(tx, owner.UserId); err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ?", userPlanId, owner.UserId).
+			First(&revoked).Error; err != nil {
+			return err
+		}
+
+		now := time.Now().UnixMilli()
+		result := tx.Model(&UserPlan{}).
+			Where("id = ? AND user_id = ? AND status = ? AND is_current = ? AND queue_position = ?",
+				revoked.Id, revoked.UserId, revoked.Status, revoked.IsCurrent, revoked.QueuePosition).
+			Updates(map[string]interface{}{
+				"status":         UserPlanStatusRevoked,
+				"is_current":     0,
+				"queue_position": 0,
+				"pinned":         0,
+				"updated_at":     now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("套餐状态已变化，请重试")
+		}
+
+		if revoked.IsCurrent == 1 {
+			activated, activateErr := activateNextQueuedPlanWithTx(tx, revoked.UserId)
+			if activateErr != nil {
+				return activateErr
+			}
+			next = activated
+		} else if revoked.QueuePosition > 0 {
+			if err := recalculateQueuePositionsWithTx(tx, revoked.UserId); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	InvalidateUserPlanCache(revoked.UserId)
+	return &revoked, next, nil
 }
 
 // RemovePlanFromQueue removes a plan from the queue and reorders positions

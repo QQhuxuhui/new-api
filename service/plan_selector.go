@@ -89,6 +89,13 @@ func selectPlanForRequest(userId int, modelName string, requiredGroup string) (*
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user plans: %w", err)
 	}
+	requestValidPlans := validPlans[:0]
+	for _, userPlan := range validPlans {
+		if userPlan != nil && userPlan.IsValid() {
+			requestValidPlans = append(requestValidPlans, userPlan)
+		}
+	}
+	validPlans = requestValidPlans
 
 	if len(validPlans) == 0 {
 		return nil, ErrNoPlanAvailable
@@ -349,28 +356,12 @@ func UserSwitchPlanByUserPlanId(userId int, targetUserPlanId int) error {
 
 // UserToggleAutoSwitch allows a user to toggle auto-switch on their current plan
 func UserToggleAutoSwitch(userId int, userPlanId int, enabled bool) error {
-	userPlan, err := model.GetUserPlanById(userPlanId)
-	if err != nil {
-		return fmt.Errorf("plan not found: %w", err)
-	}
-
-	// Verify ownership
-	if userPlan.UserId != userId {
-		return errors.New("plan does not belong to user")
-	}
-
-	// A pinned, unlocked owner can explicitly restore automatic scheduling.
-	restorePinnedScheduling := enabled && userPlan.Pinned == 1 && !userPlan.IsLocked()
-	if !userPlan.CanUserToggleAuto() && !restorePinnedScheduling {
-		return errors.New("you don't have permission to toggle auto-switch")
-	}
-
 	autoSwitch := 0
 	if enabled {
 		autoSwitch = 1
 	}
 
-	return model.ToggleUserPlanAutoSwitch(userPlanId, autoSwitch)
+	return model.ToggleUserPlanAutoSwitch(userId, userPlanId, autoSwitch)
 }
 
 // GetUserPlanSummary returns a summary of user's plans for display

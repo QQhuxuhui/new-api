@@ -1,9 +1,11 @@
 package service
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/QuantumNous/new-api/model"
+	"gorm.io/gorm"
 )
 
 func TestPermanentBanAndRestore_ClearCurrentAndQueuedPins(t *testing.T) {
@@ -23,19 +25,32 @@ func TestPermanentBanAndRestore_ClearCurrentAndQueuedPins(t *testing.T) {
 		plan.QueuePosition = 1
 		plan.Pinned = 1
 	})
+	available := makeUserPlan(t, user.Id, 3, func(plan *model.UserPlan) {
+		plan.Pinned = 1
+	})
 
 	if err := OnPermanentBan(user.Id, 99, "admin", "test", "127.0.0.1"); err != nil {
 		t.Fatalf("permanent ban: %v", err)
 	}
-	var bannedCurrent, bannedQueued model.UserPlan
+	var bannedCurrent, bannedQueued, bannedAvailable model.UserPlan
 	if err := db.First(&bannedCurrent, current.Id).Error; err != nil {
 		t.Fatalf("reload banned current: %v", err)
 	}
 	if err := db.First(&bannedQueued, queued.Id).Error; err != nil {
 		t.Fatalf("reload banned queue: %v", err)
 	}
-	if bannedCurrent.Pinned != 0 || bannedQueued.Pinned != 0 {
-		t.Fatalf("ban retained pins: current=%d queued=%d", bannedCurrent.Pinned, bannedQueued.Pinned)
+	if err := db.First(&bannedAvailable, available.Id).Error; err != nil {
+		t.Fatalf("reload banned available: %v", err)
+	}
+	if bannedCurrent.Pinned != 0 || bannedQueued.Pinned != 0 || bannedAvailable.Pinned != 0 ||
+		bannedAvailable.Status != model.UserPlanStatusForfeited {
+		t.Fatalf(
+			"ban state current_pin=%d queued_pin=%d available=(status=%d,pin=%d)",
+			bannedCurrent.Pinned,
+			bannedQueued.Pinned,
+			bannedAvailable.Status,
+			bannedAvailable.Pinned,
+		)
 	}
 
 	var snapshot model.UserAssetSnapshot
@@ -43,7 +58,7 @@ func TestPermanentBanAndRestore_ClearCurrentAndQueuedPins(t *testing.T) {
 		t.Fatalf("load snapshot: %v", err)
 	}
 	if err := db.Model(&model.UserPlan{}).
-		Where("id IN ?", []int{current.Id, queued.Id}).
+		Where("id IN ?", []int{current.Id, queued.Id, available.Id}).
 		Update("pinned", 1).Error; err != nil {
 		t.Fatalf("seed stale pins: %v", err)
 	}
@@ -54,12 +69,15 @@ func TestPermanentBanAndRestore_ClearCurrentAndQueuedPins(t *testing.T) {
 		t.Fatalf("restore snapshot: %v", err)
 	}
 
-	var restoredCurrent, restoredQueued model.UserPlan
+	var restoredCurrent, restoredQueued, restoredAvailable model.UserPlan
 	if err := db.First(&restoredCurrent, current.Id).Error; err != nil {
 		t.Fatalf("reload restored current: %v", err)
 	}
 	if err := db.First(&restoredQueued, queued.Id).Error; err != nil {
 		t.Fatalf("reload restored queue: %v", err)
+	}
+	if err := db.First(&restoredAvailable, available.Id).Error; err != nil {
+		t.Fatalf("reload restored available: %v", err)
 	}
 	if restoredCurrent.Status != model.UserPlanStatusActive || restoredCurrent.IsCurrent != 1 || restoredCurrent.Pinned != 0 {
 		t.Fatalf(
@@ -76,5 +94,112 @@ func TestPermanentBanAndRestore_ClearCurrentAndQueuedPins(t *testing.T) {
 			restoredQueued.QueuePosition,
 			restoredQueued.Pinned,
 		)
+	}
+	if restoredAvailable.Status != model.UserPlanStatusActive || restoredAvailable.IsCurrent != 0 ||
+		restoredAvailable.QueuePosition != 0 || restoredAvailable.Pinned != 0 {
+		t.Fatalf(
+			"restored available status=%d current=%d queue=%d pinned=%d",
+			restoredAvailable.Status,
+			restoredAvailable.IsCurrent,
+			restoredAvailable.QueuePosition,
+			restoredAvailable.Pinned,
+		)
+	}
+}
+
+func TestPermanentBan_UpdateFailureRollsBackSnapshotAndPlans(t *testing.T) {
+	db := setupTestDB(t)
+	if err := db.AutoMigrate(&model.UserAssetSnapshot{}); err != nil {
+		t.Fatalf("migrate snapshots: %v", err)
+	}
+	user := &model.User{Username: "ban-rollback", Password: "12345678", Status: 1}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	current := makeUserPlan(t, user.Id, 1, func(plan *model.UserPlan) {
+		plan.IsCurrent = 1
+		plan.Pinned = 1
+	})
+
+	callbackName := "test:fail_permanent_ban_plan_update"
+	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "user_plans" {
+			tx.AddError(errors.New("injected plan update failure"))
+		}
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Update().Remove(callbackName)
+	})
+
+	if err := OnPermanentBan(user.Id, 99, "admin", "test", "127.0.0.1"); err == nil {
+		t.Fatal("expected permanent ban failure")
+	}
+
+	var snapshotCount int64
+	if err := db.Model(&model.UserAssetSnapshot{}).Where("user_id = ?", user.Id).Count(&snapshotCount).Error; err != nil {
+		t.Fatalf("count snapshots: %v", err)
+	}
+	if snapshotCount != 0 {
+		t.Fatalf("failed ban committed %d snapshot(s)", snapshotCount)
+	}
+	var got model.UserPlan
+	if err := db.First(&got, current.Id).Error; err != nil {
+		t.Fatalf("reload current: %v", err)
+	}
+	if got.Status != model.UserPlanStatusActive || got.IsCurrent != 1 || got.Pinned != 1 {
+		t.Fatalf("failed ban mutated status=%d current=%d pinned=%d", got.Status, got.IsCurrent, got.Pinned)
+	}
+}
+
+func TestRestoreFromSnapshot_MissingSelectedPlanRollsBackAndKeepsSnapshotRetryable(t *testing.T) {
+	db := setupTestDB(t)
+	if err := db.AutoMigrate(&model.UserAssetSnapshot{}); err != nil {
+		t.Fatalf("migrate snapshots: %v", err)
+	}
+	user := &model.User{Username: "restore-rollback", Password: "12345678", Status: 1}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	current := makeUserPlan(t, user.Id, 1, func(plan *model.UserPlan) {
+		plan.IsCurrent = 1
+		plan.Pinned = 1
+	})
+	queued := makeUserPlan(t, user.Id, 2, func(plan *model.UserPlan) {
+		plan.QueuePosition = 1
+		plan.Pinned = 1
+	})
+	if err := OnPermanentBan(user.Id, 99, "admin", "test", "127.0.0.1"); err != nil {
+		t.Fatalf("permanent ban: %v", err)
+	}
+	var snapshot model.UserAssetSnapshot
+	if err := db.Where("user_id = ?", user.Id).First(&snapshot).Error; err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if err := db.Delete(&model.UserPlan{}, queued.Id).Error; err != nil {
+		t.Fatalf("delete queued plan: %v", err)
+	}
+
+	err := RestoreFromSnapshot(snapshot.Id, &RestoreOptions{
+		RestoreCurrentPlan: true,
+		RestoreQueuePlans:  []int{queued.Id},
+	}, 99, "admin", "127.0.0.1")
+	if err == nil {
+		t.Fatal("expected missing restore target failure")
+	}
+
+	var gotCurrent model.UserPlan
+	if err := db.First(&gotCurrent, current.Id).Error; err != nil {
+		t.Fatalf("reload current: %v", err)
+	}
+	if gotCurrent.Status != model.UserPlanStatusForfeited || gotCurrent.IsCurrent != 0 || gotCurrent.Pinned != 0 {
+		t.Fatalf("failed restore mutated status=%d current=%d pinned=%d", gotCurrent.Status, gotCurrent.IsCurrent, gotCurrent.Pinned)
+	}
+	if err := db.First(&snapshot, snapshot.Id).Error; err != nil {
+		t.Fatalf("reload snapshot: %v", err)
+	}
+	if snapshot.IsRestored() {
+		t.Fatal("failed restore marked snapshot as restored")
 	}
 }

@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestPlanInsert_PreservesExplicitDefaultAllowSwitchZero(t *testing.T) {
 	setupUserPlanSwitchTestDB(t)
@@ -120,6 +123,7 @@ func TestSeedDefaultPlans_PreservesExistingTrialSettings(t *testing.T) {
 
 func TestPlanUpdate_PreservesStoredDefaultAllowSwitchZero(t *testing.T) {
 	setupUserPlanSwitchTestDB(t)
+	enableUserPlanExpiryRedis(t)
 
 	zero := 0
 	plan := &Plan{
@@ -135,6 +139,20 @@ func TestPlanUpdate_PreservesStoredDefaultAllowSwitchZero(t *testing.T) {
 	plan.DisplayName = "After Update"
 	if err := plan.Update(); err != nil {
 		t.Fatalf("update plan: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		status := GetPlanSyncStatus(plan.Id)
+		if status != nil && status.Status == planSyncStatusSuccess {
+			break
+		}
+		if status != nil && status.Status == planSyncStatusFailed {
+			t.Fatalf("plan snapshot sync failed: %s", status.ErrorMsg)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for plan snapshot sync")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	var stored Plan

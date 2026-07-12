@@ -62,6 +62,12 @@ func invalidateUserCache(userId int) error {
 	return common.RedisDelKey(getUserCacheKey(userId))
 }
 
+// InvalidateUserCache clears the cached user record after a transactional
+// balance update performed outside the standard quota helpers.
+func InvalidateUserCache(userId int) error {
+	return invalidateUserCache(userId)
+}
+
 // updateUserCache updates all user cache fields using hash
 func updateUserCache(user User) error {
 	if !common.RedisEnabled {
