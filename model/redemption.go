@@ -283,7 +283,7 @@ func redeemToPlan(tx *gorm.DB, redemption *Redemption, userId int) (*RedeemResul
 		UsedQuota:       0,
 		IsCurrent:       0,
 		AutoSwitch:      1,
-		AllowUserSwitch: plan.DefaultAllowSwitch,
+		AllowUserSwitch: plan.GetDefaultAllowSwitch(),
 		AllowUserToggle: plan.DefaultAllowToggle,
 		Locked:          0,
 		StartedAt:       time.Now().UnixMilli(),

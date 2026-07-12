@@ -201,7 +201,7 @@ func UpdatePlan(c *gin.Context) {
 	existingPlan.ValidityDays = plan.ValidityDays
 	existingPlan.DailyQuotaLimit = plan.DailyQuotaLimit
 	existingPlan.RateLimitRules = plan.RateLimitRules
-	existingPlan.DefaultAllowSwitch = plan.DefaultAllowSwitch
+	mergeDefaultAllowSwitch(existingPlan, &plan)
 	existingPlan.DefaultAllowToggle = plan.DefaultAllowToggle
 	existingPlan.Settings = plan.Settings
 	existingPlan.Status = plan.Status
@@ -280,6 +280,12 @@ func UpdatePlan(c *gin.Context) {
 		"data":        existingPlan,
 		"sync_status": "pending", // Snapshot sync runs async in background
 	})
+}
+
+func mergeDefaultAllowSwitch(existingPlan, update *model.Plan) {
+	if update.DefaultAllowSwitch != nil {
+		existingPlan.DefaultAllowSwitch = update.DefaultAllowSwitch
+	}
 }
 
 // DeletePlan deletes a plan (admin)

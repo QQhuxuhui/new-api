@@ -119,7 +119,7 @@ func DeliverPlan(orderId int, tx *gorm.DB) error {
 		OriginalQuota:       plan.DefaultQuota,
 		IsCurrent:           isCurrent,
 		AutoSwitch:          1,
-		AllowUserSwitch:     plan.DefaultAllowSwitch,
+		AllowUserSwitch:     plan.GetDefaultAllowSwitch(),
 		AllowUserToggle:     plan.DefaultAllowToggle,
 		Locked:              0,
 		StartedAt:           startedAt,

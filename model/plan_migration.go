@@ -45,7 +45,7 @@ func CreateLegacyPlan() (*Plan, error) {
 		ChannelGroup:       "",                  // Use default channel group
 		DefaultQuota:       0,                   // No default quota, will use user's existing quota
 		ValidityDays:       0,                   // Never expires
-		DefaultAllowSwitch: 1,                   // Allow users to switch
+		DefaultAllowSwitch: common.GetPointer[int](1), // Allow users to switch
 		DefaultAllowToggle: 1,                   // Allow users to toggle auto-switch
 		Status:             PlanStatusEnabled,
 	}
@@ -121,7 +121,7 @@ func MigrateExistingUsers(dryRun bool) (*MigrationResult, error) {
 			UsedQuota:       int64(user.UsedQuota), // Transfer used quota for historical tracking
 			IsCurrent:       1,                      // Set as current plan
 			AutoSwitch:      1,                      // Enable auto-switch
-			AllowUserSwitch: plan.DefaultAllowSwitch,
+			AllowUserSwitch: plan.GetDefaultAllowSwitch(),
 			AllowUserToggle: plan.DefaultAllowToggle,
 			Locked:          0,
 			StartedAt:       now,
@@ -181,7 +181,7 @@ func MigrateSingleUser(userId int) error {
 		UsedQuota:       int64(user.UsedQuota),
 		IsCurrent:       1,
 		AutoSwitch:      1,
-		AllowUserSwitch: plan.DefaultAllowSwitch,
+		AllowUserSwitch: plan.GetDefaultAllowSwitch(),
 		AllowUserToggle: plan.DefaultAllowToggle,
 		Locked:          0,
 		StartedAt:       now,

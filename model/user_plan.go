@@ -968,7 +968,7 @@ func AssignPlanToUser(userId, planId int, quota int64, expiresAt int64) (*UserPl
 		OriginalQuota:   quota,
 		IsCurrent:       0, // Will be set to 1 if no current plan
 		AutoSwitch:      1,
-		AllowUserSwitch: plan.DefaultAllowSwitch,
+		AllowUserSwitch: plan.GetDefaultAllowSwitch(),
 		AllowUserToggle: plan.DefaultAllowToggle,
 		Locked:          0,
 		Status:          UserPlanStatusActive,
@@ -1332,7 +1332,7 @@ func AddPlanToQueue(userId int, planId int, quota int64, source string, sourceOr
 		OriginalQuota:   quota,
 		IsCurrent:       0, // Will be set to 1 if no current plan
 		AutoSwitch:      1,
-		AllowUserSwitch: plan.DefaultAllowSwitch,
+		AllowUserSwitch: plan.GetDefaultAllowSwitch(),
 		AllowUserToggle: plan.DefaultAllowToggle,
 		Locked:          0,
 		Status:          UserPlanStatusActive,
