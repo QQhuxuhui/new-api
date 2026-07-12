@@ -63,10 +63,7 @@ test('groups by current, inactive, locked, queued, then available precedence', (
     getInactiveKind(plan(8, { status: 1, expires_at: now }), now),
     'expired',
   );
-  assert.equal(
-    isUserLocked(plan(9, { locked: 1, locked_by: 'user' })),
-    true,
-  );
+  assert.equal(isUserLocked(plan(9, { locked: 1, locked_by: 'user' })), true);
   assert.equal(
     isUserLocked(plan(10, { locked: 1, locked_by: 'admin' })),
     false,

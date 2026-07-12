@@ -113,7 +113,7 @@ const CompactPlanCard = ({
       className={[
         '!rounded-lg border border-semi-color-border shadow-sm',
         'min-h-[210px] transition-colors duration-200 hover:border-semi-color-primary',
-        'motion-reduce:transition-none',
+        'motion-reduce:transition-none motion-reduce:duration-0',
         muted ? 'bg-semi-color-fill-0' : '',
       ].join(' ')}
       bodyStyle={{ padding: 16 }}
@@ -135,7 +135,11 @@ const CompactPlanCard = ({
         >
           <div className='flex items-start justify-between gap-2'>
             <div className='min-w-0 flex-1'>
-              <Title heading={6} className='m-0 break-all'>
+              <Title
+                heading={6}
+                className='m-0 truncate'
+                title={planDisplayName(plan)}
+              >
                 {planDisplayName(plan) || t('未知套餐')}
               </Title>
               <div className='mt-2 flex flex-wrap gap-1.5'>
