@@ -273,3 +273,181 @@ func TestSwitchUserCurrentPlan_RejectsLockedTargetWithoutMutation(t *testing.T) 
 		)
 	}
 }
+
+func insertPinnedTransitionPlan(t *testing.T, plan *UserPlan) *UserPlan {
+	t.Helper()
+	if err := DB.Create(plan).Error; err != nil {
+		t.Fatalf("create transition plan: %v", err)
+	}
+	return plan
+}
+
+func TestActivateNextQueuedPlan_SkipsLockedHeadAndClearsActivePins(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	locked := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 1, Locked: 1, LockedBy: "admin", Pinned: 1,
+	})
+	next := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 2, Pinned: 1,
+	})
+
+	activated, err := ActivateNextQueuedPlan(1)
+	if err != nil {
+		t.Fatalf("activate next queued plan: %v", err)
+	}
+	if activated == nil || activated.Id != next.Id {
+		t.Fatalf("expected activation of %d, got %#v", next.Id, activated)
+	}
+
+	var lockedRow, nextRow UserPlan
+	if err := DB.First(&lockedRow, locked.Id).Error; err != nil {
+		t.Fatalf("reload locked row: %v", err)
+	}
+	if err := DB.First(&nextRow, next.Id).Error; err != nil {
+		t.Fatalf("reload next row: %v", err)
+	}
+	if lockedRow.IsCurrent != 0 || lockedRow.QueuePosition == 0 || lockedRow.Locked != 1 || lockedRow.Pinned != 0 {
+		t.Fatalf(
+			"locked row current=%d queue=%d locked=%d pinned=%d",
+			lockedRow.IsCurrent,
+			lockedRow.QueuePosition,
+			lockedRow.Locked,
+			lockedRow.Pinned,
+		)
+	}
+	if nextRow.IsCurrent != 1 || nextRow.QueuePosition != 0 || nextRow.Pinned != 0 {
+		t.Fatalf("next row current=%d queue=%d pinned=%d", nextRow.IsCurrent, nextRow.QueuePosition, nextRow.Pinned)
+	}
+}
+
+func TestActivateNextQueuedPlan_NoEligibleQueuePreservesCurrentPin(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	current := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		IsCurrent: 1, Pinned: 1,
+	})
+	insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 1, Locked: 1, LockedBy: "admin",
+	})
+
+	activated, err := ActivateNextQueuedPlan(1)
+	if err != nil {
+		t.Fatalf("activate next queued plan: %v", err)
+	}
+	if activated != nil {
+		t.Fatalf("expected no eligible activation, got %#v", activated)
+	}
+
+	var got UserPlan
+	if err := DB.First(&got, current.Id).Error; err != nil {
+		t.Fatalf("reload current: %v", err)
+	}
+	if got.IsCurrent != 1 || got.Pinned != 1 {
+		t.Fatalf("no-op activation changed current=%d pinned=%d", got.IsCurrent, got.Pinned)
+	}
+}
+
+func TestCompleteUserPlanIfDepleted_ClearsOldAndActivatedPins(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	current := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 0, Status: UserPlanStatusActive,
+		IsCurrent: 1, Pinned: 1,
+	})
+	next := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 1, Pinned: 1,
+	})
+
+	activated, err := CompleteUserPlanIfDepleted(1, current.Id)
+	if err != nil {
+		t.Fatalf("complete depleted plan: %v", err)
+	}
+	if activated == nil || activated.Id != next.Id {
+		t.Fatalf("expected activation of %d, got %#v", next.Id, activated)
+	}
+
+	var oldRow, nextRow UserPlan
+	if err := DB.First(&oldRow, current.Id).Error; err != nil {
+		t.Fatalf("reload old row: %v", err)
+	}
+	if err := DB.First(&nextRow, next.Id).Error; err != nil {
+		t.Fatalf("reload next row: %v", err)
+	}
+	if oldRow.Status != UserPlanStatusCompleted || oldRow.IsCurrent != 0 || oldRow.Pinned != 0 {
+		t.Fatalf("old status=%d current=%d pinned=%d", oldRow.Status, oldRow.IsCurrent, oldRow.Pinned)
+	}
+	if nextRow.IsCurrent != 1 || nextRow.Pinned != 0 {
+		t.Fatalf("next current=%d pinned=%d", nextRow.IsCurrent, nextRow.Pinned)
+	}
+}
+
+func TestCompleteCurrentPlan_ClearsExpiredAndActivatedPins(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	current := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		IsCurrent: 1, Pinned: 1,
+	})
+	next := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 1, Pinned: 1,
+	})
+
+	activated, err := CompleteCurrentPlan(1, UserPlanStatusExpired)
+	if err != nil {
+		t.Fatalf("complete current plan: %v", err)
+	}
+	if activated == nil || activated.Id != next.Id {
+		t.Fatalf("expected activation of %d, got %#v", next.Id, activated)
+	}
+
+	var oldRow, nextRow UserPlan
+	if err := DB.First(&oldRow, current.Id).Error; err != nil {
+		t.Fatalf("reload old row: %v", err)
+	}
+	if err := DB.First(&nextRow, next.Id).Error; err != nil {
+		t.Fatalf("reload next row: %v", err)
+	}
+	if oldRow.Status != UserPlanStatusExpired || oldRow.IsCurrent != 0 || oldRow.Pinned != 0 {
+		t.Fatalf("old status=%d current=%d pinned=%d", oldRow.Status, oldRow.IsCurrent, oldRow.Pinned)
+	}
+	if nextRow.IsCurrent != 1 || nextRow.Pinned != 0 {
+		t.Fatalf("next current=%d pinned=%d", nextRow.IsCurrent, nextRow.Pinned)
+	}
+}
+
+func TestGetEstimatedActivationTime_LockedTargetHasNoETA(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	target := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 1, Locked: 1, LockedBy: "admin",
+	})
+	eta, err := GetEstimatedActivationTime(target.Id)
+	if err != nil {
+		t.Fatalf("get ETA: %v", err)
+	}
+	if eta != 0 {
+		t.Fatalf("locked target ETA=%d, want 0", eta)
+	}
+}
+
+func TestGetEstimatedActivationTime_IgnoresLockedPredecessors(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 1, Locked: 1, LockedBy: "admin", PlanValidityDays: 365,
+	})
+	target := insertPinnedTransitionPlan(t, &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive,
+		QueuePosition: 2,
+	})
+	eta, err := GetEstimatedActivationTime(target.Id)
+	if err != nil {
+		t.Fatalf("get ETA: %v", err)
+	}
+	if time.UnixMilli(eta).After(time.Now().Add(60 * 24 * time.Hour)) {
+		t.Fatalf("ETA counted locked predecessor: %v", time.UnixMilli(eta))
+	}
+}

@@ -870,6 +870,7 @@ func AdminRevokePlan(c *gin.Context) {
 	updates := map[string]interface{}{
 		"status":     model.UserPlanStatusRevoked,
 		"is_current": 0,
+		"pinned":     0,
 		"updated_at": now,
 	}
 	if userPlan.QueuePosition > 0 {

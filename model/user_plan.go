@@ -909,9 +909,13 @@ func ToggleUserPlanAutoSwitch(userPlanId int, autoSwitch int) error {
 		defer InvalidateUserPlanCache(userPlan.UserId)
 	}
 
+	updates := map[string]interface{}{"auto_switch": autoSwitch}
+	if autoSwitch == 1 {
+		updates["pinned"] = 0
+	}
 	return DB.Model(&UserPlan{}).
 		Where("id = ?", userPlanId).
-		Update("auto_switch", autoSwitch).Error
+		Updates(updates).Error
 }
 
 // GetUserPlansByPlanId retrieves all user plans for a specific plan
@@ -944,7 +948,10 @@ func ExpireUserPlans() (int64, error) {
 	result := DB.Model(&UserPlan{}).
 		// Do not expire queued unactivated plans: their expires_at may be a display precompute value.
 		Where("status = ? AND expires_at > 0 AND expires_at < ? AND NOT (queue_position > 0 AND started_at = 0)", UserPlanStatusActive, now).
-		Update("status", UserPlanStatusExpired)
+		Updates(map[string]interface{}{
+			"status": UserPlanStatusExpired,
+			"pinned": 0,
+		})
 	return result.RowsAffected, result.Error
 }
 
@@ -1495,6 +1502,9 @@ func GetEstimatedActivationTime(userPlanId int) (int64, error) {
 	if err := DB.Preload("Plan").First(&targetPlan, userPlanId).Error; err != nil {
 		return 0, err
 	}
+	if targetPlan.Locked == 1 {
+		return 0, nil
+	}
 
 	if targetPlan.IsCurrent == 1 {
 		return targetPlan.StartedAt, nil // Already active
@@ -1522,7 +1532,7 @@ func GetEstimatedActivationTime(userPlanId int) (int64, error) {
 	// Get all queue plans before this one
 	var queuePlans []*UserPlan
 	err = DB.Preload("Plan").
-		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND queue_position < ?",
+		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND queue_position < ? AND locked != 1",
 			userId, UserPlanStatusActive, targetPlan.QueuePosition).
 		Order("queue_position ASC").
 		Find(&queuePlans).Error
@@ -1572,13 +1582,18 @@ func activateNextQueuedPlanWithTx(tx *gorm.DB, userId int) (*UserPlan, error) {
 	// Get next plan in queue
 	var nextPlan UserPlan
 	err := tx.Preload("Plan").
-		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0", userId, UserPlanStatusActive).
+		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND locked != 1", userId, UserPlanStatusActive).
 		Order("queue_position ASC").
 		First(&nextPlan).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil // No next plan
 		}
+		return nil, err
+	}
+	if err := tx.Model(&UserPlan{}).
+		Where("user_id = ? AND status = ? AND pinned = 1", userId, UserPlanStatusActive).
+		Update("pinned", 0).Error; err != nil {
 		return nil, err
 	}
 
@@ -1597,6 +1612,7 @@ func activateNextQueuedPlanWithTx(tx *gorm.DB, userId int) (*UserPlan, error) {
 	// Activate the plan
 	updates := map[string]interface{}{
 		"is_current":          1,
+		"pinned":              0,
 		"queue_position":      0,
 		"started_at":          now.UnixMilli(),
 		"expires_at":          expiresAt,
@@ -1638,6 +1654,7 @@ func CompleteCurrentPlan(userId int, completionStatus int) (*UserPlan, error) {
 	// Mark as completed/expired
 	updates := map[string]interface{}{
 		"is_current": 0,
+		"pinned":     0,
 		"status":     completionStatus,
 		"updated_at": now,
 	}
@@ -1674,6 +1691,7 @@ func CompleteUserPlanIfDepleted(userId int, userPlanId int) (*UserPlan, error) {
 				userPlanId, userId, UserPlanStatusActive).
 			Updates(map[string]interface{}{
 				"is_current": 0,
+				"pinned":     0,
 				"status":     UserPlanStatusCompleted,
 				"updated_at": now,
 			})

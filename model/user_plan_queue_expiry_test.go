@@ -121,3 +121,39 @@ func TestExpireUserPlans_DoesNotExpireQueuedUnactivatedPlans(t *testing.T) {
 		t.Fatalf("expected started expired plan to become expired, got status=%d", reloadedStarted.Status)
 	}
 }
+
+func TestExpireUserPlans_ClearsPinsOnlyOnRowsItExpires(t *testing.T) {
+	setupUserPlanSwitchTestDB(t)
+	now := time.Now()
+	queued := &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive, Pinned: 1,
+		QueuePosition: 1, StartedAt: 0, ExpiresAt: now.Add(-2 * time.Hour).UnixMilli(),
+	}
+	started := &UserPlan{
+		UserId: 1, Quota: 100, Status: UserPlanStatusActive, Pinned: 1,
+		StartedAt: now.Add(-48 * time.Hour).UnixMilli(), ExpiresAt: now.Add(-time.Hour).UnixMilli(),
+	}
+	if err := DB.Create(queued).Error; err != nil {
+		t.Fatalf("create queued plan: %v", err)
+	}
+	if err := DB.Create(started).Error; err != nil {
+		t.Fatalf("create started plan: %v", err)
+	}
+
+	if _, err := ExpireUserPlans(); err != nil {
+		t.Fatalf("expire user plans: %v", err)
+	}
+	var queuedRow, startedRow UserPlan
+	if err := DB.First(&queuedRow, queued.Id).Error; err != nil {
+		t.Fatalf("reload queued row: %v", err)
+	}
+	if err := DB.First(&startedRow, started.Id).Error; err != nil {
+		t.Fatalf("reload started row: %v", err)
+	}
+	if queuedRow.Status != UserPlanStatusActive || queuedRow.Pinned != 1 {
+		t.Fatalf("queued status=%d pinned=%d", queuedRow.Status, queuedRow.Pinned)
+	}
+	if startedRow.Status != UserPlanStatusExpired || startedRow.Pinned != 0 {
+		t.Fatalf("expired status=%d pinned=%d", startedRow.Status, startedRow.Pinned)
+	}
+}

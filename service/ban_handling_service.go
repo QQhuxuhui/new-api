@@ -192,6 +192,7 @@ func OnPermanentBan(userId int, adminId int, adminUsername string, reason string
 			Where("id = ?", currentPlan.Id).
 			Updates(map[string]interface{}{
 				"is_current": 0,
+				"pinned":     0,
 				"status":     model.UserPlanStatusForfeited,
 				"updated_at": now,
 			}).Error
@@ -233,6 +234,7 @@ func OnPermanentBan(userId int, adminId int, adminUsername string, reason string
 				Where("id = ?", plan.Id).
 				Updates(map[string]interface{}{
 					"queue_position": 0,
+					"pinned":         0,
 					"status":         model.UserPlanStatusForfeited,
 					"updated_at":     now,
 				})
@@ -323,6 +325,7 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 			Where("id = ?", cp.UserPlanId).
 			Updates(map[string]interface{}{
 				"is_current": 1,
+				"pinned":     0,
 				"status":     model.UserPlanStatusActive,
 				"expires_at": newExpiresAt,
 				"updated_at": now,
@@ -351,6 +354,7 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 					Where("id = ?", qp.UserPlanId).
 					Updates(map[string]interface{}{
 						"status":         model.UserPlanStatusActive,
+						"pinned":         0,
 						"queue_position": qp.QueuePosition,
 						"updated_at":     now,
 					}).Error

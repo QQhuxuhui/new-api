@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -164,5 +165,69 @@ func TestAdminForceSwitch_PinAndEligibilitySemanticsInBothCompatibilityBranches(
 				)
 			}
 		})
+	}
+}
+
+func TestAdminRevokePlan_ClearsRevokedAndActivatedPins(t *testing.T) {
+	previousDB := model.DB
+	previousRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.RedisEnabled = previousRedisEnabled
+	})
+
+	dsn := fmt.Sprintf("file:revoke_pin_%d?mode=memory&cache=shared", time.Now().UnixNano())
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	model.DB = db
+	if err := db.AutoMigrate(&model.User{}, &model.Plan{}, &model.UserPlan{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	user := &model.User{Username: "revoke-pin-user", Password: "12345678", Status: 1}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	current := &model.UserPlan{
+		UserId: user.Id, Quota: 100, Status: model.UserPlanStatusActive,
+		IsCurrent: 1, Pinned: 1,
+	}
+	next := &model.UserPlan{
+		UserId: user.Id, Quota: 100, Status: model.UserPlanStatusActive,
+		QueuePosition: 1, Pinned: 1,
+	}
+	if err := db.Create(current).Error; err != nil {
+		t.Fatalf("create current plan: %v", err)
+	}
+	if err := db.Create(next).Error; err != nil {
+		t.Fatalf("create queued plan: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: strconv.Itoa(current.Id)}}
+	context.Set("id", 99)
+	context.Set("username", "admin")
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/user_plan/revoke", strings.NewReader(`{}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	AdminRevokePlan(context)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var oldRow, nextRow model.UserPlan
+	if err := db.First(&oldRow, current.Id).Error; err != nil {
+		t.Fatalf("reload revoked plan: %v", err)
+	}
+	if err := db.First(&nextRow, next.Id).Error; err != nil {
+		t.Fatalf("reload activated plan: %v", err)
+	}
+	if oldRow.Status != model.UserPlanStatusRevoked || oldRow.IsCurrent != 0 || oldRow.Pinned != 0 {
+		t.Fatalf("revoked status=%d current=%d pinned=%d", oldRow.Status, oldRow.IsCurrent, oldRow.Pinned)
+	}
+	if nextRow.IsCurrent != 1 || nextRow.Pinned != 0 {
+		t.Fatalf("next current=%d pinned=%d", nextRow.IsCurrent, nextRow.Pinned)
 	}
 }

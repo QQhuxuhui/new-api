@@ -158,8 +158,8 @@ func SelectPlanForRequest(userId int, modelName string) (*PlanSelectionResult, e
 	}
 
 	// 6. Check for smart auto-switch (upgrade to higher priority if available)
-	if currentPlan.AutoSwitch == 1 {
-		higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
+	if currentPlan.AutoSwitch == 1 && currentPlan.Pinned != 1 {
+		higherPlan := findHigherPriorityPlanWithQuotaForModel(validPlans, currentPlan, modelName)
 		if higherPlan != nil {
 			// DB verification: confirm the candidate actually has quota (cache may be stale)
 			freshPlan, freshErr := model.GetUserPlanById(higherPlan.Id)
@@ -207,6 +207,37 @@ func findHigherPriorityPlanWithQuota(plans []*model.UserPlan, current *model.Use
 		}
 	}
 	return nil
+}
+
+func findHigherPriorityPlanWithQuotaForModel(plans []*model.UserPlan, current *model.UserPlan, modelName string) *model.UserPlan {
+	if current == nil {
+		return nil
+	}
+	currentPriority := current.GetPriority()
+	for _, plan := range plans {
+		if plan.GetPriority() > currentPriority && plan.IsValid() && hasPlanAvailableQuota(plan) && planCanServeModel(plan, modelName) {
+			return plan
+		}
+	}
+	return nil
+}
+
+func planCanServeModel(plan *model.UserPlan, modelName string) bool {
+	if modelName == "" {
+		return true
+	}
+	for group := range expandChannelGroupsToSet(plan.GetChannelGroups()) {
+		for retry := 0; ; retry++ {
+			channel, _, err := model.GetRandomSatisfiedChannelDetailed(group, modelName, retry, false)
+			if err == nil && channel != nil {
+				return true
+			}
+			if err != nil {
+				break
+			}
+		}
+	}
+	return false
 }
 
 // hasPlanAvailableQuota checks if a plan has available quota
@@ -295,8 +326,9 @@ func UserToggleAutoSwitch(userId int, userPlanId int, enabled bool) error {
 		return errors.New("plan does not belong to user")
 	}
 
-	// Check permission
-	if !userPlan.CanUserToggleAuto() {
+	// A pinned, unlocked owner can explicitly restore automatic scheduling.
+	restorePinnedScheduling := enabled && userPlan.Pinned == 1 && !userPlan.IsLocked()
+	if !userPlan.CanUserToggleAuto() && !restorePinnedScheduling {
 		return errors.New("you don't have permission to toggle auto-switch")
 	}
 
