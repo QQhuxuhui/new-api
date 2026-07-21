@@ -185,6 +185,38 @@ func WssAuth(c *gin.Context) {
 
 }
 
+// TokenOrUserAuth allows either session-based user auth or API token auth.
+// Used for endpoints that need to be accessible from both the dashboard and API clients.
+// 会话分支不要求 New-Api-User 请求头（浏览器 <a>/<video> 直链无法携带），
+// 仅校验登录用户存在且未被封禁。
+func TokenOrUserAuth() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		if session.Get("username") != nil {
+			userId, ok := session.Get("id").(int)
+			if !ok || userId <= 0 {
+				abortWithOpenAiMessage(c, http.StatusUnauthorized, "无权进行此操作，登录用户信息无效")
+				return
+			}
+			user, err := model.GetUserById(userId, false)
+			if err != nil || user == nil || user.Id == 0 {
+				abortWithOpenAiMessage(c, http.StatusUnauthorized, "无权进行此操作，用户不存在或已失效")
+				return
+			}
+			if user.Status != common.UserStatusEnabled {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "用户已被封禁")
+				return
+			}
+			c.Set("id", user.Id)
+			c.Set("username", user.Username)
+			c.Set("role", user.Role)
+			c.Next()
+			return
+		}
+		TokenAuth()(c)
+	}
+}
+
 func TokenAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		// 先检测是否为ws

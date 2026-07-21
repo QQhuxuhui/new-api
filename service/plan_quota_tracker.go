@@ -81,15 +81,29 @@ func CheckDailyQuotaBeforeConsume(userPlanId int, quotaAmount int64) error {
 
 // getDailyQuotaKey returns the Redis key for daily quota tracking
 func getDailyQuotaKey(userPlanId int) string {
-	today := time.Now().Format("20060102")
-	return fmt.Sprintf(dailyQuotaKeyFmt, userPlanId, today)
+	return getDailyQuotaKeyAt(userPlanId, time.Now())
+}
+
+func getDailyQuotaKeyAt(userPlanId int, billingTime time.Time) string {
+	return fmt.Sprintf(dailyQuotaKeyFmt, userPlanId, billingTime.Format("20060102"))
 }
 
 // getDailyQuotaTTL calculates TTL until end of day
 func getDailyQuotaTTL() time.Duration {
 	now := time.Now()
-	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 999999999, now.Location())
-	return endOfDay.Sub(now)
+	return getDailyQuotaTTLAt(now, now)
+}
+
+func getDailyQuotaTTLAt(billingTime, now time.Time) time.Duration {
+	endOfDay := time.Date(billingTime.Year(), billingTime.Month(), billingTime.Day(), 23, 59, 59, 999999999, billingTime.Location())
+	if !endOfDay.After(now) {
+		return 0
+	}
+	ttl := endOfDay.Sub(now)
+	if ttl < time.Second {
+		return time.Second
+	}
+	return ttl
 }
 
 // getRateLimitKey returns the Redis key for rate limit tracking
@@ -138,6 +152,41 @@ func IncrDailyQuotaUsage(userPlanId int, amount int64) error {
 	pipe.Expire(ctx, key, ttl)
 
 	_, err := pipe.Exec(ctx)
+	return err
+}
+
+var incrDailyQuotaOnceScript = redis.NewScript(`
+local inserted = redis.call('SETNX', KEYS[2], '1')
+if inserted == 1 then
+  redis.call('INCRBY', KEYS[1], ARGV[2])
+end
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+redis.call('EXPIRE', KEYS[2], ARGV[4])
+return inserted
+`)
+
+func IncrDailyQuotaUsageOnce(userPlanId int, amount int64, eventID string) error {
+	return IncrDailyQuotaUsageOnceAt(userPlanId, amount, eventID, time.Now())
+}
+
+func IncrDailyQuotaUsageOnceAt(userPlanId int, amount int64, eventID string, billingTime time.Time) error {
+	if !common.RedisEnabled || amount <= 0 {
+		return nil
+	}
+	const eventTTL = 90 * 24 * time.Hour
+	ctx := context.Background()
+	eventKey := "plan_daily_task_event:" + eventID
+	now := time.Now().In(billingTime.Location())
+	ttl := getDailyQuotaTTLAt(billingTime, now)
+	if ttl <= 0 {
+		return common.RDB.SetNX(ctx, eventKey, "1", eventTTL).Err()
+	}
+	key := getDailyQuotaKeyAt(userPlanId, billingTime)
+	ttlSeconds := int64((ttl + time.Second - 1) / time.Second)
+	const eventTTLSeconds = int64(eventTTL / time.Second)
+	_, err := incrDailyQuotaOnceScript.Run(
+		ctx, common.RDB, []string{key, eventKey}, eventID, amount, ttlSeconds, eventTTLSeconds,
+	).Result()
 	return err
 }
 
@@ -200,21 +249,27 @@ type RateLimitRecord struct {
 // RecordConsumptionForRateLimit records a consumption for rate limiting
 // Uses Redis Sorted Set with timestamp as score
 func RecordConsumptionForRateLimit(userPlanId int, amountUSD float64, requestId string) error {
+	return RecordConsumptionForRateLimitAt(userPlanId, amountUSD, requestId, time.Now().UnixMilli())
+}
+
+func RecordConsumptionForRateLimitAt(userPlanId int, amountUSD float64, requestId string, recordedAt int64) error {
 	if !common.RedisEnabled {
 		return nil
 	}
 
 	key := getRateLimitKey(userPlanId)
 	ctx := context.Background()
-	now := time.Now().UnixMilli()
+	if recordedAt <= 0 {
+		recordedAt = time.Now().UnixMilli()
+	}
 
 	// Member format: timestamp_amount_requestId
-	member := fmt.Sprintf("%d_%.4f_%s", now, amountUSD, requestId)
+	member := fmt.Sprintf("%d_%.4f_%s", recordedAt, amountUSD, requestId)
 
 	pipe := common.RDB.TxPipeline()
 	// Add record to sorted set
 	pipe.ZAdd(ctx, key, &redis.Z{
-		Score:  float64(now),
+		Score:  float64(recordedAt),
 		Member: member,
 	})
 	// Set TTL to ensure cleanup

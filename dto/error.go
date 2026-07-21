@@ -31,6 +31,14 @@ type GeneralErrorResponse struct {
 	} `json:"response"`
 }
 
+func (e GeneralErrorResponse) TryToOpenAIError() *types.OpenAIError {
+	if e.Error.Message != "" {
+		openAIError := e.Error
+		return &openAIError
+	}
+	return nil
+}
+
 func (e GeneralErrorResponse) ToMessage() string {
 	if e.Error.Message != "" {
 		return e.Error.Message

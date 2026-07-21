@@ -154,7 +154,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 }
 
 // ModelPriceHelperPerCall 按次计费的 PriceHelper (MJ、Task)
-func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) types.PerCallPriceData {
+func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
 
 	// 获取渠道倍率，默认为 1.0
@@ -170,23 +170,61 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) types.
 	}
 
 	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
-	// 如果没有配置价格，则使用默认价格
+	usePrice := success
+	var modelRatio float64
+
+	// Prefer a fixed task price, then fall back to token/model-ratio billing.
 	if !success {
 		defaultPrice, ok := ratio_setting.GetDefaultModelPriceMap()[info.OriginModelName]
-		if !ok {
-			modelPrice = 0.1
-		} else {
+		if ok {
 			modelPrice = defaultPrice
+			usePrice = true
+		} else {
+			var ratioSuccess bool
+			var matchName string
+			modelRatio, ratioSuccess, matchName = ratio_setting.GetModelRatio(info.OriginModelName)
+			if !ratioSuccess && !info.UserSetting.AcceptUnsetRatioModel {
+				return types.PriceData{}, fmt.Errorf("模型 %s 倍率或价格未配置，请联系管理员设置或开始自用模式；Model %s ratio or price not set, please set or start self-use mode", matchName, matchName)
+			}
 		}
 	}
-	// 应用渠道倍率：模型价格 * 分组倍率 * 渠道倍率 * 渠道模型倍率
-	quota := int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * channelRatio * channelModelRatio)
-	priceData := types.PerCallPriceData{
-		ModelPrice:     modelPrice,
-		Quota:          quota,
-		GroupRatioInfo: groupRatioInfo,
+
+	var quota int
+	freeModel := false
+	if usePrice {
+		var err error
+		quota, err = common.QuotaFromFloatStrict(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * channelRatio * channelModelRatio)
+		if err != nil {
+			return types.PriceData{}, err
+		}
+		if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && (groupRatioInfo.GroupRatio == 0 || modelPrice == 0) {
+			quota = 0
+			freeModel = true
+		}
+	} else {
+		var err error
+		quota, err = common.QuotaFromFloatStrict(modelRatio / 2 * common.QuotaPerUnit * groupRatioInfo.GroupRatio * channelRatio * channelModelRatio)
+		if err != nil {
+			return types.PriceData{}, err
+		}
+		modelPrice = -1
+		if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && (groupRatioInfo.GroupRatio == 0 || modelRatio == 0) {
+			quota = 0
+			freeModel = true
+		}
 	}
-	return priceData
+
+	priceData := types.PriceData{
+		FreeModel:         freeModel,
+		ModelPrice:        modelPrice,
+		ModelRatio:        modelRatio,
+		UsePrice:          usePrice,
+		Quota:             quota,
+		ChannelRatio:      channelRatio,
+		ChannelModelRatio: channelModelRatio,
+		GroupRatioInfo:    groupRatioInfo,
+	}
+	return priceData, nil
 }
 
 func ContainPriceOrRatio(modelName string) bool {

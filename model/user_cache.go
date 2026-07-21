@@ -54,12 +54,23 @@ func getUserCacheKey(userId int) string {
 	return fmt.Sprintf("user:%d", userId)
 }
 
+func getUserCacheGenerationKey(userId int) string {
+	return fmt.Sprintf("user:%d:generation", userId)
+}
+
+func getUserCacheGeneration(userId int) (int64, error) {
+	if !common.RedisEnabled {
+		return 0, nil
+	}
+	return common.RedisGetGeneration(getUserCacheGenerationKey(userId))
+}
+
 // invalidateUserCache clears user cache
 func invalidateUserCache(userId int) error {
-	if !common.RedisEnabled {
+	if !common.RedisEnabled || common.RDB == nil {
 		return nil
 	}
-	return common.RedisDelKey(getUserCacheKey(userId))
+	return common.RedisBumpGenerationAndDelete(getUserCacheGenerationKey(userId), getUserCacheKey(userId))
 }
 
 // InvalidateUserCache clears the cached user record after a transactional
@@ -68,16 +79,17 @@ func InvalidateUserCache(userId int) error {
 	return invalidateUserCache(userId)
 }
 
-// updateUserCache updates all user cache fields using hash
-func updateUserCache(user User) error {
+func updateUserCacheAtGeneration(user User, generation int64) (bool, error) {
 	if !common.RedisEnabled {
-		return nil
+		return false, nil
 	}
 
-	return common.RedisHSetObj(
+	return common.RedisHSetObjIfGeneration(
 		getUserCacheKey(user.Id),
 		user.ToBaseUser(),
 		time.Duration(common.RedisKeyCacheSeconds())*time.Second,
+		getUserCacheGenerationKey(user.Id),
+		generation,
 	)
 }
 
@@ -85,16 +97,7 @@ func updateUserCache(user User) error {
 func GetUserCache(userId int) (userCache *UserBase, err error) {
 	var user *User
 	var fromDB bool
-	defer func() {
-		// Update Redis cache asynchronously on successful DB read
-		if shouldUpdateRedis(fromDB, err) && user != nil {
-			gopool.Go(func() {
-				if err := updateUserCache(*user); err != nil {
-					common.SysLog("failed to update user status cache: " + err.Error())
-				}
-			})
-		}
-	}()
+	var refillGeneration int64
 
 	// Try getting from Redis first
 	userCache, err = cacheGetUserBase(userId)
@@ -104,6 +107,10 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 
 	// If Redis fails, get from DB
 	fromDB = true
+	refillGeneration, generationErr := getUserCacheGeneration(userId)
+	if generationErr != nil {
+		common.SysLog("failed to read user cache generation: " + generationErr.Error())
+	}
 	user, err = GetUserById(userId, false)
 	if err != nil {
 		return nil, err // Return nil and error if DB lookup fails
@@ -119,6 +126,13 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 		Setting:        user.Setting,
 		Email:          user.Email,
 		MaxConcurrency: user.MaxConcurrency,
+	}
+	if generationErr == nil && shouldUpdateRedis(fromDB, nil) {
+		gopool.Go(func() {
+			if _, cacheErr := updateUserCacheAtGeneration(*user, refillGeneration); cacheErr != nil {
+				common.SysLog("failed to update user status cache: " + cacheErr.Error())
+			}
+		})
 	}
 
 	return userCache, nil
@@ -142,7 +156,9 @@ func cacheIncrUserQuota(userId int, delta int64) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisHIncrBy(getUserCacheKey(userId), "Quota", delta)
+	return common.RedisBumpGenerationAndHIncrByIfExists(
+		getUserCacheGenerationKey(userId), getUserCacheKey(userId), "Quota", delta,
+	)
 }
 
 func cacheDecrUserQuota(userId int, delta int64) error {
@@ -199,35 +215,45 @@ func updateUserStatusCache(userId int, status bool) error {
 	if !status {
 		statusInt = common.UserStatusDisabled
 	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Status", fmt.Sprintf("%d", statusInt))
+	return common.RedisBumpGenerationAndHSetIfExists(
+		getUserCacheGenerationKey(userId), getUserCacheKey(userId), "Status", fmt.Sprintf("%d", statusInt),
+	)
 }
 
 func updateUserQuotaCache(userId int, quota int) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Quota", fmt.Sprintf("%d", quota))
+	return common.RedisBumpGenerationAndHSetIfExists(
+		getUserCacheGenerationKey(userId), getUserCacheKey(userId), "Quota", fmt.Sprintf("%d", quota),
+	)
 }
 
 func updateUserGroupCache(userId int, group string) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Group", group)
+	return common.RedisBumpGenerationAndHSetIfExists(
+		getUserCacheGenerationKey(userId), getUserCacheKey(userId), "Group", group,
+	)
 }
 
 func updateUserNameCache(userId int, username string) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Username", username)
+	return common.RedisBumpGenerationAndHSetIfExists(
+		getUserCacheGenerationKey(userId), getUserCacheKey(userId), "Username", username,
+	)
 }
 
 func updateUserSettingCache(userId int, setting string) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Setting", setting)
+	return common.RedisBumpGenerationAndHSetIfExists(
+		getUserCacheGenerationKey(userId), getUserCacheKey(userId), "Setting", setting,
+	)
 }
 
 // ------------------ User concurrency counters ------------------

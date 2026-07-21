@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -1053,6 +1054,22 @@ func RelayNotFound(c *gin.Context) {
 	})
 }
 
+// RelayTaskFetch 任务查询入口：仅透传查询，不进入渠道重试与计费流程。
+func RelayTaskFetch(c *gin.Context) {
+	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, &dto.TaskError{
+			Code:       "gen_relay_info_failed",
+			Message:    err.Error(),
+			StatusCode: http.StatusInternalServerError,
+		})
+		return
+	}
+	if taskErr := relay.RelayTaskFetch(c, relayInfo.RelayMode); taskErr != nil {
+		respondTaskError(c, taskErr)
+	}
+}
+
 func RelayTask(c *gin.Context) {
 	channelId := c.GetInt("channel_id")
 	group := c.GetString("group")
@@ -1062,7 +1079,26 @@ func RelayTask(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	taskErr := taskRelayHandler(c, relayInfo)
+
+	isTaskFetchMode := isTaskFetchRelayMode(relayInfo.RelayMode)
+	if !isTaskFetchMode {
+		// remix/续作：查找原始任务并锁定渠道（重试时复用同一渠道）
+		if taskErr := relay.ResolveOriginTask(c, relayInfo); taskErr != nil {
+			respondTaskError(c, taskErr)
+			return
+		}
+		channelId = c.GetInt("channel_id")
+	}
+	var responseBuffer *taskResponseBuffer
+	var originalWriter gin.ResponseWriter
+	if !isTaskFetchMode {
+		originalWriter = c.Writer
+		responseBuffer = newTaskResponseBuffer(originalWriter)
+		c.Writer = responseBuffer
+		defer func() { c.Writer = originalWriter }()
+	}
+
+	result, taskErr := taskRelayHandler(c, relayInfo)
 
 	// Record channel health based on result
 	if taskErr == nil {
@@ -1086,18 +1122,36 @@ func RelayTask(c *gin.Context) {
 		if !shouldRetryTaskRelay(c, channelId, taskErr, remainingRetries) {
 			break
 		}
-		channel, newAPIError := getChannel(c, group, originalModel, attemptsTask, priorityIndex)
-		if newAPIError != nil {
-			logger.LogError(c, fmt.Sprintf("CacheGetRandomSatisfiedChannel failed: %s", newAPIError.Error()))
-			taskErr = service.TaskErrorWrapperLocal(newAPIError.Err, "get_channel_failed", http.StatusInternalServerError)
-			if types.IsSkipRetryError(newAPIError) {
+
+		var channel *model.Channel
+		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
+			// 渠道已锁定（remix/续作）：复用同一渠道重试，轮换 key
+			if attemptsTask >= common.RetryTimes {
 				break
 			}
-			continue
-		}
-		if channel == nil {
-			// 当前优先级无可用渠道，继续下一优先级
-			continue
+			channel = lockedCh
+			if setupErr := middleware.SetupContextForSelectedChannel(c, channel, originalModel); setupErr != nil {
+				taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
+				break
+			}
+			if relayInfo.LockedChannelKey != "" {
+				common.SetContextKey(c, constant.ContextKeyChannelKey, relayInfo.LockedChannelKey)
+			}
+		} else {
+			var newAPIError *types.NewAPIError
+			channel, newAPIError = getChannel(c, group, originalModel, attemptsTask, priorityIndex)
+			if newAPIError != nil {
+				logger.LogError(c, fmt.Sprintf("CacheGetRandomSatisfiedChannel failed: %s", newAPIError.Error()))
+				taskErr = service.TaskErrorWrapperLocal(newAPIError.Err, "get_channel_failed", http.StatusInternalServerError)
+				if types.IsSkipRetryError(newAPIError) {
+					break
+				}
+				continue
+			}
+			if channel == nil {
+				// 当前优先级无可用渠道，继续下一优先级
+				continue
+			}
 		}
 
 		channelId = channel.Id
@@ -1108,14 +1162,17 @@ func RelayTask(c *gin.Context) {
 
 		requestBody, _ := common.GetRequestBody(c)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
-		taskErr = taskRelayHandler(c, relayInfo)
+		if responseBuffer != nil {
+			responseBuffer.Reset()
+		}
+		result, taskErr = taskRelayHandler(c, relayInfo)
 		attemptsTask++
 
 		// Record channel health based on retry result
 		if taskErr == nil {
 			// Success - record to health tracker
 			service.RecordChannelSuccess(channelId)
-			return // Exit immediately on success
+			break
 		}
 
 		// Error occurred - check if it should trigger health tracking
@@ -1130,7 +1187,32 @@ func RelayTask(c *gin.Context) {
 		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
 	}
+
+	finalizeFailed := false
+	if taskErr == nil && result == nil {
+		taskErr = service.TaskErrorWrapperLocal(errors.New("task adaptor returned no result"), "empty_task_result", http.StatusInternalServerError)
+	}
+	// 成功：结算 + 日志 + 插入任务
+	if taskErr == nil && result != nil {
+		if finalizeErr := finalizeTaskSubmit(c, relayInfo, result); finalizeErr != nil {
+			finalizeFailed = true
+			taskErr = service.TaskErrorWrapperLocal(finalizeErr, "task_finalize_failed", http.StatusInternalServerError)
+		} else if responseBuffer != nil {
+			if commitErr := responseBuffer.Commit(); commitErr != nil {
+				logger.LogError(c, fmt.Sprintf("commit task response failed: %v", commitErr))
+			}
+		}
+	}
+
 	if taskErr != nil {
+		if responseBuffer != nil {
+			responseBuffer.Reset()
+			c.Writer = originalWriter
+		}
+		// 提交失败：按计费来源返还预扣费额度
+		if !isTaskFetchMode && !finalizeFailed {
+			service.ReturnPreConsumedQuota(c, relayInfo)
+		}
 		if service.ShouldUseUnifiedTaskUpstreamMessage(taskErr) {
 			taskErr.Message = service.UnifiedUpstreamClientMessage
 		} else if taskErr.StatusCode == http.StatusTooManyRequests {
@@ -1140,15 +1222,196 @@ func RelayTask(c *gin.Context) {
 	}
 }
 
-func taskRelayHandler(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dto.TaskError {
-	var err *dto.TaskError
-	switch relayInfo.RelayMode {
+func isTaskFetchRelayMode(relayMode int) bool {
+	switch relayMode {
 	case relayconstant.RelayModeSunoFetch, relayconstant.RelayModeSunoFetchByID, relayconstant.RelayModeVideoFetchByID:
-		err = relay.RelayTaskFetch(c, relayInfo.RelayMode)
-	default:
-		err = relay.RelayTaskSubmit(c, relayInfo)
+		return true
 	}
-	return err
+	return false
+}
+
+// respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
+func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
+	if service.ShouldUseUnifiedTaskUpstreamMessage(taskErr) {
+		taskErr.Message = service.UnifiedUpstreamClientMessage
+	} else if taskErr.StatusCode == http.StatusTooManyRequests {
+		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
+	}
+	c.JSON(taskErr.StatusCode, taskErr)
+}
+
+// finalizeTaskSubmit 任务提交成功后的统一结算：按三级计费落账（日卡/套餐/钱包）、
+// 记录消费日志、写入任务（含异步退款/差额结算所需的计费上下文）。
+func finalizeTaskSubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo, result *relay.TaskSubmitResult) error {
+	dailyPoolDate := ""
+	if relayInfo.BillingSource == service.BillingSourceDailyPool {
+		dailyPoolDate = model.GetTodayDate()
+	}
+	if settleErr := service.PostConsumeQuota(relayInfo, result.Quota-relayInfo.FinalPreConsumedQuota, relayInfo.FinalPreConsumedQuota, true); settleErr != nil {
+		service.ReturnPreConsumedQuota(c, relayInfo)
+		return fmt.Errorf("settle task billing: %w", settleErr)
+	}
+	task := buildTaskFromSubmit(relayInfo, result)
+	if dailyPoolDate != "" {
+		task.PrivateData.DailyPoolDate = dailyPoolDate
+	}
+	if insertErr := task.Insert(); insertErr != nil {
+		persistedTask, exists, lookupErr := findTaskAfterAmbiguousInsert(task)
+		if lookupErr != nil {
+			return fmt.Errorf("%w; verify task insert: %v", insertErr, lookupErr)
+		}
+		if exists {
+			finishTaskSubmitAccounting(c, relayInfo, persistedTask)
+			return nil
+		}
+		// A transient create failure must not leave an invisible charge. Retry as
+		// a failed compensation record first; its non-zero quota is recoverable by
+		// the normal transactional refund sweep even if the immediate refund fails.
+		task.ID = 0
+		task.Status = model.TaskStatusFailure
+		task.Progress = "100%"
+		task.FinishTime = time.Now().Unix()
+		task.FailReason = "task insert failed; billing compensation pending"
+		if recoveryInsertErr := task.Insert(); recoveryInsertErr == nil {
+			service.RefundTaskQuota(c.Request.Context(), task, task.FailReason)
+			return insertErr
+		} else {
+			persistedRecovery, recoveryExists, recoveryLookupErr := findTaskAfterAmbiguousInsert(task)
+			if recoveryLookupErr != nil {
+				return fmt.Errorf("%w; task recovery insert: %v; verify recovery insert: %v", insertErr, recoveryInsertErr, recoveryLookupErr)
+			}
+			if recoveryExists {
+				service.RefundTaskQuota(c.Request.Context(), persistedRecovery, persistedRecovery.FailReason)
+				return insertErr
+			}
+			var compensation *model.TaskBillingCompensation
+			var compensationErr error
+			for attempt := 0; attempt < 3; attempt++ {
+				compensation, compensationErr = model.CreateTaskBillingCompensation(task, "task insert failed")
+				if compensationErr == nil {
+					break
+				}
+			}
+			if compensationErr == nil {
+				if !service.RefundTaskBillingCompensation(c.Request.Context(), compensation) {
+					return fmt.Errorf("%w; task recovery insert: %v; durable compensation pending", insertErr, recoveryInsertErr)
+				}
+				return insertErr
+			}
+			// An insert error can be an acknowledgement loss after a committed
+			// outbox row. Direct refund here could therefore mint quota twice.
+			return fmt.Errorf("%w; task recovery insert: %v; compensation outbox state unknown: %v", insertErr, recoveryInsertErr, compensationErr)
+		}
+	}
+	finishTaskSubmitAccounting(c, relayInfo, task)
+	return nil
+}
+
+func findTaskAfterAmbiguousInsert(expected *model.Task) (*model.Task, bool, error) {
+	if expected == nil || expected.TaskID == "" {
+		return nil, false, errors.New("task snapshot is required")
+	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		persisted, exists, err := model.GetByOnlyTaskId(expected.TaskID)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !exists {
+			return nil, false, nil
+		}
+		if persisted.UserId != expected.UserId || persisted.ChannelId != expected.ChannelId ||
+			persisted.Status != expected.Status || persisted.Quota != expected.Quota {
+			return nil, false, fmt.Errorf("task id %s belongs to a different task snapshot", expected.TaskID)
+		}
+		return persisted, true, nil
+	}
+	return nil, false, lastErr
+}
+
+func finishTaskSubmitAccounting(c *gin.Context, relayInfo *relaycommon.RelayInfo, task *model.Task) {
+	if relayInfo.FundingSettledQuota > 0 {
+		relayInfo.PriceData.Quota = task.Quota
+	}
+	service.LogTaskConsumption(c, relayInfo)
+}
+
+func buildTaskFromSubmit(relayInfo *relaycommon.RelayInfo, result *relay.TaskSubmitResult) *model.Task {
+	taskCtx := &model.TaskInitContext{
+		UserId:            relayInfo.UserId,
+		UsingGroup:        relayInfo.UsingGroup,
+		ChannelId:         relayInfo.ChannelId,
+		UpstreamModelName: relayInfo.UpstreamModelName,
+		OriginModelName:   relayInfo.OriginModelName,
+		PublicTaskID:      relayInfo.PublicTaskID,
+		UserPlanId:        relayInfo.UserPlanId,
+		BillingSource:     relayInfo.BillingSource,
+		TokenId:           relayInfo.TokenId,
+		NodeName:          common.NodeName,
+		BillingContext: &model.TaskBillingContext{
+			ModelPrice:        relayInfo.PriceData.ModelPrice,
+			GroupRatio:        relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+			ModelRatio:        relayInfo.PriceData.ModelRatio,
+			ChannelRatio:      relayInfo.PriceData.ChannelRatio,
+			ChannelModelRatio: relayInfo.PriceData.ChannelModelRatio,
+			OtherRatios:       relayInfo.PriceData.OtherRatios(),
+			OriginModelName:   relayInfo.OriginModelName,
+			PerCallBilling:    common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+		},
+	}
+	if relayInfo.BillingSource == service.BillingSourceDailyPool {
+		taskCtx.DailyPoolDate = model.GetTodayDate()
+	}
+	if relayInfo.ChannelMeta != nil {
+		taskCtx.ChannelType = relayInfo.ChannelMeta.ChannelType
+		taskCtx.ChannelApiKey = relayInfo.ChannelMeta.ApiKey
+	}
+
+	task := model.InitTask(result.Platform, taskCtx)
+	tokenChargedQuota := relayInfo.TokenSettledQuota
+	task.PrivateData.TokenChargedQuota = &tokenChargedQuota
+	task.PrivateData.TokenQuotaEnabled = !relayInfo.IsPlayground && relayInfo.TokenId > 0 &&
+		(!relayInfo.TokenUnlimited || relayInfo.TokenSettledQuota > 0)
+	if task.PrivateData.BillingContext != nil && task.PrivateData.BillingContext.PerCallBilling {
+		task.BillingStatus = model.TaskBillingSettled
+	} else {
+		task.BillingStatus = model.TaskBillingWaiting
+	}
+	// Keep the public task ID returned by the adaptor. The provider ID is stored
+	// separately and is only used for upstream polling/content requests.
+	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
+	task.Quota = result.Quota
+	if relayInfo.FundingSettledQuota > 0 {
+		task.Quota = relayInfo.FundingSettledQuota
+	}
+	// 混合计费：落库实际分账，异步退款/补扣按此逆向
+	if relayInfo.BillingSource == service.BillingSourcePlanAndUserBalance {
+		planCharge := relayInfo.FundingSettledPlanQuota
+		walletCharge := relayInfo.FundingSettledWalletQuota
+		if relayInfo.FundingSettledQuota == 0 {
+			planCharge = int64(relayInfo.PlanPreConsumeQuota) + relayInfo.PlanOverflowChargedQuota
+			if planCharge > int64(task.Quota) {
+				planCharge = int64(task.Quota)
+			}
+			walletCharge = int64(task.Quota) - planCharge
+		}
+		if planCharge < 0 {
+			planCharge = 0
+		}
+		task.PrivateData.PlanChargedQuota = planCharge
+		task.PrivateData.WalletChargedQuota = walletCharge
+	}
+	task.Data = result.TaskData
+	task.Action = relayInfo.Action
+	return task
+}
+
+func taskRelayHandler(c *gin.Context, relayInfo *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+	if isTaskFetchRelayMode(relayInfo.RelayMode) {
+		return nil, relay.RelayTaskFetch(c, relayInfo.RelayMode)
+	}
+	return relay.RelayTaskSubmit(c, relayInfo)
 }
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError, retryTimes int) bool {

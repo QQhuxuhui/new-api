@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -115,12 +116,27 @@ func main() {
 
 	go controller.AutomaticallyTestChannels()
 
+	// 注入任务轮询使用的适配器工厂（打破 service -> relay 循环依赖），必须先于轮询启动
+	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
+		adaptor := relay.GetTaskAdaptor(platform)
+		if adaptor == nil {
+			return nil
+		}
+		return adaptor
+	}
+
 	if common.IsMasterNode && constant.UpdateTask {
 		gopool.Go(func() {
 			controller.UpdateMidjourneyTaskBulk()
 		})
 		gopool.Go(func() {
 			controller.UpdateTaskBulk()
+		})
+	} else if common.IsMasterNode {
+		// Financial reconciliation must keep running even when operators disable
+		// provider polling with UPDATE_TASK=false.
+		gopool.Go(func() {
+			controller.ReconcileTaskBillingBulk()
 		})
 	}
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {

@@ -15,30 +15,33 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Log struct {
-	Id               int    `json:"id" gorm:"index:idx_created_at_id,priority:1"`
-	UserId           int    `json:"user_id" gorm:"index"`
-	CreatedAt        int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:2;index:idx_created_at_type"`
-	Type             int    `json:"type" gorm:"index:idx_created_at_type"`
-	Content          string `json:"content"`
-	Username         string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
-	TokenName        string `json:"token_name" gorm:"index;default:''"`
-	ModelName        string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
-	Quota            int    `json:"quota" gorm:"default:0"`
-	PromptTokens     int    `json:"prompt_tokens" gorm:"default:0"`
-	CompletionTokens int    `json:"completion_tokens" gorm:"default:0"`
-	UseTime          int    `json:"use_time" gorm:"default:0"`
-	IsStream         bool   `json:"is_stream"`
-	ChannelId        int    `json:"channel" gorm:"index"`
-	ChannelName      string `json:"channel_name" gorm:"->"`
-	TokenId          int    `json:"token_id" gorm:"default:0;index"`
-	UserPlanId       int    `json:"user_plan_id" gorm:"default:0;index"` // 关联的用户套餐ID，用于套餐消耗统计
-	PlanName         string `json:"plan_name" gorm:"->;column:plan_name"` // 套餐显示名称（LEFT JOIN user_plans.plan_display_name）
-	Group            string `json:"group" gorm:"index"`
-	Ip               string `json:"ip" gorm:"index;default:''"`
-	Other            string `json:"other"`
+	Id                        int    `json:"id" gorm:"index:idx_created_at_id,priority:1"`
+	TaskBillingTaskId         *int64 `json:"-" gorm:"uniqueIndex"`
+	TaskBillingCompensationId *int64 `json:"-" gorm:"uniqueIndex"`
+	UserId                    int    `json:"user_id" gorm:"index"`
+	CreatedAt                 int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:2;index:idx_created_at_type"`
+	Type                      int    `json:"type" gorm:"index:idx_created_at_type"`
+	Content                   string `json:"content"`
+	Username                  string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
+	TokenName                 string `json:"token_name" gorm:"index;default:''"`
+	ModelName                 string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
+	Quota                     int    `json:"quota" gorm:"default:0"`
+	PromptTokens              int    `json:"prompt_tokens" gorm:"default:0"`
+	CompletionTokens          int    `json:"completion_tokens" gorm:"default:0"`
+	UseTime                   int    `json:"use_time" gorm:"default:0"`
+	IsStream                  bool   `json:"is_stream"`
+	ChannelId                 int    `json:"channel" gorm:"index"`
+	ChannelName               string `json:"channel_name" gorm:"->"`
+	TokenId                   int    `json:"token_id" gorm:"default:0;index"`
+	UserPlanId                int    `json:"user_plan_id" gorm:"default:0;index"`  // 关联的用户套餐ID，用于套餐消耗统计
+	PlanName                  string `json:"plan_name" gorm:"->;column:plan_name"` // 套餐显示名称（LEFT JOIN user_plans.plan_display_name）
+	Group                     string `json:"group" gorm:"index"`
+	Ip                        string `json:"ip" gorm:"index;default:''"`
+	Other                     string `json:"other"`
 }
 
 // don't use iota, avoid change log type value
@@ -204,6 +207,84 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			LogQuotaData(userId, username, params.ModelName, params.Quota, common.GetTimestamp(), params.PromptTokens+params.CompletionTokens)
 		})
 	}
+}
+
+type RecordTaskBillingLogParams struct {
+	TaskBillingTaskId         int64
+	TaskBillingCompensationId int64
+	UserId                    int
+	LogType                   int
+	Content                   string
+	ChannelId                 int
+	ModelName                 string
+	Quota                     int
+	TokenId                   int
+	UserPlanId                int // 关联的用户套餐ID，用于套餐消耗统计
+	Group                     string
+	Other                     map[string]interface{}
+	NodeName                  string // 任务发起节点；为空时回退当前节点
+}
+
+// RecordTaskBillingLog 记录任务异步结算/退款产生的日志（无 gin 上下文的轮询路径）。
+func RecordTaskBillingLog(params RecordTaskBillingLogParams) error {
+	if params.LogType == LogTypeConsume && !common.LogConsumeEnabled {
+		return nil
+	}
+	username, _ := GetUsernameById(params.UserId, false)
+	tokenName := ""
+	if params.TokenId > 0 {
+		if token, err := GetTokenById(params.TokenId); err == nil {
+			tokenName = token.Name
+		}
+	}
+	createdAt := common.GetTimestamp()
+	log := &Log{
+		UserId:     params.UserId,
+		Username:   username,
+		CreatedAt:  createdAt,
+		Type:       params.LogType,
+		Content:    params.Content,
+		TokenName:  tokenName,
+		ModelName:  params.ModelName,
+		Quota:      params.Quota,
+		ChannelId:  params.ChannelId,
+		TokenId:    params.TokenId,
+		UserPlanId: params.UserPlanId,
+		Group:      params.Group,
+		Other:      common.MapToJsonStr(params.Other),
+	}
+	if params.TaskBillingTaskId > 0 {
+		taskID := params.TaskBillingTaskId
+		log.TaskBillingTaskId = &taskID
+	}
+	if params.TaskBillingCompensationId > 0 {
+		compensationID := params.TaskBillingCompensationId
+		log.TaskBillingCompensationId = &compensationID
+	}
+	query := LOG_DB
+	if log.TaskBillingCompensationId != nil {
+		query = query.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "task_billing_compensation_id"}},
+			DoNothing: true,
+		})
+	} else if log.TaskBillingTaskId != nil {
+		query = query.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "task_billing_task_id"}},
+			DoNothing: true,
+		})
+	}
+	result := query.Create(log)
+	err := result.Error
+	if err != nil {
+		common.SysLog("failed to record task billing log: " + err.Error())
+		return err
+	}
+	if result.RowsAffected > 0 && params.LogType == LogTypeConsume && common.DataExportEnabled {
+		gopool.Go(func() {
+			LogQuotaData(params.UserId, username, params.ModelName, params.Quota, createdAt, 0)
+		})
+	}
+	return nil
 }
 
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, userPlanId *int) (logs []*Log, total int64, err error) {

@@ -38,6 +38,7 @@ import {
   TASK_ACTION_FIRST_TAIL_GENERATE,
   TASK_ACTION_GENERATE,
   TASK_ACTION_REFERENCE_GENERATE,
+  TASK_ACTION_REMIX_GENERATE,
   TASK_ACTION_TEXT_GENERATE,
 } from '../../../constants/common.constant';
 import { CHANNEL_OPTIONS } from '../../../constants/channel.constants';
@@ -123,6 +124,12 @@ const renderType = (type, t) => {
       return (
         <Tag color='blue' shape='circle' prefixIcon={<Sparkles size={14} />}>
           {t('参照生视频')}
+        </Tag>
+      );
+    case TASK_ACTION_REMIX_GENERATE:
+      return (
+        <Tag color='blue' shape='circle' prefixIcon={<Sparkles size={14} />}>
+          {t('视频 Remix')}
         </Tag>
       );
     default:
@@ -354,21 +361,29 @@ export const getTaskLogsColumns = ({
       dataIndex: 'fail_reason',
       fixed: 'right',
       render: (text, record, index) => {
-        // 仅当为视频生成任务且成功，且 fail_reason 是 URL 时显示可点击链接
+        // 仅当为视频生成任务且成功，且存在结果 URL 时显示可点击链接
+        // 新任务结果地址在 result_url，旧任务兼容 fail_reason 中的 URL
         const isVideoTask =
           record.action === TASK_ACTION_GENERATE ||
           record.action === TASK_ACTION_TEXT_GENERATE ||
           record.action === TASK_ACTION_FIRST_TAIL_GENERATE ||
-          record.action === TASK_ACTION_REFERENCE_GENERATE;
+          record.action === TASK_ACTION_REFERENCE_GENERATE ||
+          record.action === TASK_ACTION_REMIX_GENERATE;
         const isSuccess = record.status === 'SUCCESS';
-        const isUrl = typeof text === 'string' && /^https?:\/\//.test(text);
-        if (isSuccess && isVideoTask && isUrl) {
+        const isHttpUrl = (value) =>
+          typeof value === 'string' && /^https?:\/\//.test(value);
+        const videoUrl = isHttpUrl(record.result_url)
+          ? record.result_url
+          : isHttpUrl(text)
+            ? text
+            : '';
+        if (isSuccess && isVideoTask && videoUrl) {
           return (
             <a
               href='#'
               onClick={(e) => {
                 e.preventDefault();
-                openVideoModal(text);
+                openVideoModal(videoUrl);
               }}
             >
               {t('点击预览视频')}

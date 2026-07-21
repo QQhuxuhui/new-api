@@ -341,6 +341,10 @@ var defaultModelPrice = map[string]float64{
 	"mj_upload":                      0.05,
 	"sora-2":                         0.3,
 	"sora-2-pro":                     0.5,
+	"veo-3.0-generate-001":           0.4,
+	"veo-3.0-fast-generate-001":      0.15,
+	"veo-3.1-generate-preview":       0.4,
+	"veo-3.1-fast-generate-preview":  0.15,
 }
 
 var defaultAudioRatio = map[string]float64{

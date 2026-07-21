@@ -782,6 +782,40 @@ func DecreaseUserPlanQuota(userPlanId int, amount int64) error {
 	return InvalidateUserPlanCache(userPlan.UserId)
 }
 
+// DecreaseUserPlanQuotaIfEnough atomically debits a plan only when its current
+// quota can cover the full amount. The boolean is false when another worker
+// consumed the available quota first.
+func DecreaseUserPlanQuotaIfEnough(userPlanId int, amount int64) (bool, error) {
+	if amount < 0 {
+		return false, errors.New("扣除额度不能为负数")
+	}
+	if amount == 0 {
+		return true, nil
+	}
+
+	var userPlan UserPlan
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err != nil {
+		return false, err
+	}
+	result := DB.Model(&UserPlan{}).
+		Where("id = ? AND quota >= ?", userPlanId, amount).
+		Updates(map[string]interface{}{
+			"quota":      gorm.Expr("quota - ?", amount),
+			"used_quota": gorm.Expr("used_quota + ?", amount),
+			"updated_at": time.Now().UnixMilli(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return false, nil
+	}
+	if err := InvalidateUserPlanCache(userPlan.UserId); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
 // IncreaseUserPlanQuota increases quota for a user plan
 func IncreaseUserPlanQuota(userPlanId int, amount int64) error {
 	if amount < 0 {

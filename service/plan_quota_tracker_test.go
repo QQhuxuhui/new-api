@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -9,6 +11,65 @@ import (
 	miniredis "github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
 )
+
+func TestTaskPlanTrackingIsIdempotent(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	oldRDB := common.RDB
+	oldRedisEnabled := common.RedisEnabled
+	common.RDB = redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	common.RedisEnabled = true
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RDB = oldRDB
+		common.RedisEnabled = oldRedisEnabled
+	})
+
+	recordedAt := time.Now().UnixMilli()
+	for i := 0; i < 2; i++ {
+		if err := IncrDailyQuotaUsageOnce(7, 10, "task-billing:42"); err != nil {
+			t.Fatal(err)
+		}
+		if err := RecordConsumptionForRateLimitAt(7, 0.5, "task-billing:42", recordedAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usage, err := GetDailyQuotaUsage(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rateEvents, err := common.RDB.ZCard(context.Background(), getRateLimitKey(7)).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage != 10 || rateEvents != 1 {
+		t.Fatalf("task plan tracking duplicated: daily=%d rate_events=%d", usage, rateEvents)
+	}
+	if err := IncrDailyQuotaUsageOnceAt(8, 10, "task-billing:43", time.Now().AddDate(0, 0, -1)); err != nil {
+		t.Fatal(err)
+	}
+	yesterdayRecoveryUsage, err := GetDailyQuotaUsage(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if yesterdayRecoveryUsage != 0 {
+		t.Fatalf("yesterday task polluted today's daily quota: %d", yesterdayRecoveryUsage)
+	}
+}
+
+func TestDailyQuotaTTLDoesNotTruncateFinalSecond(t *testing.T) {
+	location := time.FixedZone("test", 8*60*60)
+	billingTime := time.Date(2026, 7, 21, 23, 59, 59, 500_000_000, location)
+	if ttl := getDailyQuotaTTLAt(billingTime, billingTime); ttl != time.Second {
+		t.Fatalf("final-second TTL = %s, want one second", ttl)
+	}
+	if ttl := getDailyQuotaTTLAt(billingTime, billingTime.Add(time.Second)); ttl != 0 {
+		t.Fatalf("expired billing date TTL = %s, want zero", ttl)
+	}
+}
 
 func TestCheckDailyQuotaBeforeConsume_EnforcesSnapshotLimit_WhenPlanIdIsNil(t *testing.T) {
 	db := setupTestDB(t)

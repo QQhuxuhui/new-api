@@ -78,6 +78,22 @@ func validatePrompt(prompt string) *dto.TaskError {
 	return nil
 }
 
+// MaxTaskDurationSeconds caps user-supplied video duration. Duration is used
+// as a billing multiplier (OtherRatio "seconds"); an unbounded value could
+// overflow quota calculation into a negative charge.
+const MaxTaskDurationSeconds = 3600
+
+func validateTaskDurationBounds(req TaskSubmitReq) *dto.TaskError {
+	seconds := req.Duration
+	if seconds == 0 && req.Seconds != "" {
+		seconds, _ = strconv.Atoi(req.Seconds)
+	}
+	if seconds < 0 || seconds > MaxTaskDurationSeconds {
+		return createTaskError(fmt.Errorf("seconds must be between 1 and %d", MaxTaskDurationSeconds), "invalid_seconds", http.StatusBadRequest, true)
+	}
+	return nil
+}
+
 func validateMultipartTaskRequest(c *gin.Context, info *RelayInfo, action string) (TaskSubmitReq, error) {
 	var req TaskSubmitReq
 	if _, err := c.MultipartForm(); err != nil {
@@ -156,6 +172,10 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 		return taskErr
 	}
 
+	if taskErr := validateTaskDurationBounds(req); taskErr != nil {
+		return taskErr
+	}
+
 	action := constant.TaskActionTextGenerate
 	if hasInputReference {
 		action = constant.TaskActionGenerate
@@ -176,16 +196,16 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 		if model == "sora-2-pro" && !lo.Contains([]string{"720x1280", "1280x720", "1792x1024", "1024x1792"}, size) {
 			return createTaskError(fmt.Errorf("sora-2 size is invalid"), "invalid_size", http.StatusBadRequest, true)
 		}
-		info.PriceData.OtherRatios = map[string]float64{
+		info.PriceData.ReplaceOtherRatios(map[string]float64{
 			"seconds": float64(seconds),
 			"size":    1,
-		}
+		})
 		if lo.Contains([]string{"1792x1024", "1024x1792"}, size) {
-			info.PriceData.OtherRatios["size"] = 1.666667
+			info.PriceData.AddOtherRatio("size", 1.666667)
 		}
 	}
 
-	info.Action = action
+	storeTaskRequest(c, info, action, req)
 
 	return nil
 }
@@ -222,11 +242,17 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 		if err != nil {
 			return createTaskError(err, "invalid_multipart_form", http.StatusBadRequest, true)
 		}
-	} else if err := common.UnmarshalBodyReusable(c, &req); err != nil {
+	}
+	// 为了metadata字段的兼容性，统一UnmarshalBodyReusable
+	if err := common.UnmarshalBodyReusable(c, &req); err != nil {
 		return createTaskError(err, "invalid_request", http.StatusBadRequest, true)
 	}
 
 	if taskErr := validatePrompt(req.Prompt); taskErr != nil {
+		return taskErr
+	}
+
+	if taskErr := validateTaskDurationBounds(req); taskErr != nil {
 		return taskErr
 	}
 
