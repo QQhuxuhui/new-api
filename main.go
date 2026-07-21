@@ -132,6 +132,12 @@ func main() {
 		gopool.Go(func() {
 			controller.UpdateTaskBulk()
 		})
+	} else if common.IsMasterNode {
+		// Financial reconciliation must keep running even when operators disable
+		// provider polling with UPDATE_TASK=false.
+		gopool.Go(func() {
+			controller.ReconcileTaskBillingBulk()
+		})
 	}
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true

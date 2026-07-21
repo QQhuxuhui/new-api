@@ -23,6 +23,13 @@ func UpdateTaskBulk() {
 	}
 }
 
+func ReconcileTaskBillingBulk() {
+	for {
+		time.Sleep(15 * time.Second)
+		service.RunTaskBillingReconciliationOnce(context.Background())
+	}
+}
+
 func GetAllTask(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 

@@ -138,27 +138,10 @@ func GetTokenById(id int) (*Token, error) {
 	token := Token{Id: id}
 	var err error = nil
 	err = DB.First(&token, "id = ?", id).Error
-	if shouldUpdateRedis(true, err) {
-		gopool.Go(func() {
-			if err := cacheSetToken(token); err != nil {
-				common.SysLog("failed to update user status cache: " + err.Error())
-			}
-		})
-	}
 	return &token, err
 }
 
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
-	defer func() {
-		// Update Redis cache asynchronously on successful DB read
-		if shouldUpdateRedis(fromDB, err) && token != nil {
-			gopool.Go(func() {
-				if err := cacheSetToken(*token); err != nil {
-					common.SysLog("failed to update user status cache: " + err.Error())
-				}
-			})
-		}
-	}()
 	if !fromDB && common.RedisEnabled {
 		// Try Redis first
 		token, err := cacheGetTokenByKey(key)
@@ -168,7 +151,19 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 		// Don't return error - fall through to DB
 	}
 	fromDB = true
+	refillGeneration, generationErr := getTokenCacheGeneration(key)
+	if generationErr != nil {
+		common.SysLog("failed to read token cache generation: " + generationErr.Error())
+	}
 	err = DB.Where(commonKeyCol+" = ?", key).First(&token).Error
+	if shouldUpdateRedis(fromDB, err) && token != nil && generationErr == nil {
+		tokenSnapshot := *token
+		gopool.Go(func() {
+			if _, cacheErr := cacheSetTokenAtGeneration(tokenSnapshot, refillGeneration); cacheErr != nil {
+				common.SysLog("failed to update token cache: " + cacheErr.Error())
+			}
+		})
+	}
 	return token, err
 }
 
@@ -180,35 +175,21 @@ func (token *Token) Insert() error {
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
-	defer func() {
-		if shouldUpdateRedis(true, err) {
-			gopool.Go(func() {
-				err := cacheSetToken(*token)
-				if err != nil {
-					common.SysLog("failed to update token cache: " + err.Error())
-				}
-			})
-		}
-	}()
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
 		"model_limits_enabled", "model_limits", "allow_ips", "group",
 		"sticky_session", "sticky_session_ttl", "client_restriction_enabled", "allowed_clients").Updates(token).Error
-	return err
+	if err != nil {
+		return err
+	}
+	return cacheDeleteToken(token.Key)
 }
 
 func (token *Token) SelectUpdate() (err error) {
-	defer func() {
-		if shouldUpdateRedis(true, err) {
-			gopool.Go(func() {
-				err := cacheSetToken(*token)
-				if err != nil {
-					common.SysLog("failed to update token cache: " + err.Error())
-				}
-			})
-		}
-	}()
 	// This can update zero values
-	return DB.Model(token).Select("accessed_time", "status").Updates(token).Error
+	if err = DB.Model(token).Select("accessed_time", "status").Updates(token).Error; err != nil {
+		return err
+	}
+	return cacheDeleteToken(token.Key)
 }
 
 func (token *Token) Delete() (err error) {
@@ -245,7 +226,6 @@ func (token *Token) GetModelLimitsMap() map[string]bool {
 	}
 	return limitsMap
 }
-
 
 func DisableModelLimits(tokenId int) error {
 	token, err := GetTokenById(tokenId)
@@ -289,6 +269,20 @@ func IncreaseTokenQuota(id int, key string, quota int) (err error) {
 	return increaseTokenQuota(id, quota)
 }
 
+func IncreaseTokenQuotaDirect(id int, key string, quota int) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheIncrTokenQuota(key, int64(quota)); err != nil {
+				common.SysLog("failed to increase token quota: " + err.Error())
+			}
+		})
+	}
+	return increaseTokenQuota(id, quota)
+}
+
 func increaseTokenQuota(id int, quota int) (err error) {
 	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
@@ -315,6 +309,20 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeTokenQuota, id, -quota)
 		return nil
+	}
+	return decreaseTokenQuota(id, quota)
+}
+
+func DecreaseTokenQuotaDirect(id int, key string, quota int) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheDecrTokenQuota(key, int64(quota)); err != nil {
+				common.SysLog("failed to decrease token quota: " + err.Error())
+			}
+		})
 	}
 	return decreaseTokenQuota(id, quota)
 }

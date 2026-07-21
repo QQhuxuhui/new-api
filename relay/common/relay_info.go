@@ -111,6 +111,9 @@ type RelayInfo struct {
 	RelayFormat            types.RelayFormat
 	SendResponseCount      int
 	FinalPreConsumedQuota  int // 最终预消耗的配额
+	// TokenSettledQuota tracks the token quota that actually reached storage.
+	// It can differ from funding quota when secondary token accounting fails.
+	TokenSettledQuota int
 	// ForcePreConsume 为 true 时禁用预扣费的信任额度旁路，强制预扣全额。
 	// 用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。
@@ -133,6 +136,12 @@ type RelayInfo struct {
 	// split happens inside PostConsumeQuota, after pre-consume fields are
 	// frozen, so it needs its own tracking for task billing-split persistence.
 	PlanOverflowChargedQuota int64
+	// FundingSettledQuota is set only when settlement had to stop after a
+	// partial, non-reversible debit. Task persistence/refunds must use the
+	// amount actually charged rather than the requested amount.
+	FundingSettledQuota       int
+	FundingSettledPlanQuota   int64
+	FundingSettledWalletQuota int64
 
 	PriceData types.PriceData
 
@@ -549,6 +558,9 @@ type TaskRelayInfo struct {
 	// a specific channel (e.g., remix on origin task's channel). Stored as any
 	// to keep parity with upstream; callers type-assert to *model.Channel.
 	LockedChannel any
+	// LockedChannelKey pins remix/continuation requests to the same provider
+	// account that created the origin task.
+	LockedChannelKey string
 }
 
 type TaskSubmitReq struct {

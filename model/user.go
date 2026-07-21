@@ -624,8 +624,10 @@ func (user *User) Update(updatePassword bool) error {
 		return err
 	}
 
-	// Update cache
-	return updateUserCache(*user)
+	// Invalidate instead of asynchronously writing the pre-update snapshot; a
+	// concurrent quota transaction may otherwise be overwritten by that stale
+	// refill.
+	return invalidateUserCache(user.Id)
 }
 
 func (user *User) Edit(updatePassword bool) error {
@@ -656,8 +658,7 @@ func (user *User) Edit(updatePassword bool) error {
 		return err
 	}
 
-	// Update cache
-	return updateUserCache(*user)
+	return invalidateUserCache(user.Id)
 }
 
 func (user *User) Delete() error {
@@ -973,6 +974,21 @@ func DecreaseUserQuota(id int, quota int) (err error) {
 		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
 		return nil
 	}
+	return decreaseUserQuota(id, quota)
+}
+
+// DecreaseUserQuotaDirect persists a debit before returning, bypassing the
+// in-memory batch queue. Async task billing uses it before writing a durable
+// task marker that may later drive refunds or settlement.
+func DecreaseUserQuotaDirect(id int, quota int) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	gopool.Go(func() {
+		if err := cacheDecrUserQuota(id, int64(quota)); err != nil {
+			common.SysLog("failed to decrease user quota: " + err.Error())
+		}
+	})
 	return decreaseUserQuota(id, quota)
 }
 

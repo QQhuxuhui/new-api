@@ -24,9 +24,17 @@ const (
 // with an in-memory SQLite DB. Production code is unchanged: defaults alias
 // the real model functions.
 var (
-	decreaseUserQuotaFn     = model.DecreaseUserQuota
-	increaseUserPlanQuotaFn = model.IncreaseUserPlanQuota
+	decreaseUserQuotaFn       = model.DecreaseUserQuota
+	decreaseUserQuotaDirectFn = model.DecreaseUserQuotaDirect
+	increaseUserPlanQuotaFn   = model.IncreaseUserPlanQuota
 )
+
+func decreaseOverflowUserQuota(relayInfo *relaycommon.RelayInfo, amount int) error {
+	if relayInfo != nil && relayInfo.ForcePreConsume {
+		return decreaseUserQuotaDirectFn(relayInfo.UserId, amount)
+	}
+	return decreaseUserQuotaFn(relayInfo.UserId, amount)
+}
 
 // BillingResult contains the result of billing source determination
 type BillingResult struct {
@@ -229,7 +237,8 @@ func chargeSplitForOverflow(relayInfo *relaycommon.RelayInfo, plan *model.UserPl
 	if planPart <= 0 || walletPart <= 0 {
 		return false, false
 	}
-	if decErr := model.DecreaseUserPlanQuota(plan.Id, planPart); decErr != nil {
+	planCharged, decErr := model.DecreaseUserPlanQuotaIfEnough(plan.Id, planPart)
+	if decErr != nil {
 		if errors.Is(decErr, model.ErrUserPlanCacheInvalidation) {
 			common.SysLog(fmt.Sprintf("pool-overflow split: plan deduction committed but cache invalidation failed user=%d plan=%d: %v",
 				relayInfo.UserId, plan.Id, decErr))
@@ -238,8 +247,10 @@ func chargeSplitForOverflow(relayInfo *relaycommon.RelayInfo, plan *model.UserPl
 				relayInfo.UserId, plan.Id, planPart, decErr))
 			return false, false
 		}
+	} else if !planCharged {
+		return false, false
 	}
-	if decErr := decreaseUserQuotaFn(relayInfo.UserId, int(walletPart)); decErr != nil {
+	if decErr := decreaseOverflowUserQuota(relayInfo, int(walletPart)); decErr != nil {
 		common.SysLog(fmt.Sprintf("pool-overflow split: wallet deduction failed user=%d amount=%d: %v",
 			relayInfo.UserId, walletPart, decErr))
 		// Refund the plan portion so the user is not partially charged.
@@ -261,6 +272,9 @@ func chargeSplitForOverflow(relayInfo *relaycommon.RelayInfo, plan *model.UserPl
 
 			relayInfo.BillingSource = BillingSourcePlan
 			relayInfo.UserPlanId = plan.Id
+			relayInfo.FundingSettledQuota = int(planPart)
+			relayInfo.FundingSettledPlanQuota = planPart
+			relayInfo.FundingSettledWalletQuota = 0
 			relayInfo.PlanId = 0
 			if plan.PlanId != nil {
 				relayInfo.PlanId = *plan.PlanId
@@ -315,7 +329,8 @@ func recordPlanChargeSideEffects(userId, planId int, amount int64) {
 // one (either it was current before, or SwitchToUserPlan was invoked). Returns
 // true on success so the caller can stop the fallback chain.
 func chargeExistingPlanForOverflow(relayInfo *relaycommon.RelayInfo, plan *model.UserPlan, amount int64) bool {
-	if decErr := model.DecreaseUserPlanQuota(plan.Id, amount); decErr != nil {
+	planCharged, decErr := model.DecreaseUserPlanQuotaIfEnough(plan.Id, amount)
+	if decErr != nil {
 		if errors.Is(decErr, model.ErrUserPlanCacheInvalidation) {
 			common.SysLog(fmt.Sprintf("pool-overflow fallback: plan deduction committed but cache invalidation failed user=%d plan=%d: %v",
 				relayInfo.UserId, plan.Id, decErr))
@@ -324,6 +339,8 @@ func chargeExistingPlanForOverflow(relayInfo *relaycommon.RelayInfo, plan *model
 				relayInfo.UserId, plan.Id, amount, decErr))
 			return false
 		}
+	} else if !planCharged {
+		return false
 	}
 
 	relayInfo.BillingSource = BillingSourcePlan
@@ -354,9 +371,9 @@ func chargeExistingPlanForOverflow(relayInfo *relaycommon.RelayInfo, plan *model
 //
 // Updates relayInfo.BillingSource / UserPlanId / PlanId so the consumption log
 // records the real source used.
-func billDailyPoolOverflow(relayInfo *relaycommon.RelayInfo, amount int64) {
+func billDailyPoolOverflow(relayInfo *relaycommon.RelayInfo, amount int64) error {
 	if relayInfo == nil || amount <= 0 {
-		return
+		return nil
 	}
 	usingGroup := relayInfo.UsingGroup
 	userId := relayInfo.UserId
@@ -368,20 +385,22 @@ func billDailyPoolOverflow(relayInfo *relaycommon.RelayInfo, amount int64) {
 		capacity := planOverflowCapacity(currentPlan)
 		if capacity >= amount {
 			if chargeExistingPlanForOverflow(relayInfo, currentPlan, amount) {
-				return
+				return nil
 			}
 		} else if capacity > 0 {
 			remainder := amount - capacity
 			if userQuota, qErr := model.GetUserQuota(userId, false); qErr == nil && int64(userQuota) >= remainder {
 				charged, mustAbort := chargeSplitForOverflow(relayInfo, currentPlan, capacity, remainder)
 				if charged {
-					return
+					return nil
 				}
 				if mustAbort {
 					// Plan was debited and the wallet-side rollback failed. Further
 					// fallback would double-charge the user; leave BillingSource as
-					// set by chargeSplitForOverflow and halt here.
-					return
+					// set by chargeSplitForOverflow and halt here. This is treated as
+					// settled because returning an error would trigger the caller's
+					// generic pre-consume refund while the plan debit is still live.
+					return nil
 				}
 			}
 		}
@@ -404,7 +423,7 @@ func billDailyPoolOverflow(relayInfo *relaycommon.RelayInfo, amount int64) {
 						userId, alt.Id, switchErr))
 				}
 				if chargeExistingPlanForOverflow(relayInfo, alt, amount) {
-					return
+					return nil
 				}
 			}
 		}
@@ -412,13 +431,13 @@ func billDailyPoolOverflow(relayInfo *relaycommon.RelayInfo, amount int64) {
 
 	// 4. User balance full.
 	if userQuota, qErr := model.GetUserQuota(userId, false); qErr == nil && int64(userQuota) >= amount {
-		if decErr := model.DecreaseUserQuota(userId, int(amount)); decErr == nil {
+		if decErr := decreaseOverflowUserQuota(relayInfo, int(amount)); decErr == nil {
 			relayInfo.BillingSource = BillingSourceUserBalance
 			// Clear plan context so the log does not surface a stale plan_id /
 			// user_plan_id (see log_info_generate.go:57,60).
 			relayInfo.UserPlanId = 0
 			relayInfo.PlanId = 0
-			return
+			return nil
 		} else {
 			common.SysLog(fmt.Sprintf("pool-overflow fallback: user balance deduction failed user=%d amount=%d: %v",
 				userId, amount, decErr))
@@ -429,6 +448,7 @@ func billDailyPoolOverflow(relayInfo *relaycommon.RelayInfo, amount int64) {
 	// operators can reconcile manually.
 	common.SysError(fmt.Sprintf("CRITICAL: all billing sources failed for user %d amount=%d after daily pool overflow — request was served without charge",
 		userId, amount))
+	return fmt.Errorf("all billing sources failed after daily-pool overflow for user %d", userId)
 }
 
 // CheckAndTriggerPlanSwitch checks if a plan needs to be switched

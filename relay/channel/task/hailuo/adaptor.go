@@ -28,6 +28,7 @@ type TaskAdaptor struct {
 	ChannelType int
 	apiKey      string
 	baseURL     string
+	proxy       string
 }
 
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
@@ -116,6 +117,11 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	if !ok {
 		return nil, fmt.Errorf("invalid task_id")
 	}
+	// ParseTaskResult performs a second request to resolve the completed file.
+	// Keep the exact polling credential and transport settings for that request.
+	a.apiKey = key
+	a.baseURL = baseUrl
+	a.proxy = proxy
 
 	uri := fmt.Sprintf("%s%s?task_id=%s", baseUrl, QueryTaskEndpoint, taskID)
 
@@ -206,9 +212,13 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 			taskResult.Progress = "50%"
 		}
 	case TaskStatusSuccess:
+		videoURL, err := a.buildVideoURL(resTask.TaskID, resTask.FileID)
+		if err != nil {
+			return nil, err
+		}
 		taskResult.Status = model.TaskStatusSuccess
 		taskResult.Progress = "100%"
-		taskResult.Url = a.buildVideoURL(resTask.TaskID, resTask.FileID)
+		taskResult.Url = videoURL
 	case TaskStatusFailed:
 		taskResult.Status = model.TaskStatusFailure
 		taskResult.Progress = "100%"
@@ -245,42 +255,52 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 	return jsonData, nil
 }
 
-func (a *TaskAdaptor) buildVideoURL(_, fileID string) string {
+func (a *TaskAdaptor) buildVideoURL(_, fileID string) (string, error) {
 	if a.apiKey == "" || a.baseURL == "" {
-		return ""
+		return "", errors.New("missing polling credential or base URL")
 	}
 
 	url := fmt.Sprintf("%s/v1/files/retrieve?file_id=%s", a.baseURL, fileID)
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return ""
+		return "", err
 	}
 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
 
-	resp, err := service.GetHttpClient().Do(req)
+	client, err := service.GetHttpClientWithProxy(a.proxy)
 	if err != nil {
-		return ""
+		return "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("retrieve file status code: %d", resp.StatusCode)
+	}
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return ""
+		return "", err
 	}
 
 	var retrieveResp RetrieveFileResponse
 	if err := common.Unmarshal(responseBody, &retrieveResp); err != nil {
-		return ""
+		return "", err
 	}
 
 	if retrieveResp.BaseResp.StatusCode != StatusSuccess {
-		return ""
+		return "", fmt.Errorf("retrieve file API error: %s", retrieveResp.BaseResp.StatusMsg)
+	}
+	if retrieveResp.File.DownloadURL == "" {
+		return "", errors.New("retrieve file response missing download URL")
 	}
 
-	return retrieveResp.File.DownloadURL
+	return retrieveResp.File.DownloadURL, nil
 }
 
 func contains(slice []string, item string) bool {

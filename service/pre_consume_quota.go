@@ -17,72 +17,47 @@ import (
 )
 
 func ReturnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
-	if relayInfo.FinalPreConsumedQuota != 0 {
-		logger.LogInfo(c, fmt.Sprintf("用户 %d 请求失败, 返还预扣费额度 %s (计费来源: %s)", relayInfo.UserId, logger.FormatQuota(relayInfo.FinalPreConsumedQuota), relayInfo.BillingSource))
+	if relayInfo == nil || relayInfo.FinalPreConsumedQuota == 0 {
+		return
+	}
+	logger.LogInfo(c, fmt.Sprintf("用户 %d 请求失败, 返还预扣费额度 %s (计费来源: %s)", relayInfo.UserId, logger.FormatQuota(relayInfo.FinalPreConsumedQuota), relayInfo.BillingSource))
 
-		// Mixed billing: return user-balance remainder (if deducted) and token quota (if deducted).
-		if relayInfo.BillingSource == BillingSourcePlanAndUserBalance {
-			// Return wallet part.
-			if relayInfo.UserBalancePreConsumedQuota > 0 {
-				gopool.Go(func() {
-					if err := model.IncreaseUserQuota(relayInfo.UserId, relayInfo.UserBalancePreConsumedQuota, false); err != nil {
-						common.SysLog("error return pre-consumed user quota (mixed): " + err.Error())
-					}
-				})
-			}
-
-			// Return token part (token was pre-consumed for the whole request in plan/mixed billing).
-			if !relayInfo.IsPlayground && relayInfo.FinalPreConsumedQuota > 0 {
-				gopool.Go(func() {
-					if err := model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, relayInfo.FinalPreConsumedQuota); err != nil {
-						common.SysLog("error return pre-consumed token quota (mixed): " + err.Error())
-					}
-				})
-			}
-			return
-		}
-
-		// For plan billing: Only return token quota, NOT plan/user balance
-		// Because in plan billing path, we only pre-consumed token quota, not plan or user balance
-		if relayInfo.BillingSource == BillingSourcePlan {
-			if !relayInfo.IsPlayground && relayInfo.FinalPreConsumedQuota > 0 {
-				gopool.Go(func() {
-					// Only return token quota
-					err := model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, relayInfo.FinalPreConsumedQuota)
-					if err != nil {
-						common.SysLog("error return pre-consumed token quota for plan billing: " + err.Error())
-					}
-				})
-			}
-			return
-		}
-
-		// For daily pool billing: Only return token quota, NOT daily pool
-		// Because in daily pool billing path, we only pre-consumed token quota, not daily pool
-		// Daily pool quota is only deducted in PostConsumeQuota
-		if relayInfo.BillingSource == BillingSourceDailyPool {
-			if !relayInfo.IsPlayground && relayInfo.FinalPreConsumedQuota > 0 {
-				gopool.Go(func() {
-					// Only return token quota (daily pool was NOT pre-consumed)
-					err := model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, relayInfo.FinalPreConsumedQuota)
-					if err != nil {
-						common.SysLog("error return pre-consumed token quota for daily pool billing: " + err.Error())
-					}
-				})
-			}
-			return
-		}
-
-		// For user balance billing: Use normal refund flow
-		gopool.Go(func() {
-			relayInfoCopy := *relayInfo
-
-			err := PostConsumeQuota(&relayInfoCopy, -relayInfoCopy.FinalPreConsumedQuota, 0, false)
-			if err != nil {
-				common.SysLog("error return pre-consumed quota: " + err.Error())
+	walletRefund := 0
+	switch relayInfo.BillingSource {
+	case BillingSourcePlanAndUserBalance:
+		walletRefund = relayInfo.UserBalancePreConsumedQuota
+	case BillingSourcePlan, BillingSourceDailyPool:
+		// These sources do not debit funding until post-consume.
+	default:
+		walletRefund = relayInfo.FinalPreConsumedQuota
+	}
+	if walletRefund > 0 {
+		runQuotaReturn(relayInfo, func() {
+			if err := increaseRelayUserQuota(relayInfo, walletRefund); err != nil {
+				common.SysLog("error return pre-consumed user quota: " + err.Error())
 			}
 		})
 	}
+
+	// Refund only the token amount that actually reached the ledger. This can
+	// be zero for unlimited/playground tokens or after a secondary token write
+	// failed, even while funding was successfully pre-consumed.
+	tokenRefund := relayInfo.TokenSettledQuota
+	if !relayInfo.IsPlayground && tokenRefund > 0 {
+		runQuotaReturn(relayInfo, func() {
+			if err := increaseRelayTokenQuota(relayInfo, tokenRefund); err != nil {
+				common.SysLog("error return pre-consumed token quota: " + err.Error())
+			}
+		})
+	}
+}
+
+func runQuotaReturn(relayInfo *relaycommon.RelayInfo, fn func()) {
+	if relayInfo != nil && relayInfo.ForcePreConsume {
+		fn()
+		return
+	}
+	gopool.Go(fn)
 }
 
 // PreConsumeQuota checks if the user has enough quota to pre-consume.
@@ -90,6 +65,7 @@ func ReturnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
 // Uses skip-level billing - if a source is insufficient, skip entirely to next level
 // Sets relayInfo.BillingSource to indicate the quota source.
 func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	relayInfo.TokenSettledQuota = 0
 	requiredQuota := int64(preConsumedQuota)
 	// Reset per-request mixed-billing fields (relayInfo can be reused during retries/failover).
 	relayInfo.UserBalancePreConsumedQuota = 0
@@ -392,7 +368,7 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 
 						// Deduct the wallet remainder now (plan part is deducted after completion).
 						if remainder > 0 {
-							if err := model.DecreaseUserQuota(relayInfo.UserId, int(remainder)); err != nil {
+							if err := decreaseRelayUserQuota(relayInfo, int(remainder)); err != nil {
 								return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 							}
 						}
@@ -476,7 +452,7 @@ func preConsumeFromUserAndToken(c *gin.Context, preConsumedQuota int, relayInfo 
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 		}
-		err = model.DecreaseUserQuota(relayInfo.UserId, preConsumedQuota)
+		err = decreaseRelayUserQuota(relayInfo, preConsumedQuota)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 		}

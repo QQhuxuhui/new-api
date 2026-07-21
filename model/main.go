@@ -257,6 +257,9 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
+	if err := consolidateDuplicateUserDailyPools(); err != nil {
+		return err
+	}
 	err := DB.AutoMigrate(
 		&Channel{},
 		&Token{},
@@ -271,6 +274,7 @@ func migrateDB() error {
 		&TopUp{},
 		&QuotaData{},
 		&Task{},
+		&TaskBillingCompensation{},
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},
@@ -469,6 +473,9 @@ func migrateUserPlanLockedBy() error {
 }
 
 func migrateDBFast() error {
+	if err := consolidateDuplicateUserDailyPools(); err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
 
@@ -488,6 +495,7 @@ func migrateDBFast() error {
 		{&TopUp{}, "TopUp"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
+		{&TaskBillingCompensation{}, "TaskBillingCompensation"},
 		{&Model{}, "Model"},
 		{&Vendor{}, "Vendor"},
 		{&PrefillGroup{}, "PrefillGroup"},

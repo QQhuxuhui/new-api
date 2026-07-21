@@ -124,10 +124,33 @@ func RedisHSetObj(key string, obj interface{}, expiration time.Duration) error {
 	}
 	ctx := context.Background()
 
-	data := make(map[string]interface{})
+	data, err := redisHashObjectData(obj)
+	if err != nil {
+		return err
+	}
 
-	// 使用反射遍历结构体字段
-	v := reflect.ValueOf(obj).Elem()
+	txn := RDB.TxPipeline()
+	txn.HSet(ctx, key, data)
+
+	// 只有在 expiration 大于 0 时才设置过期时间
+	if expiration > 0 {
+		txn.Expire(ctx, key, expiration)
+	}
+
+	_, err = txn.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to execute transaction: %w", err)
+	}
+	return nil
+}
+
+func redisHashObjectData(obj interface{}) (map[string]interface{}, error) {
+	value := reflect.ValueOf(obj)
+	if value.Kind() != reflect.Ptr || value.IsNil() || value.Elem().Kind() != reflect.Struct {
+		return nil, fmt.Errorf("obj must be a non-nil pointer to a struct, got %T", obj)
+	}
+	data := make(map[string]interface{})
+	v := value.Elem()
 	t := v.Type()
 	for i := 0; i < v.NumField(); i++ {
 		field := t.Field(i)
@@ -156,20 +179,100 @@ func RedisHSetObj(key string, obj interface{}, expiration time.Duration) error {
 		// 其他类型直接转换为字符串
 		data[field.Name] = fmt.Sprintf("%v", value.Interface())
 	}
+	return data, nil
+}
 
+// RedisGetGeneration returns zero for a generation key that has not been
+// created yet.
+func RedisGetGeneration(key string) (int64, error) {
+	if RDB == nil {
+		return 0, errors.New("redis client is not initialized")
+	}
+	value, err := RDB.Get(context.Background(), key).Int64()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	return value, err
+}
+
+// RedisBumpGenerationAndDelete invalidates a cache key while making every
+// refill holding the previous generation permanently stale.
+func RedisBumpGenerationAndDelete(generationKey, cacheKey string) error {
+	if RDB == nil {
+		return errors.New("redis client is not initialized")
+	}
+	ctx := context.Background()
 	txn := RDB.TxPipeline()
-	txn.HSet(ctx, key, data)
-
-	// 只有在 expiration 大于 0 时才设置过期时间
-	if expiration > 0 {
-		txn.Expire(ctx, key, expiration)
-	}
-
+	txn.Incr(ctx, generationKey)
+	txn.Del(ctx, cacheKey)
 	_, err := txn.Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to execute transaction: %w", err)
+	return err
+}
+
+func RedisBumpGenerationAndHIncrByIfExists(generationKey, cacheKey, field string, delta int64) error {
+	if RDB == nil {
+		return errors.New("redis client is not initialized")
 	}
-	return nil
+	const script = `
+redis.call('INCR', KEYS[1])
+if redis.call('EXISTS', KEYS[2]) == 1 then
+  redis.call('HINCRBY', KEYS[2], ARGV[1], ARGV[2])
+end
+return 1`
+	return RDB.Eval(context.Background(), script, []string{generationKey, cacheKey}, field, delta).Err()
+}
+
+func RedisBumpGenerationAndHSetIfExists(generationKey, cacheKey, field, value string) error {
+	if RDB == nil {
+		return errors.New("redis client is not initialized")
+	}
+	const script = `
+redis.call('INCR', KEYS[1])
+if redis.call('EXISTS', KEYS[2]) == 1 then
+  redis.call('HSET', KEYS[2], ARGV[1], ARGV[2])
+end
+return 1`
+	return RDB.Eval(context.Background(), script, []string{generationKey, cacheKey}, field, value).Err()
+}
+
+// RedisHSetObjIfGeneration writes a DB refill only while its generation is
+// still current. WATCH closes the compare/write race with invalidation.
+func RedisHSetObjIfGeneration(key string, obj interface{}, expiration time.Duration, generationKey string, expectedGeneration int64) (bool, error) {
+	if RDB == nil {
+		return false, errors.New("redis client is not initialized")
+	}
+	data, err := redisHashObjectData(obj)
+	if err != nil {
+		return false, err
+	}
+	ctx := context.Background()
+	written := false
+	err = RDB.Watch(ctx, func(tx *redis.Tx) error {
+		generation, err := tx.Get(ctx, generationKey).Int64()
+		if errors.Is(err, redis.Nil) {
+			generation = 0
+		} else if err != nil {
+			return err
+		}
+		if generation != expectedGeneration {
+			return nil
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.HSet(ctx, key, data)
+			if expiration > 0 {
+				pipe.Expire(ctx, key, expiration)
+			}
+			return nil
+		})
+		if err == nil {
+			written = true
+		}
+		return err
+	}, generationKey)
+	if errors.Is(err, redis.TxFailedErr) {
+		return false, nil
+	}
+	return written, err
 }
 
 func RedisHGetObj(key string, obj interface{}) error {
