@@ -1053,6 +1053,22 @@ func RelayNotFound(c *gin.Context) {
 	})
 }
 
+// RelayTaskFetch 任务查询入口：仅透传查询，不进入渠道重试与计费流程。
+func RelayTaskFetch(c *gin.Context) {
+	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, &dto.TaskError{
+			Code:       "gen_relay_info_failed",
+			Message:    err.Error(),
+			StatusCode: http.StatusInternalServerError,
+		})
+		return
+	}
+	if taskErr := relay.RelayTaskFetch(c, relayInfo.RelayMode); taskErr != nil {
+		respondTaskError(c, taskErr)
+	}
+}
+
 func RelayTask(c *gin.Context) {
 	channelId := c.GetInt("channel_id")
 	group := c.GetString("group")
