@@ -206,6 +206,59 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	}
 }
 
+type RecordTaskBillingLogParams struct {
+	UserId     int
+	LogType    int
+	Content    string
+	ChannelId  int
+	ModelName  string
+	Quota      int
+	TokenId    int
+	UserPlanId int // 关联的用户套餐ID，用于套餐消耗统计
+	Group      string
+	Other      map[string]interface{}
+	NodeName   string // 任务发起节点；为空时回退当前节点
+}
+
+// RecordTaskBillingLog 记录任务异步结算/退款产生的日志（无 gin 上下文的轮询路径）。
+func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
+	if params.LogType == LogTypeConsume && !common.LogConsumeEnabled {
+		return
+	}
+	username, _ := GetUsernameById(params.UserId, false)
+	tokenName := ""
+	if params.TokenId > 0 {
+		if token, err := GetTokenById(params.TokenId); err == nil {
+			tokenName = token.Name
+		}
+	}
+	createdAt := common.GetTimestamp()
+	log := &Log{
+		UserId:     params.UserId,
+		Username:   username,
+		CreatedAt:  createdAt,
+		Type:       params.LogType,
+		Content:    params.Content,
+		TokenName:  tokenName,
+		ModelName:  params.ModelName,
+		Quota:      params.Quota,
+		ChannelId:  params.ChannelId,
+		TokenId:    params.TokenId,
+		UserPlanId: params.UserPlanId,
+		Group:      params.Group,
+		Other:      common.MapToJsonStr(params.Other),
+	}
+	err := LOG_DB.Create(log).Error
+	if err != nil {
+		common.SysLog("failed to record task billing log: " + err.Error())
+	}
+	if params.LogType == LogTypeConsume && common.DataExportEnabled {
+		gopool.Go(func() {
+			LogQuotaData(params.UserId, username, params.ModelName, params.Quota, createdAt, 0)
+		})
+	}
+}
+
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, userPlanId *int) (logs []*Log, total int64, err error) {
 	baseQuery := LOG_DB.Model(&Log{}).
 		Joins("LEFT JOIN user_plans ON user_plans.id = logs.user_plan_id")

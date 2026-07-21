@@ -154,7 +154,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 }
 
 // ModelPriceHelperPerCall 按次计费的 PriceHelper (MJ、Task)
-func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) types.PerCallPriceData {
+func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
 
 	// 获取渠道倍率，默认为 1.0
@@ -179,14 +179,31 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) types.
 			modelPrice = defaultPrice
 		}
 	}
+
 	// 应用渠道倍率：模型价格 * 分组倍率 * 渠道倍率 * 渠道模型倍率
-	quota := int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * channelRatio * channelModelRatio)
-	priceData := types.PerCallPriceData{
-		ModelPrice:     modelPrice,
-		Quota:          quota,
-		GroupRatioInfo: groupRatioInfo,
+	quota, err := common.QuotaFromFloatStrict(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * channelRatio * channelModelRatio)
+	if err != nil {
+		return types.PriceData{}, err
 	}
-	return priceData
+
+	freeModel := false
+	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
+		if groupRatioInfo.GroupRatio == 0 || modelPrice == 0 {
+			quota = 0
+			freeModel = true
+		}
+	}
+
+	priceData := types.PriceData{
+		FreeModel:         freeModel,
+		ModelPrice:        modelPrice,
+		UsePrice:          true,
+		Quota:             quota,
+		ChannelRatio:      channelRatio,
+		ChannelModelRatio: channelModelRatio,
+		GroupRatioInfo:    groupRatioInfo,
+	}
+	return priceData, nil
 }
 
 func ContainPriceOrRatio(modelName string) bool {

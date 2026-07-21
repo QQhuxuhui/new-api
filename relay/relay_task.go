@@ -80,13 +80,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 	}
 	// FIXME: 临时修补，支持任务仅按次计费
 	if !common.StringsContains(constant.TaskPricePatches, modelName) {
-		if len(info.PriceData.OtherRatios) > 0 {
-			for _, ra := range info.PriceData.OtherRatios {
-				if 1.0 != ra {
-					ratio *= ra
-				}
-			}
-		}
+		ratio = info.PriceData.ApplyOtherRatiosToFloat(ratio)
 	}
 	println(fmt.Sprintf("model: %s, model_price: %.4f, group: %s, group_ratio: %.4f, final_ratio: %.4f", modelName, modelPrice, info.UsingGroup, groupRatio, ratio))
 	userQuota, err := model.GetUserQuota(info.UserId, false)
@@ -170,16 +164,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 				if common.StringsContains(constant.TaskPricePatches, modelName) {
 					logContent = fmt.Sprintf("%s，按次计费", logContent)
 				} else {
-					if len(info.PriceData.OtherRatios) > 0 {
-						var contents []string
-						for key, ra := range info.PriceData.OtherRatios {
-							if 1.0 != ra {
-								contents = append(contents, fmt.Sprintf("%s: %.2f", key, ra))
-							}
+					var contents []string
+					for key, ra := range info.PriceData.OtherRatios() {
+						if 1.0 != ra {
+							contents = append(contents, fmt.Sprintf("%s: %.2f", key, ra))
 						}
-						if len(contents) > 0 {
-							logContent = fmt.Sprintf("%s, 计算参数：%s", logContent, strings.Join(contents, ", "))
-						}
+					}
+					if len(contents) > 0 {
+						logContent = fmt.Sprintf("%s, 计算参数：%s", logContent, strings.Join(contents, ", "))
 					}
 				}
 				other := make(map[string]interface{})
@@ -220,6 +212,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 		ChannelId:         info.ChannelId,
 		UpstreamModelName: info.UpstreamModelName,
 		OriginModelName:   info.OriginModelName,
+		PublicTaskID:      info.PublicTaskID,
+		UserPlanId:        info.UserPlanId,
+		BillingSource:     info.BillingSource,
+		TokenId:           info.TokenId,
 	}
 	if info.ChannelMeta != nil {
 		taskCtx.ChannelType = info.ChannelMeta.ChannelType

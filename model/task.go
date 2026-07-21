@@ -1,10 +1,12 @@
 package model
 
 import (
+	"bytes"
 	"database/sql/driver"
 	"encoding/json"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 )
@@ -38,6 +40,10 @@ const (
 	TaskStatusUnknown               = "UNKNOWN"
 )
 
+// TaskRefundLegacyCutoff separates legacy timeout tasks that intentionally
+// do not receive automatic refunds from tasks covered by reconciliation.
+const TaskRefundLegacyCutoff int64 = 1740182400 // 2025-02-22 00:00:00 UTC
+
 type Task struct {
 	ID         int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
 	CreatedAt  int64                 `json:"created_at" gorm:"index"`
@@ -56,6 +62,7 @@ type Task struct {
 	FinishTime int64                 `json:"finish_time" gorm:"index"`
 	Progress   string                `json:"progress" gorm:"type:varchar(20);index"`
 	Properties Properties            `json:"properties" gorm:"type:json"`
+	Username   string                `json:"username,omitempty" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
@@ -77,6 +84,8 @@ type Properties struct {
 	OriginModelName   string `json:"origin_model_name,omitempty"`
 }
 
+// TaskInitContext 用于解耦 model 与 relay/common（dev 的 relay/common 反向依赖 model，
+// InitTask 不能直接接收 *relaycommon.RelayInfo）。
 type TaskInitContext struct {
 	UserId            int
 	UsingGroup        string
@@ -85,6 +94,14 @@ type TaskInitContext struct {
 	ChannelApiKey     string
 	UpstreamModelName string
 	OriginModelName   string
+	// PublicTaskID 是提交时预生成的 task_xxxx 公开 ID；为空时 InitTask 会新生成。
+	PublicTaskID string
+	// 计费上下文（异步退款/差额结算依赖）
+	UserPlanId     int
+	BillingSource  string
+	TokenId        int
+	NodeName       string
+	BillingContext *TaskBillingContext
 }
 
 func (m *Properties) Scan(val interface{}) error {
@@ -104,7 +121,52 @@ func (m Properties) Value() (driver.Value, error) {
 }
 
 type TaskPrivateData struct {
-	Key string `json:"key,omitempty"`
+	Key            string `json:"key,omitempty"`
+	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
+	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
+	BillingSource  string              `json:"billing_source,omitempty"`  // 计费来源（daily_pool/plan/plan_and_user_balance/user_balance）
+	UserPlanId     int                 `json:"user_plan_id,omitempty"`    // 用户套餐 ID，用于套餐额度退款/补扣
+	TokenId        int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
+	NodeName       string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
+	BillingContext *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
+	// 混合计费分账：结算时实际从套餐/钱包扣除的额度，异步退款按此逆向
+	PlanChargedQuota   int64 `json:"plan_charged_quota,omitempty"`
+	WalletChargedQuota int64 `json:"wallet_charged_quota,omitempty"`
+}
+
+// TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
+type TaskBillingContext struct {
+	ModelPrice      float64            `json:"model_price,omitempty"`       // 模型单价
+	GroupRatio      float64            `json:"group_ratio,omitempty"`       // 分组倍率
+	ModelRatio      float64            `json:"model_ratio,omitempty"`       // 模型倍率
+	OtherRatios     map[string]float64 `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
+	OriginModelName string             `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
+	PerCallBilling  bool               `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
+}
+
+// GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
+// 旧数据没有 UpstreamTaskID 时，TaskID 本身就是上游 ID
+func (t *Task) GetUpstreamTaskID() string {
+	if t.PrivateData.UpstreamTaskID != "" {
+		return t.PrivateData.UpstreamTaskID
+	}
+	return t.TaskID
+}
+
+// GetResultURL 获取任务结果 URL（视频地址等）
+// 新数据存在 PrivateData.ResultURL 中；旧数据回退到 FailReason（历史兼容）
+func (t *Task) GetResultURL() string {
+	if t.PrivateData.ResultURL != "" {
+		return t.PrivateData.ResultURL
+	}
+	return t.FailReason
+}
+
+// GenerateTaskID 生成对外暴露的 task_xxxx 格式 ID
+func GenerateTaskID() string {
+	key, _ := common.GenerateRandomCharsKey(32)
+	return "task_" + key
 }
 
 func (p *TaskPrivateData) Scan(val interface{}) error {
@@ -142,7 +204,8 @@ func InitTask(platform constant.TaskPlatform, ctx *TaskInitContext) *Task {
 		ctx = &TaskInitContext{}
 	}
 	{
-		if ctx.ChannelType == constant.ChannelTypeGemini {
+		if ctx.ChannelType == constant.ChannelTypeGemini ||
+			ctx.ChannelType == constant.ChannelTypeVertexAi {
 			privateData.Key = ctx.ChannelApiKey
 		}
 		if ctx.UpstreamModelName != "" {
@@ -151,9 +214,21 @@ func InitTask(platform constant.TaskPlatform, ctx *TaskInitContext) *Task {
 		if ctx.OriginModelName != "" {
 			properties.OriginModelName = ctx.OriginModelName
 		}
+		privateData.UserPlanId = ctx.UserPlanId
+		privateData.BillingSource = ctx.BillingSource
+		privateData.TokenId = ctx.TokenId
+		privateData.NodeName = ctx.NodeName
+		privateData.BillingContext = ctx.BillingContext
+	}
+
+	// 使用预生成的公开 ID（如果有），否则新生成
+	taskID := ctx.PublicTaskID
+	if taskID == "" {
+		taskID = GenerateTaskID()
 	}
 
 	t := &Task{
+		TaskID:      taskID,
 		UserId:      ctx.UserId,
 		Group:       ctx.UsingGroup,
 		SubmitTime:  time.Now().Unix(),
@@ -248,6 +323,42 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	return tasks
 }
 
+func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
+	var tasks []*Task
+	err := DB.Where("progress != ?", "100%").
+		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+		Where("submit_time < ?", cutoffUnix).
+		Order("submit_time").
+		Limit(limit).
+		Find(&tasks).Error
+	if err != nil {
+		return nil
+	}
+	return tasks
+}
+
+// GetUnrefundedFailedTasks returns failed tasks whose non-zero quota marks a
+// pending refund. Legacy timeout tasks are excluded before LIMIT is applied so
+// they cannot starve refundable tasks from the reconciliation sweep.
+func GetUnrefundedFailedTasks(updatedBefore int64, limit int) []*Task {
+	if limit <= 0 {
+		return nil
+	}
+
+	var tasks []*Task
+	err := DB.Where("status = ?", TaskStatusFailure).
+		Where("quota != ?", 0).
+		Where("updated_at <= ?", updatedBefore).
+		Where("(submit_time <= ? OR submit_time >= ?)", 0, TaskRefundLegacyCutoff).
+		Order("id").
+		Limit(limit).
+		Find(&tasks).Error
+	if err != nil {
+		return nil
+	}
+	return tasks
+}
+
 func GetAllUnFinishSyncTasks(limit int) []*Task {
 	var tasks []*Task
 	var err error
@@ -257,6 +368,38 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 		return nil
 	}
 	return tasks
+}
+
+// HasUnfinishedSyncTasks reports whether at least one async (Suno/video) task is
+// still in progress. It is a cheap existence check (LIMIT 1) used to decide
+// whether the polling loop has pending work at all.
+func HasUnfinishedSyncTasks() bool {
+	var id int64
+	err := DB.Model(&Task{}).
+		Where("progress != ?", "100%").
+		Where("status != ?", TaskStatusFailure).
+		Where("status != ?", TaskStatusSuccess).
+		Limit(1).
+		Pluck("id", &id).Error
+	return err == nil && id != 0
+}
+
+// HasTaskPollingWork reports whether polling has either an unfinished task or
+// a failed task with a pending, non-legacy refund. The latter keeps polling
+// active when reconciliation is the only work left.
+func HasTaskPollingWork() bool {
+	if HasUnfinishedSyncTasks() {
+		return true
+	}
+
+	var id int64
+	err := DB.Model(&Task{}).
+		Where("status = ?", TaskStatusFailure).
+		Where("quota != ?", 0).
+		Where("(submit_time <= ? OR submit_time >= ?)", 0, TaskRefundLegacyCutoff).
+		Limit(1).
+		Pluck("id", &id).Error
+	return err == nil && id != 0
 }
 
 func GetByOnlyTaskId(taskId string) (*Task, bool, error) {
@@ -312,12 +455,100 @@ func (Task *Task) Insert() error {
 	return err
 }
 
+type taskSnapshot struct {
+	Status     TaskStatus
+	Progress   string
+	StartTime  int64
+	FinishTime int64
+	FailReason string
+	ResultURL  string
+	Data       json.RawMessage
+}
+
+func (s taskSnapshot) Equal(other taskSnapshot) bool {
+	return s.Status == other.Status &&
+		s.Progress == other.Progress &&
+		s.StartTime == other.StartTime &&
+		s.FinishTime == other.FinishTime &&
+		s.FailReason == other.FailReason &&
+		s.ResultURL == other.ResultURL &&
+		bytes.Equal(s.Data, other.Data)
+}
+
+func (t *Task) Snapshot() taskSnapshot {
+	return taskSnapshot{
+		Status:     t.Status,
+		Progress:   t.Progress,
+		StartTime:  t.StartTime,
+		FinishTime: t.FinishTime,
+		FailReason: t.FailReason,
+		ResultURL:  t.PrivateData.ResultURL,
+		Data:       t.Data,
+	}
+}
+
 func (Task *Task) Update() error {
 	var err error
 	err = DB.Save(Task).Error
 	return err
 }
 
+func (t *Task) UpdateQuota() error {
+	return DB.Model(t).Update("quota", t.Quota).Error
+}
+
+// ClaimQuotaForRefund atomically clears an expected non-zero quota. A true
+// result grants the caller ownership of the corresponding refund attempt.
+func ClaimQuotaForRefund(id int64, expectedQuota int) (bool, error) {
+	if expectedQuota == 0 {
+		return false, nil
+	}
+
+	result := DB.Model(&Task{}).
+		Where("id = ? AND quota = ?", id, expectedQuota).
+		Update("quota", 0)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// RestoreQuotaAfterFailedRefund restores a claimed quota marker only while it
+// is still zero. It is used when the observable funding adjustment fails, so a
+// later reconciliation pass can retry without overwriting another writer.
+func RestoreQuotaAfterFailedRefund(id int64, quota int) (bool, error) {
+	if quota == 0 {
+		return false, nil
+	}
+
+	result := DB.Model(&Task{}).
+		Where("id = ? AND quota = ?", id, 0).
+		Update("quota", quota)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
+// Returns (true, nil) if this caller won the update, (false, nil) if
+// another process already moved the task out of fromStatus. MySQL commonly
+// reports changed rows rather than matched rows, so a same-value no-op update
+// can also return false even when the status predicate still matched.
+//
+// Uses Model().Select("*").Updates() instead of Save() because GORM's Save
+// falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
+// zero rows, which silently bypasses the CAS guard.
+func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
+	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// TaskBulkUpdate performs an unconditional bulk UPDATE by upstream task_id strings.
+// Same caveats as TaskBulkUpdateByID — no CAS guard.
 func TaskBulkUpdate(TaskIds []string, params map[string]any) error {
 	if len(TaskIds) == 0 {
 		return nil
@@ -336,6 +567,11 @@ func TaskBulkUpdateByTaskIds(taskIDs []int64, params map[string]any) error {
 		Updates(params).Error
 }
 
+// TaskBulkUpdateByID performs an unconditional bulk UPDATE by primary key IDs.
+// WARNING: This function has NO CAS (Compare-And-Swap) guard — it will overwrite
+// any concurrent status changes. DO NOT use in billing/quota lifecycle flows
+// (e.g., timeout, success, failure transitions that trigger refunds or settlements).
+// For status transitions that involve billing, use Task.UpdateWithStatus() instead.
 func TaskBulkUpdateByID(ids []int64, params map[string]any) error {
 	if len(ids) == 0 {
 		return nil
@@ -440,4 +676,16 @@ func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 	}
 	_ = query.Count(&total).Error
 	return total
+}
+
+func (t *Task) ToOpenAIVideo() *dto.OpenAIVideo {
+	openAIVideo := dto.NewOpenAIVideo()
+	openAIVideo.ID = t.TaskID
+	openAIVideo.Status = t.Status.ToVideoStatus()
+	openAIVideo.Model = t.Properties.OriginModelName
+	openAIVideo.SetProgressStr(t.Progress)
+	openAIVideo.CreatedAt = t.CreatedAt
+	openAIVideo.CompletedAt = t.UpdatedAt
+	openAIVideo.SetMetadata("url", t.GetResultURL())
+	return openAIVideo
 }

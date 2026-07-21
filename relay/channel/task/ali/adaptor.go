@@ -497,16 +497,16 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 		return nil, err
 	}
 
-	info.PriceData.OtherRatios = map[string]float64{
+	info.PriceData.ReplaceOtherRatios(map[string]float64{
 		"seconds": float64(aliReq.Parameters.Duration),
-	}
+	})
 
 	ratios, err := ProcessAliOtherRatios(aliReq)
 	if err != nil {
 		return nil, err
 	}
 	for s, f := range ratios {
-		info.PriceData.OtherRatios[s] = f
+		info.PriceData.AddOtherRatio(s, f)
 	}
 
 	return aliReq, nil

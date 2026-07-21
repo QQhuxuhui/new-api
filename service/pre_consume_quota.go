@@ -450,7 +450,10 @@ func checkPlanQuotaSufficient(userPlanId int, requiredQuota int64) (bool, error)
 func preConsumeFromUserAndToken(c *gin.Context, preConsumedQuota int, relayInfo *relaycommon.RelayInfo, userQuota int) *types.NewAPIError {
 	trustQuota := common.GetTrustQuota()
 
-	if userQuota > trustQuota {
+	// ForcePreConsume 时禁用信任额度旁路，强制预扣全额。
+	// 异步任务（视频/音乐生成等）在请求返回后仍在运行，必须在提交前锁定全额，
+	// 否则任务失败退款时会凭空多退（钱从未被扣过）。
+	if !relayInfo.ForcePreConsume && userQuota > trustQuota {
 		// 用户额度充足，判断令牌额度是否充足
 		if !relayInfo.TokenUnlimited {
 			// 非无限令牌，判断令牌额度是否充足

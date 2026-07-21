@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,9 +110,13 @@ type RelayInfo struct {
 	UserQuota              int
 	RelayFormat            types.RelayFormat
 	SendResponseCount      int
-	FinalPreConsumedQuota  int  // 最终预消耗的配额
-	IsClaudeBetaQuery      bool // /v1/messages?beta=true
-	ConvertedViaResponses  bool // 标识请求经过了 chat→responses 转换
+	FinalPreConsumedQuota  int // 最终预消耗的配额
+	// ForcePreConsume 为 true 时禁用预扣费的信任额度旁路，强制预扣全额。
+	// 用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
+	// 必须在提交前锁定全额。
+	ForcePreConsume       bool
+	IsClaudeBetaQuery     bool // /v1/messages?beta=true
+	ConvertedViaResponses bool // 标识请求经过了 chat→responses 转换
 
 	// Plan-related fields
 	UserPlanId    int    // User's current plan assignment ID for quota tracking
@@ -125,6 +130,11 @@ type RelayInfo struct {
 	PlanPreConsumeQuota         int
 
 	PriceData types.PriceData
+
+	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
+	// int32 bound (or NaN fallback) while computing this request's charge.
+	// It is surfaced onto the consume/task log's admin_info for auditing.
+	QuotaClamp *common.QuotaClamp
 
 	Request                dto.Request
 	CacheSimulationRequest *dto.ClaudeRequest
@@ -494,9 +504,13 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 		info.RelayFormat = types.RelayFormatOpenAIResponsesCompaction
 		return info, nil
 	case types.RelayFormatTask:
-		return genBaseRelayInfo(c, nil), nil
+		info := genBaseRelayInfo(c, nil)
+		info.TaskRelayInfo = &TaskRelayInfo{}
+		return info, nil
 	case types.RelayFormatMjProxy:
-		return genBaseRelayInfo(c, nil), nil
+		info := genBaseRelayInfo(c, nil)
+		info.TaskRelayInfo = &TaskRelayInfo{}
+		return info, nil
 	default:
 		return nil, errors.New("invalid relay format")
 	}
@@ -520,8 +534,16 @@ func (info *RelayInfo) HasSendResponse() bool {
 type TaskRelayInfo struct {
 	Action       string
 	OriginTaskID string
+	// PublicTaskID 是提交时预生成的 task_xxxx 格式公开 ID，
+	// 供 DoResponse 在返回给客户端时使用（避免暴露上游真实 ID）。
+	PublicTaskID string
 
 	ConsumeQuota bool
+
+	// LockedChannel holds the full channel object when the request is bound to
+	// a specific channel (e.g., remix on origin task's channel). Stored as any
+	// to keep parity with upstream; callers type-assert to *model.Channel.
+	LockedChannel any
 }
 
 type TaskSubmitReq struct {
@@ -549,6 +571,7 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 	type Alias TaskSubmitReq
 	aux := &struct {
 		Metadata json.RawMessage `json:"metadata,omitempty"`
+		Duration json.RawMessage `json:"duration,omitempty"`
 		*Alias
 	}{
 		Alias: (*Alias)(t),
@@ -556,6 +579,20 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 
 	if err := common.Unmarshal(data, &aux); err != nil {
 		return err
+	}
+
+	if len(aux.Duration) > 0 {
+		var durationInt int
+		if err := common.Unmarshal(aux.Duration, &durationInt); err == nil {
+			t.Duration = durationInt
+		} else {
+			var durationStr string
+			if err := common.Unmarshal(aux.Duration, &durationStr); err == nil && durationStr != "" {
+				if v, err := strconv.Atoi(durationStr); err == nil {
+					t.Duration = v
+				}
+			}
+		}
 	}
 
 	if len(aux.Metadata) > 0 {
@@ -574,6 +611,21 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 		}
 	}
 
+	return nil
+}
+
+func (t *TaskSubmitReq) UnmarshalMetadata(v any) error {
+	metadata := t.Metadata
+	if metadata != nil {
+		metadataBytes, err := common.Marshal(metadata)
+		if err != nil {
+			return fmt.Errorf("marshal metadata failed: %w", err)
+		}
+		err = common.Unmarshal(metadataBytes, v)
+		if err != nil {
+			return fmt.Errorf("unmarshal metadata to target failed: %w", err)
+		}
+	}
 	return nil
 }
 
