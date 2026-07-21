@@ -87,9 +87,9 @@ type AliVideoOutput struct {
 
 // AliUsage 使用统计
 type AliUsage struct {
-	Duration   int `json:"duration,omitempty"`
-	VideoCount int `json:"video_count,omitempty"`
-	SR         int `json:"SR,omitempty"`
+	Duration   dto.IntValue `json:"duration,omitempty"`
+	VideoCount dto.IntValue `json:"video_count,omitempty"`
+	SR         dto.IntValue `json:"SR,omitempty"`
 }
 
 type AliMetadata struct {
@@ -202,6 +202,10 @@ func sizeToResolution(size string) (string, error) {
 func ProcessAliOtherRatios(aliReq *AliVideoRequest) (map[string]float64, error) {
 	otherRatios := make(map[string]float64)
 	aliRatios := map[string]map[string]float64{
+		"wan2.6-i2v": {
+			"720P":  1,
+			"1080P": 1 / 0.6,
+		},
 		"wan2.5-t2v-preview": {
 			"480P":  1,
 			"720P":  2,
@@ -448,7 +452,9 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 				aliReq.Parameters.Size = "1280*720"
 			}
 		} else {
-			if strings.HasPrefix(upstreamModel, "wan2.5") {
+			if strings.HasPrefix(upstreamModel, "wan2.6") {
+				aliReq.Parameters.Resolution = "1080P"
+			} else if strings.HasPrefix(upstreamModel, "wan2.5") {
 				aliReq.Parameters.Resolution = "1080P"
 			} else if strings.HasPrefix(upstreamModel, "wan2.2-i2v-flash") {
 				aliReq.Parameters.Resolution = "720P"
@@ -499,19 +505,37 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 		return nil, err
 	}
 
-	info.PriceData.ReplaceOtherRatios(map[string]float64{
-		"seconds": float64(aliReq.Parameters.Duration),
-	})
+	return aliReq, nil
+}
 
+// EstimateBilling 根据用户请求参数计算 OtherRatios（时长、分辨率等）。
+// 在 ValidateRequestAndSetAction 之后、价格计算之前调用。
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	aliReq := a.aliReq
+	if aliReq == nil {
+		taskReq, err := relaycommon.GetTaskRequest(c)
+		if err != nil {
+			return nil
+		}
+		aliReq, err = a.convertToAliRequest(info, taskReq)
+		if err != nil {
+			return nil
+		}
+	}
+
+	// metadata can override Duration past standard request validation;
+	// cap it because it is used as a billing multiplier.
+	otherRatios := map[string]float64{
+		"seconds": float64(min(aliReq.Parameters.Duration, relaycommon.MaxTaskDurationSeconds)),
+	}
 	ratios, err := ProcessAliOtherRatios(aliReq)
 	if err != nil {
-		return nil, err
+		return otherRatios
 	}
-	for s, f := range ratios {
-		info.PriceData.AddOtherRatio(s, f)
+	for k, v := range ratios {
+		otherRatios[k] = v
 	}
-
-	return aliReq, nil
+	return otherRatios
 }
 
 // DoRequest delegates to common helper
@@ -548,7 +572,8 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 
 	// 转换为 OpenAI 格式响应
 	openAIResp := dto.NewOpenAIVideo()
-	openAIResp.ID = aliResp.Output.TaskID
+	openAIResp.ID = info.PublicTaskID
+	openAIResp.TaskID = info.PublicTaskID
 	openAIResp.Model = c.GetString("model")
 	if openAIResp.Model == "" && info != nil {
 		openAIResp.Model = info.OriginModelName
