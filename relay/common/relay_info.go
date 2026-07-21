@@ -128,6 +128,11 @@ type RelayInfo struct {
 	// - PlanPreConsumeQuota is the max part intended to be charged to the plan for this request.
 	UserBalancePreConsumedQuota int
 	PlanPreConsumeQuota         int
+	// PlanOverflowChargedQuota is the plan portion actually debited when a
+	// daily-pool settlement overflows into plan+wallet split billing; the
+	// split happens inside PostConsumeQuota, after pre-consume fields are
+	// frozen, so it needs its own tracking for task billing-split persistence.
+	PlanOverflowChargedQuota int64
 
 	PriceData types.PriceData
 

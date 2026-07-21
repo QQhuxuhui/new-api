@@ -1251,7 +1251,7 @@ func finalizeTaskSubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo, result
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 	// 混合计费：落库实际分账，异步退款/补扣按此逆向
 	if relayInfo.BillingSource == service.BillingSourcePlanAndUserBalance {
-		planCharge := int64(relayInfo.PlanPreConsumeQuota)
+		planCharge := int64(relayInfo.PlanPreConsumeQuota) + relayInfo.PlanOverflowChargedQuota
 		if planCharge > int64(result.Quota) {
 			planCharge = int64(result.Quota)
 		}

@@ -20,6 +20,9 @@ var ModelList = []string{
 	"gemini-2.5-pro-preview-03-25",
 	// imagen models
 	"imagen-3.0-generate-002",
+	// veo models
+	"veo-2.0-generate-001", "veo-3.0-generate-001", "veo-3.0-fast-generate-001",
+	"veo-3.1-generate-preview", "veo-3.1-fast-generate-preview",
 	// embedding models
 	"gemini-embedding-exp-03-07",
 	"text-embedding-004",

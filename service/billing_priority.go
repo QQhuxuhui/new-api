@@ -274,6 +274,7 @@ func chargeSplitForOverflow(relayInfo *relaycommon.RelayInfo, plan *model.UserPl
 
 	relayInfo.BillingSource = BillingSourcePlanAndUserBalance
 	relayInfo.UserPlanId = plan.Id
+	relayInfo.PlanOverflowChargedQuota += planPart
 	// Clear then overwrite PlanId to avoid leaking a stale value if the snapshot
 	// PlanId is nil (log_info_generate.go:57,60).
 	relayInfo.PlanId = 0
