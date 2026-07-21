@@ -29,7 +29,7 @@ func TestRelayTaskSubmitAppliesModelMappingBeforeValidation(t *testing.T) {
 		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
 	}
 
-	taskErr := RelayTaskSubmit(c, info)
+	_, taskErr := RelayTaskSubmit(c, info)
 	if taskErr == nil || taskErr.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected prompt validation to stop request with 400, got %+v", taskErr)
 	}
@@ -62,7 +62,7 @@ func TestRelayTaskSubmitRecomputesModelMappingWhenChannelChanges(t *testing.T) {
 		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
 	}
 
-	if taskErr := RelayTaskSubmit(c, info); taskErr == nil || taskErr.StatusCode != http.StatusBadRequest {
+	if _, taskErr := RelayTaskSubmit(c, info); taskErr == nil || taskErr.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected first request to stop at prompt validation, got %+v", taskErr)
 	}
 	if !info.IsModelMapped || info.UpstreamModelName != "wan2.7-i2v" {
@@ -71,7 +71,7 @@ func TestRelayTaskSubmitRecomputesModelMappingWhenChannelChanges(t *testing.T) {
 
 	c.Set("channel_id", 2)
 	c.Set("model_mapping", `{}`)
-	if taskErr := RelayTaskSubmit(c, info); taskErr == nil || taskErr.StatusCode != http.StatusBadRequest {
+	if _, taskErr := RelayTaskSubmit(c, info); taskErr == nil || taskErr.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected second request to stop at prompt validation, got %+v", taskErr)
 	}
 	if info.IsModelMapped {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -131,6 +132,11 @@ func GetSSRFProtectedHTTPClient() *http.Client {
 		return GetHttpClient()
 	}
 	return ssrfProtectedHTTPClient
+}
+
+// GetHttpClientWithProxy 返回默认客户端或带缓存的代理客户端。
+func GetHttpClientWithProxy(rawProxyURL string) (*http.Client, error) {
+	return NewProxyHttpClient(strings.TrimSpace(rawProxyURL))
 }
 
 // ResetProxyClientCache 清空代理客户端缓存，确保下次使用时重新初始化

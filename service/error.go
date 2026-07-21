@@ -289,3 +289,16 @@ func TaskErrorWrapper(err error, code string, statusCode int) *dto.TaskError {
 
 	return taskError
 }
+
+// TaskErrorFromAPIError 将预扣费返回的 NewAPIError 转换为 TaskError。
+func TaskErrorFromAPIError(apiErr *types.NewAPIError) *dto.TaskError {
+	if apiErr == nil {
+		return nil
+	}
+	return &dto.TaskError{
+		Code:       string(apiErr.GetErrorCode()),
+		Message:    apiErr.Err.Error(),
+		StatusCode: apiErr.StatusCode,
+		Error:      apiErr.Err,
+	}
+}

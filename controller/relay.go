@@ -1062,7 +1062,18 @@ func RelayTask(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	taskErr := taskRelayHandler(c, relayInfo)
+
+	isTaskFetchMode := isTaskFetchRelayMode(relayInfo.RelayMode)
+	if !isTaskFetchMode {
+		// remix/续作：查找原始任务并锁定渠道（重试时复用同一渠道）
+		if taskErr := relay.ResolveOriginTask(c, relayInfo); taskErr != nil {
+			respondTaskError(c, taskErr)
+			return
+		}
+		channelId = c.GetInt("channel_id")
+	}
+
+	result, taskErr := taskRelayHandler(c, relayInfo)
 
 	// Record channel health based on result
 	if taskErr == nil {
@@ -1086,18 +1097,33 @@ func RelayTask(c *gin.Context) {
 		if !shouldRetryTaskRelay(c, channelId, taskErr, remainingRetries) {
 			break
 		}
-		channel, newAPIError := getChannel(c, group, originalModel, attemptsTask, priorityIndex)
-		if newAPIError != nil {
-			logger.LogError(c, fmt.Sprintf("CacheGetRandomSatisfiedChannel failed: %s", newAPIError.Error()))
-			taskErr = service.TaskErrorWrapperLocal(newAPIError.Err, "get_channel_failed", http.StatusInternalServerError)
-			if types.IsSkipRetryError(newAPIError) {
+
+		var channel *model.Channel
+		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
+			// 渠道已锁定（remix/续作）：复用同一渠道重试，轮换 key
+			if attemptsTask >= common.RetryTimes {
 				break
 			}
-			continue
-		}
-		if channel == nil {
-			// 当前优先级无可用渠道，继续下一优先级
-			continue
+			channel = lockedCh
+			if setupErr := middleware.SetupContextForSelectedChannel(c, channel, originalModel); setupErr != nil {
+				taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
+				break
+			}
+		} else {
+			var newAPIError *types.NewAPIError
+			channel, newAPIError = getChannel(c, group, originalModel, attemptsTask, priorityIndex)
+			if newAPIError != nil {
+				logger.LogError(c, fmt.Sprintf("CacheGetRandomSatisfiedChannel failed: %s", newAPIError.Error()))
+				taskErr = service.TaskErrorWrapperLocal(newAPIError.Err, "get_channel_failed", http.StatusInternalServerError)
+				if types.IsSkipRetryError(newAPIError) {
+					break
+				}
+				continue
+			}
+			if channel == nil {
+				// 当前优先级无可用渠道，继续下一优先级
+				continue
+			}
 		}
 
 		channelId = channel.Id
@@ -1108,14 +1134,14 @@ func RelayTask(c *gin.Context) {
 
 		requestBody, _ := common.GetRequestBody(c)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
-		taskErr = taskRelayHandler(c, relayInfo)
+		result, taskErr = taskRelayHandler(c, relayInfo)
 		attemptsTask++
 
 		// Record channel health based on retry result
 		if taskErr == nil {
 			// Success - record to health tracker
 			service.RecordChannelSuccess(channelId)
-			return // Exit immediately on success
+			break
 		}
 
 		// Error occurred - check if it should trigger health tracking
@@ -1130,7 +1156,17 @@ func RelayTask(c *gin.Context) {
 		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
 	}
+
+	// 成功：结算 + 日志 + 插入任务
+	if taskErr == nil && result != nil {
+		finalizeTaskSubmit(c, relayInfo, result)
+	}
+
 	if taskErr != nil {
+		// 提交失败：按计费来源返还预扣费额度
+		if !isTaskFetchMode {
+			service.ReturnPreConsumedQuota(c, relayInfo)
+		}
 		if service.ShouldUseUnifiedTaskUpstreamMessage(taskErr) {
 			taskErr.Message = service.UnifiedUpstreamClientMessage
 		} else if taskErr.StatusCode == http.StatusTooManyRequests {
@@ -1140,15 +1176,88 @@ func RelayTask(c *gin.Context) {
 	}
 }
 
-func taskRelayHandler(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dto.TaskError {
-	var err *dto.TaskError
-	switch relayInfo.RelayMode {
+func isTaskFetchRelayMode(relayMode int) bool {
+	switch relayMode {
 	case relayconstant.RelayModeSunoFetch, relayconstant.RelayModeSunoFetchByID, relayconstant.RelayModeVideoFetchByID:
-		err = relay.RelayTaskFetch(c, relayInfo.RelayMode)
-	default:
-		err = relay.RelayTaskSubmit(c, relayInfo)
+		return true
 	}
-	return err
+	return false
+}
+
+// respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
+func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
+	if service.ShouldUseUnifiedTaskUpstreamMessage(taskErr) {
+		taskErr.Message = service.UnifiedUpstreamClientMessage
+	} else if taskErr.StatusCode == http.StatusTooManyRequests {
+		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
+	}
+	c.JSON(taskErr.StatusCode, taskErr)
+}
+
+// finalizeTaskSubmit 任务提交成功后的统一结算：按三级计费落账（日卡/套餐/钱包）、
+// 记录消费日志、写入任务（含异步退款/差额结算所需的计费上下文）。
+func finalizeTaskSubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo, result *relay.TaskSubmitResult) {
+	if settleErr := service.PostConsumeQuota(relayInfo, result.Quota-relayInfo.FinalPreConsumedQuota, relayInfo.FinalPreConsumedQuota, true); settleErr != nil {
+		common.SysError("settle task billing error: " + settleErr.Error())
+	}
+	service.LogTaskConsumption(c, relayInfo)
+
+	taskCtx := &model.TaskInitContext{
+		UserId:            relayInfo.UserId,
+		UsingGroup:        relayInfo.UsingGroup,
+		ChannelId:         relayInfo.ChannelId,
+		UpstreamModelName: relayInfo.UpstreamModelName,
+		OriginModelName:   relayInfo.OriginModelName,
+		PublicTaskID:      relayInfo.PublicTaskID,
+		UserPlanId:        relayInfo.UserPlanId,
+		BillingSource:     relayInfo.BillingSource,
+		TokenId:           relayInfo.TokenId,
+		NodeName:          common.NodeName,
+		BillingContext: &model.TaskBillingContext{
+			ModelPrice:      relayInfo.PriceData.ModelPrice,
+			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+			ModelRatio:      relayInfo.PriceData.ModelRatio,
+			OtherRatios:     relayInfo.PriceData.OtherRatios(),
+			OriginModelName: relayInfo.OriginModelName,
+			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+		},
+	}
+	if relayInfo.ChannelMeta != nil {
+		taskCtx.ChannelType = relayInfo.ChannelMeta.ChannelType
+		taskCtx.ChannelApiKey = relayInfo.ChannelMeta.ApiKey
+	}
+
+	task := model.InitTask(result.Platform, taskCtx)
+	// 兼容现状：适配器响应仍返回上游 ID，TaskID 保持上游 ID 以支持客户端按响应中的 ID 查询
+	if result.UpstreamTaskID != "" {
+		task.TaskID = result.UpstreamTaskID
+	}
+	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
+	// 混合计费：落库实际分账，异步退款/补扣按此逆向
+	if relayInfo.BillingSource == service.BillingSourcePlanAndUserBalance {
+		planCharge := int64(relayInfo.PlanPreConsumeQuota)
+		if planCharge > int64(result.Quota) {
+			planCharge = int64(result.Quota)
+		}
+		if planCharge < 0 {
+			planCharge = 0
+		}
+		task.PrivateData.PlanChargedQuota = planCharge
+		task.PrivateData.WalletChargedQuota = int64(result.Quota) - planCharge
+	}
+	task.Quota = result.Quota
+	task.Data = result.TaskData
+	task.Action = relayInfo.Action
+	if insertErr := task.Insert(); insertErr != nil {
+		common.SysError("insert task error: " + insertErr.Error())
+	}
+}
+
+func taskRelayHandler(c *gin.Context, relayInfo *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+	if isTaskFetchRelayMode(relayInfo.RelayMode) {
+		return nil, relay.RelayTaskFetch(c, relayInfo.RelayMode)
+	}
+	return relay.RelayTaskSubmit(c, relayInfo)
 }
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError, retryTimes int) bool {

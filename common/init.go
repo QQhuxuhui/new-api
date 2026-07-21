@@ -79,6 +79,7 @@ func InitEnv() {
 	DebugEnabled = os.Getenv("DEBUG") == "true"
 	MemoryCacheEnabled = os.Getenv("MEMORY_CACHE_ENABLED") == "true"
 	IsMasterNode = os.Getenv("NODE_TYPE") != "slave"
+	initNodeNameIdentity()
 	CaptchaEnabled = GetEnvOrDefaultBool("CAPTCHA_ENABLED", true)
 
 	// Parse requestInterval and set RequestInterval
