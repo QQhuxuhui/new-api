@@ -497,6 +497,12 @@ func (t *Task) UpdateQuota() error {
 	return DB.Model(t).Update("quota", t.Quota).Error
 }
 
+// UpdatePrivateData 仅回写 private_data 列。
+// 异步结算阶段计费来源/分账字段可能变化（如套餐补扣回退钱包），需要单独持久化。
+func (t *Task) UpdatePrivateData() error {
+	return DB.Model(t).Update("private_data", t.PrivateData).Error
+}
+
 // ClaimQuotaForRefund atomically clears an expected non-zero quota. A true
 // result grants the caller ownership of the corresponding refund attempt.
 func ClaimQuotaForRefund(id int64, expectedQuota int) (bool, error) {
