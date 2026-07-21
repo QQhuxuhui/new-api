@@ -22,6 +22,7 @@ type Adaptor struct {
 }
 
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
+	request.GenerationConfig.ImageConfig = normalizeImageConfig(request.GenerationConfig.ImageConfig)
 	if len(request.Contents) > 0 {
 		for i, content := range request.Contents {
 			if i == 0 {

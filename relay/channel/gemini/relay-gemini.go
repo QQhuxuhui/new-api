@@ -274,7 +274,7 @@ func CovertGemini2OpenAI(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 				if err != nil {
 					return nil, fmt.Errorf("invalid extra_body.google.image_config: %w", err)
 				}
-				geminiRequest.GenerationConfig.ImageConfig = imageConfigBytes
+				geminiRequest.GenerationConfig.ImageConfig = normalizeImageConfig(imageConfigBytes)
 			}
 		}
 	}
