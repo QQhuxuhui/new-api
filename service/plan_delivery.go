@@ -164,7 +164,9 @@ func DeliverPlan(orderId int, tx *gorm.DB) error {
 	}
 
 	// Invalidate user plan cache
-	model.InvalidateUserPlanCache(order.UserId)
+	if err := model.InvalidateUserPlanCache(order.UserId); err != nil {
+		return err
+	}
 
 	// Log delivery
 	activationStatus := "queued"

@@ -276,7 +276,9 @@ func (p *Plan) Delete() error {
 	// - Pending/paid orders are protected by the check above
 
 	// Invalidate cache BEFORE delete to ensure no stale data is served (synchronous)
-	InvalidateUserPlanCacheByPlanId(p.Id)
+	if err := InvalidateUserPlanCacheByPlanId(p.Id); err != nil {
+		return err
+	}
 	return DB.Delete(p).Error
 }
 
@@ -373,7 +375,7 @@ func UpdatePlanStatus(id int, status int) error {
 	err := DB.Model(&Plan{}).Where("id = ?", id).Update("status", status).Error
 	if err == nil {
 		// Invalidate cache for all users who have this plan (synchronous to ensure consistency)
-		InvalidateUserPlanCacheByPlanId(id)
+		return InvalidateUserPlanCacheByPlanId(id)
 	}
 	return err
 }

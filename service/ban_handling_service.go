@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -63,22 +64,24 @@ func OnTemporaryBan(userId int, adminId int, adminUsername string, reason string
 	if err == nil && len(queuedPlans) > 0 {
 		for _, plan := range queuedPlans {
 			if !plan.IsPaused() && plan.StartedAt > 0 {
-				model.DB.Model(&model.UserPlan{}).
+				if err := model.DB.Model(&model.UserPlan{}).
 					Where("id = ?", plan.Id).
 					Updates(map[string]interface{}{
 						"paused_at":  now,
 						"updated_at": now,
-					})
+					}).Error; err != nil {
+					return fmt.Errorf("暂停队列套餐 %d 失败: %w", plan.Id, err)
+				}
 			}
 		}
+	} else if err != nil {
+		return fmt.Errorf("查询队列套餐失败: %w", err)
 	}
 
 	// Clear daily pool (not recoverable)
 	// Daily pool expires daily anyway, so we just leave it
 
-	// Invalidate cache
-	model.InvalidateUserPlanCache(userId)
-
+	logCommittedLifecycleCacheError("temporary ban", userId, model.InvalidateUserPlanCache(userId))
 	return nil
 }
 
@@ -146,7 +149,9 @@ func OnUnban(userId int, adminId int, adminUsername string, ipAddress string) er
 		// Check if plan expired even after extending (use newExpiresAt, not old ExpiresAt)
 		if newExpiresAt > 0 && newExpiresAt < now {
 			// Plan expired during ban even after extension, need to switch to next
-			_, _ = model.CompleteCurrentPlanById(userId, currentPlan.Id, model.UserPlanStatusExpired)
+			if _, err := completeExpiredPlanAndNotify(userId, currentPlan.Id); err != nil {
+				return fmt.Errorf("处理解封后过期套餐失败: %w", err)
+			}
 		}
 	}
 
@@ -156,20 +161,22 @@ func OnUnban(userId int, adminId int, adminUsername string, ipAddress string) er
 		for _, plan := range queuedPlans {
 			if plan.IsPaused() {
 				pausedDuration := now - plan.PausedAt
-				model.DB.Model(&model.UserPlan{}).
+				if err := model.DB.Model(&model.UserPlan{}).
 					Where("id = ?", plan.Id).
 					Updates(map[string]interface{}{
 						"paused_at":       0,
 						"paused_duration": plan.PausedDuration + pausedDuration,
 						"updated_at":      now,
-					})
+					}).Error; err != nil {
+					return fmt.Errorf("恢复队列套餐 %d 失败: %w", plan.Id, err)
+				}
 			}
 		}
+	} else if err != nil {
+		return fmt.Errorf("查询队列套餐失败: %w", err)
 	}
 
-	// Invalidate cache
-	model.InvalidateUserPlanCache(userId)
-
+	logCommittedLifecycleCacheError("unban", userId, model.InvalidateUserPlanCache(userId))
 	return nil
 }
 
@@ -204,6 +211,7 @@ func OnPermanentBan(userId int, adminId int, adminUsername string, reason string
 				"is_current":     0,
 				"queue_position": 0,
 				"pinned":         0,
+				"quota":          0,
 				"status":         model.UserPlanStatusForfeited,
 				"updated_at":     time.Now().UnixMilli(),
 			})
@@ -212,6 +220,9 @@ func OnPermanentBan(userId int, adminId int, adminUsername string, reason string
 		}
 		if result.RowsAffected != int64(expectedPlans) {
 			return fmt.Errorf("作废套餐数量不一致: expected=%d actual=%d", expectedPlans, result.RowsAffected)
+		}
+		if err := tx.Model(&model.User{}).Where("id = ?", userId).UpdateColumn("quota", 0).Error; err != nil {
+			return fmt.Errorf("清空用户余额失败: %w", err)
 		}
 
 		if err := tx.Where("user_id = ? AND date = ?", userId, model.GetTodayDate()).
@@ -240,9 +251,7 @@ func OnPermanentBan(userId int, adminId int, adminUsername string, reason string
 		"",
 	)
 
-	// Invalidate cache
-	model.InvalidateUserPlanCache(userId)
-
+	logCommittedLifecycleCacheError("permanent ban", userId, model.InvalidateUserPlanCache(userId))
 	return nil
 }
 
@@ -279,6 +288,10 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 			return fmt.Errorf("解析快照数据失败: %w", err)
 		}
 		userId = snapshot.UserId
+		var restoreUser model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&restoreUser, userId).Error; err != nil {
+			return fmt.Errorf("恢复用户不存在: %w", err)
+		}
 		now := time.Now().UnixMilli()
 		banDuration := int64(0)
 		if options.AdjustExpiry {
@@ -298,7 +311,9 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 			}
 			if err := restoreSnapshotPlanWithTx(tx, userId, cp.UserPlanId, map[string]interface{}{
 				"is_current": 1, "queue_position": 0, "expires_at": expiresAt,
-				"pinned": 0, "status": model.UserPlanStatusActive, "updated_at": now,
+				"started_at": cp.StartedAt, "quota": cp.Quota, "used_quota": cp.UsedQuota,
+				"original_quota": cp.OriginalQuota, "pinned": 0,
+				"status": model.UserPlanStatusActive, "updated_at": now,
 			}); err != nil {
 				return fmt.Errorf("恢复当前套餐失败: %w", err)
 			}
@@ -314,9 +329,16 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 				continue
 			}
 			seenSelected[qp.UserPlanId] = true
+			expiresAt := qp.ExpiresAt
+			if options.AdjustExpiry && expiresAt > 0 {
+				expiresAt += banDuration
+			}
 			if err := restoreSnapshotPlanWithTx(tx, userId, qp.UserPlanId, map[string]interface{}{
 				"is_current": 0, "queue_position": qp.QueuePosition,
-				"pinned": 0, "status": model.UserPlanStatusActive, "updated_at": now,
+				"started_at": qp.StartedAt, "expires_at": expiresAt,
+				"quota": qp.Quota, "used_quota": qp.UsedQuota,
+				"original_quota": qp.OriginalQuota, "pinned": 0,
+				"status": model.UserPlanStatusActive, "updated_at": now,
 			}); err != nil {
 				return fmt.Errorf("恢复队列套餐 %d 失败: %w", qp.UserPlanId, err)
 			}
@@ -328,9 +350,16 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 		}
 
 		for _, plan := range snapshotData.AvailablePlans {
+			expiresAt := plan.ExpiresAt
+			if options.AdjustExpiry && expiresAt > 0 {
+				expiresAt += banDuration
+			}
 			if err := restoreSnapshotPlanWithTx(tx, userId, plan.UserPlanId, map[string]interface{}{
 				"is_current": 0, "queue_position": 0,
-				"pinned": 0, "status": model.UserPlanStatusActive, "updated_at": now,
+				"started_at": plan.StartedAt, "expires_at": expiresAt,
+				"quota": plan.Quota, "used_quota": plan.UsedQuota,
+				"original_quota": plan.OriginalQuota, "pinned": 0,
+				"status": model.UserPlanStatusActive, "updated_at": now,
 			}); err != nil {
 				return fmt.Errorf("恢复可用套餐 %d 失败: %w", plan.UserPlanId, err)
 			}
@@ -339,14 +368,11 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 		if err := recalculateRestoredQueueWithTx(tx, userId); err != nil {
 			return fmt.Errorf("重排队列失败: %w", err)
 		}
-		if options.RestoreBalance && snapshotData.UserBalance > 0 {
+		if options.RestoreBalance {
 			result := tx.Model(&model.User{}).Where("id = ?", userId).
-				UpdateColumn("quota", gorm.Expr("quota + ?", snapshotData.UserBalance))
+				UpdateColumn("quota", snapshotData.UserBalance)
 			if result.Error != nil {
 				return fmt.Errorf("恢复用户余额失败: %w", result.Error)
-			}
-			if result.RowsAffected != 1 {
-				return errors.New("恢复用户余额失败: 用户不存在")
 			}
 		}
 
@@ -390,10 +416,16 @@ func RestoreFromSnapshot(snapshotId int, options *RestoreOptions, adminId int, a
 	)
 
 	// Invalidate cache
-	model.InvalidateUserPlanCache(userId)
-	model.InvalidateUserCache(userId)
-
+	planCacheErr := model.InvalidateUserPlanCache(userId)
+	userCacheErr := model.InvalidateUserCache(userId)
+	logCommittedLifecycleCacheError("snapshot restore", userId, errors.Join(planCacheErr, userCacheErr))
 	return nil
+}
+
+func logCommittedLifecycleCacheError(operation string, userId int, err error) {
+	if err != nil {
+		common.SysError(fmt.Sprintf("%s committed for user %d but cache invalidation failed: %v", operation, userId, err))
+	}
 }
 
 func restoreSnapshotPlanWithTx(tx *gorm.DB, userId int, userPlanId int, updates map[string]interface{}) error {
@@ -454,13 +486,11 @@ func CheckBanStatus(userId int) (bool, bool, string) {
 		return false, false, ""
 	}
 
-	// Check user status
-	// Assuming status 2 = disabled (temporary), status 3 = banned (permanent)
-	// This depends on your actual user status constants
+	// Check user status.
 	switch user.Status {
-	case 2: // Disabled
+	case common.UserStatusDisabled:
 		return true, true, "账号已被临时禁用"
-	case 3: // Banned
+	case common.UserStatusBanned:
 		return true, false, "账号已被永久封禁"
 	default:
 		return false, false, ""

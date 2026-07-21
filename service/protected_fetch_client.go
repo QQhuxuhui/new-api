@@ -34,6 +34,11 @@ type ssrfProtectedRoundTripper struct {
 	transports map[string]*http.Transport
 }
 
+const (
+	protectedFetchDialTimeout    = 30 * time.Second
+	protectedFetchCandidateLimit = 8
+)
+
 func currentFetchProtection() (*common.SSRFProtection, bool, error) {
 	fetchSetting := system_setting.GetFetchSetting()
 	if !fetchSetting.EnableSSRFProtection {
@@ -60,7 +65,7 @@ func newProtectedFetchHTTPClient() *http.Client {
 }
 
 func newProtectedFetchHTTPClientWithDialer(resolver ssrfResolver, dialContext func(ctx context.Context, network, address string) (net.Conn, error), getProtection func() (*common.SSRFProtection, bool, error)) *http.Client {
-	return newProtectedFetchHTTPClientWithProxy(resolver, dialContext, getProtection, http.ProxyFromEnvironment)
+	return newProtectedFetchHTTPClientWithProxy(resolver, dialContext, getProtection, nil)
 }
 
 func newProtectedFetchHTTPClientWithProxy(resolver ssrfResolver, dialContext func(ctx context.Context, network, address string) (net.Conn, error), getProtection func() (*common.SSRFProtection, bool, error), proxy func(*http.Request) (*url.URL, error)) *http.Client {
@@ -77,10 +82,6 @@ func newProtectedFetchHTTPClientWithProxy(resolver ssrfResolver, dialContext fun
 	if getProtection == nil {
 		getProtection = currentFetchProtection
 	}
-	if proxy == nil {
-		proxy = http.ProxyFromEnvironment
-	}
-
 	client := &http.Client{
 		Transport: &ssrfProtectedRoundTripper{
 			resolver:      resolver,
@@ -105,9 +106,13 @@ func (t *ssrfProtectedRoundTripper) RoundTrip(req *http.Request) (*http.Response
 		return nil, err
 	}
 
-	proxyURL, err := t.proxy(req)
-	if err != nil {
-		return nil, err
+	var proxyURL *url.URL
+	if t.proxy != nil {
+		var err error
+		proxyURL, err = t.proxy(req)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return t.transportFor(proxyURL).RoundTrip(req)
 }
@@ -170,6 +175,8 @@ func (d *protectedFetchDialer) DialContext(ctx context.Context, network, addr st
 	if !enabled {
 		return d.dialContext(ctx, network, addr)
 	}
+	dialCtx, cancel := context.WithTimeout(ctx, protectedFetchDialTimeout)
+	defer cancel()
 
 	host, portText, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -184,19 +191,20 @@ func (d *protectedFetchDialer) DialContext(ctx context.Context, network, addr st
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
-		return d.dialContext(ctx, network, net.JoinHostPort(ip.String(), portText))
-	}
-	if !protection.ApplyIPFilterForDomain {
-		return d.dialContext(ctx, network, addr)
+		return d.dialContext(dialCtx, network, net.JoinHostPort(ip.String(), portText))
 	}
 
-	resolved, err := d.resolver.LookupIPAddr(ctx, host)
+	resolved, err := d.resolver.LookupIPAddr(dialCtx, host)
 	if err != nil {
 		return nil, fmt.Errorf("DNS resolution failed for %s: %v", host, err)
 	}
 
-	var candidateIPs []net.IP
+	candidateIPs := make([]net.IP, 0, protectedFetchCandidateLimit)
+	seenIPs := make(map[string]struct{}, protectedFetchCandidateLimit)
 	for _, ipAddr := range resolved {
+		if len(candidateIPs) == protectedFetchCandidateLimit {
+			break
+		}
 		ip := ipAddr.IP
 		if ip == nil || !networkAllowsIP(network, ip) {
 			continue
@@ -204,12 +212,17 @@ func (d *protectedFetchDialer) DialContext(ctx context.Context, network, addr st
 		if err := protection.ValidateResolvedIP(host, ip); err != nil {
 			return nil, err
 		}
+		ipText := ip.String()
+		if _, exists := seenIPs[ipText]; exists {
+			continue
+		}
+		seenIPs[ipText] = struct{}{}
 		candidateIPs = append(candidateIPs, ip)
 	}
 
 	var lastDialErr error
 	for _, ip := range candidateIPs {
-		conn, err := d.dialContext(ctx, network, net.JoinHostPort(ip.String(), portText))
+		conn, err := d.dialContext(dialCtx, network, net.JoinHostPort(ip.String(), portText))
 		if err == nil {
 			return conn, nil
 		}

@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -11,6 +12,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // GetFailoverCandidates returns all valid user plans excluding the current user plan.
@@ -25,10 +27,17 @@ func GetFailoverCandidates(userId, excludeUserPlanId int) ([]*model.UserPlan, er
 
 	// Filter out the current plan, locked plans, and plans without available quota
 	var candidates []*model.UserPlan
-	for _, plan := range validPlans {
+	for _, cachedPlan := range validPlans {
+		plan, freshErr := model.GetUserPlanById(cachedPlan.Id)
+		if freshErr != nil {
+			if errors.Is(freshErr, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to refresh failover candidate %d: %w", cachedPlan.Id, freshErr)
+		}
 		// Exclude current user plan by user_plan.id only.
 		// Using plan_id here can cause false exclusion when numeric IDs collide.
-		if plan.Id == excludeUserPlanId || plan.IsLocked() {
+		if plan.UserId != userId || plan.Id == excludeUserPlanId || !plan.IsValid() {
 			continue
 		}
 
@@ -39,6 +48,12 @@ func GetFailoverCandidates(userId, excludeUserPlanId int) ([]*model.UserPlan, er
 
 		candidates = append(candidates, plan)
 	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].GetPriority() == candidates[j].GetPriority() {
+			return candidates[i].Id < candidates[j].Id
+		}
+		return candidates[i].GetPriority() > candidates[j].GetPriority()
+	})
 
 	// Plans are already sorted by priority in model.CachedGetUserValidPlans
 	// Priority is descending (higher priority first)
@@ -104,6 +119,19 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 
 	// Try each candidate plan in priority order
 	for _, candidate := range candidates {
+		freshCandidate, freshErr := model.GetUserPlanById(candidate.Id)
+		if freshErr != nil {
+			if errors.Is(freshErr, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return nil, nil, "", fmt.Errorf("failed to revalidate failover candidate %d: %w", candidate.Id, freshErr)
+		}
+		if freshCandidate.UserId != userId || !freshCandidate.IsValid() ||
+			!hasPlanAvailableQuotaForFailover(freshCandidate) {
+			logger.LogInfo(c, fmt.Sprintf("[PlanFailover] user=%d plan_id=%d skipped after fresh eligibility check", userId, candidate.Id))
+			continue
+		}
+		candidate = freshCandidate
 		planName := candidate.GetDisplayName()
 		// Use UserPlan snapshot fields for channel groups
 		channelGroups := candidate.GetChannelGroups()
@@ -223,6 +251,50 @@ func AttemptPlanFailover(c *gin.Context, userId int, currentPlanId int, modelNam
 	return nil, nil, "", nil
 }
 
+func expandedFailoverPlanGroups(plan *model.UserPlan) []string {
+	if plan == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	groups := make([]string, 0)
+	for _, configuredGroup := range plan.GetChannelGroups() {
+		for _, group := range ratio_setting.ExpandGroup(configuredGroup) {
+			if group == "" || seen[group] {
+				continue
+			}
+			seen[group] = true
+			groups = append(groups, group)
+		}
+	}
+	return groups
+}
+
+// SetPlanFailoverRoutingContext keeps a parent token group as an authorization
+// constraint while routing and billing use the actual child group selected.
+func SetPlanFailoverRoutingContext(c *gin.Context, plan *model.UserPlan, failoverGroup string) {
+	planGroups := expandedFailoverPlanGroups(plan)
+	tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+	if tokenGroup != "" && tokenGroup != "auto" {
+		allowed := make(map[string]bool, len(ratio_setting.ExpandGroup(tokenGroup)))
+		for _, group := range ratio_setting.ExpandGroup(tokenGroup) {
+			allowed[group] = true
+		}
+		effective := make([]string, 0, len(planGroups))
+		for _, group := range planGroups {
+			if allowed[group] {
+				effective = append(effective, group)
+			}
+		}
+		planGroups = effective
+	}
+	if len(planGroups) == 0 && failoverGroup != "" {
+		planGroups = []string{failoverGroup}
+	}
+	common.SetContextKey(c, constant.ContextKeyPlanGroups, planGroups)
+	common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
+}
+
 // ShouldAttemptCrossplanFailover checks if cross-plan failover should be attempted
 // This is called after all retries within current plan have failed
 // Returns: shouldAttempt, currentUserPlanId, userId
@@ -309,9 +381,21 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 
 	// Successfully found alternative plan - switch user to it
 	// Use SwitchToUserPlan which works with user_plan.id (supports NULL plan_id)
-	if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id, false); switchErr != nil {
+	switched, switchErr := model.SwitchToUserPlanGuarded(userId, failoverPlan.Id, model.SystemPlanSwitchGuard{
+		ExpectedCurrentUserPlanId: currentUserPlanId,
+		RequireAutoSwitch:         true,
+		RequireUnexpired:          true,
+	})
+	if switchErr != nil && !switched {
 		logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
 		return nil, nil, "", false
+	}
+	if !switched {
+		logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] user=%d source plan changed, discarding stale failover", userId))
+		return nil, nil, "", false
+	}
+	if switchErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] user=%d switch committed but cache invalidation failed: %v", userId, switchErr))
 	}
 
 	// Get plan name for logging - use snapshot fields first (works even when Plan is deleted)
@@ -336,40 +420,7 @@ func AttemptCrossplanFailoverAfterRetry(c *gin.Context, modelName string) (*mode
 	common.SetContextKey(c, constant.ContextKeyPlanName, planName)
 	common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
 
-	// Update channel groups in context
-	// Use UserPlan snapshot fields for channel groups
-	channelGroups := failoverPlan.GetChannelGroups()
-
-	// Expand parent groups to child groups (channel cache keys are child groups)
-	if len(channelGroups) > 0 {
-		expandedSet := make(map[string]bool)
-		for _, pg := range channelGroups {
-			expanded := ratio_setting.ExpandGroup(pg)
-			for _, g := range expanded {
-				expandedSet[g] = true
-			}
-		}
-		channelGroups = make([]string, 0, len(expandedSet))
-		for g := range expandedSet {
-			channelGroups = append(channelGroups, g)
-		}
-	}
-
-	if len(channelGroups) > 0 {
-		// Check if token has a specific group constraint
-		tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
-		if tokenGroup != "" && tokenGroup != "auto" {
-			// Token specified a group, only set that group (should match failoverGroup)
-			common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{tokenGroup})
-			common.SetContextKey(c, constant.ContextKeyPlanGroup, tokenGroup)
-			common.SetContextKey(c, constant.ContextKeyUsingGroup, tokenGroup)
-		} else {
-			// No token group constraint, use all plan groups
-			common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
-			common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
-			common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
-		}
-	}
+	SetPlanFailoverRoutingContext(c, failoverPlan, failoverGroup)
 
 	return failoverChannel, failoverPlan, failoverGroup, true
 }

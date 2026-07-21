@@ -122,6 +122,7 @@ func ResponsesResponseToChatCompletionsResponse(
 		// PromptTokensDetails is InputTokenDetails (value type)
 		if resp.Usage.InputTokensDetails != nil {
 			chatResp.Usage.PromptTokensDetails.CachedTokens = resp.Usage.InputTokensDetails.CachedTokens
+			chatResp.Usage.PromptTokensDetails.CachedCreationTokens = resp.Usage.InputTokensDetails.CachedCreationTokens
 		}
 	}
 

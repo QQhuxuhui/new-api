@@ -164,6 +164,9 @@ func GetRandomSatisfiedChannelDetailed(group string, model string, retry int, in
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
 		channel, err := GetChannel(group, model, retry)
+		if err == nil && channel != nil && !IsChannelHealthy(channel.Id) {
+			return nil, warningSkipped, nil
+		}
 		return channel, warningSkipped, err
 	}
 
@@ -310,6 +313,9 @@ func GetRandomSatisfiedChannelExcludingDetailed(group string, model string, retr
 		// For non-cached mode, fall back to basic selection
 		// TODO: implement exclusion for database queries if needed
 		channel, err := GetChannel(group, model, retry)
+		if err == nil && channel != nil && !IsChannelHealthy(channel.Id) {
+			return nil, warningSkipped, nil
+		}
 		return channel, warningSkipped, err
 	}
 

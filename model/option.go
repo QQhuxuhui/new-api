@@ -199,11 +199,33 @@ func InitOptionMap() {
 func loadOptionsFromDatabase() {
 	options, _ := AllOption()
 	for _, option := range options {
-		err := updateOptionMap(option.Key, option.Value)
+		err := updateOptionMapFromDatabase(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
 	}
+}
+
+func updateOptionMapFromDatabase(key string, value string) error {
+	switch key {
+	case "ModelRatio":
+		if err := ratio_setting.UpdateModelRatioByJSONStringWithUpgradeDefaults(value); err != nil {
+			return err
+		}
+		value = ratio_setting.ModelRatio2JSONString()
+	case "CacheRatio":
+		if err := ratio_setting.UpdateCacheRatioByJSONStringWithUpgradeDefaults(value); err != nil {
+			return err
+		}
+		value = ratio_setting.CacheRatio2JSONString()
+	default:
+		return updateOptionMap(key, value)
+	}
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap[key] = value
+	common.OptionMapRWMutex.Unlock()
+	return nil
 }
 
 func SyncOptions(frequency int) {

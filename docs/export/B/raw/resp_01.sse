@@ -1,0 +1,75 @@
+event: message_start
+data: {"message":{"content":[],"id":"req_vrtx_011CbXn6Ha8sdoUv3kSa7UGy","model":"claude-opus-4-6","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"input_tokens":25183,"output_tokens":3}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"thinking":"","type":"thinking"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"thinking":"The user is","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" asking me to directly","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" output the tag they provided","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":".","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" The tag they input","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" is: `","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":"\u003ctest_cd00c38093","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":"f97330\u003e`. They want me","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" to output","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" it","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" directly","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" without using any tools.","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"signature":"RXZVQ0NtVUlEaEFDR0FJcVFPNm5oT0E5YVd6L0RMZm1JQ2hTTkFvNnhFWGVORXRPcXgzNWZwenQzdEF4THFpaG02VkwzOERDU0hWWVJtZHlLdGpDQWV1LzBxWGV4Q2ZyWTlTb0V5UXlEMk5zWVhWa1pTMXZjSFZ6TFRRdE5qZ0FRZ2gwYUdsdWEybHVaeElNL2FVaVY3aDRqbUxmQ1ljMUdneVNLZmVpSmhRbHgxRjJwRTRpTUtFVnk2c1ZLSzdYRXlPNUJlWmg5dFVhTVlobTZkaXVqc2dkOUVZRjJ1b3FmUjRFeWxlZWtWRXRCdTc1bGdPdkx5cTlBWlV6NEZQTGRqdTJNMGY5azNNTmdLckM5bTNra2JMWnVzN3dsSWFFa0xKb2FXdzl2ZSs4N3grOG5UcUdKRVEzVDVhY3pRdGRtc3BIZFhKcHFZOThpQitPUkJCZlFBcjBEU2lmekNtWEIyUXhQeWgxKytlb1U2NStJcWtsa2xMZ2I2SmJFQW00dndjeThmaVA4NjBCWEJuN0NOSExBelhRdE10OFhzOEpqUi9LMVNoOHBjdWVHQXJVSStyV1VmVUlDL29KQVJGUVd3ZWRzWE5NQjJhbFdiVElONFdicTg3ODQ1THRYb1JHMFFBWGorVU5NSlpEYXEyRG54M0RkaGdC","type":"signature_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":1,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"你","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"输","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"入的tag是：`\u003ctest","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"_cd00c38093f97","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"330\u003e`","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":1,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"end_turn","stop_sequence":null},"type":"message_delta","usage":{"input_tokens":25183,"output_tokens":76}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

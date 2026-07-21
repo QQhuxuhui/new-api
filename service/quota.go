@@ -713,7 +713,7 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 			}
 
 			// If the current plan is depleted, activate the next queued plan (queue order).
-			if _, err := model.CompleteUserPlanIfDepleted(relayInfo.UserId, relayInfo.UserPlanId); err != nil {
+			if _, err := completeDepletedPlanAndNotify(relayInfo.UserId, relayInfo.UserPlanId); err != nil {
 				common.SysLog(fmt.Sprintf("failed to complete depleted user_plan %d: %v", relayInfo.UserPlanId, err))
 			}
 		} else if actualQuota < 0 {
@@ -771,7 +771,7 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 			}
 
 			// If the current plan is depleted, activate the next queued plan (queue order).
-			if _, err := model.CompleteUserPlanIfDepleted(relayInfo.UserId, relayInfo.UserPlanId); err != nil {
+			if _, err := completeDepletedPlanAndNotify(relayInfo.UserId, relayInfo.UserPlanId); err != nil {
 				common.SysLog(fmt.Sprintf("failed to complete depleted user_plan %d (mixed): %v", relayInfo.UserPlanId, err))
 			}
 		}

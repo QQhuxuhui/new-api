@@ -41,5 +41,18 @@ func StartPlanOrderTasks() {
 		}
 	}()
 
+	// Process current-plan validity expiry (runs every 1 minute). Request-time
+	// selection also performs the same ID-scoped transition as a backstop.
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			if err := ProcessPlanExpiry(); err != nil {
+				common.SysLog("plan expiry task failed: " + err.Error())
+			}
+		}
+	}()
+
 	common.SysLog("plan order background tasks started")
 }

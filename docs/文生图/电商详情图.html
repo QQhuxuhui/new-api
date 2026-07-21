@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SparkCode · 电商详情图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-base: #FAFAF7;
+    --bg-card: #FFFFFF;
+    --bg-soft: #F5F4EF;
+    --bg-input: #FAFAF7;
+    --bg-hover: #F0EFEA;
+
+    --border: #E5E3DC;
+    --border-soft: #EFEDE6;
+    --border-strong: #D6D3CB;
+
+    --ink-0: #1A1A1A;
+    --ink-1: #4B4845;
+    --ink-2: #8A867F;
+    --ink-3: #B8B4AB;
+
+    --indigo: #1E3A8A;
+    --indigo-deep: #1E2F6F;
+    --indigo-soft: #E8EBF5;
+    --indigo-glow: rgba(30, 58, 138, 0.18);
+
+    --vermilion: #BE123C;
+    --vermilion-soft: #FCE7EC;
+
+    --jade: #15803D;
+    --amber: #B45309;
+    --amber-soft: #FEF3C7;
+
+    --serif: "Noto Serif SC", "Songti SC", "STSong", "宋体", serif;
+    --sans: -apple-system, "PingFang SC", "Microsoft YaHei", "微软雅黑", "HarmonyOS Sans SC", "SF Pro SC", "Helvetica Neue", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+
+    --shadow-card: 0 1px 2px rgba(28,28,28,0.04), 0 1px 3px rgba(28,28,28,0.04);
+    --shadow-hover: 0 4px 12px rgba(28,28,28,0.06), 0 2px 6px rgba(28,28,28,0.04);
+    --shadow-image: 0 1px 1px rgba(0,0,0,0.04), 0 6px 16px -8px rgba(0,0,0,0.12);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg-base);
+    color: var(--ink-0);
+    font-size: 13px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: var(--indigo-soft); color: var(--indigo-deep); }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #DDD9CF; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #C9C4B7; }
+
+  .app {
+    display: grid;
+    grid-template-rows: 52px 1fr;
+    grid-template-columns: 320px 1fr;
+    height: 100vh;
+  }
+
+  /* ----- 顶栏 ----- */
+  .topbar {
+    grid-column: 1 / -1;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 22px;
+    user-select: none;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 280px;
+  }
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+  }
+  .brand-name {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--ink-0);
+    letter-spacing: -0.01em;
+  }
+  .brand-sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-2);
+    margin-top: 1px;
+    letter-spacing: 0.05em;
+  }
+  .top-status {
+    flex: 1;
+    text-align: center;
+    font-size: 12px;
+    color: var(--ink-1);
+  }
+  .top-status .dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    margin-right: 8px;
+    transform: translateY(-1px);
+    transition: background 0.2s;
+  }
+  .top-status.busy .dot { background: var(--indigo); animation: pulse 1.2s ease-in-out infinite; }
+  .top-status.ok .dot   { background: var(--jade); }
+  .top-status.err .dot  { background: var(--vermilion); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: translateY(-1px) scale(1); }
+    50% { opacity: 0.4; transform: translateY(-1px) scale(0.85); }
+  }
+  .top-actions { display: flex; gap: 6px; }
+  .top-actions button {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--ink-1);
+    font-family: var(--sans);
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .top-actions button:hover {
+    background: var(--bg-soft);
+    color: var(--ink-0);
+  }
+
+  /* ----- 左侧栏 ----- */
+  .sidebar {
+    background: var(--bg-card);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 18px 18px 28px;
+  }
+  .section { margin-bottom: 22px; }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .section-num {
+    font-family: var(--serif);
+    font-size: 13px;
+    color: var(--vermilion);
+    font-weight: 500;
+  }
+  .section-title {
+    font-family: var(--serif);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink-0);
+    letter-spacing: 0.04em;
+  }
+  .section-sub {
+    font-size: 11px;
+    color: var(--ink-2);
+    margin-left: auto;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .field-label {
+    font-size: 12px;
+    color: var(--ink-1);
+    font-weight: 500;
+  }
+  .field-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+
+  input[type="text"], input[type="password"], select, textarea {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--ink-0);
+    font-family: var(--sans);
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    outline: none;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  input[type="text"]:focus, input[type="password"]:focus,
+  select:focus, textarea:focus {
+    border-color: var(--indigo);
+    background: var(--bg-card);
+    box-shadow: 0 0 0 3px var(--indigo-glow);
+  }
+  input::placeholder, textarea::placeholder { color: var(--ink-3); }
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M3 5l3 3 3-3' stroke='%238A867F' stroke-width='1.2' fill='none' stroke-linecap='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px;
+    padding-right: 26px;
+    cursor: pointer;
+  }
+  select option {
+    background: var(--bg-card);
+    color: var(--ink-0);
+  }
+  #llmApiKey, #imageApiKey, #llmModel, #imageModel { font-family: var(--mono); font-size: 12px; }
+
+  /* 参考图 */
+  .refs-area { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ref-thumb {
+    position: relative;
+    width: 60px; height: 60px;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    cursor: zoom-in;
+    background: var(--bg-soft);
+  }
+  .ref-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .ref-thumb .label {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(28,28,28,0.65);
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 9px;
+    text-align: center;
+    padding: 1px 0;
+  }
+  .ref-thumb .remove {
+    position: absolute; top: 3px; right: 3px;
+    width: 18px; height: 18px;
+    background: rgba(28,28,28,0.6);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    font-size: 11px;
+    line-height: 16px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .upload-btn {
+    width: 60px; height: 60px;
+    border: 1px dashed var(--border-strong);
+    background: var(--bg-soft);
+    color: var(--ink-2);
+    font-size: 22px;
+    font-weight: 300;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .upload-btn:hover {
+    border-color: var(--indigo);
+    color: var(--indigo);
+    background: var(--indigo-soft);
+  }
+  .ref-hint {
+    font-size: 11px;
+    color: var(--ink-2);
+    margin-top: 8px;
+    line-height: 1.5;
+  }
+
+  /* ===== 右侧画布 ===== */
+  .canvas {
+    background: var(--bg-base);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+  }
+  .canvas-image-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 36px 14px;
+    position: relative;
+  }
+  .canvas-image-wrap img.hero {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 4px;
+    background: var(--bg-card);
+    box-shadow: var(--shadow-image);
+    cursor: zoom-in;
+    animation: heroIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes heroIn {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  .empty {
+    text-align: center;
+    color: var(--ink-2);
+    max-width: 380px;
+  }
+  .empty-mark {
+    width: 52px; height: 52px;
+    margin: 0 auto 18px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--vermilion);
+    font-family: var(--serif);
+    font-size: 22px;
+    background: var(--bg-card);
+  }
+  .empty-text {
+    font-family: var(--serif);
+    font-size: 19px;
+    font-weight: 500;
+    color: var(--ink-0);
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .empty-sub {
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+  .empty-steps {
+    margin-top: 20px;
+    text-align: left;
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 12px;
+    color: var(--ink-1);
+    line-height: 1.7;
+  }
+  .empty-steps b { color: var(--indigo); margin-right: 6px; font-family: var(--serif); }
+
+  .loader { text-align: center; color: var(--ink-1); }
+  .loader .ring {
+    width: 36px; height: 36px;
+    border: 2px solid var(--border);
+    border-top-color: var(--indigo);
+    border-radius: 50%;
+    margin: 0 auto 14px;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loader-text {
+    font-size: 12px;
+    color: var(--ink-1);
+  }
+
+  .err {
+    max-width: 560px;
+    text-align: center;
+  }
+  .err-icon {
+    font-family: var(--serif);
+    font-size: 44px;
+    color: var(--vermilion);
+    margin-bottom: 14px;
+    line-height: 1;
+  }
+  .err-text {
+    color: var(--ink-0);
+    font-size: 12px;
+    line-height: 1.65;
+    word-break: break-word;
+    background: var(--vermilion-soft);
+    border: 1px solid #F5C9D2;
+    padding: 12px 14px;
+    border-radius: 6px;
+    text-align: left;
+    font-family: var(--mono);
+  }
+  .retry-this {
+    margin-top: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--vermilion);
+    color: var(--vermilion);
+    padding: 7px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--sans);
+    transition: all 0.15s;
+  }
+  .retry-this:hover { background: var(--vermilion); color: #fff; }
+
+  .canvas-meta {
+    position: absolute;
+    top: 22px; right: 28px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-2);
+    text-align: right;
+    background: rgba(255,255,255,0.7);
+    backdrop-filter: blur(6px);
+    border: 1px solid var(--border-soft);
+    padding: 6px 10px;
+    border-radius: 6px;
+  }
+  .canvas-meta div { line-height: 1.6; }
+  .canvas-meta .accent { color: var(--indigo); font-weight: 500; }
+  .canvas-meta .download-mini {
+    display: block;
+    margin-top: 4px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--ink-1);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-family: var(--sans);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    width: 100%;
+  }
+  .canvas-meta .download-mini:hover { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+
+  /* 缩略图带 */
+  .thumbs {
+    flex-shrink: 0;
+    padding: 0 36px;
+    margin-bottom: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .thumbs.empty { display: none; }
+  .thumb-row {
+    display: flex;
+    gap: 10px;
+    padding: 6px 0;
+  }
+  .thumb {
+    flex-shrink: 0;
+    width: 68px; height: 68px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.15s;
+    overflow: hidden;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb .thumb-loader {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .thumb .thumb-loader::after {
+    content: '';
+    width: 14px; height: 14px;
+    border: 1.5px solid var(--border);
+    border-top-color: var(--indigo);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  .thumb .thumb-err {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--vermilion);
+    font-family: var(--serif);
+    font-size: 22px;
+  }
+  .thumb-num {
+    position: absolute;
+    top: 4px; left: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: rgba(255,255,255,0.95);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    font-weight: 500;
+  }
+  .thumb:hover {
+    border-color: var(--indigo);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
+  }
+  .thumb.active {
+    border-color: var(--indigo);
+    box-shadow: 0 0 0 1px var(--indigo), 0 4px 10px -2px var(--indigo-glow);
+  }
+
+  /* Prompt 区 */
+  .prompt-bar {
+    flex-shrink: 0;
+    padding: 0 36px 24px;
+  }
+  .prompt-frame {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    overflow: hidden;
+  }
+  .prompt-frame:focus-within {
+    border-color: var(--indigo);
+    box-shadow: 0 0 0 3px var(--indigo-glow);
+  }
+  .prompt-textarea {
+    width: 100%;
+    min-height: 78px;
+    max-height: 220px;
+    resize: none;
+    background: transparent !important;
+    border: none !important;
+    color: var(--ink-0);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 14px 16px 6px !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  .prompt-textarea::placeholder { color: var(--ink-3); }
+  .prompt-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px 10px 16px;
+    border-top: 1px solid var(--border-soft);
+  }
+  .prompt-foot-left {
+    font-size: 11px;
+    color: var(--ink-2);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pill {
+    background: var(--indigo-soft);
+    color: var(--indigo-deep);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .gen-btn {
+    background: var(--indigo);
+    color: #fff;
+    border: none;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 9px 24px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.06em;
+  }
+  .gen-btn:hover:not(:disabled) {
+    background: var(--indigo-deep);
+    box-shadow: 0 4px 12px -2px var(--indigo-glow);
+  }
+  .gen-btn:active:not(:disabled) { transform: translateY(1px); }
+  .gen-btn:disabled {
+    background: var(--bg-hover);
+    color: var(--ink-2);
+    cursor: not-allowed;
+  }
+
+  .modal {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(20,20,18,0.88);
+    z-index: 200;
+    cursor: zoom-out;
+    padding: 30px;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal.show { display: flex; }
+  .modal img { max-width: 100%; max-height: 100%; border-radius: 4px; }
+
+  /* 错误条（顶部，含重试 LLM 按钮 + 原文 details） */
+  .err-banner {
+    background: var(--vermilion-soft);
+    border: 1px solid #F5C9D2;
+    color: #6F0F2D;
+    padding: 10px 14px;
+    margin: 0 36px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.55;
+    word-break: break-word;
+  }
+  .err-banner.warn { background: var(--amber-soft); border-color: #FCD34D; color: #92400E; }
+  .err-banner-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  }
+  .err-banner-btn {
+    background: var(--bg-card);
+    border: 1px solid currentColor;
+    color: inherit;
+    padding: 4px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: var(--sans);
+    flex-shrink: 0;
+  }
+  .err-banner-btn:hover { background: currentColor; color: #fff; }
+  .err-banner details { margin-top: 8px; }
+  .err-banner summary { cursor: pointer; font-size: 11px; opacity: 0.8; }
+  .err-banner pre {
+    margin-top: 8px;
+    background: rgba(0,0,0,0.04);
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: var(--mono);
+  }
+
+  .sidebar-foot {
+    margin-top: 24px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-soft);
+    text-align: center;
+    font-size: 11px;
+    color: var(--ink-2);
+  }
+
+  @media (max-width: 900px) {
+    .app {
+      grid-template-rows: 52px auto 1fr;
+      grid-template-columns: 1fr;
+    }
+    .sidebar {
+      max-height: 38vh;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .canvas-image-wrap, .thumbs, .prompt-bar { padding-left: 16px; padding-right: 16px; }
+    .err-banner { margin-left: 16px; margin-right: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ===== 顶栏 ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-text">
+        <span class="brand-name">SparkCode</span>
+        <span class="brand-sub">Gemini · 电商详情图编排</span>
+      </div>
+    </div>
+    <div class="top-status" id="topStatus">
+      <span class="dot"></span><span id="statusText">待机</span>
+    </div>
+    <div class="top-actions">
+      <button id="clearBtn" type="button">清空</button>
+      <button id="downloadAllBtn" type="button">全部下载</button>
+    </div>
+  </header>
+
+  <!-- ===== 左侧栏 ===== -->
+  <aside class="sidebar">
+
+    <div class="section">
+      <div class="section-head">
+        <span class="section-num">壹</span>
+        <span class="section-title">凭证</span>
+      </div>
+      <div class="field">
+        <span class="field-label">LLM API 密钥</span>
+        <input id="llmApiKey" type="password" placeholder="sk-…">
+      </div>
+      <div class="field">
+        <span class="field-label">LLM 模型</span>
+        <input id="llmModel" type="text" placeholder="gemini-2.5-pro">
+      </div>
+      <div class="field">
+        <span class="field-label">图像 API 密钥</span>
+        <input id="imageApiKey" type="password" placeholder="sk-…">
+      </div>
+      <div class="field">
+        <span class="field-label">图像模型</span>
+        <input id="imageModel" type="text" value="gemini-3.1-flash-image-preview">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span class="section-num">贰</span>
+        <span class="section-title">参数</span>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <span class="field-label">数量</span>
+          <select id="count">
+            <option value="auto">自动 3-8</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+          </select>
+        </div>
+        <div class="field">
+          <span class="field-label">并发</span>
+          <select id="concurrency">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="4" selected>4</option>
+            <option value="8">8</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <span class="field-label">强制尺寸</span>
+          <select id="forceSize">
+            <option value="">由 LLM 决定</option>
+            <option value="512">512</option>
+            <option value="1K">1K</option>
+            <option value="2K">2K</option>
+            <option value="4K">4K</option>
+          </select>
+        </div>
+        <div class="field">
+          <span class="field-label">强制比例</span>
+          <select id="forceAspect">
+            <option value="">由 LLM 决定</option>
+            <option value="1:1">1:1</option>
+            <option value="16:9">16:9</option>
+            <option value="9:16">9:16</option>
+            <option value="4:3">4:3</option>
+            <option value="3:4">3:4</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" id="refCard">
+      <div class="section-head">
+        <span class="section-num">叁</span>
+        <span class="section-title">商品图</span>
+      </div>
+      <div class="refs-area" id="refList">
+        <button class="upload-btn" id="uploadBtn" type="button">+</button>
+        <input type="file" id="refFileInput" accept="image/*" multiple hidden>
+      </div>
+      <div class="ref-hint">
+        可上传多张同一商品的不同角度。LLM 会根据数量自动选用合适的参考图。
+      </div>
+    </div>
+
+    <div class="sidebar-foot">
+      两阶段流水线 · LLM 编排 + 并发渲染
+    </div>
+  </aside>
+
+  <!-- ===== 右侧画布 ===== -->
+  <main class="canvas">
+
+    <!-- 元数据浮层 -->
+    <div class="canvas-meta" id="canvasMeta" style="display:none;">
+      <div>第 <span class="accent" id="metaIdx">—</span> 张</div>
+      <div id="metaRefIdx">参考图 —</div>
+      <button class="download-mini" id="metaDownload" type="button">下载</button>
+    </div>
+
+    <div class="canvas-image-wrap" id="canvasImageWrap">
+      <div class="empty" id="canvasEmpty">
+        <div class="empty-mark">墨</div>
+        <div class="empty-text">尚未起笔</div>
+        <div class="empty-sub">完成下方三步即可开始编排详情图</div>
+        <div class="empty-steps">
+          <div><b>壹</b>左侧填入 API 密钥与模型</div>
+          <div><b>贰</b>左侧上传至少一张商品图</div>
+          <div><b>叁</b>下方填写商品介绍并按"生成"</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="errorBanner"></div>
+
+    <div class="thumbs empty" id="thumbsContainer">
+      <div class="thumb-row" id="resultGrid"></div>
+    </div>
+
+    <div class="prompt-bar">
+      <div class="prompt-frame">
+        <textarea id="productDescription" class="prompt-textarea" rows="3"
+          placeholder="例如：这是一款专为户外露营设计的便携式折叠桌，铝合金材质，承重 30kg，10 秒展开，附带收纳袋……"></textarea>
+        <div class="prompt-foot">
+          <div class="prompt-foot-left">
+            <span class="pill" id="footMode">商品介绍</span>
+            <span>⌘ / Ctrl + Enter 快捷生成</span>
+          </div>
+          <button class="gen-btn" id="generateBtn" type="button">生成</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<div class="modal" id="zoomModal"><img id="zoomImg" src=""></div>
+
+<script>
+  // ===== Constants =====
+  const API_URL = 'https://api.sparkcode.top/v1/chat/completions';
+  const STORAGE_KEY = 'detail_image_config';
+  const MAX_TOKENS = 4096;
+  const MAX_RETRIES = 5;
+  const LLM_MAX_ATTEMPTS = 3;
+
+  // ===== State =====
+  const state = {
+    refImages: [],
+    productDescription: '',
+    phase: 'idle',          // 'idle' | 'llm' | 'generating' | 'done' | 'llm_failed'
+    llmRawResponse: null,
+    llmAttempt: 0,
+    tasks: [],
+    activeTaskId: null
+  };
+
+  // ===== Helpers =====
+  const $ = id => document.getElementById(id);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+  }
+  function downloadDataUrl(url, name) {
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  function zoomImg(src) {
+    $('zoomImg').src = src;
+    $('zoomModal').classList.add('show');
+  }
+  $('zoomModal').addEventListener('click', () => $('zoomModal').classList.remove('show'));
+
+  // ===== Config =====
+  const CONFIG_FIELDS = [
+    'llmApiKey', 'imageApiKey', 'llmModel', 'imageModel',
+    'count', 'concurrency', 'forceSize', 'forceAspect'
+  ];
+  function saveConfig() {
+    const cfg = {};
+    CONFIG_FIELDS.forEach(id => { cfg[id] = $(id).value; });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+  }
+  function loadConfig() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    try {
+      const cfg = JSON.parse(raw);
+      CONFIG_FIELDS.forEach(id => {
+        if (cfg[id] !== undefined && cfg[id] !== '') $(id).value = cfg[id];
+      });
+    } catch (e) { console.warn('config parse failed:', e); }
+  }
+  function bindConfigPersistence() {
+    CONFIG_FIELDS.forEach(id => {
+      $(id).addEventListener('change', saveConfig);
+      $(id).addEventListener('input', saveConfig);
+    });
+  }
+
+  // ===== 参考图（商品图） =====
+  function readFileAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  async function handleRefUpload(event) {
+    const files = Array.from(event.target.files);
+    for (const f of files) {
+      try {
+        const url = await readFileAsDataURL(f);
+        state.refImages.push(url);
+      } catch (e) { console.warn('read file failed:', e); }
+    }
+    event.target.value = '';
+    renderRefList();
+  }
+  function removeRef(idx) {
+    state.refImages.splice(idx, 1);
+    renderRefList();
+  }
+  function renderRefList() {
+    const list = $('refList');
+    list.querySelectorAll('.ref-thumb').forEach(el => el.remove());
+    const uploadBtn = $('uploadBtn');
+    state.refImages.forEach((url, i) => {
+      const div = document.createElement('div');
+      div.className = 'ref-thumb';
+      div.innerHTML = `
+        <img src="${url}">
+        <div class="label">#${i + 1}</div>
+        <button class="remove" type="button">×</button>
+      `;
+      div.querySelector('img').addEventListener('click', () => zoomImg(url));
+      div.querySelector('.remove').addEventListener('click', e => { e.stopPropagation(); removeRef(i); });
+      list.insertBefore(div, uploadBtn);
+    });
+  }
+  function bindRefUploader() {
+    $('uploadBtn').addEventListener('click', () => $('refFileInput').click());
+    $('refFileInput').addEventListener('change', handleRefUpload);
+  }
+
+  // ===== 商品介绍同步到 state =====
+  function bindDescription() {
+    $('productDescription').addEventListener('input', e => {
+      state.productDescription = e.target.value;
+    });
+  }
+
+  // ===== 清空与下载 =====
+  function clearAll() {
+    if (!confirm('确定清空商品图、商品介绍与生成结果？(密钥/模型保留)')) return;
+    state.refImages = [];
+    state.productDescription = '';
+    state.tasks = [];
+    state.activeTaskId = null;
+    state.llmRawResponse = null;
+    state.llmAttempt = 0;
+    state.phase = 'idle';
+    $('productDescription').value = '';
+    renderRefList();
+    renderThumbs();
+    renderCanvas();
+    clearError();
+    updateStatusBar();
+  }
+  function downloadAll() {
+    const done = state.tasks.filter(t => t.status === 'done' && t.result);
+    if (done.length === 0) { alert('暂无可下载图像'); return; }
+    done.forEach((t, i) => {
+      setTimeout(() => downloadDataUrl(t.result, `detail_${i + 1}.png`), i * 250);
+    });
+  }
+
+  // ===== 状态条 =====
+  const PHASE_LABEL = {
+    idle: '待机',
+    llm: 'LLM 编排中',
+    generating: '渲染中',
+    done: '完成',
+    llm_failed: 'LLM 失败'
+  };
+  function updateStatusBar() {
+    let text = PHASE_LABEL[state.phase] || state.phase;
+    if (state.phase === 'llm' && state.llmAttempt > 0) {
+      text += `（第 ${state.llmAttempt}/${LLM_MAX_ATTEMPTS} 次）`;
+    }
+    const total = state.tasks.length;
+    const ok = state.tasks.filter(t => t.status === 'done').length;
+    const err = state.tasks.filter(t => t.status === 'error').length;
+    if (total > 0) text += ` · ${ok}/${total}` + (err > 0 ? ` · 失败 ${err}` : '');
+    $('statusText').textContent = text;
+
+    const top = $('topStatus');
+    top.classList.remove('busy', 'ok', 'err');
+    if (state.phase === 'llm' || state.phase === 'generating') top.classList.add('busy');
+    else if (state.phase === 'done')        top.classList.add('ok');
+    else if (state.phase === 'llm_failed')  top.classList.add('err');
+
+    const busy = state.phase === 'llm' || state.phase === 'generating';
+    $('generateBtn').disabled = busy;
+    $('generateBtn').textContent = busy ? '处理中…' : '生成';
+  }
+
+  // ===== 错误条（顶部，含 LLM 重试） =====
+  function showError(level, message, rawText) {
+    const cls = level === 'yellow' ? 'warn' : '';
+    const rawBlock = rawText
+      ? `<details><summary>展开原始响应</summary><pre>${escapeHtml(rawText)}</pre></details>`
+      : '';
+    $('errorBanner').innerHTML = `
+      <div class="err-banner ${cls}">
+        <div class="err-banner-row">
+          <div>${escapeHtml(message)}</div>
+          <button class="err-banner-btn" id="retryLlmBtn" type="button">重试 LLM</button>
+        </div>
+        ${rawBlock}
+      </div>
+    `;
+    $('retryLlmBtn').addEventListener('click', retryLLM);
+  }
+  function clearError() { $('errorBanner').innerHTML = ''; }
+
+  // ===== Stage 1: LLM =====
+  const SYSTEM_PROMPT =
+`你是电商详情图设计专家。基于用户提供的商品图与商品介绍，规划 N 张电商详情图（主图 / 卖点图 / 使用场景图 / 细节特写 / 规格说明 / 对比图 等中合理选择若干），为每张图生成一条独立、可直接送入文生图模型执行的中文提示词。
+
+输出**只能**是一个 JSON 数组，不要包裹 markdown 代码块、不要任何额外文字。每个元素结构：
+{ "ref_index": <从 1 开始的整数，指向用户上传的第几张商品图>,
+  "prompt": "<完整的、信息自包含的中文文生图提示词，描述构图、风格、光影、文字、布局>",
+  "size": "<可选: 512 | 1K | 2K | 4K>",
+  "aspect_ratio": "<可选: 1:1 | 16:9 | 9:16 | 4:3 | 3:4>" }
+
+要求：
+- ref_index 必须在用户上传的图片范围内
+- 当用户在介绍中明确指定了尺寸/比例需求时，请填入 size / aspect_ratio
+- 未要求时省略这两个字段
+- 提示词需自包含商品的关键视觉信息，不要假设模型已经"看过"参考图
+- 当用户指定了具体张数时严格按数量返回；未指定时返回 3-8 条之间的合理数量`;
+
+  class ParseError extends Error {
+    constructor(message, raw) { super(message); this.raw = raw; }
+  }
+
+  function buildLLMRequest(apiKey, model, count) {
+    const userText =
+      `商品介绍：\n${state.productDescription}\n\n` +
+      (count === 'auto'
+        ? '请生成 3-8 条之间合理数量的文生图提示词。'
+        : `请生成正好 ${count} 条文生图提示词。`);
+
+    const content = state.refImages.map(url => ({
+      type: 'image_url', image_url: { url }
+    }));
+    content.push({ type: 'text', text: userText });
+
+    return {
+      model,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content }
+      ],
+      max_tokens: MAX_TOKENS,
+      stream: false
+    };
+  }
+
+  async function callLLM(apiKey, model, count) {
+    const body = buildLLMRequest(apiKey, model, count);
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey
+      },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${text.substring(0, 300)}`);
+    }
+    const text = await resp.text();
+    const data = parseLLMHttpBody(text);
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+    return data;
+  }
+
+  function parseLLMHttpBody(text) {
+    const trimmed = text.replace(/^﻿/, '').trimStart();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try { return JSON.parse(trimmed); } catch {}
+    }
+    let deltaContent = '';
+    let messageContent = '';
+    let lastObj = null;
+    for (const rawLine of trimmed.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      let obj;
+      try { obj = JSON.parse(payload); } catch { continue; }
+      lastObj = obj;
+      const ch = obj.choices?.[0];
+      if (!ch) continue;
+      if (typeof ch.delta?.content === 'string')  deltaContent   += ch.delta.content;
+      if (typeof ch.delta?.text === 'string')     deltaContent   += ch.delta.text;
+      if (typeof ch.text === 'string')            deltaContent   += ch.text;
+      if (typeof ch.message?.content === 'string' && ch.message.content.length > messageContent.length) {
+        messageContent = ch.message.content;
+      }
+    }
+    if (lastObj) {
+      const content = deltaContent || messageContent;
+      if (content) {
+        return {
+          ...lastObj,
+          choices: [{
+            ...(lastObj.choices?.[0] || {}),
+            message: { role: 'assistant', content }
+          }]
+        };
+      }
+      const usage = lastObj.usage || {};
+      throw new Error(
+        `SSE 解析出空内容（completion_tokens=${usage.completion_tokens ?? '?'}）。原文前 300 字: ` +
+        text.substring(0, 300)
+      );
+    }
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (match) { try { return JSON.parse(match[0]); } catch {} }
+    throw new Error('响应既非 JSON 也非 SSE 流。原文前 300 字: ' + text.substring(0, 300));
+  }
+
+  function parseLLMResponse(data) {
+    const content = data.choices?.[0]?.message?.content;
+    if (!content || typeof content !== 'string') {
+      throw new ParseError('LLM 未返回文本内容', JSON.stringify(data).substring(0, 500));
+    }
+    let arr;
+    try { arr = JSON.parse(content); }
+    catch {
+      const fenced = content.match(/```(?:json)?\s*([\s\S]+?)```/);
+      if (fenced) { try { arr = JSON.parse(fenced[1]); } catch {} }
+    }
+    if (!arr) {
+      const m = content.match(/\[[\s\S]*\]/);
+      if (m) { try { arr = JSON.parse(m[0]); } catch {} }
+    }
+    if (!Array.isArray(arr)) throw new ParseError('未能解析为 JSON 数组', content);
+    if (arr.length === 0) throw new ParseError('LLM 返回了空数组', content);
+
+    return arr.map((item, i) => {
+      if (!item || typeof item !== 'object') {
+        throw new ParseError(`第 ${i + 1} 项不是对象`, content);
+      }
+      let refIdx = item.ref_index;
+      if (typeof refIdx === 'string') refIdx = parseInt(refIdx, 10);
+      if (!Number.isInteger(refIdx) || refIdx < 1 || refIdx > state.refImages.length) {
+        throw new ParseError(
+          `第 ${i + 1} 项 ref_index 越界或非法: ${item.ref_index}（共上传 ${state.refImages.length} 张）`,
+          content
+        );
+      }
+      if (typeof item.prompt !== 'string' || !item.prompt.trim()) {
+        throw new ParseError(`第 ${i + 1} 项 prompt 为空`, content);
+      }
+      return {
+        refIndex: refIdx,
+        prompt: item.prompt.trim(),
+        size: typeof item.size === 'string' ? item.size : null,
+        aspect: typeof item.aspect_ratio === 'string' ? item.aspect_ratio : null
+      };
+    });
+  }
+
+  // ===== Stage 2: Image API =====
+  function snapshotImageConfig() {
+    return {
+      apiKey:   $('imageApiKey').value.trim(),
+      model:    $('imageModel').value.trim(),
+      uiSize:   $('forceSize').value,
+      uiAspect: $('forceAspect').value
+    };
+  }
+  function buildImageRequest(task, snap) {
+    const size   = snap.uiSize   || task.size   || null;
+    const aspect = snap.uiAspect || task.aspect || null;
+    const refUrl = state.refImages[task.refIndex - 1];
+
+    const body = {
+      model: snap.model,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: refUrl } },
+          { type: 'text', text: task.prompt }
+        ]
+      }],
+      max_tokens: MAX_TOKENS
+    };
+
+    const cfg = {};
+    if (size)   cfg.image_size = size;
+    if (aspect) cfg.aspect_ratio = aspect;
+    if (Object.keys(cfg).length) {
+      body.extra_body = { google: { image_config: cfg } };
+    }
+    return body;
+  }
+  function extractImageFromResponse(data) {
+    const message = data.choices?.[0]?.message;
+    if (!message) throw new Error('API 响应中没有 message 字段');
+    const finishReason = data.choices?.[0]?.finish_reason;
+    if (finishReason === 'content_filter') {
+      throw new Error('CONTENT_FILTER: 被内容安全过滤器拦截，将自动重试');
+    }
+    const content = message.content;
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        if (part.type === 'image_url' && part.image_url?.url) return part.image_url.url;
+        if (part.inline_data) return `data:${part.inline_data.mime_type || 'image/png'};base64,${part.inline_data.data}`;
+        if (typeof part.text === 'string') {
+          const m = part.text.match(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/);
+          if (m) return m[0];
+        }
+        if (typeof part === 'string') {
+          const m = part.match(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/);
+          if (m) return m[0];
+        }
+      }
+    }
+    if (typeof content === 'string' && content.length > 0) {
+      const m = content.match(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/);
+      if (m) return m[0];
+    }
+    const parts = message.parts || [];
+    for (const p of parts) {
+      if (p.inline_data) return `data:${p.inline_data.mime_type || 'image/png'};base64,${p.inline_data.data}`;
+    }
+    if (data.data?.[0]?.b64_json) return `data:image/png;base64,${data.data[0].b64_json}`;
+    if (data.data?.[0]?.url)      return data.data[0].url;
+    const preview = typeof content === 'string' ? content.substring(0, 200) : JSON.stringify(content)?.substring(0, 200);
+    throw new Error(`解析失败(content type=${typeof content}). 前 200 字: ${preview}`);
+  }
+  async function callImageAPI(task, snap) {
+    const body = buildImageRequest(task, snap);
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + snap.apiKey
+      },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${text.substring(0, 200)}`);
+    }
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+    return extractImageFromResponse(data);
+  }
+
+  // ===== Worker pool =====
+  async function runOneTask(task, snap, maxRetries) {
+    task.status = 'running';
+    task.error = null;
+    renderThumbs();
+    if (task.id === state.activeTaskId) renderCanvas();
+    updateStatusBar();
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      task.attempts = attempt;
+      try {
+        const url = await callImageAPI(task, snap);
+        task.result = url;
+        task.status = 'done';
+        task.error = null;
+        break;
+      } catch (e) {
+        const retryable = e.message.includes('CONTENT_FILTER');
+        console.warn(`[Task ${task.id}] attempt ${attempt} failed:`, e.message);
+        if (attempt < maxRetries && retryable) {
+          await sleep(1000 + Math.random() * 1000);
+          continue;
+        }
+        task.status = 'error';
+        task.error = attempt > 1 ? `${attempt} 次尝试均失败: ${e.message}` : e.message;
+        break;
+      }
+    }
+    renderThumbs();
+    if (task.id === state.activeTaskId) renderCanvas();
+    updateStatusBar();
+  }
+
+  async function runImageStage() {
+    const concurrency = parseInt($('concurrency').value, 10) || 4;
+    const snap = snapshotImageConfig();
+    const queue = state.tasks.filter(t => t.status === 'wait');
+
+    const workers = Array(Math.min(concurrency, queue.length))
+      .fill(0)
+      .map(async () => {
+        while (queue.length) {
+          const task = queue.shift();
+          if (!task) continue;
+          await runOneTask(task, snap, MAX_RETRIES);
+        }
+      });
+    await Promise.all(workers);
+  }
+
+  // ===== 渲染 =====
+  let _taskIdSeq = 0;
+  function nextTaskId() { return ++_taskIdSeq; }
+
+  function renderThumbs() {
+    const grid = $('resultGrid');
+    const wrap = $('thumbsContainer');
+    if (state.tasks.length === 0) {
+      wrap.classList.add('empty');
+      grid.innerHTML = '';
+      return;
+    }
+    wrap.classList.remove('empty');
+    grid.innerHTML = '';
+    state.tasks.forEach((t, i) => {
+      const div = document.createElement('div');
+      div.className = 'thumb';
+      if (t.id === state.activeTaskId) div.classList.add('active');
+      let inner = `<div class="thumb-num">${i + 1}</div>`;
+      if (t.status === 'wait' || t.status === 'running') inner += `<div class="thumb-loader"></div>`;
+      else if (t.status === 'done' && t.result) inner += `<img src="${t.result}">`;
+      else if (t.status === 'error') inner += `<div class="thumb-err">!</div>`;
+      div.innerHTML = inner;
+      div.addEventListener('click', () => {
+        state.activeTaskId = t.id;
+        renderThumbs();
+        renderCanvas();
+      });
+      grid.appendChild(div);
+    });
+  }
+
+  function renderCanvas() {
+    const wrap = $('canvasImageWrap');
+    const meta = $('canvasMeta');
+    wrap.innerHTML = '';
+
+    let active = state.tasks.find(t => t.id === state.activeTaskId);
+    if (!active && state.tasks.length) {
+      active = state.tasks.find(t => t.status === 'done') || state.tasks[0];
+      state.activeTaskId = active ? active.id : null;
+    }
+
+    if (!active) {
+      // 空态：根据 phase 区分
+      if (state.phase === 'llm') {
+        wrap.innerHTML = `
+          <div class="loader">
+            <div class="ring"></div>
+            <div class="loader-text">LLM 正在编排提示词…（第 ${state.llmAttempt}/${LLM_MAX_ATTEMPTS} 次）</div>
+          </div>`;
+      } else if (state.phase === 'generating') {
+        wrap.innerHTML = `
+          <div class="loader">
+            <div class="ring"></div>
+            <div class="loader-text">渲染中…</div>
+          </div>`;
+      } else {
+        // 默认空态：保留 empty-steps 引导
+        wrap.innerHTML = `
+          <div class="empty">
+            <div class="empty-mark">墨</div>
+            <div class="empty-text">尚未起笔</div>
+            <div class="empty-sub">完成下方三步即可开始编排详情图</div>
+            <div class="empty-steps">
+              <div><b>壹</b>左侧填入 API 密钥与模型</div>
+              <div><b>贰</b>左侧上传至少一张商品图</div>
+              <div><b>叁</b>下方填写商品介绍并按"生成"</div>
+            </div>
+          </div>`;
+      }
+      meta.style.display = 'none';
+      return;
+    }
+
+    if (active.status === 'wait' || active.status === 'running') {
+      const refLabel = active.refIndex ? `（基于商品图 #${active.refIndex}）` : '';
+      wrap.innerHTML = `
+        <div class="loader">
+          <div class="ring"></div>
+          <div class="loader-text">渲染第 ${active.id} 张${refLabel}…</div>
+        </div>`;
+      meta.style.display = 'none';
+    } else if (active.status === 'done' && active.result) {
+      const img = document.createElement('img');
+      img.className = 'hero';
+      img.src = active.result;
+      img.addEventListener('click', () => zoomImg(active.result));
+      wrap.appendChild(img);
+      const idx = state.tasks.findIndex(t => t.id === active.id) + 1;
+      $('metaIdx').textContent = String(idx).padStart(2, '0') + ' / ' + String(state.tasks.length).padStart(2, '0');
+      $('metaRefIdx').textContent = active.refIndex ? `参考图 #${active.refIndex}` : '';
+      const btn = $('metaDownload');
+      btn.onclick = () => downloadDataUrl(active.result, `detail_${active.id}.png`);
+      meta.style.display = 'block';
+    } else if (active.status === 'error') {
+      wrap.innerHTML = `
+        <div class="err">
+          <div class="err-icon">!</div>
+          <div class="err-text">${escapeHtml(active.error || '生成失败')}</div>
+          <button class="retry-this" type="button">重试这张</button>
+        </div>`;
+      wrap.querySelector('.retry-this').addEventListener('click', () => retryOne(active.id));
+      meta.style.display = 'none';
+    }
+  }
+
+  async function retryOne(taskId) {
+    const task = state.tasks.find(t => t.id === taskId);
+    if (!task) return;
+    task.status = 'wait';
+    task.error = null;
+    task.attempts = 0;
+    state.activeTaskId = taskId;
+    renderThumbs();
+    renderCanvas();
+    await runOneTask(task, snapshotImageConfig(), MAX_RETRIES);
+  }
+
+  // ===== 校验 + 主流程 =====
+  function validateInputs() {
+    if (!$('llmApiKey').value.trim())   { alert('请填写 LLM API 密钥');  return false; }
+    if (!$('imageApiKey').value.trim()) { alert('请填写 图像 API 密钥'); return false; }
+    if (!$('llmModel').value.trim())    { alert('请填写 LLM 模型');       return false; }
+    if (!$('imageModel').value.trim())  { alert('请填写 图像模型');       return false; }
+    if (state.refImages.length === 0)   { alert('请至少上传一张商品图'); return false; }
+    if (!$('productDescription').value.trim()) { alert('请填写商品介绍'); return false; }
+    return true;
+  }
+
+  async function runStage1() {
+    const llmKey = $('llmApiKey').value.trim();
+    const llmModel = $('llmModel').value.trim();
+    const count = $('count').value;
+
+    state.phase = 'llm';
+    state.llmRawResponse = null;
+    state.llmAttempt = 0;
+    clearError();
+    renderCanvas();   // 显示 LLM 进度
+    updateStatusBar();
+
+    let lastError = null;
+    let lastRaw = null;
+    let lastIsParseError = false;
+
+    for (let attempt = 1; attempt <= LLM_MAX_ATTEMPTS; attempt++) {
+      state.llmAttempt = attempt;
+      renderCanvas();
+      updateStatusBar();
+      try {
+        const llmData = await callLLM(llmKey, llmModel, count);
+        state.llmRawResponse = llmData.choices?.[0]?.message?.content || JSON.stringify(llmData);
+        const parsed = parseLLMResponse(llmData);
+        return parsed;
+      } catch (e) {
+        lastError = e;
+        lastIsParseError = e instanceof ParseError;
+        lastRaw = (lastIsParseError && e.raw) || state.llmRawResponse;
+        console.warn(`[LLM] attempt ${attempt}/${LLM_MAX_ATTEMPTS} failed:`, e.message);
+        if (attempt < LLM_MAX_ATTEMPTS) await sleep(600 + Math.random() * 600);
+      }
+    }
+
+    state.phase = 'llm_failed';
+    updateStatusBar();
+    showError(
+      lastIsParseError ? 'yellow' : 'red',
+      `LLM 连续 ${LLM_MAX_ATTEMPTS} 次失败：${lastError?.message || '未知错误'}`,
+      lastRaw
+    );
+    return null;
+  }
+
+  async function generate() {
+    if (state.phase === 'llm' || state.phase === 'generating') return;
+    if (!validateInputs()) return;
+
+    state.tasks = [];
+    state.activeTaskId = null;
+    renderThumbs();
+    renderCanvas();
+
+    const parsed = await runStage1();
+    if (!parsed) {
+      renderCanvas();
+      return;
+    }
+
+    state.tasks = parsed.map(p => ({
+      id: nextTaskId(),
+      refIndex: p.refIndex,
+      prompt: p.prompt,
+      size: p.size,
+      aspect: p.aspect,
+      status: 'wait',
+      result: null,
+      error: null,
+      attempts: 0
+    }));
+    state.activeTaskId = state.tasks[0].id;
+    state.phase = 'generating';
+    renderThumbs();
+    renderCanvas();
+    updateStatusBar();
+
+    await runImageStage();
+
+    // 渲染完成后默认聚焦到第一张已 done 的图
+    const firstDone = state.tasks.find(t => t.status === 'done');
+    if (firstDone) state.activeTaskId = firstDone.id;
+    state.phase = 'done';
+    renderThumbs();
+    renderCanvas();
+    updateStatusBar();
+  }
+
+  async function retryLLM() {
+    if (state.phase === 'llm' || state.phase === 'generating') return;
+    await generate();
+  }
+
+  function bindPromptShortcut() {
+    $('productDescription').addEventListener('keydown', e => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        generate();
+      }
+    });
+  }
+
+  // ===== 初始化 =====
+  window.addEventListener('DOMContentLoaded', () => {
+    loadConfig();
+    bindConfigPersistence();
+    bindRefUploader();
+    bindDescription();
+    bindPromptShortcut();
+    $('clearBtn').addEventListener('click', clearAll);
+    $('downloadAllBtn').addEventListener('click', downloadAll);
+    $('generateBtn').addEventListener('click', generate);
+    updateStatusBar();
+    renderCanvas();
+  });
+</script>
+</body>
+</html>

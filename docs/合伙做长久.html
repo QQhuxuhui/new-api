@@ -1,0 +1,1700 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>合伙做长久 · AI 中转站合伙架构与合并路线</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Noto+Serif+SC:wght@300;400;500;600;700;900&family=DM+Mono:ital,wght@0,300;0,400;0,500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #1a1612;
+  --ink-soft: #2d2620;
+  --ink-mute: #5a4f42;
+  --paper: #f1ebdd;
+  --paper-light: #f8f3e6;
+  --paper-dark: #e8dfc8;
+  --paper-deep: #ddd2b8;
+  --seal: #8b2820;
+  --seal-soft: #a04030;
+  --gold: #9a7d3c;
+  --gold-light: #c4a85e;
+  --gray-1: #6b6358;
+  --gray-2: #998e7e;
+  --line: rgba(26,22,18,0.14);
+  --line-strong: rgba(26,22,18,0.28);
+  --line-soft: rgba(26,22,18,0.07);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Noto Serif SC', 'Cormorant Garamond', 'Songti SC', serif;
+  font-size: 16px;
+  line-height: 1.85;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  position: relative;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    radial-gradient(ellipse at 20% 15%, rgba(154,125,60,0.07) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 85%, rgba(139,40,32,0.05) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(232,223,200,0.4) 0%, transparent 70%);
+  pointer-events: none; z-index: 1;
+}
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.1 0 0 0 0 0.1 0 0 0 0 0.05 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.55; pointer-events: none;
+  mix-blend-mode: multiply; z-index: 1;
+}
+
+main { position: relative; z-index: 2; }
+
+.container { max-width: 1180px; margin: 0 auto; padding: 0 56px; }
+
+/* ============ COVER ============ */
+.cover {
+  min-height: 100vh;
+  padding: 64px 0 64px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  position: relative;
+}
+
+.meta-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  font-family: 'DM Mono', 'Noto Serif SC', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+}
+.meta-bar .left { display: flex; gap: 32px; }
+.meta-bar .right { text-align: right; }
+.meta-bar strong { color: var(--seal); font-weight: 500; }
+
+.cover-center {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 80px 0;
+  position: relative;
+}
+
+.cover-tag {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 17px;
+  color: var(--seal);
+  letter-spacing: 0.04em;
+  margin-bottom: 28px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.cover-tag::before {
+  content: '';
+  width: 36px; height: 1px;
+  background: var(--seal);
+}
+
+.cover-title {
+  font-family: 'Noto Serif SC', serif;
+  font-weight: 900;
+  font-size: clamp(72px, 11vw, 144px);
+  line-height: 0.96;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  margin-bottom: 36px;
+  position: relative;
+}
+.cover-title .accent { color: var(--seal); }
+
+.cover-sub {
+  font-family: 'Noto Serif SC', serif;
+  font-weight: 300;
+  font-size: clamp(20px, 2.4vw, 30px);
+  line-height: 1.55;
+  color: var(--ink-soft);
+  max-width: 720px;
+  letter-spacing: 0.02em;
+}
+.cover-sub em {
+  font-style: normal;
+  background-image: linear-gradient(transparent 60%, rgba(154,125,60,0.28) 60%);
+  padding: 0 2px;
+}
+
+.cover-quote {
+  margin-top: 56px;
+  font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+  font-style: italic;
+  font-size: 18px;
+  color: var(--ink-mute);
+  border-left: 2px solid var(--seal);
+  padding-left: 22px;
+  max-width: 580px;
+  line-height: 1.7;
+}
+
+.cover-toc {
+  border-top: 1px solid var(--line);
+  padding-top: 28px;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+}
+.toc-item {
+  border-left: 1px solid var(--line);
+  padding-left: 14px;
+}
+.toc-item:first-child { border-left: none; padding-left: 0; }
+.toc-num {
+  display: block;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 22px;
+  color: var(--seal);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.toc-name {
+  display: block;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 13px;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+}
+
+/* ============ SECTION SHELL ============ */
+section.chapter {
+  padding: 120px 0 100px;
+  position: relative;
+  border-top: 1px solid var(--line);
+}
+
+.chapter-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 48px;
+  align-items: end;
+  margin-bottom: 72px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chapter-num {
+  font-family: 'Noto Serif SC', serif;
+  font-weight: 900;
+  font-size: 110px;
+  line-height: 1;
+  color: var(--seal);
+  letter-spacing: -0.02em;
+  position: relative;
+}
+.chapter-num::after {
+  content: attr(data-en);
+  position: absolute;
+  bottom: 14px;
+  left: calc(100% + 14px);
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 14px;
+  color: var(--gold);
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.chapter-title-block { padding-bottom: 18px; }
+.chapter-kicker {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
+.chapter-title {
+  font-family: 'Noto Serif SC', serif;
+  font-size: clamp(38px, 5vw, 60px);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.chapter-lede {
+  font-family: 'Noto Serif SC', serif;
+  font-weight: 300;
+  font-size: 19px;
+  line-height: 1.7;
+  color: var(--ink-mute);
+  max-width: 760px;
+  margin-top: 18px;
+}
+
+/* ============ SECTION 1 — CURRENT ============ */
+.current-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr;
+  gap: 64px;
+  align-items: start;
+}
+.current-text p {
+  margin-bottom: 18px;
+  color: var(--ink-soft);
+  font-size: 16px;
+}
+.current-text strong { color: var(--seal); font-weight: 600; }
+.current-text .label {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--gold);
+  display: block;
+  margin-bottom: 4px;
+  margin-top: 24px;
+}
+
+.stats-row {
+  margin-top: 56px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+}
+.stat-cell {
+  padding: 24px 20px;
+  border-right: 1px solid var(--line);
+}
+.stat-cell:last-child { border-right: none; }
+.stat-num {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 44px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.stat-num .unit { font-size: 18px; color: var(--gold); margin-left: 4px; }
+.stat-label {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 13px;
+  color: var(--ink-mute);
+  margin-top: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* ============ SECTION 2 — CONTRIBUTIONS ============ */
+.contrib-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  margin-top: 24px;
+}
+.contrib-card {
+  padding: 40px 36px 44px;
+  border-right: 1px solid var(--line);
+  position: relative;
+}
+.contrib-card:last-child { border-right: none; }
+.contrib-card:nth-child(2) {
+  background: linear-gradient(180deg, transparent, rgba(154,125,60,0.04));
+}
+
+.contrib-role {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+.contrib-name {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+}
+.contrib-en {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 16px;
+  color: var(--gray-1);
+  margin-bottom: 28px;
+  display: block;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 18px;
+}
+.contrib-list {
+  list-style: none;
+  margin-bottom: 28px;
+}
+.contrib-list li {
+  font-size: 14.5px;
+  color: var(--ink-soft);
+  padding: 7px 0 7px 22px;
+  position: relative;
+  line-height: 1.55;
+  border-bottom: 1px dashed var(--line-soft);
+}
+.contrib-list li:last-child { border-bottom: none; }
+.contrib-list li::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 16px;
+  width: 12px; height: 1px;
+  background: var(--seal);
+}
+
+.scarcity-block {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+.scarcity-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gray-1);
+  margin-bottom: 10px;
+}
+.scarcity-bars {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.scarcity-bar {
+  flex: 1;
+  height: 5px;
+  background: var(--paper-deep);
+}
+.scarcity-bar.on { background: var(--seal); }
+.scarcity-text {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+}
+.scarcity-text .qual {
+  color: var(--gray-1);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.contrib-quote {
+  margin-top: 56px;
+  padding: 36px 48px;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  background: rgba(248,243,230,0.4);
+  font-family: 'Noto Serif SC', serif;
+  font-size: 18px;
+  line-height: 1.75;
+  color: var(--ink);
+  text-align: center;
+  position: relative;
+}
+.contrib-quote::before, .contrib-quote::after {
+  content: '「';
+  font-family: 'Noto Serif SC', serif;
+  font-size: 36px;
+  color: var(--seal);
+  position: absolute;
+  top: 18px; left: 24px;
+  line-height: 1;
+}
+.contrib-quote::after {
+  content: '」';
+  left: auto; right: 24px;
+  top: auto; bottom: 18px;
+}
+
+/* ============ SECTION 3 — EQUITY & GOVERNANCE ============ */
+.eq-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 80px;
+  align-items: start;
+}
+.eq-chart-wrap {
+  position: relative;
+}
+.eq-chart-caption {
+  text-align: center;
+  margin-top: 24px;
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 15px;
+  color: var(--ink-mute);
+}
+.eq-chart-caption strong {
+  font-style: normal;
+  color: var(--seal);
+  font-family: 'Noto Serif SC', serif;
+  font-weight: 600;
+}
+
+.eq-legend {
+  margin-top: 32px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+.eq-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.eq-row:last-child { border-bottom: none; }
+.eq-swatch {
+  width: 14px; height: 14px;
+  border-radius: 0;
+}
+.eq-label {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 15px;
+  color: var(--ink);
+}
+.eq-label small {
+  display: block;
+  color: var(--gray-1);
+  font-size: 12px;
+  font-weight: 300;
+  margin-top: 2px;
+}
+.eq-pct {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 30px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+
+.gov-block { padding-top: 8px; }
+.gov-h {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.gov-h .en {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 14px;
+  color: var(--gold);
+  font-weight: 400;
+}
+.gov-sub {
+  font-size: 14px;
+  color: var(--ink-mute);
+  margin-bottom: 26px;
+  line-height: 1.7;
+}
+
+.gov-tier {
+  border-left: 2px solid var(--seal);
+  padding: 4px 0 4px 20px;
+  margin-bottom: 26px;
+}
+.gov-tier-name {
+  font-family: 'Noto Serif SC', serif;
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--seal);
+  margin-bottom: 6px;
+}
+.gov-tier-mech {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--gold);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.gov-tier-content {
+  font-size: 14.5px;
+  color: var(--ink-soft);
+  line-height: 1.7;
+}
+.gov-tier-content .split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 8px;
+}
+.gov-tier-content .split > div {
+  padding: 10px 14px;
+  background: rgba(248,243,230,0.5);
+  border: 1px solid var(--line);
+}
+.gov-tier-content .split strong {
+  display: block;
+  color: var(--seal);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+/* ============ SECTION 4 — TIMELINE ============ */
+.timeline-wrap {
+  margin-top: 32px;
+  position: relative;
+}
+.timeline-axis {
+  position: relative;
+  padding: 60px 0 0;
+}
+.timeline-line {
+  position: absolute;
+  left: 0; right: 0; top: 60px;
+  height: 1px;
+  background: var(--line-strong);
+}
+.timeline-line::before, .timeline-line::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  width: 7px; height: 7px;
+  background: var(--seal);
+  border-radius: 50%;
+}
+.timeline-line::before { left: 0; }
+.timeline-line::after { right: 0; }
+
+.tl-marks {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  position: relative;
+}
+.tl-mark { padding: 0 14px; position: relative; }
+.tl-mark::before {
+  content: '';
+  position: absolute;
+  top: -64px;
+  left: 14px;
+  width: 1px;
+  height: 24px;
+  background: var(--seal);
+}
+.tl-mark::after {
+  content: '';
+  position: absolute;
+  top: -45px;
+  left: 9px;
+  width: 11px; height: 11px;
+  border: 2px solid var(--seal);
+  background: var(--paper);
+  border-radius: 50%;
+}
+
+.tl-time {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--gold);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.tl-phase {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 14px;
+  letter-spacing: 0.02em;
+}
+.tl-phase .num {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 18px;
+  color: var(--seal);
+  font-weight: 400;
+  margin-right: 8px;
+}
+.tl-aim {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 14px;
+  color: var(--seal);
+  margin-bottom: 16px;
+  font-weight: 500;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+.tl-actions { list-style: none; margin-bottom: 16px; }
+.tl-actions li {
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--ink-soft);
+  padding: 5px 0 5px 18px;
+  position: relative;
+}
+.tl-actions li::before {
+  content: '·';
+  position: absolute;
+  left: 4px;
+  font-size: 18px;
+  color: var(--seal);
+  line-height: 1;
+  top: 8px;
+}
+.tl-judge {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: rgba(139,40,32,0.05);
+  border-left: 2px solid var(--seal);
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+.tl-judge strong {
+  display: block;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--seal);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+/* Conditions box for phase 3 */
+.merge-conditions {
+  margin-top: 80px;
+  padding: 48px 56px;
+  background: var(--paper-light);
+  border: 1px solid var(--line-strong);
+  position: relative;
+}
+.merge-conditions::before {
+  content: '合并五条件';
+  position: absolute;
+  top: -14px;
+  left: 36px;
+  background: var(--seal);
+  color: var(--paper-light);
+  padding: 4px 14px;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  font-weight: 500;
+}
+.merge-conditions-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0;
+  margin-top: 8px;
+}
+.mc-item {
+  padding: 0 18px;
+  border-right: 1px solid var(--line);
+}
+.mc-item:last-child { border-right: none; }
+.mc-num {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 36px;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--seal);
+  line-height: 1;
+  margin-bottom: 8px;
+}
+.mc-text {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  line-height: 1.65;
+}
+.mc-text b { color: var(--ink); font-weight: 600; }
+
+/* ============ SECTION 5 — FIVE LAWS ============ */
+.laws-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  margin-top: 12px;
+}
+.law-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 320px;
+  gap: 36px;
+  padding: 36px 0;
+  border-bottom: 1px solid var(--line);
+  align-items: start;
+}
+.law-row:first-child { border-top: 1px solid var(--line-strong); }
+.law-row:last-child { border-bottom: 1px solid var(--line-strong); }
+
+.law-num {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 64px;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--seal);
+  line-height: 0.9;
+  letter-spacing: -0.02em;
+}
+.law-num::after {
+  content: '';
+  display: block;
+  width: 28px;
+  height: 1px;
+  background: var(--gold);
+  margin-top: 12px;
+}
+
+.law-content h4 {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 10px;
+  letter-spacing: 0.02em;
+}
+.law-content p {
+  font-size: 15px;
+  color: var(--ink-mute);
+  line-height: 1.75;
+}
+
+.law-case {
+  padding: 16px 18px;
+  background: rgba(248,243,230,0.5);
+  border-left: 2px solid var(--gold);
+}
+.law-case-title {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+.law-case-body {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  line-height: 1.65;
+}
+.law-case-body strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ============ SECTION 6 — RISKS ============ */
+.risks-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin-top: 32px;
+}
+.risk-card {
+  padding: 32px 28px 32px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-light);
+  position: relative;
+}
+.risk-card::before {
+  content: '';
+  position: absolute;
+  top: -1px; left: -1px;
+  width: 36px; height: 36px;
+  border-top: 2px solid var(--seal);
+  border-left: 2px solid var(--seal);
+}
+.risk-card::after {
+  content: '';
+  position: absolute;
+  bottom: -1px; right: -1px;
+  width: 36px; height: 36px;
+  border-bottom: 2px solid var(--seal);
+  border-right: 2px solid var(--seal);
+}
+.risk-icon { width: 48px; height: 48px; margin-bottom: 18px; }
+.risk-name {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--seal);
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+}
+.risk-en {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 13px;
+  color: var(--gold);
+  margin-bottom: 18px;
+  display: block;
+  letter-spacing: 0.08em;
+}
+.risk-card p {
+  font-size: 14px;
+  color: var(--ink-soft);
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+.risk-card .defense {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+  font-size: 13px;
+  color: var(--ink);
+}
+.risk-card .defense strong {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gold);
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+/* ============ FOOTER / SEAL ============ */
+.colophon {
+  padding: 100px 0 80px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+  position: relative;
+}
+.coda {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 30px;
+  font-weight: 300;
+  color: var(--ink);
+  margin-bottom: 8px;
+  letter-spacing: 0.1em;
+}
+.coda em {
+  font-style: normal;
+  color: var(--seal);
+  font-weight: 600;
+}
+.coda-en {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 16px;
+  color: var(--gold);
+  letter-spacing: 0.18em;
+  margin-bottom: 56px;
+}
+.seal-stamp {
+  width: 100px; height: 100px;
+  margin: 0 auto 32px;
+  border: 3px solid var(--seal);
+  background: rgba(139,40,32,0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Noto Serif SC', serif;
+  font-weight: 900;
+  font-size: 30px;
+  color: var(--seal);
+  line-height: 1.05;
+  letter-spacing: 0.1em;
+  transform: rotate(-4deg);
+  position: relative;
+}
+.seal-stamp span {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  text-align: center;
+}
+.colophon-meta {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--gray-1);
+  text-transform: uppercase;
+}
+.colophon-meta div { margin: 4px 0; }
+.colophon-meta .disclaim {
+  margin-top: 28px;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--gray-2);
+  font-style: italic;
+  text-transform: none;
+}
+
+/* ============ SVG ARCHITECTURE ============ */
+.arch-svg { width: 100%; height: auto; display: block; }
+
+/* Animations */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cover-tag, .cover-title, .cover-sub, .cover-quote, .cover-toc {
+  animation: fadeUp 1.1s ease both;
+}
+.cover-title { animation-delay: 0.15s; }
+.cover-sub { animation-delay: 0.32s; }
+.cover-quote { animation-delay: 0.5s; }
+.cover-toc { animation-delay: 0.68s; }
+
+@keyframes drawLine {
+  from { stroke-dashoffset: 600; }
+  to { stroke-dashoffset: 0; }
+}
+.arch-line { stroke-dasharray: 600; animation: drawLine 1.6s ease both; }
+
+/* ============ RESPONSIVE ============ */
+@media (max-width: 880px) {
+  .container { padding: 0 28px; }
+  .meta-bar { flex-direction: column; gap: 12px; align-items: flex-start; }
+  .cover-toc { grid-template-columns: repeat(3, 1fr); gap: 18px 8px; }
+  .toc-item { padding-left: 10px; }
+  .chapter-head { grid-template-columns: 1fr; gap: 16px; }
+  .chapter-num { font-size: 80px; }
+  .current-grid, .eq-grid { grid-template-columns: 1fr; gap: 48px; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .stat-cell:nth-child(even) { border-right: none; }
+  .stat-cell:nth-child(1), .stat-cell:nth-child(2) { border-bottom: 1px solid var(--line); }
+  .contrib-grid { grid-template-columns: 1fr; }
+  .contrib-card { border-right: none; border-bottom: 1px solid var(--line); }
+  .tl-marks { grid-template-columns: 1fr; gap: 40px; }
+  .tl-mark { padding: 24px 0 0; }
+  .tl-mark::before, .tl-mark::after { display: none; }
+  .merge-conditions-grid { grid-template-columns: repeat(1, 1fr); gap: 14px; }
+  .mc-item { border-right: none; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+  .law-row { grid-template-columns: 1fr; gap: 16px; }
+  .risks-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<main>
+
+<!-- ================================================================
+     COVER
+     ================================================================ -->
+<header class="cover container">
+  <div class="meta-bar">
+    <div class="left">
+      <span>策略备忘 / <strong>战略层</strong></span>
+      <span>Vol. I · 合伙篇</span>
+    </div>
+    <div class="right">
+      贰零贰陆年仲春 · 立此为据
+    </div>
+  </div>
+
+  <div class="cover-center">
+    <div class="cover-tag">A Blueprint for Long Partnership</div>
+    <h1 class="cover-title">合伙<span class="accent">·</span>做长久</h1>
+    <p class="cover-sub">
+      AI 中转站<em>合伙架构</em>与<em>合并路线图</em><br>
+      —— 以二百年商业史为镜，论何为公允、何为长久
+    </p>
+    <blockquote class="cover-quote">
+      合伙翻车的，从不是因为贪婪。<br>
+      是因为<strong style="color: var(--seal); font-weight: 600;">不对等</strong>被掩盖，<strong style="color: var(--seal); font-weight: 600;">分工</strong>不清，<strong style="color: var(--seal); font-weight: 600;">账目</strong>有暗。
+    </blockquote>
+  </div>
+
+  <nav class="cover-toc">
+    <div class="toc-item"><span class="toc-num">壹</span><span class="toc-name">现状</span></div>
+    <div class="toc-item"><span class="toc-num">贰</span><span class="toc-name">三方贡献</span></div>
+    <div class="toc-item"><span class="toc-num">叁</span><span class="toc-name">股权与治理</span></div>
+    <div class="toc-item"><span class="toc-num">肆</span><span class="toc-name">合并路线</span></div>
+    <div class="toc-item"><span class="toc-num">伍</span><span class="toc-name">长久五律</span></div>
+    <div class="toc-item"><span class="toc-num">陆</span><span class="toc-name">三处隐患</span></div>
+  </nav>
+</header>
+
+<!-- ================================================================
+     SECTION 壹 — 现状
+     ================================================================ -->
+<section class="chapter">
+  <div class="container">
+    <div class="chapter-head">
+      <div class="chapter-num" data-en="The Present">壹</div>
+      <div class="chapter-title-block">
+        <div class="chapter-kicker">CHAPTER ONE · STATUS QUO</div>
+        <h2 class="chapter-title">两站并行，结构待立</h2>
+        <p class="chapter-lede">
+          原站验证了模型，跑出了利润；新站搭好了壳，借入了团队。两条线已起，但合伙的底层结构尚未落地。
+        </p>
+      </div>
+    </div>
+
+    <div class="current-grid">
+      <div class="current-text">
+        <span class="label">— 原站 / Origin Station</span>
+        <p>由你<strong>独立走通</strong>了完整业务闭环：模型源、客户、运营节奏。每月以<strong>总营收 10%</strong> 与下属分成，相当于约 <strong>20–25%</strong> 利润分配。毛利稳定在 <strong>40–50%</strong>，现金流正向，已超过你的本职工资。</p>
+
+        <span class="label">— 新站 / Joint Venture</span>
+        <p>朋友带来其 <strong>~10 人小团队</strong>与公司外壳。新站独立搭建，目前与原站<strong>法律分立</strong>。原始合作方案为：营收发完员工工资后，剩余对半分。</p>
+
+        <span class="label">— 真正的不对称</span>
+        <p>你贡献的是<strong>已被验证的模型</strong>（最稀缺、最不可替代）；朋友贡献的是<strong>人和壳</strong>（市场上可复制、可雇佣）；下属在原站有名分、在新站无定位。这是当下结构的三个隐性矛盾。</p>
+      </div>
+
+      <div class="arch-figure">
+        <svg class="arch-svg" viewBox="0 0 540 380" xmlns="http://www.w3.org/2000/svg">
+          <!-- Origin station -->
+          <g>
+            <rect x="20" y="40" width="220" height="180" fill="none" stroke="#1a1612" stroke-width="1"/>
+            <text x="32" y="64" font-family="DM Mono, monospace" font-size="10" fill="#9a7d3c" letter-spacing="2">ORIGIN · 原站</text>
+            <line x1="20" y1="76" x2="240" y2="76" stroke="#1a1612" stroke-width="0.5" opacity="0.3"/>
+
+            <!-- You -->
+            <circle cx="80" cy="120" r="22" fill="#8b2820"/>
+            <text x="80" y="125" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" fill="#f1ebdd" font-weight="700">你</text>
+            <text x="80" y="160" text-anchor="middle" font-family="DM Mono, monospace" font-size="9" fill="#1a1612" letter-spacing="1">FOUNDER</text>
+
+            <!-- Subordinate -->
+            <circle cx="180" cy="120" r="18" fill="none" stroke="#1a1612" stroke-width="1.5"/>
+            <text x="180" y="124" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#1a1612" font-weight="500">下属</text>
+            <text x="180" y="160" text-anchor="middle" font-family="DM Mono, monospace" font-size="9" fill="#1a1612" letter-spacing="1">10% REV</text>
+
+            <!-- Connection -->
+            <line class="arch-line" x1="102" y1="120" x2="162" y2="120" stroke="#9a7d3c" stroke-width="1" stroke-dasharray="3 3"/>
+
+            <!-- Margin tag -->
+            <text x="130" y="200" text-anchor="middle" font-family="Cormorant Garamond, serif" font-style="italic" font-size="13" fill="#5a4f42">毛利 40–50%</text>
+          </g>
+
+          <!-- Friend's company -->
+          <g>
+            <rect x="300" y="40" width="220" height="180" fill="none" stroke="#1a1612" stroke-width="1" stroke-dasharray="4 4"/>
+            <text x="312" y="64" font-family="DM Mono, monospace" font-size="10" fill="#9a7d3c" letter-spacing="2">FRIEND · 旧公司</text>
+            <line x1="300" y1="76" x2="520" y2="76" stroke="#1a1612" stroke-width="0.5" opacity="0.3"/>
+
+            <!-- Friend -->
+            <circle cx="360" cy="120" r="22" fill="#1a1612"/>
+            <text x="360" y="125" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" fill="#f1ebdd" font-weight="700">朋友</text>
+
+            <!-- Team dots -->
+            <g fill="#1a1612" opacity="0.55">
+              <circle cx="430" cy="100" r="5"/>
+              <circle cx="450" cy="100" r="5"/>
+              <circle cx="470" cy="100" r="5"/>
+              <circle cx="490" cy="100" r="5"/>
+              <circle cx="430" cy="120" r="5"/>
+              <circle cx="450" cy="120" r="5"/>
+              <circle cx="470" cy="120" r="5"/>
+              <circle cx="490" cy="120" r="5"/>
+              <circle cx="450" cy="140" r="5"/>
+              <circle cx="470" cy="140" r="5"/>
+            </g>
+            <text x="460" y="170" text-anchor="middle" font-family="DM Mono, monospace" font-size="9" fill="#1a1612" letter-spacing="1">~10 EMPLOYEES</text>
+            <text x="410" y="200" text-anchor="middle" font-family="Cormorant Garamond, serif" font-style="italic" font-size="13" fill="#5a4f42">公司发展遇困</text>
+          </g>
+
+          <!-- New JV -->
+          <g>
+            <rect x="120" y="270" width="300" height="80" fill="rgba(139,40,32,0.06)" stroke="#8b2820" stroke-width="1.5"/>
+            <text x="270" y="298" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="20" fill="#8b2820" font-weight="700" letter-spacing="2">新 站 · 合 资</text>
+            <text x="270" y="322" text-anchor="middle" font-family="DM Mono, monospace" font-size="10" fill="#9a7d3c" letter-spacing="2">JOINT VENTURE · STRUCTURE PENDING</text>
+            <text x="270" y="340" text-anchor="middle" font-family="Cormorant Garamond, serif" font-style="italic" font-size="12" fill="#5a4f42">原始方案：发完工资后对半分</text>
+          </g>
+
+          <!-- Connection lines from origins to JV -->
+          <line class="arch-line" x1="130" y1="220" x2="220" y2="270" stroke="#1a1612" stroke-width="0.8" opacity="0.4"/>
+          <line class="arch-line" x1="410" y1="220" x2="320" y2="270" stroke="#1a1612" stroke-width="0.8" opacity="0.4"/>
+
+          <!-- Decorative corner marks -->
+          <g stroke="#9a7d3c" stroke-width="1" fill="none" opacity="0.6">
+            <path d="M 8 8 L 8 24 M 8 8 L 24 8"/>
+            <path d="M 532 8 L 532 24 M 532 8 L 516 8"/>
+            <path d="M 8 372 L 8 356 M 8 372 L 24 372"/>
+            <path d="M 532 372 L 532 356 M 532 372 L 516 372"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-cell">
+        <div class="stat-num">40–50<span class="unit">%</span></div>
+        <div class="stat-label">原站毛利</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-num">2<span class="unit">人</span></div>
+        <div class="stat-label">原站全员（含下属）</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-num">10<span class="unit">+</span></div>
+        <div class="stat-label">朋友公司团队</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-num">2–4<span class="unit">年</span></div>
+        <div class="stat-label">AI 中转层窗口期估</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     SECTION 贰 — 三方贡献
+     ================================================================ -->
+<section class="chapter">
+  <div class="container">
+    <div class="chapter-head">
+      <div class="chapter-num" data-en="The Three">贰</div>
+      <div class="chapter-title-block">
+        <div class="chapter-kicker">CHAPTER TWO · CONTRIBUTIONS</div>
+        <h2 class="chapter-title">三方贡献清单</h2>
+        <p class="chapter-lede">
+          先把每个人带来的东西摆上桌面。合伙的"公允"不在数字本身，在于不对等是否被公开承认、被结构化地处理。
+        </p>
+      </div>
+    </div>
+
+    <div class="contrib-grid">
+      <article class="contrib-card">
+        <div class="contrib-role">FOUNDER · 作者</div>
+        <h3 class="contrib-name">你</h3>
+        <span class="contrib-en">The Validator</span>
+        <ul class="contrib-list">
+          <li>已被验证的业务模型</li>
+          <li>上游供应商关系（模型源 / API 渠道）</li>
+          <li>客户关系与运营 know-how</li>
+          <li>对行业窗口期的判断力</li>
+          <li>合伙生意的"作者权"</li>
+        </ul>
+        <div class="scarcity-block">
+          <div class="scarcity-label">SCARCITY · 稀缺度</div>
+          <div class="scarcity-bars">
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar on"></div>
+          </div>
+          <div class="scarcity-text">最稀缺<span class="qual">— 不在，则生意不存在</span></div>
+        </div>
+      </article>
+
+      <article class="contrib-card">
+        <div class="contrib-role">CO-MANAGING · 运营合伙</div>
+        <h3 class="contrib-name">朋友</h3>
+        <span class="contrib-en">The Operator</span>
+        <ul class="contrib-list">
+          <li>~10 人现成团队</li>
+          <li>公司外壳与办公场地</li>
+          <li>潜在的全职管理时间</li>
+          <li>客户服务与日常运营带宽</li>
+          <li>与你不同的人脉与资源面</li>
+        </ul>
+        <div class="scarcity-block">
+          <div class="scarcity-label">SCARCITY · 稀缺度</div>
+          <div class="scarcity-bars">
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar"></div>
+            <div class="scarcity-bar"></div>
+          </div>
+          <div class="scarcity-text">中低<span class="qual">— 人和壳市场上可另觅</span></div>
+        </div>
+      </article>
+
+      <article class="contrib-card">
+        <div class="contrib-role">KEY PARTNER · 关键伙伴</div>
+        <h3 class="contrib-name">下属</h3>
+        <span class="contrib-en">The Trusted</span>
+        <ul class="contrib-list">
+          <li>多年信任与一线执行</li>
+          <li>原站日常运营经验</li>
+          <li>原站营收 10% 分成已生效</li>
+          <li>低离职风险、高交付稳定性</li>
+          <li>团队文化的承载者</li>
+        </ul>
+        <div class="scarcity-block">
+          <div class="scarcity-label">SCARCITY · 稀缺度</div>
+          <div class="scarcity-bars">
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar on"></div>
+            <div class="scarcity-bar"></div>
+          </div>
+          <div class="scarcity-text">中高<span class="qual">— 可替代但迁移成本极高</span></div>
+        </div>
+      </article>
+    </div>
+
+    <div class="contrib-quote">
+      做长久的合伙，不是把不对等压平成"五五开"，<br>
+      而是把不对等<strong style="color: var(--seal);">公开承认、写入结构</strong>，让每个人 5 年后都觉得当年的安排是公允的。
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     SECTION 叁 — 股权与治理
+     ================================================================ -->
+<section class="chapter">
+  <div class="container">
+    <div class="chapter-head">
+      <div class="chapter-num" data-en="Equity & Governance">叁</div>
+      <div class="chapter-title-block">
+        <div class="chapter-kicker">CHAPTER THREE · STRUCTURE</div>
+        <h2 class="chapter-title">股权 五十 · 四十 · 十</h2>
+        <p class="chapter-lede">
+          股权决定长期归属，治理决定每日运行。两件事必须分开谈。
+        </p>
+      </div>
+    </div>
+
+    <div class="eq-grid">
+      <div class="eq-chart-wrap">
+        <svg class="arch-svg" viewBox="0 0 380 380" xmlns="http://www.w3.org/2000/svg">
+          <!-- Donut chart: 50/40/10 -->
+          <!-- center 190,190 r 130, inner r 78 -->
+          <!-- 50% slice: 0deg to 180deg (top, going clockwise) -->
+          <!-- 40% slice: 180 to 324deg -->
+          <!-- 10% slice: 324 to 360deg -->
+
+          <!-- Background ring base -->
+          <circle cx="190" cy="190" r="155" fill="none" stroke="#9a7d3c" stroke-width="0.5" stroke-dasharray="2 4" opacity="0.4"/>
+
+          <!-- 50% you (right half): outer top→bottom CW, inner bottom→top CCW -->
+          <path d="M 190 60 A 130 130 0 0 1 190 320 L 190 268 A 78 78 0 0 0 190 112 Z" fill="#1a1612"/>
+
+          <!-- 40% friend (bottom-to-upper-left, through left side): outer CCW, inner CW -->
+          <path d="M 190 320 A 130 130 0 0 0 113.6 84.8 L 144.2 126.9 A 78 78 0 0 1 190 268 Z" fill="#9a7d3c"/>
+
+          <!-- 10% subordinate (small upper-left wedge): outer CW, inner CCW -->
+          <path d="M 113.6 84.8 A 130 130 0 0 1 190 60 L 190 112 A 78 78 0 0 0 144.2 126.9 Z" fill="#8b2820"/>
+
+          <!-- inner white circle for clean center -->
+          <circle cx="190" cy="190" r="78" fill="#f1ebdd"/>
+
+          <!-- Center labels -->
+          <text x="190" y="180" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#9a7d3c" letter-spacing="3">新 站</text>
+          <text x="190" y="208" text-anchor="middle" font-family="Cormorant Garamond, serif" font-style="italic" font-size="14" fill="#5a4f42">Equity</text>
+
+          <!-- Outer labels -->
+          <!-- 50% you -->
+          <line x1="320" y1="190" x2="350" y2="190" stroke="#1a1612" stroke-width="0.6"/>
+          <text x="356" y="186" font-family="Cormorant Garamond, serif" font-size="22" font-weight="600" fill="#1a1612">50%</text>
+          <text x="356" y="200" font-family="Noto Serif SC, serif" font-size="11" fill="#5a4f42">你</text>
+
+          <!-- 40% friend -->
+          <line x1="60" y1="190" x2="30" y2="190" stroke="#9a7d3c" stroke-width="0.6"/>
+          <text x="22" y="186" text-anchor="end" font-family="Cormorant Garamond, serif" font-size="22" font-weight="600" fill="#9a7d3c">40%</text>
+          <text x="22" y="200" text-anchor="end" font-family="Noto Serif SC, serif" font-size="11" fill="#5a4f42">朋友</text>
+
+          <!-- 10% subordinate -->
+          <line x1="148" y1="65" x2="120" y2="40" stroke="#8b2820" stroke-width="0.6"/>
+          <text x="116" y="36" text-anchor="end" font-family="Cormorant Garamond, serif" font-size="20" font-weight="600" fill="#8b2820">10%</text>
+          <text x="116" y="50" text-anchor="end" font-family="Noto Serif SC, serif" font-size="11" fill="#5a4f42">下属</text>
+
+          <!-- Decorative corner marks -->
+          <g stroke="#9a7d3c" stroke-width="0.8" fill="none" opacity="0.4">
+            <path d="M 8 8 L 8 22 M 8 8 L 22 8"/>
+            <path d="M 372 8 L 372 22 M 372 8 L 358 8"/>
+            <path d="M 8 372 L 8 358 M 8 372 L 22 372"/>
+            <path d="M 372 372 L 372 358 M 372 372 L 358 372"/>
+          </g>
+        </svg>
+        <p class="eq-chart-caption">
+          股权 = 长期归属与决策基础<br>
+          <strong>不过半</strong>，也不让任何一方一票独裁
+        </p>
+      </div>
+
+      <div class="eq-meta">
+        <div class="eq-legend">
+          <div class="eq-row">
+            <span class="eq-swatch" style="background: #1a1612;"></span>
+            <span class="eq-label">你 · Founder<small>业务模型作者 / 战略主理</small></span>
+            <span class="eq-pct">50%</span>
+          </div>
+          <div class="eq-row">
+            <span class="eq-swatch" style="background: #9a7d3c;"></span>
+            <span class="eq-label">朋友 · Co-Managing Partner<small>团队 / 运营 / 财务主理</small></span>
+            <span class="eq-pct">40%</span>
+          </div>
+          <div class="eq-row">
+            <span class="eq-swatch" style="background: #8b2820;"></span>
+            <span class="eq-label">下属 · Key Partner<small>从"你的人"升格为"事业合伙人"</small></span>
+            <span class="eq-pct">10%</span>
+          </div>
+        </div>
+
+        <div class="gov-block" style="margin-top: 56px;">
+          <h3 class="gov-h">治理 · 双轨锁 <span class="en">Dual-Lock Governance</span></h3>
+          <p class="gov-sub">
+            合伙关系最大的杀手，不是分歧，是没有处理分歧的机制。
+            把决策分两层，让每一层都有清晰的运行规则。
+          </p>
+
+          <div class="gov-tier">
+            <div class="gov-tier-name">战略层</div>
+            <div class="gov-tier-mech">DUAL CONSENT · 双方一致</div>
+            <div class="gov-tier-content">
+              路线 / 重大投资 / 对外合作 / 是否合并 ——
+              任何一方反对即不通过。强迫两人在大事上必须谈拢，
+              比一票独裁更能让合伙活下去。
+            </div>
+          </div>
+
+          <div class="gov-tier">
+            <div class="gov-tier-name">运营层</div>
+            <div class="gov-tier-mech">DIVIDED OWNERSHIP · 分工独立</div>
+            <div class="gov-tier-content">
+              在自己负责的领域里，对方原则上不干涉。
+              <div class="split">
+                <div>
+                  <strong>你 · 主理</strong>
+                  商业模式 / 上游供应链 / 技术方向 / 行业判断
+                </div>
+                <div>
+                  <strong>朋友 · 主理</strong>
+                  团队 / 客户服务 / 财务 / 日常运营
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="gov-tier">
+            <div class="gov-tier-name">僵局处理</div>
+            <div class="gov-tier-mech">COOLING-OFF · 30 天冷静期</div>
+            <div class="gov-tier-content">
+              战略层谈不拢 → 冷静 30 天再议 → 仍不拢则<strong style="color: var(--seal);">暂搁置不强推</strong>。
+              一次以多数票强压的胜利，会换来三次裂痕。
+            </div>
+          </div>
+
+          <div class="gov-tier">
+            <div class="gov-tier-name">退出条款</div>
+            <div class="gov-tier-mech">EXIT MECHANISM · 第一天写清</div>
+            <div class="gov-tier-content">
+              估值方法、买回流程、付款节奏 —— 全部白纸黑字。
+              这一条不是为了防对方，是为了让两人都<strong style="color: var(--seal);">安心地不想退出</strong>。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     SECTION 肆 — 合并路线
+     ================================================================ -->
+<section class="chapter">
+  <div class="container">
+    <div class="chapter-head">
+      <div class="chapter-num" data-en="The Roadmap">肆</div>
+      <div class="chapter-title-block">
+        <div class="chapter-kicker">CHAPTER FOUR · MERGER ROADMAP</div>
+        <h2 class="chapter-title">合并三阶段路线图</h2>
+        <p class="chapter-lede">
+          原站不是嫁妆，也不是永远的孤岛。
+          先合作，再合体；信任由时间建立，估值由第三方决定。
+        </p>
+      </div>
+    </div>
+
+    <div class="timeline-wrap">
+      <div class="timeline-axis">
+        <div class="timeline-line"></div>
+        <div class="tl-marks">
+          <div class="tl-mark">
+            <div class="tl-time">MONTH 0 → 12</div>
+            <h3 class="tl-phase"><span class="num">I.</span>独立运营</h3>
+            <div class="tl-aim">建立信任，是这一阶段唯一的产出</div>
+            <ul class="tl-actions">
+              <li>两站法律 / 财务 / 客户独立</li>
+              <li>建立联合采购、技术互通的协作机制</li>
+              <li>原站资产以授权方式给新站使用，付授权费</li>
+              <li>对账透明，每月对所有合伙人开放</li>
+              <li>下属在原站升级身份，在新站获 10% 股权</li>
+            </ul>
+            <div class="tl-judge">
+              <strong>Judgment Point · 判断点</strong>
+              朋友能否独立把新站做起来？是否真正在管，而不只是出借团队？
+            </div>
+          </div>
+
+          <div class="tl-mark">
+            <div class="tl-time">MONTH 12 → 24</div>
+            <h3 class="tl-phase"><span class="num">II.</span>深度协同</h3>
+            <div class="tl-aim">从"两个站"开始走向"一盘生意"</div>
+            <ul class="tl-actions">
+              <li>客户可在两站间无缝迁移</li>
+              <li>新站产品反向赋能原站，反之亦然</li>
+              <li>共享技术栈、共享上游、共享采购</li>
+              <li>启动第三方公允估值流程</li>
+              <li>评估两站发展是否真正趋同</li>
+            </ul>
+            <div class="tl-judge">
+              <strong>Judgment Point · 判断点</strong>
+              两站是越来越像一家，还是各自分化？分化则保持独立深度协作；趋同则准备合并。
+            </div>
+          </div>
+
+          <div class="tl-mark">
+            <div class="tl-time">MONTH 24 → ∞</div>
+            <h3 class="tl-phase"><span class="num">III.</span>合并判断</h3>
+            <div class="tl-aim">合并是第二段合伙的开始，不是终点</div>
+            <ul class="tl-actions">
+              <li>外部驱动出现：融资、品类扩张、对手压力</li>
+              <li>第三方估值确定原站 / 新站价值</li>
+              <li>合并后股权按估值折算，下属同步放大</li>
+              <li>明确合并后 CEO / COO / CTO 等席位</li>
+              <li>所有合伙人 5 年 lock-in</li>
+            </ul>
+            <div class="tl-judge">
+              <strong>Judgment Point · 判断点</strong>
+              不满足"五条件"则不合 —— 长期保持独立 + 深度协作也是好结局。
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="merge-conditions">
+        <div class="merge-conditions-grid">
+          <div class="mc-item">
+            <div class="mc-num">i</div>
+            <div class="mc-text"><b>两站都健康</b><br>不是一个救另一个，救助式合并 90% 失败。</div>
+          </div>
+          <div class="mc-item">
+            <div class="mc-num">ii</div>
+            <div class="mc-text"><b>外部驱动</b><br>融资 / 拓品类 / 打对手，<u>为合并而合并的合并</u>都失败了。</div>
+          </div>
+          <div class="mc-item">
+            <div class="mc-num">iii</div>
+            <div class="mc-text"><b>第三方估值</b><br>不你和朋友自己谈，避免心里不爽埋下日后火源。</div>
+          </div>
+          <div class="mc-item">
+            <div class="mc-num">iv</div>
+            <div class="mc-text"><b>提前定位</b><br>合并那一刻每个人的职位、汇报关系都要清楚。</div>
+          </div>
+          <div class="mc-item">
+            <div class="mc-num">v</div>
+            <div class="mc-text"><b>5 年 Lock-in</b><br>合并不是为了让对方套现你，是 5 年期共同承诺。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     SECTION 伍 — 长久五律
+     ================================================================ -->
+<section class="chapter">
+  <div class="container">
+    <div class="chapter-head">
+      <div class="chapter-num" data-en="The Five Laws">伍</div>
+      <div class="chapter-title-block">
+        <div class="chapter-kicker">CHAPTER FIVE · FIVE LAWS OF LONGEVITY</div>
+        <h2 class="chapter-title">长久五律</h2>
+        <p class="chapter-lede">
+          二百年商业史上，活过 30 年的合伙关系都遵循这五条规律。
+          它们不是道德，是<em>结构</em>。
+        </p>
+      </div>
+    </div>
+
+    <div class="laws-grid">
+      <div class="law-row">
+        <div class="law-num">i</div>
+        <div class="law-content">
+          <h4>不对等被公开承认，而非用 50/50 掩盖</h4>
+          <p>强行把不对等压平成对等，矛盾积累得最快。承认谁是主、谁是辅，反而最稳。</p>
+        </div>
+        <div class="law-case">
+          <div class="law-case-title">CASE STUDY</div>
+          <div class="law-case-body">
+            <strong>Buffett & Munger</strong> · 60 年合伙不翻脸。Munger 公开承认自己是 Buffett 的副手。岩崎家族的三菱、罗斯柴尔德五兄弟，皆此例。
+          </div>
+        </div>
+      </div>
+
+      <div class="law-row">
+        <div class="law-num">ii</div>
+        <div class="law-content">
+          <h4>分工清晰到能写在一张纸上</h4>
+          <p>所有"两个人都管所有事"的合伙都死掉了。一个人管什么、不管什么，必须明确到无歧义。</p>
+        </div>
+        <div class="law-case">
+          <div class="law-case-title">CASE STUDY</div>
+          <div class="law-case-body">
+            <strong>P&G 创立时</strong> · 一个人管财务、一个人管生产，划得清楚。Lennon-McCartney 词曲分工亦同。
+          </div>
+        </div>
+      </div>
+
+      <div class="law-row">
+        <div class="law-num">iii</div>
+        <div class="law-content">
+          <h4>金钱流动透明到没有暗账</h4>
+          <p>暗补贴是合伙的癌症，比贪婪更致命。账本要对所有合伙人开放，每月一次。</p>
+        </div>
+        <div class="law-case">
+          <div class="law-case-title">CASE STUDY</div>
+          <div class="law-case-body">
+            <strong>罗斯柴尔德五兄弟</strong> · 五座城市互寄账册，做了 100 多年。徽商票号、宁波钱庄网络皆此例。
+          </div>
+        </div>
+      </div>
+
+      <div class="law-row">
+        <div class="law-num">iv</div>
+        <div class="law-content">
+          <h4>退出机制从第一天开始规划</h4>
+          <p>好的合伙关系，从第一天就规划怎么散场。这不是不信任，是成熟。</p>
+        </div>
+        <div class="law-case">
+          <div class="law-case-title">CASE STUDY</div>
+          <div class="law-case-body">
+            <strong>Goldman Sachs 合伙制</strong> · 强制退休、合伙席位 Up-or-Out。家族企业的传承条款亦循此理。
+          </div>
+        </div>
+      </div>
+
+      <div class="law-row">
+        <div class="law-num">v</div>
+        <div class="law-content">
+          <h4>共同的"使命叙事"高于个人收益</h4>
+          <p>所有活过两代人的合伙，都有一个超越钱的共同故事。能被外人讲述的故事，比账本更能凝合人。</p>
+        </div>
+        <div class="law-case">
+          <div class="law-case-title">CASE STUDY</div>
+          <div class="law-case-body">
+            <strong>稻盛和夫"敬天爱人"</strong> · 京瓷 / 第二电电的精神主轴。罗斯柴尔德"五支箭"、丰田"产业报国"皆如此。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     SECTION 陆 — 三隐患
+     ================================================================ -->
+<section class="chapter">
+  <div class="container">
+    <div class="chapter-head">
+      <div class="chapter-num" data-en="The Three Risks">陆</div>
+      <div class="chapter-title-block">
+        <div class="chapter-kicker">CHAPTER SIX · THREE HIDDEN RISKS</div>
+        <h2 class="chapter-title">三处隐患</h2>
+        <p class="chapter-lede">
+          这三件事不会立刻让合伙崩，但会在 18–36 个月后让所有人都觉得"早知道当年应该……"。提前埋好对策。
+        </p>
+      </div>
+    </div>
+
+    <div class="risks-grid">
+      <article class="risk-card">
+        <svg class="risk-icon" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="24" cy="24" r="20" fill="none" stroke="#8b2820" stroke-width="1.5"/>
+          <path d="M 14 24 L 34 24 M 14 18 L 34 18 M 14 30 L 28 30" stroke="#8b2820" stroke-width="1.5"/>
+          <path d="M 30 30 L 36 36 M 36 30 L 30 36" stroke="#8b2820" stroke-width="1.5"/>
+        </svg>
+        <h3 class="risk-name">暗补贴</h3>
+        <span class="risk-en">Hidden Subsidies</span>
+        <p>朋友公司的员工工资如以"实际花多少扣多少"进入新站成本，他即<strong style="color:var(--seal);">没有动力压人效</strong>，因为多招人对他没成本，而你承担一半。</p>
+        <div class="defense">
+          <strong>Defense · 对策</strong>
+          员工按市场价 + 项目人头预算上限走。每月对账，账册全员可见。
+        </div>
+      </article>
+
+      <article class="risk-card">
+        <svg class="risk-icon" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+          <rect x="6" y="14" width="14" height="20" fill="none" stroke="#8b2820" stroke-width="1.5"/>
+          <rect x="28" y="14" width="14" height="20" fill="none" stroke="#8b2820" stroke-width="1.5" stroke-dasharray="2 2"/>
+          <path d="M 20 24 L 28 24" stroke="#8b2820" stroke-width="1.5" stroke-dasharray="2 2"/>
+          <path d="M 24 8 L 24 14 M 21 11 L 27 11" stroke="#8b2820" stroke-width="1.5"/>
+        </svg>
+        <h3 class="risk-name">软合并</h3>
+        <span class="risk-en">Silent Asset Drift</span>
+        <p>"哥们儿，原站客户也接到新站好不好？" "原站供应商关系也帮新站对接一下？" —— 这是没有对价的合并，<strong style="color:var(--seal);">护城河无声地从原站流入新站</strong>。</p>
+        <div class="defense">
+          <strong>Defense · 对策</strong>
+          原站资产 → 新站使用，必须授权 + 付费。不是为了赚钱，是为了让产权关系永远清晰。
+        </div>
+      </article>
+
+      <article class="risk-card">
+        <svg class="risk-icon" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="16" cy="24" r="8" fill="none" stroke="#8b2820" stroke-width="1.5"/>
+          <circle cx="32" cy="24" r="8" fill="none" stroke="#8b2820" stroke-width="1.5"/>
+          <path d="M 24 18 L 24 30" stroke="#8b2820" stroke-width="2"/>
+          <path d="M 12 12 L 8 8 M 36 12 L 40 8 M 12 36 L 8 40 M 36 36 L 40 40" stroke="#8b2820" stroke-width="1"/>
+        </svg>
+        <h3 class="risk-name">五五死锁</h3>
+        <span class="risk-en">50/50 Deadlock</span>
+        <p>"对半分听起来公平"是商业史最大的陷阱之一。Adidas/Puma 兄弟反目、Beats 早期、无数互联网创业 ——
+        <strong style="color:var(--seal);">分歧来时无人能拍板</strong>。</p>
+        <div class="defense">
+          <strong>Defense · 对策</strong>
+          股权 50/40/10 而非 50/50。战略层双轨锁，运营层分工独立。<u>不过半，但不死锁</u>。
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     COLOPHON
+     ================================================================ -->
+<footer class="colophon">
+  <div class="container">
+    <div class="coda">
+      公允<em>·</em>清晰<em>·</em>长久
+    </div>
+    <div class="coda-en">FAIRNESS · CLARITY · LONGEVITY</div>
+
+    <div class="seal-stamp">
+      <span><div>合</div><div>做</div><div>伙</div><div>久</div></span>
+    </div>
+
+    <div class="colophon-meta">
+      <div>策略备忘 · VOL.I · 合伙篇</div>
+      <div>立此为据 · 贰零贰陆年仲春</div>
+      <div class="disclaim">
+        本文为基于商业史经验的战略框架，非法律意见。
+        正式合伙协议条款请由专业律师起草。
+      </div>
+    </div>
+  </div>
+</footer>
+
+</main>
+</body>
+</html>

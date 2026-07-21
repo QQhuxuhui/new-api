@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini 批量生图系统 - 稳定版</title>
+    <style>
+        :root {
+            --primary: #4f8cff;
+            --success: #52c41a;
+            --danger: #ff4d4f;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: #1e293b; line-height: 1.5; padding-bottom: 100px; }
+        
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        
+        /* Header & Config */
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .card { background: var(--card-bg); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid var(--border); }
+        .card-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        label { font-size: 13px; font-weight: 600; color: #64748b; }
+        input, select, textarea {
+            padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; outline: none; transition: border 0.2s;
+        }
+        input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.1); }
+        
+        /* Upload Area */
+        .upload-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+        .upload-box {
+            border: 2px dashed #cbd5e1; border-radius: 12px; padding: 30px; text-align: center; cursor: pointer; background: #fff; transition: all 0.2s;
+        }
+        .upload-box:hover { border-color: var(--primary); background: #f0f7ff; }
+        .upload-box i { font-style: normal; font-size: 24px; display: block; margin-bottom: 8px; }
+        .upload-box span { font-weight: 600; color: #475569; }
+
+        /* Batch List & Task Cards */
+        .batch-list { display: flex; flex-direction: column; gap: 12px; }
+        .task-card {
+            display: grid; grid-template-columns: 150px 30px 150px 40px 1fr 150px;
+            align-items: center; gap: 20px; padding: 16px; background: #fff; border-radius: 12px;
+            border: 1px solid var(--border); transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .task-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        
+        .img-slot {
+            width: 150px; height: 150px; background: #f1f5f9; border: 2px solid #e2e8f0; border-radius: 8px;
+            position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;
+            cursor: grab;
+        }
+        .img-slot.drag-over { border-color: var(--primary); background: #eff6ff; }
+        .img-slot img { width: 100%; height: 100%; object-fit: contain; }
+        .img-slot .label { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; text-align: center; padding: 2px 0; pointer-events: none; }
+        .img-slot .remove { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; background: rgba(255,255,255,0.8); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; cursor: pointer; color: var(--danger); }
+        
+        .arrow-sep { font-size: 20px; color: #94a3b8; text-align: center; font-weight: bold; }
+        
+        .result-area { height: 150px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; }
+        .result-area img { height: 100%; width: 100%; object-fit: contain; cursor: zoom-in; }
+        .result-area .error-text { font-size: 11px; color: var(--danger); padding: 8px; word-break: break-all; }
+        
+        .status-badge { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; }
+        .status-wait { background: #f1f5f9; color: #64748b; }
+        .status-running { background: #e0f2fe; color: #0369a1; }
+        .status-done { background: #dcfce7; color: #15803d; }
+        .status-error { background: #fee2e2; color: #b91c1c; }
+
+        /* Bottom Bar */
+        .bottom-bar {
+            position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid var(--border);
+            padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; z-index: 1000;
+        }
+        .stats { font-size: 14px; color: #64748b; font-weight: 500; }
+        .btn {
+            padding: 10px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s;
+            display: inline-flex; align-items: center; gap: 8px;
+        }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-primary:hover { background: #3b82f6; }
+        .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+        .btn-ghost { background: transparent; border: 1px solid var(--border); color: #475569; }
+        .btn-ghost:hover { background: #f1f5f9; }
+        .btn-danger { background: #fee2e2; color: #b91c1c; }
+
+        /* Loader */
+        .loader { border: 2px solid #f3f3f3; border-top: 2px solid var(--primary); border-radius: 50%; width: 14px; height: 14px; animation: spin 0.8s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Modal */
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 2000; align-items: center; justify-content: center; padding: 40px; cursor: zoom-out; }
+        .modal.show { display: flex; }
+        .modal img { max-width: 100%; max-height: 100%; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>Gemini 批量生成系统 <small style="font-weight: normal; font-size: 0.6em; color: #64748b;">(Gemini Edition)</small></h1>
+        <div style="display: flex; gap: 12px;">
+            <button class="btn btn-ghost" onclick="downloadAll()">📦 批量下载</button>
+            <button class="btn btn-ghost btn-danger" onclick="clearData()">🗑️ 清空工作区</button>
+        </div>
+    </div>
+
+    <!-- API Config Card -->
+    <div class="card">
+        <div class="card-title">⚙️ 核心配置</div>
+        <div class="form-grid">
+            <div class="form-group" style="grid-column: span 2;">
+                <label>API Key (持久化存储)</label>
+                <input id="apiKey" type="password" placeholder="sk-..." onchange="saveConfig()">
+            </div>
+            <div class="form-group">
+                <label>模型 (Model)</label>
+                <input id="model" value="gemini-3.1-flash-image-preview" onchange="saveConfig()">
+            </div>
+            <div class="form-group">
+                <label>并发数 (Concurrency)</label>
+                <select id="concurrency" onchange="saveConfig()">
+                    <option value="1">1 (最稳)</option>
+                    <option value="2">2 (推荐)</option>
+                    <option value="4" selected>4 (极速)</option>
+                    <option value="8">8 (高性能)</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>生成尺寸 (Size)</label>
+                <select id="imageSize" onchange="saveConfig()">
+                    <option value="">不指定 (默认)</option>
+                    <option value="512">512</option>
+                    <option value="1K">1K</option>
+                    <option value="2K">2K</option>
+                    <option value="4K">4K</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>宽高比 (Aspect Ratio)</label>
+                <select id="aspectRatio" onchange="saveConfig()">
+                    <option value="">不指定 (默认)</option>
+                    <option value="1:1">1:1 Square</option>
+                    <option value="16:9">16:9 Cinematic</option>
+                    <option value="9:16">9:16 Portrait</option>
+                    <option value="4:3">4:3 Standard</option>
+                    <option value="3:4">3:4 Portrait</option>
+                </select>
+            </div>
+            <div class="form-group" style="grid-column: span 2;">
+                <label>通用提示词 (Prompt)</label>
+                <textarea id="prompt" rows="2" onchange="saveConfig()">保持图2的产品特征，将其融合进图1的场景、光影、构图和氛围中，生成一张高质量的商拍图。</textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Area -->
+    <div class="upload-section">
+        <div class="upload-box" onclick="document.getElementById('refInput').click()">
+            <i>🖼️</i>
+            <span>批量上传【参考图】</span>
+            <input type="file" id="refInput" multiple accept="image/*" hidden onchange="handleFileUpload(event, 'ref')">
+        </div>
+        <div class="upload-box" onclick="document.getElementById('prodInput').click()">
+            <i>📦</i>
+            <span>批量上传【产品图】</span>
+            <input type="file" id="prodInput" multiple accept="image/*" hidden onchange="handleFileUpload(event, 'prod')">
+        </div>
+    </div>
+
+    <!-- Batch Task List -->
+    <div class="batch-list" id="batchList">
+        <!-- Tasks will be injected here -->
+    </div>
+</div>
+
+<div class="bottom-bar">
+    <div class="stats" id="stats">就绪任务: 0 / 总计: 0</div>
+    <div style="display: flex; gap: 16px;">
+        <button id="startBtn" class="btn btn-primary" onclick="startBatchProcessing()">🚀 开始批量生成</button>
+    </div>
+</div>
+
+<div class="modal" id="previewModal" onclick="this.classList.remove('show')">
+    <img id="modalImg" src="">
+</div>
+
+<script>
+    const API_URL = 'https://sparkcode.top/v1/chat/completions';
+    const DB_NAME = 'GeminiBatchGenDB';
+    const STORE_NAME = 'tasks_v2';
+    
+    let db;
+    let tasks = [];
+    let isProcessing = false;
+
+    // --- IndexedDB Core ---
+    async function initDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(DB_NAME, 2);
+            request.onupgradeneeded = e => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(STORE_NAME)) {
+                    db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                }
+            };
+            request.onsuccess = e => { db = e.target.result; resolve(); };
+            request.onerror = e => reject(e);
+        });
+    }
+
+    async function dbSaveTask(task) {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).put(JSON.parse(JSON.stringify(task)));
+        return new Promise(res => tx.oncomplete = res);
+    }
+
+    async function dbDeleteTask(id) {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).delete(id);
+        return new Promise(res => tx.oncomplete = res);
+    }
+
+    async function dbLoadTasks() {
+        return new Promise(res => {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const request = tx.objectStore(STORE_NAME).getAll();
+            request.onsuccess = () => res(request.result || []);
+        });
+    }
+
+    // --- State Management ---
+    window.onload = async () => {
+        await initDB();
+        loadConfig();
+        tasks = await dbLoadTasks();
+        tasks.sort((a, b) => a.order - b.order);
+        renderList();
+    };
+
+    function saveConfig() {
+        const config = {
+            apiKey: document.getElementById('apiKey').value,
+            model: document.getElementById('model').value,
+            concurrency: document.getElementById('concurrency').value,
+            imageSize: document.getElementById('imageSize').value,
+            aspectRatio: document.getElementById('aspectRatio').value,
+            prompt: document.getElementById('prompt').value
+        };
+        localStorage.setItem('gemini_batch_config', JSON.stringify(config));
+    }
+
+    function loadConfig() {
+        const saved = localStorage.getItem('gemini_batch_config');
+        if (saved) {
+            const c = JSON.parse(saved);
+            if (c.apiKey) document.getElementById('apiKey').value = c.apiKey;
+            if (c.model) document.getElementById('model').value = c.model;
+            if (c.concurrency) document.getElementById('concurrency').value = c.concurrency;
+            if (c.imageSize) document.getElementById('imageSize').value = c.imageSize;
+            if (c.aspectRatio) document.getElementById('aspectRatio').value = c.aspectRatio;
+            if (c.prompt) document.getElementById('prompt').value = c.prompt;
+        }
+    }
+
+    // --- File Handling ---
+    async function handleFileUpload(event, type) {
+        const files = Array.from(event.target.files);
+        if (!files.length) return;
+
+        for (const file of files) {
+            const dataUrl = await readFileAsDataURL(file);
+            // Find first task missing this type, or create new
+            let task = tasks.find(t => !t[type] && t.status === 'wait');
+            if (!task) {
+                task = { 
+                    id: Date.now() + Math.random(), 
+                    ref: null, 
+                    prod: null, 
+                    status: 'wait', 
+                    result: null, 
+                    error: null,
+                    order: tasks.length 
+                };
+                tasks.push(task);
+            }
+            task[type] = dataUrl;
+            await dbSaveTask(task);
+        }
+        renderList();
+        event.target.value = '';
+    }
+
+    function readFileAsDataURL(file) {
+        return new Promise(res => {
+            const reader = new FileReader();
+            reader.onload = () => res(reader.result);
+            reader.readAsDataURL(file);
+        });
+    }
+
+    // --- Drag & Drop ---
+    let dragData = null;
+
+    function handleDragStart(e, taskId, type) {
+        dragData = { taskId, type };
+        e.dataTransfer.effectAllowed = 'move';
+        // Give visual feedback after a tiny delay
+        setTimeout(() => e.target.closest('.img-slot').style.opacity = '0.4', 0);
+    }
+
+    function handleDragEnd(e) {
+        document.querySelectorAll('.img-slot').forEach(s => s.style.opacity = '1');
+        document.querySelectorAll('.img-slot').forEach(s => s.classList.remove('drag-over'));
+    }
+
+    function handleDragOver(e) { e.preventDefault(); e.target.closest('.img-slot').classList.add('drag-over'); }
+    function handleDragLeave(e) { e.target.closest('.img-slot').classList.remove('drag-over'); }
+
+    async function handleDrop(e, targetTaskId, targetType) {
+        e.preventDefault();
+        if (!dragData) return;
+
+        const sourceTask = tasks.find(t => t.id === dragData.taskId);
+        const targetTask = tasks.find(t => t.id === targetTaskId);
+        
+        if (sourceTask && targetTask) {
+            // Swap content
+            const temp = sourceTask[dragData.type];
+            sourceTask[dragData.type] = targetTask[targetType];
+            targetTask[targetType] = temp;
+            
+            await dbSaveTask(sourceTask);
+            await dbSaveTask(targetTask);
+            renderList();
+        }
+    }
+
+    // --- UI Rendering ---
+    function renderList() {
+        const container = document.getElementById('batchList');
+        container.innerHTML = tasks.length === 0 ? '<div style="text-align:center;color:#94a3b8;padding:40px;">暂无任务，请上传参考图和产品图</div>' : '';
+        
+        tasks.forEach((task, index) => {
+            const div = document.createElement('div');
+            div.className = 'task-card';
+            div.id = `task-${task.id}`;
+            
+            div.innerHTML = `
+                <div class="img-slot" draggable="true" 
+                     ondragstart="handleDragStart(event, ${task.id}, 'ref')" 
+                     ondragend="handleDragEnd(event)"
+                     ondragover="handleDragOver(event)"
+                     ondragleave="handleDragLeave(event)"
+                     ondrop="handleDrop(event, ${task.id}, 'ref')">
+                    ${task.ref ? `<img src="${task.ref}"><div class="remove" onclick="removeImg(${task.id}, 'ref')">×</div>` : '<span style="color:#cbd5e1;font-size:12px">放入参考图</span>'}
+                    <div class="label">参考图 #${index+1}</div>
+                </div>
+                
+                <div class="arrow-sep">+</div>
+                
+                <div class="img-slot" draggable="true"
+                     ondragstart="handleDragStart(event, ${task.id}, 'prod')"
+                     ondragend="handleDragEnd(event)"
+                     ondragover="handleDragOver(event)"
+                     ondragleave="handleDragLeave(event)"
+                     ondrop="handleDrop(event, ${task.id}, 'prod')">
+                    ${task.prod ? `<img src="${task.prod}"><div class="remove" onclick="removeImg(${task.id}, 'prod')">×</div>` : '<span style="color:#cbd5e1;font-size:12px">放入产品图</span>'}
+                    <div class="label">产品图 #${index+1}</div>
+                </div>
+
+                <div class="status-area">
+                    <div class="status-badge status-${task.status}">
+                        ${task.status === 'running' ? '<div class="loader"></div>' : ''}
+                        <span>${getStatusLabel(task.status)}</span>
+                    </div>
+                </div>
+
+                <div class="result-area">
+                    ${task.result ? `<img src="${task.result}" onclick="zoomImg('${task.result}')">` : (task.error ? `<div class="error-text">${task.error}</div>` : '')}
+                </div>
+
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    <button class="btn btn-ghost" style="padding:6px 12px; font-size:12px" onclick="deleteTask(${task.id})">🗑️ 删除</button>
+                    ${task.ref && task.prod ? `<button class="btn btn-ghost" style="padding:6px 12px; font-size:12px" ${task.status === 'running' ? 'disabled' : ''} onclick="retryTask(${task.id})">🔄 ${task.status === 'done' ? '重试' : '生成'}</button>` : ''}
+                    ${task.result ? `<button class="btn btn-primary" style="padding:6px 12px; font-size:12px" onclick="downloadImg('${task.result}', 'gen_${index+1}.png')">💾 下载</button>` : ''}
+                </div>
+            `;
+            container.appendChild(div);
+        });
+        updateStats();
+    }
+
+    async function retryTask(taskId) {
+        const task = tasks.find(t => t.id === taskId);
+        if (!task || !task.ref || !task.prod) return alert('缺少参考图或产品图');
+
+        const apiKey = document.getElementById('apiKey').value.trim();
+        if (!apiKey) return alert('请输入 API Key');
+
+        const config = {
+            model: document.getElementById('model').value,
+            size: document.getElementById('imageSize').value,
+            aspect: document.getElementById('aspectRatio').value,
+            prompt: document.getElementById('prompt').value
+        };
+
+        try {
+            task.status = 'running';
+            task.error = null;
+            renderTaskStatus(task);
+            const result = await callGeminiAPI(apiKey, config, task.ref, task.prod);
+            task.result = result;
+            task.status = 'done';
+        } catch (e) {
+            task.status = 'error';
+            task.error = e.message;
+        }
+        await dbSaveTask(task);
+        renderList(); // 全量刷新以更新下载和重试按钮状态
+    }
+
+    function getStatusLabel(s) {
+        return { wait: '等待中', running: '生成中', done: '已完成', error: '失败' }[s];
+    }
+
+    async function removeImg(taskId, type) {
+        const task = tasks.find(t => t.id === taskId);
+        if (task) {
+            task[type] = null;
+            if (task.status === 'done') task.status = 'wait';
+            await dbSaveTask(task);
+            renderList();
+        }
+    }
+
+    async function deleteTask(id) {
+        tasks = tasks.filter(t => t.id !== id);
+        await dbDeleteTask(id);
+        renderList();
+    }
+
+    async function clearData() {
+        if (!confirm('确定要清空所有任务吗？这将无法撤销。')) return;
+        tasks = [];
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).clear();
+        tx.oncomplete = () => renderList();
+    }
+
+    function updateStats() {
+        const ready = tasks.filter(t => t.ref && t.prod && t.status === 'wait').length;
+        document.getElementById('stats').textContent = `就绪任务: ${ready} / 总计: ${tasks.length}`;
+        document.getElementById('startBtn').disabled = isProcessing || ready === 0;
+    }
+
+    // --- Batch Engine ---
+    async function startBatchProcessing() {
+        const apiKey = document.getElementById('apiKey').value.trim();
+        if (!apiKey) return alert('请输入 API Key');
+
+        isProcessing = true;
+        updateStats();
+        
+        const concurrency = parseInt(document.getElementById('concurrency').value);
+        const queue = tasks.filter(t => t.ref && t.prod && t.status === 'wait');
+        
+        // Configuration Snapshot
+        const config = {
+            model: document.getElementById('model').value,
+            size: document.getElementById('imageSize').value,
+            aspect: document.getElementById('aspectRatio').value,
+            prompt: document.getElementById('prompt').value
+        };
+
+        const workers = Array(Math.min(concurrency, queue.length)).fill(0).map(async () => {
+            while (queue.length > 0) {
+                const task = queue.shift();
+                if (!task) continue;
+                
+                try {
+                    task.status = 'running';
+                    renderTaskStatus(task);
+                    const result = await callGeminiAPI(apiKey, config, task.ref, task.prod);
+                    task.result = result;
+                    task.status = 'done';
+                    task.error = null;
+                } catch (e) {
+                    task.status = 'error';
+                    task.error = e.message;
+                }
+                await dbSaveTask(task);
+                renderTaskStatus(task);
+            }
+        });
+
+        await Promise.all(workers);
+        isProcessing = false;
+        updateStats();
+    }
+
+    function renderTaskStatus(task) {
+        const el = document.getElementById(`task-${task.id}`);
+        if (!el) return;
+        
+        const badge = el.querySelector('.status-area');
+        badge.innerHTML = `<div class="status-badge status-${task.status}">
+            ${task.status === 'running' ? '<div class="loader"></div>' : ''}
+            <span>${getStatusLabel(task.status)}</span>
+        </div>`;
+        
+        const resArea = el.querySelector('.result-area');
+        if (task.status === 'done') {
+            resArea.innerHTML = `<img src="${task.result}" onclick="zoomImg('${task.result}')">`;
+            renderList(); // Refresh full UI for download buttons
+        } else if (task.status === 'error') {
+            resArea.innerHTML = `<div class="error-text">${task.error}</div>`;
+        }
+    }
+
+    async function callGeminiAPI(apiKey, config, refUrl, prodUrl) {
+        const body = {
+            model: config.model,
+            messages: [{
+                role: "user",
+                content: [
+                    { type: "image_url", image_url: { url: refUrl } },
+                    { type: "image_url", image_url: { url: prodUrl } },
+                    { type: "text", text: config.prompt }
+                ]
+            }],
+            max_tokens: 4096
+        };
+
+        const imageConfig = {};
+        if (config.size) imageConfig.image_size = config.size;
+        if (config.aspect) imageConfig.aspect_ratio = config.aspect;
+        if (Object.keys(imageConfig).length > 0) {
+            body.extra_body = { google: { image_config: imageConfig } };
+        }
+
+        const res = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify(body)
+        });
+
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        
+        const content = data.choices?.[0]?.message?.content || '';
+        
+        // Extract Base64 from markdown or direct string
+        const match = content.match(/data:image\/[a-zA-Z]+;base64,[^)\s]+/);
+        if (match) return match[0];
+        
+        // Check parts
+        const parts = data.choices?.[0]?.message?.parts || [];
+        const inline = parts.find(p => p.inline_data);
+        if (inline) return `data:${inline.inline_data.mime_type || 'image/png'};base64,${inline.inline_data.data}`;
+
+        throw new Error('未能从 API 响应中识别出图片。');
+    }
+
+    // --- Utils ---
+    function zoomImg(src) {
+        document.getElementById('modalImg').src = src;
+        document.getElementById('previewModal').classList.add('show');
+    }
+
+    function downloadImg(url, name) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.click();
+    }
+
+    function downloadAll() {
+        const done = tasks.filter(t => t.result);
+        if (!done.length) return alert('没有已完成的图片');
+        done.forEach((t, i) => {
+            setTimeout(() => downloadImg(t.result, `gemini_batch_${i+1}.png`), i * 300);
+        });
+    }
+</script>
+
+</body>
+</html>

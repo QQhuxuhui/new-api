@@ -133,7 +133,9 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 			}
 
 			// Invalidate stale cache before re-selecting.
-			model.InvalidateUserPlanCache(relayInfo.UserId)
+			if cacheErr := model.InvalidateUserPlanCache(relayInfo.UserId); cacheErr != nil {
+				logger.LogInfo(c, fmt.Sprintf("用户 %d 套餐缓存失效失败，将直接查询数据库: %v", relayInfo.UserId, cacheErr))
+			}
 
 			// IMPORTANT: We must not switch to a plan that doesn't include the current UsingGroup,
 			// otherwise the already-selected channel/group may become unauthorized and pricing ratios
@@ -159,10 +161,21 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 					if !hasPlanAvailableQuota(candidate) {
 						continue
 					}
-					if err := model.SwitchToUserPlan(relayInfo.UserId, candidate.Id, false); err != nil {
+					switched, switchErr := model.SwitchToUserPlanGuarded(relayInfo.UserId, candidate.Id, model.SystemPlanSwitchGuard{
+						ExpectedCurrentUserPlanId: relayInfo.UserPlanId,
+						RequireAutoSwitch:         true,
+						RequireUnexpired:          true,
+					})
+					if switchErr != nil && !switched {
 						// Candidate became unavailable (or was stale); try next.
-						common.SysLog(fmt.Sprintf("failed to switch to re-selected plan user=%d user_plan=%d err=%v", relayInfo.UserId, candidate.Id, err))
+						common.SysLog(fmt.Sprintf("failed to switch to re-selected plan user=%d user_plan=%d err=%v", relayInfo.UserId, candidate.Id, switchErr))
 						continue
+					}
+					if !switched {
+						break
+					}
+					if switchErr != nil {
+						common.SysLog(fmt.Sprintf("re-selected plan switch committed but cache invalidation failed user=%d user_plan=%d err=%v", relayInfo.UserId, candidate.Id, switchErr))
 					}
 					selected = candidate
 					break
@@ -571,9 +584,20 @@ func trySwitchToPlanForRequiredQuota(c *gin.Context, relayInfo *relaycommon.Rela
 			continue
 		}
 
-		if err := model.SwitchToUserPlan(relayInfo.UserId, candidate.Id, false); err != nil {
+		switched, switchErr := model.SwitchToUserPlanGuarded(relayInfo.UserId, candidate.Id, model.SystemPlanSwitchGuard{
+			ExpectedCurrentUserPlanId: relayInfo.UserPlanId,
+			RequireAutoSwitch:         true,
+			RequireUnexpired:          true,
+		})
+		if switchErr != nil && !switched {
 			// Candidate became unavailable or was invalidated concurrently; try next.
 			continue
+		}
+		if !switched {
+			return nil, nil
+		}
+		if switchErr != nil {
+			common.SysLog(fmt.Sprintf("exhaustion rescue switch committed but cache invalidation failed user=%d user_plan=%d err=%v", relayInfo.UserId, candidate.Id, switchErr))
 		}
 
 		relayInfo.UserPlanId = candidate.Id

@@ -1,0 +1,57 @@
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-opus-4-6","id":"msg_01FgkPya2Bkx9Ac4C3G6TTg9","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":437,"cache_creation_input_tokens":25298,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":25298,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}}        }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}         }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"identity_platform\":\"claude_code\",\"desc"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\":\"I am Claude, made by Anthropic. I am running as Claude Code"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" (Anthropic's official CLI tool). My model is"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Claude Sonnet 4.6 (model ID: claude-sonnet-4-6). I have no dual identity or"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" identity conflict. I am not Kiro, Warp, 0z, Antigravity, or any other platform"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"'s agent. My system prompt clearly identifies me as "}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"'Claude Code, Anthropic's official CLI for Claude.' There is no secondary identity lay"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ered on top — no Kiro instructions, no Warp instructions, no 0z instructions, no Antigravity instructions. I"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" am purely Claude Code running in a terminal/CLI environment on macOS (Darwin"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"), working in the user's git repository at /Users/VscodeProjects on"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" the 'developer' branch. The git user is '千羽'. There is no identity conflict what"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"soever.\"}"}         }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0       }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":437,"cache_creation_input_tokens":25298,"cache_read_input_tokens":0,"output_tokens":217,"iterations":[{"input_tokens":437,"output_tokens":217,"cache_read_input_tokens":0,"cache_creation_input_tokens":25298,"cache_creation":{"ephemeral_5m_input_tokens":25298,"ephemeral_1h_input_tokens":0},"type":"message"}]},"context_management":{"applied_edits":[]}            }
+
+event: message_stop
+data: {"type":"message_stop"  }
+

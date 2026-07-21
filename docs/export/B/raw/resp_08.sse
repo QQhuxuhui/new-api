@@ -1,0 +1,141 @@
+event: message_start
+data: {"message":{"content":[],"id":"req_vrtx_011CbXnCmrQRQorz6cCFK9BS","model":"claude-opus-4-6","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"input_tokens":25155,"output_tokens":6}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"thinking":"","type":"thinking"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"thinking":"The user is asking me about","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" the","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" text","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" content of a PDF,","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" but they haven't provided any PDF file","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" path","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" or attachment","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":". They","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" also","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" explicitly","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" say","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" \"Do not use any tools.\"","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" I","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" cannot","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" read","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" a","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" PDF without","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" using","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" tools,","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" and","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" no","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" PDF has","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" been referenced","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" or provided","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" in","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" this conversation.\n\nI should let","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" the user know that no","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" PDF has","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" been provided for","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" me to read.","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"signature":"RXA0RUNtVUlEaEFDR0FJcVFJQm9kVStseWlqNVI0eTJvTnRmYlZxSzg1TnpJd0hrM3VtOXdDTzRFZktPb09tQUNaNHRjV1VSRFFRNjlFYThDZHljc1hwYjNoVUR3cDFtWXBFQVhxZ3lEMk5zWVhWa1pTMXZjSFZ6TFRRdE5qZ0FRZ2gwYUdsdWEybHVaeElNTlhmekNOeGZ4QTlFZzg1N0dnelhyOE01TE1xWlQ1b1VrZzhpTU02SlQ1V2h6N1dpeldnbkhvODZsUi94U0xLM29EU0M2ZE4vbjI3TDh6REE4a0tqWFhaNHRsZlp0a1dPZmFtYnRpcm1Bc2ZUMEhHZzhMSGhvYXJXemdabEdRcEFURmxVVFlsZW9JMGd2V011YkdsQm9UMHdvdmhxY3JPWmZ1VUxUbjN6UlpiTUdpcWtUVHdmL21HOHNDeSt4azNrbUdScmYvMDgybWhkR21MdmhkeFZiN0ZFV1hWTTh0NDk0WDhUMEJGS1QyczE3YzZaVUQzejB3UVBlbWxXd0g1UVl4dnFsODlhSklBS210amU2MUxDMXl0eGJzYUFQYldGYUNVSFdaMFpFalAxSnRmbHpsMHBWVWJVWnVFSUh3S3Z4UzZBZy84N1BzeDNmRDdjRUFPWmdyb2ZYc1lQblBGZW91SUxHeGZmQkp2NnoxaU1GaHRTQ1FCVjhXeU5MKy8wVVlqeFA2N2F6Q1ZmVDFyZlI1Mkhock11eXdsZjRKSkhWZ2c1QWFodTRHUkphZFJiTzRzcHRsMCtGSjhabjVUbisyU2Fjc3ZqMGNVNjJDMDZYRkRVLzNsbjg2TVJnVkxLMXB2amtPTmlTZ2EvajBiWWFjUXNJVHV2ZE9HMDlONWNGS3A1YUFXdjRCdkNCZU0rRUhZTm84UWw4NnRXNUN0eG9xREVMbnZ0eEx2dDlNSC9za3A4T2p6bFBiVjdPNlpvNmdsc0FiRVlBUT09","type":"signature_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":1,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"No","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" PDF has","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" been provided in","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" this","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" conversation. Please","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" share the file","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" path or attach","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" the PDF you'd like me to read","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":".","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":1,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"end_turn","stop_sequence":null},"type":"message_delta","usage":{"input_tokens":25155,"output_tokens":111}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

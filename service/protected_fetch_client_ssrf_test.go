@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net"
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
 // fakeResolver returns a fixed set of IPs regardless of the host, simulating a
@@ -122,5 +126,186 @@ func TestProtectedFetchDialerBypassWhenDisabled(t *testing.T) {
 	}
 	if !dialCalled {
 		t.Errorf("underlying dialer should be called when protection is disabled")
+	}
+}
+
+func TestProtectedFetchDialerBlocksPrivateDNSWithConfiguredIPFilterDisabled(t *testing.T) {
+	dialCalled := false
+	protection := blacklistProtection()
+	protection.ApplyIPFilterForDomain = false
+	dialer := &protectedFetchDialer{
+		resolver: &fakeResolver{ips: []net.IPAddr{{IP: net.ParseIP("10.0.0.1")}}},
+		dialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialCalled = true
+			return nil, nil
+		},
+		getProtection: func() (*common.SSRFProtection, bool, error) {
+			return protection, true, nil
+		},
+	}
+
+	_, err := dialer.DialContext(context.Background(), "tcp", "evil.example.com:443")
+	if err == nil {
+		t.Fatal("expected private DNS result to be blocked even when configured IP filtering is disabled")
+	}
+	if dialCalled {
+		t.Fatal("underlying dialer must not be called for a private DNS result")
+	}
+}
+
+func TestProtectedFetchDialerPinsPublicDNSWhenConfiguredIPFilterDisabled(t *testing.T) {
+	var dialAddress string
+	protection := blacklistProtection()
+	protection.IpFilterMode = true
+	protection.IpList = []string{"1.1.1.1"}
+	protection.ApplyIPFilterForDomain = false
+	dialer := &protectedFetchDialer{
+		resolver: &fakeResolver{ips: []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}},
+		dialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialAddress = address
+			return nil, nil
+		},
+		getProtection: func() (*common.SSRFProtection, bool, error) {
+			return protection, true, nil
+		},
+	}
+
+	if _, err := dialer.DialContext(context.Background(), "tcp", "example.com:443"); err != nil {
+		t.Fatalf("expected configured IP list to be ignored for a domain, got %v", err)
+	}
+	if dialAddress != "93.184.216.34:443" {
+		t.Fatalf("expected connection to be pinned to validated DNS result, got %q", dialAddress)
+	}
+}
+
+func TestProtectedFetchDialerAppliesConfiguredIPFilterWhenEnabledForDomain(t *testing.T) {
+	dialCalled := false
+	protection := blacklistProtection()
+	protection.IpFilterMode = true
+	protection.IpList = []string{"1.1.1.1"}
+	protection.ApplyIPFilterForDomain = true
+	dialer := &protectedFetchDialer{
+		resolver: &fakeResolver{ips: []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}},
+		dialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialCalled = true
+			return nil, nil
+		},
+		getProtection: func() (*common.SSRFProtection, bool, error) {
+			return protection, true, nil
+		},
+	}
+
+	if _, err := dialer.DialContext(context.Background(), "tcp", "example.com:443"); err == nil {
+		t.Fatal("expected configured IP whitelist to reject the resolved domain address")
+	}
+	if dialCalled {
+		t.Fatal("underlying dialer must not be called for an address outside the configured whitelist")
+	}
+}
+
+func TestProtectedFetchClientDoesNotUseEnvironmentProxy(t *testing.T) {
+	client := newProtectedFetchHTTPClientWithDialer(nil, nil, nil)
+	roundTripper, ok := client.Transport.(*ssrfProtectedRoundTripper)
+	if !ok {
+		t.Fatalf("unexpected protected transport type %T", client.Transport)
+	}
+	if roundTripper.proxy != nil {
+		t.Fatal("protected client must not use an environment proxy")
+	}
+}
+
+func TestProtectedFetchURLPreflightDoesNotResolveDNS(t *testing.T) {
+	previousSetting := *system_setting.GetFetchSetting()
+	*system_setting.GetFetchSetting() = system_setting.FetchSetting{
+		EnableSSRFProtection: true,
+		AllowPrivateIp:       false,
+		DomainFilterMode:     false,
+		IpFilterMode:         false,
+	}
+	t.Cleanup(func() {
+		*system_setting.GetFetchSetting() = previousSetting
+	})
+
+	if err := ValidateSSRFProtectedFetchURL("https://does-not-resolve.invalid/path"); err != nil {
+		t.Fatalf("protected URL preflight must leave DNS resolution to the dialer: %v", err)
+	}
+}
+
+func TestProtectedFetchDialerCapsCandidateAttempts(t *testing.T) {
+	const expectedCandidateLimit = 8
+	resolved := make([]net.IPAddr, 20)
+	for index := range resolved {
+		resolved[index] = net.IPAddr{IP: net.IPv4(93, 184, 216, byte(index+1))}
+	}
+
+	dialAttempts := 0
+	dialer := &protectedFetchDialer{
+		resolver: &fakeResolver{ips: resolved},
+		dialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialAttempts++
+			return nil, errors.New("dial failed")
+		},
+		getProtection: func() (*common.SSRFProtection, bool, error) {
+			protection := blacklistProtection()
+			protection.ApplyIPFilterForDomain = false
+			return protection, true, nil
+		},
+	}
+
+	_, _ = dialer.DialContext(context.Background(), "tcp", "example.com:443")
+	if dialAttempts != expectedCandidateLimit {
+		t.Fatalf("expected %d bounded dial attempts, got %d", expectedCandidateLimit, dialAttempts)
+	}
+}
+
+func TestProtectedFetchDialerSharesOneTotalDeadline(t *testing.T) {
+	var deadlines []time.Time
+	dialer := &protectedFetchDialer{
+		resolver: &fakeResolver{ips: []net.IPAddr{
+			{IP: net.ParseIP("93.184.216.34")},
+			{IP: net.ParseIP("93.184.216.35")},
+		}},
+		dialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Fatal("expected every candidate dial to share a total deadline")
+			}
+			deadlines = append(deadlines, deadline)
+			return nil, errors.New("dial failed")
+		},
+		getProtection: func() (*common.SSRFProtection, bool, error) {
+			protection := blacklistProtection()
+			protection.ApplyIPFilterForDomain = false
+			return protection, true, nil
+		},
+	}
+
+	_, _ = dialer.DialContext(context.Background(), "tcp", "example.com:443")
+	if len(deadlines) != 2 {
+		t.Fatalf("expected two candidate attempts, got %d", len(deadlines))
+	}
+	if !deadlines[0].Equal(deadlines[1]) {
+		t.Fatalf("expected candidate attempts to share one deadline, got %v and %v", deadlines[0], deadlines[1])
+	}
+}
+
+func TestProtectedFetchRedirectBlocksPrivateTarget(t *testing.T) {
+	previousSetting := *system_setting.GetFetchSetting()
+	*system_setting.GetFetchSetting() = system_setting.FetchSetting{
+		EnableSSRFProtection: true,
+		AllowPrivateIp:       false,
+		DomainFilterMode:     false,
+		IpFilterMode:         false,
+	}
+	t.Cleanup(func() {
+		*system_setting.GetFetchSetting() = previousSetting
+	})
+
+	request, err := http.NewRequest(http.MethodGet, "http://127.0.0.1/video", nil)
+	if err != nil {
+		t.Fatalf("create redirect request: %v", err)
+	}
+	if err := checkProtectedFetchRedirect(request, nil); err == nil {
+		t.Fatal("expected protected redirect into private address to be blocked")
 	}
 }

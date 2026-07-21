@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"gorm.io/gorm"
 )
 
 // PlanSelectionResult contains the result of plan selection
@@ -83,6 +84,24 @@ func SelectPlanForRequestWithGroup(userId int, modelName string, requiredGroup s
 }
 
 func selectPlanForRequest(userId int, modelName string, requiredGroup string) (*PlanSelectionResult, error) {
+	replacement, expiryProcessed, expiryErr := processExpiredCurrentPlanForRequest(userId)
+	if expiryErr != nil {
+		return nil, fmt.Errorf("failed to process expired current plan: %w", expiryErr)
+	}
+	if expiryProcessed {
+		if replacement != nil {
+			return newPlanSelectionResult(replacement, true), nil
+		}
+		freshCurrent, currentErr := model.GetUserCurrentPlan(userId)
+		if currentErr != nil && !errors.Is(currentErr, gorm.ErrRecordNotFound) {
+			return nil, currentErr
+		}
+		if freshCurrent != nil {
+			return newPlanSelectionResult(freshCurrent, false), nil
+		}
+		return nil, ErrNoPlanAvailable
+	}
+
 	// 1. Get user's valid plans (active, not expired, not locked)
 	// Use cached version for better performance
 	validPlans, err := model.CachedGetUserValidPlans(userId)
@@ -117,9 +136,17 @@ func selectPlanForRequest(userId int, modelName string, requiredGroup string) (*
 			return nil, ErrNoPlanAvailable
 		}
 
-		// Set as current - use SwitchToUserPlan (works with NULL plan_id)
-		if err := model.SwitchToUserPlan(userId, selectedPlan.Id, false); err != nil {
-			common.SysLog(fmt.Sprintf("failed to set initial current plan: %v", err))
+		switched, switchErr := model.SwitchToUserPlanGuarded(userId, selectedPlan.Id, model.SystemPlanSwitchGuard{
+			RequireNoCurrent: true,
+		})
+		if switchErr != nil && !switched {
+			return nil, fmt.Errorf("failed to set initial current plan: %w", switchErr)
+		}
+		if !switched {
+			return selectPlanForRequest(userId, modelName, requiredGroup)
+		}
+		if switchErr != nil {
+			common.SysLog(fmt.Sprintf("initial plan switch committed but cache invalidation failed: %v", switchErr))
 		}
 
 		return newPlanSelectionResult(selectedPlan, true), nil
@@ -134,18 +161,34 @@ func selectPlanForRequest(userId int, modelName string, requiredGroup string) (*
 	if !hasPlanAvailableQuota(currentPlan) {
 		// Current plan exhausted (total quota or daily quota) - try to find another plan with quota
 		if currentPlan.AutoSwitch == 1 {
+			guard := model.SystemPlanSwitchGuard{
+				ExpectedCurrentUserPlanId: currentPlan.Id,
+				RequireAutoSwitch:         true,
+				RequireUnexpired:          true,
+				ExpectedQuotaState:        model.PlanSwitchQuotaPositive,
+			}
+			if !currentPlan.HasQuota() {
+				guard.ExpectedQuotaState = model.PlanSwitchQuotaDepleted
+				guard.CompletionStatus = model.UserPlanStatusCompleted
+			}
 			// First try higher priority plans
 			higherPlan := findHigherPriorityPlanWithQuota(validPlans, currentPlan)
 			if higherPlan != nil {
 				// DB verification: confirm the candidate actually has quota (cache may be stale)
 				freshPlan, freshErr := model.GetUserPlanById(higherPlan.Id)
 				if freshErr == nil && freshPlan != nil && freshPlan.IsValid() && freshPlan.Quota > 0 {
-					if err := model.SwitchToUserPlan(userId, freshPlan.Id, false); err != nil {
-						common.SysLog(fmt.Sprintf("failed to auto-switch to higher priority plan: %v", err))
-					} else {
+					switched, switchErr := model.SwitchToUserPlanGuarded(userId, freshPlan.Id, guard)
+					if switched {
+						if switchErr != nil {
+							common.SysLog(fmt.Sprintf("higher-priority switch committed but cache invalidation failed: %v", switchErr))
+						}
 						common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to higher priority plan %d",
 							userId, currentPlan.Id, freshPlan.Id))
 						return newPlanSelectionResult(freshPlan, true), nil
+					} else if switchErr != nil {
+						common.SysLog(fmt.Sprintf("failed to auto-switch to higher priority plan: %v", switchErr))
+					} else {
+						return selectPlanForRequest(userId, modelName, requiredGroup)
 					}
 				}
 			}
@@ -156,12 +199,18 @@ func selectPlanForRequest(userId int, modelName string, requiredGroup string) (*
 				// DB verification: confirm the candidate actually has quota (cache may be stale)
 				freshPlan, freshErr := model.GetUserPlanById(anyPlanWithQuota.Id)
 				if freshErr == nil && freshPlan != nil && freshPlan.IsValid() && freshPlan.Quota > 0 {
-					if err := model.SwitchToUserPlan(userId, freshPlan.Id, false); err != nil {
-						common.SysLog(fmt.Sprintf("failed to auto-switch to available plan: %v", err))
-					} else {
+					switched, switchErr := model.SwitchToUserPlanGuarded(userId, freshPlan.Id, guard)
+					if switched {
+						if switchErr != nil {
+							common.SysLog(fmt.Sprintf("rescue switch committed but cache invalidation failed: %v", switchErr))
+						}
 						common.SysLog(fmt.Sprintf("user %d auto-switched from exhausted plan %d to available plan %d",
 							userId, currentPlan.Id, freshPlan.Id))
 						return newPlanSelectionResult(freshPlan, true), nil
+					} else if switchErr != nil {
+						common.SysLog(fmt.Sprintf("failed to auto-switch to available plan: %v", switchErr))
+					} else {
+						return selectPlanForRequest(userId, modelName, requiredGroup)
 					}
 				}
 			}
@@ -181,14 +230,27 @@ func selectPlanForRequest(userId int, modelName string, requiredGroup string) (*
 		if higherPlan != nil {
 			// DB verification: confirm the candidate actually has quota (cache may be stale)
 			freshPlan, freshErr := model.GetUserPlanById(higherPlan.Id)
-			if freshErr == nil && freshPlan != nil && freshPlan.IsValid() && freshPlan.Quota > 0 {
-				if err := model.SwitchToUserPlan(userId, freshPlan.Id, false); err != nil {
-					common.SysLog(fmt.Sprintf("failed to auto-switch plan: %v", err))
-					// Continue with current plan on error
-				} else {
+			if freshErr == nil && freshPlan != nil && freshPlan.IsValid() && freshPlan.Quota > 0 &&
+				planCanServeModel(freshPlan, modelName, requiredGroup) {
+				switched, switchErr := model.SwitchToUserPlanGuarded(userId, freshPlan.Id, model.SystemPlanSwitchGuard{
+					ExpectedCurrentUserPlanId: currentPlan.Id,
+					RequireAutoSwitch:         true,
+					RequireUnpinned:           true,
+					RequireUnexpired:          true,
+					ExpectedQuotaState:        model.PlanSwitchQuotaPositive,
+				})
+				if switched {
+					if switchErr != nil {
+						common.SysLog(fmt.Sprintf("healthy upgrade committed but cache invalidation failed: %v", switchErr))
+					}
 					common.SysLog(fmt.Sprintf("user %d auto-switched from user_plan %d to user_plan %d",
 						userId, currentPlan.Id, freshPlan.Id))
 					return newPlanSelectionResult(freshPlan, true), nil
+				} else if switchErr != nil {
+					common.SysLog(fmt.Sprintf("failed to auto-switch plan: %v", switchErr))
+					// Continue with current plan on error
+				} else {
+					return selectPlanForRequest(userId, modelName, requiredGroup)
 				}
 			}
 		}
@@ -196,6 +258,31 @@ func selectPlanForRequest(userId int, modelName string, requiredGroup string) (*
 
 	// 7. Return current plan
 	return newPlanSelectionResult(currentPlan, false), nil
+}
+
+func processExpiredCurrentPlanForRequest(userId int) (*model.UserPlan, bool, error) {
+	var expired model.UserPlan
+	now := time.Now().UnixMilli()
+	err := model.DB.Where("user_id = ? AND is_current = 1 AND status = ? AND paused_at = 0 AND expires_at > 0 AND expires_at <= ?",
+		userId, model.UserPlanStatusActive, now).
+		Order("id ASC").
+		First(&expired).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	replacement, err := completeExpiredPlanAndNotify(userId, expired.Id)
+	if err != nil {
+		return nil, false, err
+	}
+	var transitioned model.UserPlan
+	if err := model.DB.Select("status").First(&transitioned, expired.Id).Error; err != nil {
+		return nil, false, err
+	}
+	return replacement, transitioned.Status == model.UserPlanStatusExpired, nil
 }
 
 // selectHighestPriorityWithQuota selects the highest priority plan that has available quota
@@ -269,7 +356,7 @@ func planCanServeModel(plan *model.UserPlan, modelName string, requiredGroup str
 	for _, group := range groups {
 		for retry := 0; ; retry++ {
 			channel, _, err := model.GetRandomSatisfiedChannelDetailed(group, modelName, retry, false)
-			if err == nil && channel != nil {
+			if err == nil && channel != nil && model.IsChannelHealthy(channel.Id) {
 				return true
 			}
 			if err != nil {
@@ -807,7 +894,10 @@ func PostConsumePlanQuotaWithTracking(ctx interface {
 
 	// Consume from user_plan quota
 	if err := model.DecreaseUserPlanQuota(userPlanId, int64(quota)); err != nil {
-		return err
+		if !errors.Is(err, model.ErrUserPlanCacheInvalidation) {
+			return err
+		}
+		common.SysLog(fmt.Sprintf("plan quota charge committed but cache invalidation failed user_plan=%d: %v", userPlanId, err))
 	}
 
 	// Get plan info for tracking decisions

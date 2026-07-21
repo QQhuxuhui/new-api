@@ -1,0 +1,84 @@
+event: message_start
+data: {"message":{"content":[],"id":"Mioaau7HHYakqtsPjNSO4QY","model":"claude-opus-4-6","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"input_tokens":429,"output_tokens":34}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"As of","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" May 30, 2026, the artificial intelligence sector is experiencing","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" a period of intense activity and record-breaking milestones. Here are the key developments surrounding this date:\n\n### **Market","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" and Financial Milestones**\n*   **Anthropic Funding \u0026 Valuation:** Anthropic has closed a massive $65 billion","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" funding round (led by firms including Altimeter Capital, Dragoneer, Greenoaks, and Sequoia Capital), bringing","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" its valuation to approximately $965 billion. This investment positions Anthropic ahead of rival OpenAI in total market valuation.","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"\n*   **Stock Market Performance:** US stock markets, including the S\u0026P 500 and Nasdaq, have","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" extended their record-setting rallies, driven in part by strong optimism surrounding AI. Notably, Dell Technologies shares surged 33% on","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" May 29–30 due to higher-than-expected profits fueled by strong demand for AI computing infrastructure.","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"\n*   **OpenAI IPO:** Earlier in May, OpenAI filed a confidential IPO prospectus with the target of reaching a $1 trillion valuation","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":".\n\n### **Industry \u0026 Policy Developments**\n*   **G7 Digital Ministers' Meeting:** On","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" May 28–29, Canadian Minister Evan Solomon attended the G7 Digital Ministers' Meeting in Paris. Discussions","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" centered on international collaboration regarding AI and quantum technologies, with a focus on responsible development and digital sector resilience","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":".\n*   **Nvidia \u0026 Green Investment:** Nvidia CEO Jensen Huang, while in Taiwan for events like Computex,","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" addressed the energy demands of AI. He emphasized that market forces will increasingly drive investment into renewable energy sources to meet the high electricity","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" requirements of modern AI systems.\n\n### **Technical \u0026 Research Highlights**\n*   **Mathematical Breakthrough","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":":** A major development reported this month involved an OpenAI general-purpose reasoning model that successfully generated a novel proof for a geometry","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" problem that had remained unsolved for 80 years.\n*   **Infrastructure Scale:** The scale","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" of compute infrastructure has become a primary focus, highlighted by revelations that Anthropic's compute partnership with SpaceX (utilizing Colossus infrastructure","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":") involves an agreement to pay $1.25 billion per month through May 2029.","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":1,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"\n\n---\nWeb search queries: significant AI events May 2026, AI news May 30 2026\n\nSources:\n[1] [taipeitimes.com](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEd9iNMjoPnLOmvYH5h_f8T1Yre7ifi37wtzzyAzfgrf-MbZAjyNz0vuI9kkTYMWmwY4dMZL4WnH0Zf4H6LMJehVXyRcSc2r-Ag1nTOVEcE0ehauWqEDOom7wh38m1jrPrG8WPMagphS8jrlsZA8gvwJkEOoct1TP10m6f0ikI=)\n[2] [indiatimes.com](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE0DtJ-7wndkuQPu7DERjK7uL8WU4IBCcHbl6hU-TQrpjKM2khBN9EqIo1nDRfRkZ1FGcN4FKIavcUrJ_sQ45bUW-UXnKFYx7gIUGWYent4S6wNUG24CD4GhnuCUoRL5zqAhd-d5hKNMiPvlprht3zVOdQy4vplX5Kac6F84TBX40oYHjWEMp1ee_2llghkhjiZnMvbs4LTptqrktJG8ofPR45xjfymgfpGDmPFLy_K7cCkuGOD3AfJC52cEN4djRFuwH33h3Y71tkQvVvNqNaz7Hkj9B0lxgXVdQRkNyJuxN11eBuTbGMD6djL_1dv8HudT6LfB_dTP1fR)\n[3] [aitoolsrecap.com](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFEhZ-RwK4iTop3S3fFiSTZZDn0GjzCicuuAD8KLaYcnuv_r6ri69v1uVpeQUtcRusvhi-rcoVzP53pA22n38NNJltVXYN7u4rV6Bn5e0G2FVa2K5dL2GCQ7VjiQHDI0U17bSTasmpSLWU=)\n[4] [miragenews.com](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGv6H2-NB6IzNzgrFfNN7erWTZlNcf-Hv6nxne0IHrDXJbuKOgssmyvlqxCMJmVjqDxTtokzVM-uFJ6ptcdCDdHJpvhu9U5Rs6DXuynijCZhfSwkrmfN7Q4RkuTTVt4ByBWXQ8Ng3lHmf97q1_yAx684Hj-M8UNBiiMrc1qSoTvjVNHzGvIisc0OTkdTDk=)\n[5] [taipeitimes.com](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF2GyUftZHcE_Js_0g1je_8f4soQ6Kk3FRBHxZsWGtoWSRxvO8ABPZG0tuHl8AAww30A1Y2fPSwb9viEZDWXOt5nPcGghBi4MlQl_NoLm2IZX-5tToPaBlSjaIQmWLTsVpfJMlX7HCk3En3AtJXX8Ci07BvDCixGn98xCtmzpyaOXQ=)","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":1,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"end_turn","stop_sequence":null},"type":"message_delta","usage":{"input_tokens":429,"output_tokens":480}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

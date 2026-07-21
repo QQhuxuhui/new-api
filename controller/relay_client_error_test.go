@@ -183,3 +183,35 @@ func TestShouldRetryTaskRelayDoesNotRetrySpecificChannelEvenWhenClientRuleMatche
 		t.Fatalf("expected specific channel task requests to stay non-retryable")
 	}
 }
+
+func TestShouldRetryTaskRelayDoesNotRetryLocalServerError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupRelayClientErrorTestDB(t)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/tasks", nil)
+	taskErr := &dto.TaskError{
+		Code:       "model_price_not_configured",
+		StatusCode: http.StatusInternalServerError,
+		Message:    "model price not configured",
+		LocalError: true,
+	}
+
+	if shouldRetryTaskRelay(c, 1, taskErr, 2) {
+		t.Fatal("expected local server error to bypass channel retry")
+	}
+}
+
+func TestShouldRecordTaskChannelFailureSkipsLocalError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	taskErr := &dto.TaskError{
+		Code:       "model_price_not_configured",
+		StatusCode: http.StatusInternalServerError,
+		Message:    "model price not configured",
+		LocalError: true,
+	}
+
+	if shouldRecordTaskChannelFailure(c, taskErr) {
+		t.Fatal("expected local server error to bypass channel health tracking")
+	}
+}

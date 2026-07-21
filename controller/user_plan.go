@@ -203,20 +203,9 @@ func AdminUpdateUserPlanPermissions(c *gin.Context) {
 		return
 	}
 
-	// Update the fields
-	err = model.DB.Model(&model.UserPlan{}).
-		Where("id = ?", id).
-		Updates(updates).Error
-
-	if err != nil {
+	if err := model.UpdateUserPlanFields(id, updates); err != nil {
 		common.ApiError(c, err)
 		return
-	}
-
-	// Invalidate cache
-	var userPlan model.UserPlan
-	if err := model.DB.Select("user_id").First(&userPlan, id).Error; err == nil {
-		model.InvalidateUserPlanCache(userPlan.UserId)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

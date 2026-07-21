@@ -43,6 +43,7 @@ func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, 
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 		if compactResp.Usage.InputTokensDetails != nil {
 			usage.PromptTokensDetails.CachedTokens = compactResp.Usage.InputTokensDetails.CachedTokens
+			usage.PromptTokensDetails.CachedCreationTokens = compactResp.Usage.InputTokensDetails.CachedCreationTokens
 		}
 	}
 

@@ -258,8 +258,9 @@ func redeemToPlan(tx *gorm.DB, redemption *Redemption, userId int) (*RedeemResul
 			return nil, fmt.Errorf("更新套餐额度失败: %v", err)
 		}
 
-		// Invalidate cache
-		go InvalidateUserPlanCache(userId)
+		if err := InvalidateUserPlanCache(userId); err != nil {
+			return nil, err
+		}
 
 		return &RedeemResult{
 			Quota:        redemption.Quota,
@@ -299,14 +300,19 @@ func redeemToPlan(tx *gorm.DB, redemption *Redemption, userId int) (*RedeemResul
 
 	// Check if this should be set as current plan
 	var currentCount int64
-	tx.Model(&UserPlan{}).Where("user_id = ? AND is_current = 1", userId).Count(&currentCount)
+	if err := tx.Model(&UserPlan{}).Where("user_id = ? AND is_current = 1", userId).Count(&currentCount).Error; err != nil {
+		return nil, fmt.Errorf("查询当前套餐失败: %v", err)
+	}
 	if currentCount == 0 {
 		// No current plan, set this as current
-		tx.Model(&UserPlan{}).Where("id = ?", userPlan.Id).Update("is_current", 1)
+		if err := tx.Model(&UserPlan{}).Where("id = ?", userPlan.Id).Update("is_current", 1).Error; err != nil {
+			return nil, fmt.Errorf("设置当前套餐失败: %v", err)
+		}
 	}
 
-	// Invalidate cache
-	go InvalidateUserPlanCache(userId)
+	if err := InvalidateUserPlanCache(userId); err != nil {
+		return nil, err
+	}
 
 	return &RedeemResult{
 		Quota:        redemption.Quota,

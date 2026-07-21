@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -84,26 +85,45 @@ func init() {
 			OwnedBy: "midjourney",
 		})
 	}
-	openAIModelsMap = make(map[string]dto.OpenAIModels)
-	for _, aiModel := range openAIModels {
-		openAIModelsMap[aiModel.Id] = aiModel
-	}
 	channelId2Models = make(map[int][]string)
 	for i := 1; i <= constant.ChannelTypeDummy; i++ {
+		var channelModels []string
 		apiType, success := common.ChannelType2APIType(i)
-		if !success || apiType == constant.APITypeAIProxyLibrary {
-			continue
+		if success && apiType != constant.APITypeAIProxyLibrary {
+			meta := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelType: i,
+			}}
+			adaptor := relay.GetAdaptor(apiType)
+			adaptor.Init(meta)
+			channelModels = append(channelModels, adaptor.GetModelList()...)
 		}
-		meta := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelType: i,
-		}}
-		adaptor := relay.GetAdaptor(apiType)
-		adaptor.Init(meta)
-		channelId2Models[i] = adaptor.GetModelList()
+		taskPlatform := constant.TaskPlatform(strconv.Itoa(i))
+		if i == constant.ChannelTypeSunoAPI {
+			taskPlatform = constant.TaskPlatformSuno
+		}
+		if taskAdaptor := relay.GetTaskAdaptor(taskPlatform); taskAdaptor != nil {
+			taskModels := taskAdaptor.GetModelList()
+			channelModels = append(channelModels, taskModels...)
+			for _, modelName := range taskModels {
+				openAIModels = append(openAIModels, dto.OpenAIModels{
+					Id:      modelName,
+					Object:  "model",
+					Created: 1626777600,
+					OwnedBy: taskAdaptor.GetChannelName(),
+				})
+			}
+		}
+		if len(channelModels) > 0 {
+			channelId2Models[i] = lo.Uniq(channelModels)
+		}
 	}
 	openAIModels = lo.UniqBy(openAIModels, func(m dto.OpenAIModels) string {
 		return m.Id
 	})
+	openAIModelsMap = make(map[string]dto.OpenAIModels)
+	for _, aiModel := range openAIModels {
+		openAIModelsMap[aiModel.Id] = aiModel
+	}
 }
 
 func ListModels(c *gin.Context, modelType int) {

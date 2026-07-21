@@ -290,6 +290,30 @@ var defaultModelRatio = map[string]float64{
 	"deepseek-ai/DeepSeek-V3.1":               0.8,
 }
 
+var modelRatioUpgradeDefaultKeys = []string{
+	"gpt-5.5",
+	"gpt-5.6-sol",
+	"gpt-5.6-terra",
+	"gpt-5.6-luna",
+	"claude-opus-4-6",
+	"claude-opus-4-6-max",
+	"claude-opus-4-6-high",
+	"claude-opus-4-6-medium",
+	"claude-opus-4-6-low",
+	"claude-opus-4-7",
+	"claude-opus-4-7-max",
+	"claude-opus-4-7-xhigh",
+	"claude-opus-4-7-high",
+	"claude-opus-4-7-medium",
+	"claude-opus-4-7-low",
+	"claude-opus-4-8",
+	"claude-opus-4-8-max",
+	"claude-opus-4-8-xhigh",
+	"claude-opus-4-8-high",
+	"claude-opus-4-8-medium",
+	"claude-opus-4-8-low",
+}
+
 var defaultModelPrice = map[string]float64{
 	"suno_music":                     0.1,
 	"suno_lyrics":                    0.01,
@@ -452,6 +476,24 @@ func UpdateModelRatioByJSONString(jsonStr string) error {
 		InvalidateExposedDataCache()
 	}
 	return err
+}
+
+func UpdateModelRatioByJSONStringWithUpgradeDefaults(jsonStr string) error {
+	mergedRatios := make(map[string]float64)
+	if err := common.Unmarshal([]byte(jsonStr), &mergedRatios); err != nil {
+		return err
+	}
+	for _, model := range modelRatioUpgradeDefaultKeys {
+		if _, exists := mergedRatios[model]; !exists {
+			mergedRatios[model] = defaultModelRatio[model]
+		}
+	}
+
+	modelRatioMapMutex.Lock()
+	modelRatioMap = mergedRatios
+	modelRatioMapMutex.Unlock()
+	InvalidateExposedDataCache()
+	return nil
 }
 
 // 处理带有思考预算的模型名称，方便统一定价

@@ -230,15 +230,25 @@ func chargeSplitForOverflow(relayInfo *relaycommon.RelayInfo, plan *model.UserPl
 		return false, false
 	}
 	if decErr := model.DecreaseUserPlanQuota(plan.Id, planPart); decErr != nil {
-		common.SysLog(fmt.Sprintf("pool-overflow split: plan deduction failed user=%d plan=%d amount=%d: %v",
-			relayInfo.UserId, plan.Id, planPart, decErr))
-		return false, false
+		if errors.Is(decErr, model.ErrUserPlanCacheInvalidation) {
+			common.SysLog(fmt.Sprintf("pool-overflow split: plan deduction committed but cache invalidation failed user=%d plan=%d: %v",
+				relayInfo.UserId, plan.Id, decErr))
+		} else {
+			common.SysLog(fmt.Sprintf("pool-overflow split: plan deduction failed user=%d plan=%d amount=%d: %v",
+				relayInfo.UserId, plan.Id, planPart, decErr))
+			return false, false
+		}
 	}
 	if decErr := decreaseUserQuotaFn(relayInfo.UserId, int(walletPart)); decErr != nil {
 		common.SysLog(fmt.Sprintf("pool-overflow split: wallet deduction failed user=%d amount=%d: %v",
 			relayInfo.UserId, walletPart, decErr))
 		// Refund the plan portion so the user is not partially charged.
 		if refErr := increaseUserPlanQuotaFn(plan.Id, planPart); refErr != nil {
+			if errors.Is(refErr, model.ErrUserPlanCacheInvalidation) {
+				common.SysLog(fmt.Sprintf("pool-overflow split: plan refund committed but cache invalidation failed user=%d plan=%d: %v",
+					relayInfo.UserId, plan.Id, refErr))
+				return false, false
+			}
 			// Refund failed — plan was charged, wallet was not, and we cannot
 			// undo the plan charge. Stop further fallback (double-charge risk)
 			// and tag the request as plan-billed so the consumption log aligns
@@ -292,7 +302,7 @@ func recordPlanChargeSideEffects(userId, planId int, amount int64) {
 		common.SysLog(fmt.Sprintf("pool-overflow side-effect: failed to record rate limit for user_plan %d: %v",
 			planId, rateErr))
 	}
-	if _, compErr := model.CompleteUserPlanIfDepleted(userId, planId); compErr != nil {
+	if _, compErr := completeDepletedPlanAndNotify(userId, planId); compErr != nil {
 		common.SysLog(fmt.Sprintf("pool-overflow side-effect: failed to complete depleted user_plan %d: %v",
 			planId, compErr))
 	}
@@ -305,9 +315,14 @@ func recordPlanChargeSideEffects(userId, planId int, amount int64) {
 // true on success so the caller can stop the fallback chain.
 func chargeExistingPlanForOverflow(relayInfo *relaycommon.RelayInfo, plan *model.UserPlan, amount int64) bool {
 	if decErr := model.DecreaseUserPlanQuota(plan.Id, amount); decErr != nil {
-		common.SysLog(fmt.Sprintf("pool-overflow fallback: plan deduction failed user=%d plan=%d amount=%d: %v",
-			relayInfo.UserId, plan.Id, amount, decErr))
-		return false
+		if errors.Is(decErr, model.ErrUserPlanCacheInvalidation) {
+			common.SysLog(fmt.Sprintf("pool-overflow fallback: plan deduction committed but cache invalidation failed user=%d plan=%d: %v",
+				relayInfo.UserId, plan.Id, decErr))
+		} else {
+			common.SysLog(fmt.Sprintf("pool-overflow fallback: plan deduction failed user=%d plan=%d amount=%d: %v",
+				relayInfo.UserId, plan.Id, amount, decErr))
+			return false
+		}
 	}
 
 	relayInfo.BillingSource = BillingSourcePlan
@@ -374,11 +389,22 @@ func billDailyPoolOverflow(relayInfo *relaycommon.RelayInfo, amount int64) {
 	// 3. Alternate plan — only if currentPlan allows auto-switch.
 	if currentPlan != nil && currentPlan.AutoSwitch == 1 {
 		if alt := findAlternatePlanForOverflow(userId, currentPlan.Id, usingGroup, amount); alt != nil {
-			if switchErr := model.SwitchToUserPlan(userId, alt.Id, false); switchErr != nil {
+			switched, switchErr := model.SwitchToUserPlanGuarded(userId, alt.Id, model.SystemPlanSwitchGuard{
+				ExpectedCurrentUserPlanId: currentPlan.Id,
+				RequireAutoSwitch:         true,
+				RequireUnexpired:          true,
+			})
+			if switchErr != nil && !switched {
 				common.SysLog(fmt.Sprintf("pool-overflow fallback: failed to activate alt plan user=%d plan=%d: %v",
 					userId, alt.Id, switchErr))
-			} else if chargeExistingPlanForOverflow(relayInfo, alt, amount) {
-				return
+			} else if switched {
+				if switchErr != nil {
+					common.SysLog(fmt.Sprintf("pool-overflow fallback: alt plan activated but cache invalidation failed user=%d plan=%d: %v",
+						userId, alt.Id, switchErr))
+				}
+				if chargeExistingPlanForOverflow(relayInfo, alt, amount) {
+					return
+				}
 			}
 		}
 	}
@@ -418,13 +444,13 @@ func CheckAndTriggerPlanSwitch(userId int, userPlanId int) (*model.UserPlan, err
 	// Check if plan is exhausted (quota = 0)
 	if userPlan.Quota <= 0 {
 		common.SysLog(fmt.Sprintf("用户 %d 套餐 %d 额度耗尽，触发自动切换", userId, userPlanId))
-		return model.CompleteUserPlanIfDepleted(userId, userPlanId)
+		return completeDepletedPlanAndNotify(userId, userPlanId)
 	}
 
 	// Check if plan is expired
-	if userPlan.ExpiresAt > 0 && time.Now().UnixMilli() > userPlan.ExpiresAt {
+	if !userPlan.IsPaused() && userPlan.ExpiresAt > 0 && time.Now().UnixMilli() > userPlan.ExpiresAt {
 		common.SysLog(fmt.Sprintf("用户 %d 套餐 %d 已过期，触发自动切换，剩余额度 %d 作废", userId, userPlanId, userPlan.Quota))
-		return model.CompleteCurrentPlanById(userId, userPlanId, model.UserPlanStatusExpired)
+		return completeExpiredPlanAndNotify(userId, userPlanId)
 	}
 
 	return nil, nil
@@ -437,21 +463,24 @@ func ProcessPlanExpiry() error {
 
 	// Find all expired active plans
 	var expiredPlans []*model.UserPlan
-	err := model.DB.Where("status = ? AND is_current = 1 AND expires_at > 0 AND expires_at < ?",
+	err := model.DB.Where("status = ? AND is_current = 1 AND paused_at = 0 AND expires_at > 0 AND expires_at < ?",
 		model.UserPlanStatusActive, now).Find(&expiredPlans).Error
 	if err != nil {
 		return err
 	}
 
+	var processErr error
 	for _, plan := range expiredPlans {
 		common.SysLog(fmt.Sprintf("处理过期套餐: 用户 %d, 套餐 %d, 剩余额度 %d", plan.UserId, plan.Id, plan.Quota))
-		_, err := model.CompleteCurrentPlanById(plan.UserId, plan.Id, model.UserPlanStatusExpired)
+		_, err := completeExpiredPlanAndNotify(plan.UserId, plan.Id)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("处理过期套餐失败: %v", err))
+			processErr = errors.Join(processErr, fmt.Errorf("process current plan %d: %w", plan.Id, err))
 		}
 	}
 
-	return nil
+	_, bulkErr := model.ExpireUserPlans()
+	return errors.Join(processErr, bulkErr)
 }
 
 // GetUserBillingStatus returns the current billing status for a user

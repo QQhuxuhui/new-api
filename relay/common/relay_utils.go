@@ -148,7 +148,7 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 		return createTaskError(fmt.Errorf("model field is required"), "missing_model", http.StatusBadRequest, true)
 	}
 
-	if req.HasImage() {
+	if req.HasImage() || taskMetadataHasMedia(req.Metadata) {
 		hasInputReference = true
 	}
 
@@ -188,6 +188,15 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 	info.Action = action
 
 	return nil
+}
+
+func taskMetadataHasMedia(metadata map[string]interface{}) bool {
+	input, ok := metadata["input"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	media, ok := input["media"].([]interface{})
+	return ok && len(media) > 0
 }
 
 func isKnownTaskField(field string) bool {

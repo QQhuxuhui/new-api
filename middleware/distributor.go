@@ -259,9 +259,17 @@ func Distribute() func(c *gin.Context) {
 
 										if failoverChannel != nil && failoverPlan != nil {
 											// Successfully found alternative plan with the token group
-											if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id, false); switchErr != nil {
+											switched, switchErr := model.SwitchToUserPlanGuarded(userId, failoverPlan.Id, model.SystemPlanSwitchGuard{
+												ExpectedCurrentUserPlanId: planResult.UserPlanId,
+												RequireAutoSwitch:         true,
+												RequireUnexpired:          true,
+											})
+											if switchErr != nil && !switched {
 												logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
-											} else {
+											} else if switched {
+												if switchErr != nil {
+													logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d switch committed but cache invalidation failed: %v", userId, switchErr))
+												}
 												planName := failoverPlan.GetDisplayName()
 												failoverPlanId := 0
 												if failoverPlan.PlanId != nil {
@@ -278,30 +286,8 @@ func Distribute() func(c *gin.Context) {
 												common.SetContextKey(c, constant.ContextKeyPlanName, planName)
 												common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
 
-												// Update channel groups - intersect failover plan groups with token groups
-												// This ensures we only use groups authorized by the new plan
-												failoverPlanGroups := failoverPlan.GetChannelGroups()
-												expandedPlanGroups := make(map[string]bool)
-												for _, pg := range failoverPlanGroups {
-													for _, g := range ratio_setting.ExpandGroup(pg) {
-														expandedPlanGroups[g] = true
-													}
-												}
-												expandedTokenGroups := ratio_setting.ExpandGroup(tokenGroup)
-												var effectiveGroups []string
-												for _, g := range expandedTokenGroups {
-													if expandedPlanGroups[g] {
-														effectiveGroups = append(effectiveGroups, g)
-													}
-												}
-												// Fallback to failoverGroup if intersection is empty (shouldn't happen normally)
-												if len(effectiveGroups) == 0 {
-													effectiveGroups = []string{failoverGroup}
-												}
-												common.SetContextKey(c, constant.ContextKeyPlanGroups, effectiveGroups)
-												common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
+												service.SetPlanFailoverRoutingContext(c, failoverPlan, failoverGroup)
 												usingGroup = failoverGroup
-												common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
 
 												// Use the failover channel directly, skip normal channel selection
 												channel = failoverChannel
@@ -473,9 +459,17 @@ func Distribute() func(c *gin.Context) {
 						if failoverChannel != nil && failoverPlan != nil {
 							// Successfully found alternative plan with working channel
 							// Switch user to the new plan using SwitchToUserPlan (supports NULL plan_id)
-							if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id, false); switchErr != nil {
+							switched, switchErr := model.SwitchToUserPlanGuarded(userId, failoverPlan.Id, model.SystemPlanSwitchGuard{
+								ExpectedCurrentUserPlanId: currentUserPlanId,
+								RequireAutoSwitch:         true,
+								RequireUnexpired:          true,
+							})
+							if switchErr != nil && !switched {
 								logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
-							} else {
+							} else if switched {
+								if switchErr != nil {
+									logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d switch committed but cache invalidation failed: %v", userId, switchErr))
+								}
 								planName := failoverPlan.GetDisplayName()
 								planId := 0
 								if failoverPlan.PlanId != nil {
@@ -492,25 +486,7 @@ func Distribute() func(c *gin.Context) {
 								common.SetContextKey(c, constant.ContextKeyPlanName, planName)
 								common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
 
-								// Update channel groups in context
-								// Use UserPlan snapshot fields for channel groups
-								channelGroups := failoverPlan.GetChannelGroups()
-								if len(channelGroups) > 0 {
-									// Check if token has a specific group constraint
-									tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
-									if tokenGroup != "" && tokenGroup != "auto" {
-										// Token specified a group, only set that group
-										common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{tokenGroup})
-										common.SetContextKey(c, constant.ContextKeyPlanGroup, tokenGroup)
-										common.SetContextKey(c, constant.ContextKeyUsingGroup, tokenGroup)
-									} else {
-										// No token group constraint, use all plan groups
-										common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
-										// Use the actual group where the channel was found
-										common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
-										common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
-									}
-								}
+								service.SetPlanFailoverRoutingContext(c, failoverPlan, failoverGroup)
 
 								// Use the failover channel
 								channel = failoverChannel
@@ -668,6 +644,13 @@ func Distribute() func(c *gin.Context) {
 		}
 	channelSelected:
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+
+		// fetch/poll 类请求（shouldSelectChannel=false，如 GET 任务查询）不选渠道，
+		// 跳过渠道上下文初始化，避免对 nil channel 调用 SetupContextForSelectedChannel
+		if channel == nil && !shouldSelectChannel {
+			c.Next()
+			return
+		}
 
 		// Check if this is a specific channel request (admin diagnostic/testing)
 		// Specific channel requests should not failover to other channels
@@ -1184,9 +1167,20 @@ func executePlanFailover(c *gin.Context, userId int, currentUserPlanId int, mode
 	}
 
 	// Switch user to the new plan
-	if switchErr := model.SwitchToUserPlan(userId, failoverPlan.Id, false); switchErr != nil {
+	switched, switchErr := model.SwitchToUserPlanGuarded(userId, failoverPlan.Id, model.SystemPlanSwitchGuard{
+		ExpectedCurrentUserPlanId: currentUserPlanId,
+		RequireAutoSwitch:         true,
+		RequireUnexpired:          true,
+	})
+	if switchErr != nil && !switched {
 		logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d failed to switch plan: %v", userId, switchErr))
 		return nil, nil, false
+	}
+	if !switched {
+		return nil, nil, false
+	}
+	if switchErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("[PlanFailover] user=%d switch committed but cache invalidation failed: %v", userId, switchErr))
 	}
 
 	planName := failoverPlan.GetDisplayName()
@@ -1205,20 +1199,7 @@ func executePlanFailover(c *gin.Context, userId int, currentUserPlanId int, mode
 	common.SetContextKey(c, constant.ContextKeyPlanName, planName)
 	common.SetContextKey(c, constant.ContextKeyPlanAutoSwitch, true)
 
-	// Update channel groups in context
-	channelGroups := failoverPlan.GetChannelGroups()
-	if len(channelGroups) > 0 {
-		tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
-		if tokenGroup != "" && tokenGroup != "auto" {
-			common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{tokenGroup})
-			common.SetContextKey(c, constant.ContextKeyPlanGroup, tokenGroup)
-			common.SetContextKey(c, constant.ContextKeyUsingGroup, tokenGroup)
-		} else {
-			common.SetContextKey(c, constant.ContextKeyPlanGroups, channelGroups)
-			common.SetContextKey(c, constant.ContextKeyPlanGroup, failoverGroup)
-			common.SetContextKey(c, constant.ContextKeyUsingGroup, failoverGroup)
-		}
-	}
+	service.SetPlanFailoverRoutingContext(c, failoverPlan, failoverGroup)
 
 	setAutoGroupContext(c, common.GetContextKeyString(c, constant.ContextKeyUsingGroup), failoverChannel)
 

@@ -121,6 +121,17 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 	}
 	channel := Channel{}
 	if len(abilities) > 0 {
+		healthyAbilities := abilities[:0]
+		for _, ability := range abilities {
+			if IsChannelHealthy(ability.ChannelId) {
+				healthyAbilities = append(healthyAbilities, ability)
+			}
+		}
+		if len(healthyAbilities) == 0 {
+			return nil, nil
+		}
+		abilities = healthyAbilities
+
 		// Randomly choose one
 		weightSum := uint(0)
 		for _, ability_ := range abilities {

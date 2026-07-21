@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { LocaleProvider, Typography } from '@douyinfe/semi-ui';
-import zh_CN from '@douyinfe/semi-ui/lib/es/locale/source/zh_CN';
 import {
   CreditCard,
   LayoutDashboard,
@@ -37,6 +36,7 @@ import { StatusContext } from '../../context/Status';
 import { UserContext } from '../../context/User';
 import { API } from '../../helpers';
 import i18n from '../../i18n/i18n';
+import { getSemiLocale } from '../../i18n/semiLocale';
 import '../../index.css';
 import MyPlans from './index';
 
@@ -238,7 +238,7 @@ if (modes.has('admin-toggle-current')) {
   mapCurrent({ can_toggle_auto: 0, allow_user_toggle: 0 });
 }
 if (modes.has('auto-switch-off')) {
-  mapCurrent({ auto_switch: 0, pinned: 0 });
+  mapCurrent({ auto_switch: 0, pinned: 1 });
 }
 
 const sectionModes = [
@@ -367,16 +367,10 @@ API.defaults.adapter = async (config) => {
   await new Promise((resolve) => window.setTimeout(resolve, 600));
   if (failNextAction) {
     failNextAction = false;
-    const error = new Error('Plan state changed; refresh and try again.');
-    error.config = config;
-    error.response = {
-      status: 409,
-      data: {
-        success: false,
-        message: '套餐状态已变更，请刷新后重试',
-      },
-    };
-    throw error;
+    return response(config, {
+      success: false,
+      message: '套餐状态已变更，请刷新后重试',
+    });
   }
 
   const body =
@@ -551,7 +545,7 @@ const FixtureShell = ({ children }) => {
 const mountFixture = async () => {
   await i18n.changeLanguage(requestedLanguage);
   ReactDOM.createRoot(document.getElementById('root')).render(
-    <LocaleProvider locale={zh_CN}>
+    <LocaleProvider locale={getSemiLocale(requestedLanguage)}>
       <StatusContext.Provider value={[statusState, noop]}>
         <UserContext.Provider value={[userState, noop]}>
           <MemoryRouter

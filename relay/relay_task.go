@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
@@ -27,7 +28,6 @@ import (
 Task 任务通过平台、Action 区分任务
 */
 func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.TaskError) {
-	info.InitChannelMeta(c)
 	// ensure TaskRelayInfo is initialized to avoid nil dereference when accessing embedded fields
 	if info.TaskRelayInfo == nil {
 		info.TaskRelayInfo = &relaycommon.TaskRelayInfo{}
@@ -38,6 +38,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 	}
 
 	info.InitChannelMeta(c)
+	if err := helper.ModelMappedHelper(c, info, nil); err != nil {
+		return service.TaskErrorWrapper(err, "model_mapping_failed", http.StatusInternalServerError)
+	}
 	adaptor := GetTaskAdaptor(platform)
 	if adaptor == nil {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("invalid api platform: %s", platform), "invalid_api_platform", http.StatusBadRequest)
@@ -53,14 +56,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 	if modelName == "" {
 		modelName = service.CoverTaskActionToModelName(platform, info.Action)
 	}
-	modelPrice, success := ratio_setting.GetModelPrice(modelName, true)
-	if !success {
-		defaultPrice, ok := ratio_setting.GetDefaultModelPriceMap()[modelName]
-		if !ok {
-			modelPrice = 0.1
-		} else {
-			modelPrice = defaultPrice
-		}
+	modelPrice, err := resolveTaskModelPrice(modelName, info.UpstreamModelName)
+	if err != nil {
+		return service.TaskErrorWrapperLocal(err, "model_price_not_configured", http.StatusInternalServerError)
 	}
 
 	// 处理 auto 分组：从 context 获取实际选中的分组
@@ -238,6 +236,19 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 		return
 	}
 	return nil
+}
+
+func resolveTaskModelPrice(originModelName string, upstreamModelName string) (float64, error) {
+	if modelPrice, ok := ratio_setting.GetModelPrice(originModelName, true); ok {
+		return modelPrice, nil
+	}
+	if defaultPrice, ok := ratio_setting.GetDefaultModelPriceMap()[originModelName]; ok {
+		return defaultPrice, nil
+	}
+	if strings.HasPrefix(originModelName, "wan2.7-") || strings.HasPrefix(upstreamModelName, "wan2.7-") {
+		return 0, fmt.Errorf("model price not configured for %s", originModelName)
+	}
+	return 0.1, nil
 }
 
 var fetchRespBuilders = map[int]func(c *gin.Context) (respBody []byte, taskResp *dto.TaskError){

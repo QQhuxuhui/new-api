@@ -43,10 +43,11 @@ func TestGetEstimatedActivationTime_UsesPlanValidityDaysSnapshot(t *testing.T) {
 	}
 
 	front := &UserPlan{
-		UserId:          user.Id,
-		Status:          UserPlanStatusActive,
-		IsCurrent:       0,
-		QueuePosition:   1,
+		UserId:           user.Id,
+		Quota:            100,
+		Status:           UserPlanStatusActive,
+		IsCurrent:        0,
+		QueuePosition:    1,
 		PlanValidityDays: 10,
 	}
 	if err := DB.Create(front).Error; err != nil {
@@ -54,10 +55,11 @@ func TestGetEstimatedActivationTime_UsesPlanValidityDaysSnapshot(t *testing.T) {
 	}
 
 	target := &UserPlan{
-		UserId:          user.Id,
-		Status:          UserPlanStatusActive,
-		IsCurrent:       0,
-		QueuePosition:   2,
+		UserId:           user.Id,
+		Quota:            100,
+		Status:           UserPlanStatusActive,
+		IsCurrent:        0,
+		QueuePosition:    2,
 		PlanValidityDays: 20,
 	}
 	if err := DB.Create(target).Error; err != nil {
@@ -74,4 +76,3 @@ func TestGetEstimatedActivationTime_UsesPlanValidityDaysSnapshot(t *testing.T) {
 		t.Fatalf("expected estimated activation time %d, got %d", want, est)
 	}
 }
-

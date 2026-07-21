@@ -614,8 +614,8 @@ func writeStreamErrorEvent(c *gin.Context, relayFormat types.RelayFormat, err *t
 	case types.RelayFormatOpenAIResponses, types.RelayFormatOpenAIResponsesCompaction:
 		// Responses 协议以 event: error 事件收尾，客户端按事件类型分发
 		payload, marshalErr := common.Marshal(gin.H{
-			"type":  "error",
-			"code":  err.GetErrorCode(),
+			"type":    "error",
+			"code":    err.GetErrorCode(),
 			"message": err.Error(),
 		})
 		if marshalErr != nil {
@@ -773,6 +773,10 @@ func shouldRecordChannelFailure(c *gin.Context, statusCode int, errorMessage str
 	}
 	return service.ShouldTriggerChannelFailover(statusCode, errorMessage) ||
 		statusCode == 504 || statusCode == 524
+}
+
+func shouldRecordTaskChannelFailure(c *gin.Context, taskErr *dto.TaskError) bool {
+	return taskErr != nil && !taskErr.LocalError && shouldRecordChannelFailure(c, taskErr.StatusCode, taskErr.Message)
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
@@ -1067,7 +1071,7 @@ func RelayTask(c *gin.Context) {
 	} else {
 		// Error occurred - check if it should trigger health tracking
 		// Record timeout errors (504/524) and other upstream errors to health tracker
-		if shouldRecordChannelFailure(c, taskErr.StatusCode, taskErr.Message) {
+		if shouldRecordTaskChannelFailure(c, taskErr) {
 			service.RecordChannelFailure(channelId, taskErr.StatusCode, taskErr.Message)
 		}
 	}
@@ -1078,6 +1082,10 @@ func RelayTask(c *gin.Context) {
 	const maxPriorityLevelsTask = 1000
 	attemptsTask := 0
 	for priorityIndex := basePriorityIndex; priorityIndex < basePriorityIndex+maxPriorityLevelsTask; priorityIndex++ {
+		remainingRetries := maxPriorityLevelsTask - attemptsTask
+		if !shouldRetryTaskRelay(c, channelId, taskErr, remainingRetries) {
+			break
+		}
 		channel, newAPIError := getChannel(c, group, originalModel, attemptsTask, priorityIndex)
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("CacheGetRandomSatisfiedChannel failed: %s", newAPIError.Error()))
@@ -1111,14 +1119,10 @@ func RelayTask(c *gin.Context) {
 		}
 
 		// Error occurred - check if it should trigger health tracking
-		if shouldRecordChannelFailure(c, taskErr.StatusCode, taskErr.Message) {
+		if shouldRecordTaskChannelFailure(c, taskErr) {
 			service.RecordChannelFailure(channelId, taskErr.StatusCode, taskErr.Message)
 		}
 
-		remainingRetries := maxPriorityLevelsTask - attemptsTask
-		if !shouldRetryTaskRelay(c, channelId, taskErr, remainingRetries) {
-			break
-		}
 		// 继续下一优先级
 	}
 	useChannel := c.GetStringSlice("use_channel")
@@ -1157,6 +1161,9 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 	if common.GetContextKeyBool(c, constant.ContextKeyReturnImmediately) {
 		return false
 	}
+	if taskErr.LocalError {
+		return false
+	}
 	if isClient, _ := service.CheckClientErrorRule(taskErr.StatusCode, taskErr.Message); isClient {
 		return retryTimes > 0
 	}
@@ -1178,9 +1185,6 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 	}
 	if taskErr.StatusCode == 408 {
 		// azure处理超时不重试
-		return false
-	}
-	if taskErr.LocalError {
 		return false
 	}
 	if taskErr.StatusCode/100 == 2 {

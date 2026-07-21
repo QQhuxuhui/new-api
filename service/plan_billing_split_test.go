@@ -2132,6 +2132,50 @@ func TestPostConsumeQuota_PoolOverflowPromotesAlternatePlan_AndQueueAdvancesOnDe
 	}
 }
 
+func TestChargeExistingPlanForOverflow_DoesNotRetryCommittedChargeOnCacheFailure(t *testing.T) {
+	db := setupTestDB(t)
+	plan := &model.UserPlan{
+		UserId:        901,
+		Quota:         100,
+		OriginalQuota: 100,
+		Status:        model.UserPlanStatusActive,
+		IsCurrent:     1,
+	}
+	if err := db.Create(plan).Error; err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	previousClient := common.RDB
+	previousEnabled := common.RedisEnabled
+	common.RDB = redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	common.RedisEnabled = true
+	if err := common.RDB.Close(); err != nil {
+		t.Fatalf("close redis client: %v", err)
+	}
+	t.Cleanup(func() {
+		mr.Close()
+		common.RDB = previousClient
+		common.RedisEnabled = previousEnabled
+	})
+
+	relayInfo := &relaycommon.RelayInfo{UserId: plan.UserId}
+	if charged := chargeExistingPlanForOverflow(relayInfo, plan, 10); !charged {
+		t.Fatal("committed plan charge was treated as a failed deduction")
+	}
+
+	var stored model.UserPlan
+	if err := db.First(&stored, plan.Id).Error; err != nil {
+		t.Fatalf("reload plan: %v", err)
+	}
+	if stored.Quota != 90 || relayInfo.BillingSource != BillingSourcePlan {
+		t.Fatalf("quota=%d billing_source=%s", stored.Quota, relayInfo.BillingSource)
+	}
+}
+
 func TestPostConsumeQuota_PlanDepletionWithAutoSwitchOffDoesNotAdvanceQueue(t *testing.T) {
 	db := setupTestDB(t)
 	user := &model.User{Username: "plan-auto-off", Password: "12345678", Status: 1}
@@ -2171,11 +2215,14 @@ func TestPostConsumeQuota_PlanDepletionWithAutoSwitchOffDoesNotAdvanceQueue(t *t
 	if err := db.First(&nextRow, next.Id).Error; err != nil {
 		t.Fatalf("reload queued: %v", err)
 	}
-	if oldRow.Quota != 0 || oldRow.Status != model.UserPlanStatusCompleted || oldRow.IsCurrent != 0 || oldRow.Pinned != 0 {
+	if oldRow.Quota != 0 || oldRow.Status != model.UserPlanStatusActive || oldRow.IsCurrent != 1 || oldRow.Pinned != 1 {
 		t.Fatalf("old quota=%d status=%d current=%d pinned=%d", oldRow.Quota, oldRow.Status, oldRow.IsCurrent, oldRow.Pinned)
 	}
 	if nextRow.IsCurrent != 0 || nextRow.QueuePosition != 1 || nextRow.Pinned != 1 {
 		t.Fatalf("queued current=%d queue=%d pinned=%d", nextRow.IsCurrent, nextRow.QueuePosition, nextRow.Pinned)
+	}
+	if _, err := SelectPlanForRequest(user.Id, ""); !errors.Is(err, ErrPlanQuotaExhausted) {
+		t.Fatalf("next request error=%v, want ErrPlanQuotaExhausted", err)
 	}
 }
 
@@ -2222,10 +2269,13 @@ func TestPostConsumeQuota_MixedDepletionWithAutoSwitchOffDoesNotAdvanceQueue(t *
 	if err := db.First(&nextRow, next.Id).Error; err != nil {
 		t.Fatalf("reload queued: %v", err)
 	}
-	if oldRow.Quota != 0 || oldRow.Status != model.UserPlanStatusCompleted || oldRow.IsCurrent != 0 || oldRow.Pinned != 0 {
+	if oldRow.Quota != 0 || oldRow.Status != model.UserPlanStatusActive || oldRow.IsCurrent != 1 || oldRow.Pinned != 1 {
 		t.Fatalf("old quota=%d status=%d current=%d pinned=%d", oldRow.Quota, oldRow.Status, oldRow.IsCurrent, oldRow.Pinned)
 	}
 	if nextRow.IsCurrent != 0 || nextRow.QueuePosition != 1 || nextRow.Pinned != 1 {
 		t.Fatalf("queued current=%d queue=%d pinned=%d", nextRow.IsCurrent, nextRow.QueuePosition, nextRow.Pinned)
+	}
+	if _, err := SelectPlanForRequest(user.Id, ""); !errors.Is(err, ErrPlanQuotaExhausted) {
+		t.Fatalf("next request error=%v, want ErrPlanQuotaExhausted", err)
 	}
 }

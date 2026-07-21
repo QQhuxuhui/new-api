@@ -1,0 +1,49 @@
+{
+  "channel": "B",
+  "event_types": {
+    "message_start": 8,
+    "content_block_start": 15,
+    "content_block_delta": 728,
+    "content_block_stop": 15,
+    "message_delta": 8,
+    "message_stop": 8
+  },
+  "has_ping": false,
+  "message_start.message.field_order": [
+    "content",
+    "id",
+    "model",
+    "role",
+    "stop_reason",
+    "stop_sequence",
+    "type",
+    "usage"
+  ],
+  "message_start.message.keys": [
+    "content",
+    "id",
+    "model",
+    "role",
+    "stop_reason",
+    "stop_sequence",
+    "type",
+    "usage"
+  ],
+  "message_start.usage.keys": [
+    "input_tokens",
+    "output_tokens"
+  ],
+  "message_delta.keys": [
+    "delta",
+    "type",
+    "usage"
+  ],
+  "message_delta.usage.keys": [
+    "input_tokens",
+    "output_tokens"
+  ],
+  "content_block.types": [
+    "text",
+    "thinking"
+  ]
+}

@@ -234,6 +234,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				}
 				if u.InputTokensDetails != nil {
 					usage.PromptTokensDetails.CachedTokens = u.InputTokensDetails.CachedTokens
+					usage.PromptTokensDetails.CachedCreationTokens = u.InputTokensDetails.CachedCreationTokens
 				}
 			}
 

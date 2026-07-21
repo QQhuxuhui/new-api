@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -88,7 +89,7 @@ func TestSelectPlanForRequest_PinnedBlocksHealthyUpgrade(t *testing.T) {
 	}
 }
 
-func TestSelectPlanForRequest_DoesNotServeExpiredPinnedPlanFromCache(t *testing.T) {
+func TestSelectPlanForRequest_ExpiresCachedCurrentWithoutPromotingAvailablePlan(t *testing.T) {
 	db := setupTestDB(t)
 	enableSelectorRedis(t)
 	user := &model.User{Username: "expired-cached-current", Password: "12345678", Status: 1}
@@ -115,17 +116,50 @@ func TestSelectPlanForRequest_DoesNotServeExpiredPinnedPlanFromCache(t *testing.
 		t.Fatalf("seed stale cache: %v", err)
 	}
 
+	if _, err := SelectPlanForRequest(user.Id, ""); !errors.Is(err, ErrNoPlanAvailable) {
+		t.Fatalf("select plan error=%v, want ErrNoPlanAvailable", err)
+	}
+	oldRow, availableRow := reloadSelectorPlan(t, expiredCurrent.Id), reloadSelectorPlan(t, alternative.Id)
+	if oldRow.Status != model.UserPlanStatusExpired || oldRow.IsCurrent != 0 || oldRow.Pinned != 0 {
+		t.Fatalf("expired status=%d current=%d pinned=%d", oldRow.Status, oldRow.IsCurrent, oldRow.Pinned)
+	}
+	if availableRow.IsCurrent != 0 {
+		t.Fatalf("available plan became current: %d", availableRow.IsCurrent)
+	}
+}
+
+func TestSelectPlanForRequest_ExpiredCurrentAdvancesEligibleQueue(t *testing.T) {
+	db := setupTestDB(t)
+	enableSelectorRedis(t)
+	user := &model.User{Username: "expired-queue-current", Password: "12345678", Status: 1}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	expiredCurrent := createSelectablePlan(t, user.Id, 20, func(plan *model.UserPlan) {
+		plan.IsCurrent = 1
+		plan.Pinned = 1
+		plan.ExpiresAt = time.Now().Add(-time.Hour).UnixMilli()
+	})
+	queued := createSelectablePlan(t, user.Id, 10, func(plan *model.UserPlan) {
+		plan.StartedAt = 0
+		plan.QueuePosition = 2
+		plan.PlanValidityDays = 30
+		plan.Pinned = 1
+	})
+
 	result, err := SelectPlanForRequest(user.Id, "")
 	if err != nil {
 		t.Fatalf("select plan: %v", err)
 	}
-	if result.UserPlan.Id != alternative.Id || !result.Switched {
-		t.Fatalf(
-			"expired cached plan %d was served: result=%d switched=%v",
-			expiredCurrent.Id,
-			result.UserPlan.Id,
-			result.Switched,
-		)
+	if result.UserPlan.Id != queued.Id || !result.Switched {
+		t.Fatalf("expiry replacement=%d switched=%v, want %d", result.UserPlan.Id, result.Switched, queued.Id)
+	}
+	oldRow, queuedRow := reloadSelectorPlan(t, expiredCurrent.Id), reloadSelectorPlan(t, queued.Id)
+	if oldRow.Status != model.UserPlanStatusExpired || oldRow.IsCurrent != 0 || oldRow.Pinned != 0 {
+		t.Fatalf("expired status=%d current=%d pinned=%d", oldRow.Status, oldRow.IsCurrent, oldRow.Pinned)
+	}
+	if queuedRow.IsCurrent != 1 || queuedRow.QueuePosition != 0 || queuedRow.StartedAt == 0 || queuedRow.Pinned != 0 {
+		t.Fatalf("queued current=%d queue=%d started=%d pinned=%d", queuedRow.IsCurrent, queuedRow.QueuePosition, queuedRow.StartedAt, queuedRow.Pinned)
 	}
 }
 
@@ -230,6 +264,61 @@ func TestSelectPlanForRequestWithGroup_DoesNotUpgradeOutsideTokenGroup(t *testin
 	}
 	if result.UserPlan.Id != current.Id || result.Switched {
 		t.Fatalf("upgraded outside token group: result=%d switched=%v higher=%d", result.UserPlan.Id, result.Switched, higher.Id)
+	}
+}
+
+func TestSelectPlanForRequestWithGroup_RechecksFreshCandidateGroups(t *testing.T) {
+	db := setupTestDB(t)
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate channel tables: %v", err)
+	}
+	enableSelectorRedis(t)
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+	})
+
+	user := &model.User{Username: "fresh-token-group-upgrade", Password: "12345678", Status: 1}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	current := createSelectablePlan(t, user.Id, 10, func(plan *model.UserPlan) {
+		plan.IsCurrent = 1
+		plan.PlanChannelGroups = `["token-a"]`
+	})
+	higher := createSelectablePlan(t, user.Id, 20, func(plan *model.UserPlan) {
+		plan.PlanChannelGroups = `["token-a"]`
+	})
+	priority := int64(10)
+	channel := &model.Channel{
+		Name: "fresh-token-a-channel", Key: "test",
+		Status: common.ChannelStatusEnabled, Group: "token-a", Models: "gpt-test", Priority: &priority,
+	}
+	if err := db.Create(channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := db.Create(&model.Ability{
+		Group: "token-a", Model: "gpt-test", ChannelId: channel.Id,
+		Enabled: true, Priority: &priority, Weight: 100,
+	}).Error; err != nil {
+		t.Fatalf("create ability: %v", err)
+	}
+	model.InitChannelCache()
+	if _, err := model.CachedGetUserValidPlans(user.Id); err != nil {
+		t.Fatalf("prime plan cache: %v", err)
+	}
+	if err := db.Model(&model.UserPlan{}).Where("id = ?", higher.Id).
+		UpdateColumn("plan_channel_groups", `["token-b"]`).Error; err != nil {
+		t.Fatalf("change fresh candidate groups: %v", err)
+	}
+
+	result, err := SelectPlanForRequestWithGroup(user.Id, "gpt-test", "token-a")
+	if err != nil {
+		t.Fatalf("select plan: %v", err)
+	}
+	if result.UserPlan.Id != current.Id || result.Switched {
+		t.Fatalf("upgraded using stale groups: result=%d switched=%v", result.UserPlan.Id, result.Switched)
 	}
 }
 

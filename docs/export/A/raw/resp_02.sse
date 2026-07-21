@@ -1,0 +1,249 @@
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-opus-4-6","id":"msg_01GTX6dKkgZCKKHN44J9mDD5","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":743,"cache_creation_input_tokens":25100,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":25100,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}}         }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}             }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"This","estimated_tokens":null}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" is the classic Einstein's Riddle. Let me solve it step by step.\n\nHouses are","estimated_tokens":null}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" numbered 1-5 from left to right.\n\nFrom clue 9: Norwegian is","estimated_tokens":null}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" in house 1.\nFrom clue 14: Norwegian (house 1) is next to blue house, so house 2 is blue.\nFrom","estimated_tokens":null}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" clue 8: House 3 drinks milk.\n\nFrom clue 1:","estimated_tokens":null}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Englishman lives in red house.\nFrom clue 4: Green house is immediately left of white house.\n\nNorwegian is in house 1. House","estimated_tokens":null}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" 2 is blue. So house 1 is not blue.\nGreen is","estimated_tokens":null}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" immediately left of white (clue 4). ","estimated_tokens":null}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nThe","estimated_tokens":null}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" green-white pair can't be in positions 1-2 or","estimated_tokens":null}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" 2-3 since house 2 is blue, and house 3 drinks milk while the green house owner drinks coffee, so green","estimated_tokens":null}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" can't be house 3. That means green and white must be houses 4 and 5.","estimated_tokens":null}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nNow","estimated_tokens":null}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I'm figuring out the remaining colors for houses 1 and 3. The Norwegian","estimated_tokens":null}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" is in house 1, and if house 1 were red, that would make the Norwegian the","estimated_tokens":null}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Englishman—a contradiction. So house 1 is yellow and house 3 is red, which means the Englishman lives","estimated_tokens":null}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" in house 3.\n\nFrom the yellow house smoking Dunhill, house 1 smokes Dunhill. I know house 3 drinks","estimated_tokens":null}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" milk and house 4 drinks coffee, so the Dane who drinks tea must be in house 1, 2, or 5.","estimated_tokens":null}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nThe","estimated_tokens":null}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" horse owner lives next to the Dunhill smoker in house 1, so the horse is in house 2. The Blue Master smoker drinks beer, which can","estimated_tokens":null}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"'t be house 3 (milk) or house 4 (coffee), and house 1 smokes Dunhill, so Blue Master is in house 2 or","estimated_tokens":null} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" 5. Since the Dane drinks tea and house 1 is Norwegian, the Dane must be in house 2 or 5.","estimated_tokens":null}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nLet","estimated_tokens":null}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" me test if Blue Master is in house 2: that gives beer in house 2, pushing the Dane and","estimated_tokens":null}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" tea to house 5, leaving water for house 1. This works since the","estimated_tokens":null}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Dane drinks tea.","estimated_tokens":null} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nNow trying","estimated_tokens":null}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the second option with Blue Master in house 5: beer goes to house 5, the Dane moves to house 2 ","estimated_tokens":null} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"with tea, and water stays in house 1. From the clues about nationalities,","estimated_tokens":null}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I know the Norwegian is in house 1 and the English in","estimated_tokens":null}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" house 3, leaving the Swede, Dane, and German for houses 2, 4, and 5. Since the German smokes Prince and","estimated_tokens":null} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the remaining cigarettes are Pall Mall, Blends, and Prince for houses 3, 4, and 5, the German must be in house 4.","estimated_tokens":null}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" So","estimated_tokens":null}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" German must be in house 4 with Prince, leaving Swede in house 5 with the dog. Blends goes in house 2 (","estimated_tokens":null}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"next to the water in house 1), Pall Mall in house 3 with the bird, and the horse in house 2.","estimated_tokens":null}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" That leaves cat and fish for houses 1 and 4.","estimated_tokens":null}            }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nSince","estimated_tokens":null}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the Blends smoker in house 2 needs to be next to the cat owner, and house 3 has the bird, the cat must be in house 1, putting","estimated_tokens":null}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the fish in house 4 with the German. So the German keeps the fish.","estimated_tokens":null}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"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"}          }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0 }
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"# 爱因斯坦谜题求解\n\n## 推"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"理过程\n\n**第一步：直接线索定位**\n- 线"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"索9 → 挪威人在第1座\n- 线索14 → 第"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"2座是蓝房子\n- 线索8 → 第3座喝牛奶\n\n**第二步：确定绿白"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"位置**\n- 线索4 → 绿紧挨白左边，可能 "}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"(3,4) 或 (4,5)\n- 线索5 → 绿房喝咖啡，但第3座"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"喝牛奶 → 绿≠3\n- 所以 **第4"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"座绿，第5座白**\n\n**第三步：确定剩余颜色**\n- 第1座若红 "}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"→ 挪威=英国，矛盾 → **第1座黄，第3座红**\n- 线"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"索1 → 英国人在第3座\n- 线索7 → 第1座抽 "}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Dunhill\n\n**第四步：确定饮料与国籍**\n- 线索11 → 马在 "}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Dunhill(第1座)隔壁 → **第2座养马**\n- 线索2 → 瑞典人"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"养狗，≠第2座(马) → 瑞典人不在第2座\n- 已知"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"饮料：第3座牛奶，第4座咖啡。剩余：茶/啤酒/水 分配"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"给 1/2/5\n- 线索12 → Blue Master 配啤酒，第1座已"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"是 Dunhill → BM 在2或5\n- 若"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" BM 在第2座 → 第2座啤酒 → 丹麦人(茶)在"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"第5座 → 瑞典人在第2座 → 第2座养狗，"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"但第2座养马，**矛盾！**\n- 所以 **BM 在第5座，第5"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"座啤酒** → 丹麦人(茶)在第2座 → **第1座"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"喝水**\n- 剩余：瑞典/德国 →"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" 4/5座。线索13 → 德国抽 Prince，第5座已是"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" BM → **德国第4座，瑞典第5座**\n- 线索2 → **第"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"5座养狗**\n\n**第五步：确定香烟与宠物**\n- 剩余香烟："}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Pall Mall / Blends / Prince → 2/3/4座\n- Prince 在第4座(德国人)\n- 线"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"索15 → Blends 邻居喝水(第1座) → **Blends 在第2座**\n- → **"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Pall Mall 在第3座** → 线索6 → **第3座养鸟**\n- 线索10"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" → Blends(第2座)邻居养猫 → 第1或"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"第3座；第3座养鸟 → **第1座养猫**\n- 剩余 →"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" **第4座养鱼**\n\n## 最终答案\n\n| 房子 | 颜色 | 国籍 | "}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"饮料 | 香烟 | 宠物 |\n|:---:|:---:|:---:|:---:|:---:|:---:|\n| 1 | 黄 | 挪威 | 水 |"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Dunhill | 猫 |\n| 2 | 蓝 | 丹麦 | 茶 | Blends | 马 |\n| 3 | 红 | 英国 | 牛奶 |"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Pall Mall | 鸟 |\n| 4 | 绿 | 德国 | 咖啡 | Prince | 鱼 |\n| 5 | 白 | 瑞典 | 啤酒"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Blue Master | 狗 |\n\n**德国人养鱼。**"}   }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1               }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":743,"cache_creation_input_tokens":25100,"cache_read_input_tokens":0,"output_tokens":2851,"output_tokens_details":{"thinking_tokens":1783},"iterations":[{"input_tokens":743,"output_tokens":2851,"cache_read_input_tokens":0,"cache_creation_input_tokens":25100,"cache_creation":{"ephemeral_5m_input_tokens":25100,"ephemeral_1h_input_tokens":0},"type":"message"}]},"context_management":{"applied_edits":[]}         }
+
+event: message_stop
+data: {"type":"message_stop"              }
+

@@ -420,14 +420,14 @@ func (up *UserPlan) Insert() error {
 
 	up.CreatedAt = time.Now().UnixMilli()
 	up.UpdatedAt = time.Now().UnixMilli()
-	if up.StartedAt == 0 {
+	if up.StartedAt == 0 && up.QueuePosition == 0 {
 		up.StartedAt = time.Now().UnixMilli()
 	}
 
 	err := DB.Create(up).Error
 	if err == nil {
 		// Invalidate cache after successful insert
-		InvalidateUserPlanCache(up.UserId)
+		return InvalidateUserPlanCache(up.UserId)
 	}
 	return err
 }
@@ -441,7 +441,7 @@ func (up *UserPlan) Update() error {
 	err := DB.Model(up).Updates(up).Error
 	if err == nil && up.UserId > 0 {
 		// Invalidate cache after successful update
-		InvalidateUserPlanCache(up.UserId)
+		return InvalidateUserPlanCache(up.UserId)
 	}
 	return err
 }
@@ -455,7 +455,7 @@ func (up *UserPlan) Delete() error {
 	err := DB.Delete(up).Error
 	if err == nil && userId > 0 {
 		// Invalidate cache after successful delete
-		InvalidateUserPlanCache(userId)
+		return InvalidateUserPlanCache(userId)
 	}
 	return err
 }
@@ -555,13 +555,90 @@ func SwitchUserCurrentPlan(userId int, newPlanId int) error {
 // BUG FIX: When switching to a queued plan (started_at=0), properly set started_at,
 // expires_at and queue_position to avoid the plan becoming "permanent" unexpectedly.
 func SwitchToUserPlan(userId int, userPlanId int, setPinned bool) error {
-	// Invalidate cache after switch
-	defer InvalidateUserPlanCache(userId)
+	_, err := switchToUserPlan(userId, userPlanId, setPinned, nil)
+	return err
+}
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+const (
+	PlanSwitchQuotaAny      = 0
+	PlanSwitchQuotaPositive = 1
+	PlanSwitchQuotaDepleted = -1
+)
+
+// SystemPlanSwitchGuard makes an automated switch conditional on the source
+// plan state that the caller observed before entering the transaction.
+type SystemPlanSwitchGuard struct {
+	ExpectedCurrentUserPlanId int
+	RequireNoCurrent          bool
+	RequireAutoSwitch         bool
+	RequireUnpinned           bool
+	RequireUnexpired          bool
+	ExpectedQuotaState        int
+	CompletionStatus          int
+}
+
+// SwitchToUserPlanGuarded applies a system decision only while its observed
+// source state still matches. A stale decision returns switched=false without
+// mutating current or pin state.
+func SwitchToUserPlanGuarded(userId int, userPlanId int, guard SystemPlanSwitchGuard) (bool, error) {
+	if guard.RequireNoCurrent == (guard.ExpectedCurrentUserPlanId > 0) {
+		return false, errors.New("系统切换必须指定当前套餐或要求无当前套餐")
+	}
+	if guard.ExpectedQuotaState != PlanSwitchQuotaAny &&
+		guard.ExpectedQuotaState != PlanSwitchQuotaPositive &&
+		guard.ExpectedQuotaState != PlanSwitchQuotaDepleted {
+		return false, errors.New("无效的当前套餐额度条件")
+	}
+	return switchToUserPlan(userId, userPlanId, false, &guard)
+}
+
+func switchToUserPlan(userId int, userPlanId int, setPinned bool, guard *SystemPlanSwitchGuard) (bool, error) {
+	didSwitch := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockUserPlanSelectionRows(tx, userId); err != nil {
 			return err
 		}
+
+		var sourcePlan UserPlan
+		if guard != nil {
+			if guard.RequireNoCurrent {
+				var currentCount int64
+				if err := tx.Model(&UserPlan{}).
+					Where("user_id = ? AND is_current = 1 AND status = ?", userId, UserPlanStatusActive).
+					Count(&currentCount).Error; err != nil {
+					return err
+				}
+				if currentCount > 0 {
+					return nil
+				}
+			} else {
+				sourceQuery := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+					Where("id = ? AND user_id = ? AND is_current = 1 AND status = ?",
+						guard.ExpectedCurrentUserPlanId, userId, UserPlanStatusActive)
+				if guard.RequireAutoSwitch {
+					sourceQuery = sourceQuery.Where("auto_switch = 1")
+				}
+				if guard.RequireUnpinned {
+					sourceQuery = sourceQuery.Where("pinned != 1")
+				}
+				if guard.RequireUnexpired {
+					sourceQuery = sourceQuery.Where("expires_at = 0 OR expires_at > ?", time.Now().UnixMilli())
+				}
+				switch guard.ExpectedQuotaState {
+				case PlanSwitchQuotaPositive:
+					sourceQuery = sourceQuery.Where("quota > 0")
+				case PlanSwitchQuotaDepleted:
+					sourceQuery = sourceQuery.Where("quota <= 0")
+				}
+				if err := sourceQuery.First(&sourcePlan).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return nil
+					}
+					return err
+				}
+			}
+		}
+
 		// Verify and lock the target so its eligibility cannot change while the
 		// current plan and pins are being replaced.
 		nowMs := time.Now().UnixMilli()
@@ -579,6 +656,24 @@ func SwitchToUserPlan(userId int, userPlanId int, setPinned bool) error {
 				return errors.New("未找到指定的用户套餐或套餐不可用")
 			}
 			return err
+		}
+
+		if guard != nil && guard.CompletionStatus != 0 {
+			result := tx.Model(&UserPlan{}).
+				Where("id = ? AND user_id = ? AND is_current = 1 AND status = ?",
+					sourcePlan.Id, userId, UserPlanStatusActive).
+				Updates(map[string]interface{}{
+					"is_current": 0,
+					"pinned":     0,
+					"status":     guard.CompletionStatus,
+					"updated_at": time.Now().UnixMilli(),
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errors.New("当前套餐状态已变化，请重试")
+			}
 		}
 
 		// Clear current state and every stale active pin before selecting the target.
@@ -634,9 +729,24 @@ func SwitchToUserPlan(userId int, userPlanId int, setPinned bool) error {
 		if result.RowsAffected != 1 {
 			return errors.New("目标套餐状态已变化，请重试")
 		}
+		if targetPlan.QueuePosition > 0 {
+			if err := recalculateQueuePositionsWithTx(tx, userId); err != nil {
+				return err
+			}
+		}
 
+		didSwitch = true
 		return nil
 	})
+	if err != nil {
+		return false, err
+	}
+	if didSwitch {
+		if err := InvalidateUserPlanCache(userId); err != nil {
+			return true, err
+		}
+	}
+	return didSwitch, nil
 }
 
 func lockUserPlanSelectionRows(tx *gorm.DB, userId int) error {
@@ -655,19 +765,21 @@ func DecreaseUserPlanQuota(userPlanId int, amount int64) error {
 		return errors.New("扣除额度不能为负数")
 	}
 
-	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
-	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
-		defer InvalidateUserPlanCache(userPlan.UserId)
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err != nil {
+		return err
 	}
 
-	return DB.Model(&UserPlan{}).
+	if err := DB.Model(&UserPlan{}).
 		Where("id = ?", userPlanId).
 		Updates(map[string]interface{}{
 			"quota":      gorm.Expr("quota - ?", amount),
 			"used_quota": gorm.Expr("used_quota + ?", amount),
 			"updated_at": time.Now().UnixMilli(),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	return InvalidateUserPlanCache(userPlan.UserId)
 }
 
 // IncreaseUserPlanQuota increases quota for a user plan
@@ -676,34 +788,38 @@ func IncreaseUserPlanQuota(userPlanId int, amount int64) error {
 		return errors.New("增加额度不能为负数")
 	}
 
-	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
-	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
-		defer InvalidateUserPlanCache(userPlan.UserId)
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err != nil {
+		return err
 	}
 
-	return DB.Model(&UserPlan{}).
+	if err := DB.Model(&UserPlan{}).
 		Where("id = ?", userPlanId).
 		Updates(map[string]interface{}{
 			"quota":      gorm.Expr("quota + ?", amount),
 			"updated_at": time.Now().UnixMilli(),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	return InvalidateUserPlanCache(userPlan.UserId)
 }
 
 // SetUserPlanQuota sets the quota for a user plan (admin operation)
 func SetUserPlanQuota(userPlanId int, quota int64) error {
-	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
-	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
-		defer InvalidateUserPlanCache(userPlan.UserId)
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err != nil {
+		return err
 	}
 
-	return DB.Model(&UserPlan{}).
+	if err := DB.Model(&UserPlan{}).
 		Where("id = ?", userPlanId).
 		Updates(map[string]interface{}{
 			"quota":      quota,
 			"updated_at": time.Now().UnixMilli(),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	return InvalidateUserPlanCache(userPlan.UserId)
 }
 
 // LockUserPlan locks a user plan with a reason. lockedBy must be "admin" or "user".
@@ -712,13 +828,12 @@ func LockUserPlan(userPlanId int, reason string, lockedBy string) error {
 		return fmt.Errorf("invalid lockedBy value: %q", lockedBy)
 	}
 
-	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
-	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
-		defer InvalidateUserPlanCache(userPlan.UserId)
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err != nil {
+		return err
 	}
 
-	return DB.Model(&UserPlan{}).
+	if err := DB.Model(&UserPlan{}).
 		Where("id = ?", userPlanId).
 		Updates(map[string]interface{}{
 			"locked":        1,
@@ -726,7 +841,10 @@ func LockUserPlan(userPlanId int, reason string, lockedBy string) error {
 			"locked_reason": reason,
 			"locked_at":     time.Now().UnixMilli(),
 			"updated_at":    time.Now().UnixMilli(),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	return InvalidateUserPlanCache(userPlan.UserId)
 }
 
 // LockUserPlanIfEligible atomically locks a user-owned plan with locked_by="user"
@@ -752,7 +870,9 @@ func LockUserPlanIfEligible(userPlanId, userId int, reason string) (int64, error
 		return 0, result.Error
 	}
 	if result.RowsAffected > 0 {
-		_ = InvalidateUserPlanCache(userId)
+		if err := InvalidateUserPlanCache(userId); err != nil {
+			return result.RowsAffected, err
+		}
 	}
 	return result.RowsAffected, nil
 }
@@ -775,7 +895,9 @@ func UnlockUserPlanIfUserLocked(userPlanId, userId int) (int64, error) {
 		return 0, result.Error
 	}
 	if result.RowsAffected > 0 {
-		_ = InvalidateUserPlanCache(userId)
+		if err := InvalidateUserPlanCache(userId); err != nil {
+			return result.RowsAffected, err
+		}
 	}
 	return result.RowsAffected, nil
 }
@@ -783,63 +905,68 @@ func UnlockUserPlanIfUserLocked(userPlanId, userId int) (int64, error) {
 // UnlockUserPlan unlocks a user plan, regardless of who locked it.
 // Service-layer callers must enforce who is allowed to invoke this.
 func UnlockUserPlan(userPlanId int) error {
-	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
-	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
-		defer InvalidateUserPlanCache(userPlan.UserId)
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err != nil {
+		return err
 	}
 
-	return DB.Model(&UserPlan{}).
+	if err := DB.Model(&UserPlan{}).
 		Where("id = ?", userPlanId).
 		Updates(map[string]interface{}{
 			"locked":        0,
 			"locked_by":     "",
 			"locked_reason": "",
 			"updated_at":    time.Now().UnixMilli(),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	return InvalidateUserPlanCache(userPlan.UserId)
 }
 
 // UpdateUserPlanFields updates multiple fields for a user plan
 // This is used for admin operations to modify quota, expiration, daily limit override, etc.
 func UpdateUserPlanFields(userPlanId int, updates map[string]interface{}) error {
-	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
-	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
-		defer InvalidateUserPlanCache(userPlan.UserId)
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err != nil {
+		return err
 	}
 
 	// Add updated_at timestamp
 	updates["updated_at"] = time.Now().UnixMilli()
 
-	return DB.Model(&UserPlan{}).
+	if err := DB.Model(&UserPlan{}).
 		Where("id = ?", userPlanId).
-		Updates(updates).Error
+		Updates(updates).Error; err != nil {
+		return err
+	}
+	return InvalidateUserPlanCache(userPlan.UserId)
 }
 
 // ClearUserPlanDailyQuotaOverride clears the daily quota limit override for a user plan
 // This will make the user plan use the plan's default daily quota limit
 func ClearUserPlanDailyQuotaOverride(userPlanId int) error {
-	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
-	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
-		defer InvalidateUserPlanCache(userPlan.UserId)
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err != nil {
+		return err
 	}
 
 	// Set to NULL to indicate "use plan default"
-	return DB.Model(&UserPlan{}).
+	if err := DB.Model(&UserPlan{}).
 		Where("id = ?", userPlanId).
 		Updates(map[string]interface{}{
 			"daily_quota_limit_override": nil,
 			"updated_at":                 time.Now().UnixMilli(),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	return InvalidateUserPlanCache(userPlan.UserId)
 }
 
 // UpdateUserPlanExpiry updates the expiration time for a user plan
 func UpdateUserPlanExpiry(userPlanId int, expiresAt int64) error {
-	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
-	if err := DB.Select("user_id, status").First(&userPlan, userPlanId).Error; err == nil {
-		defer InvalidateUserPlanCache(userPlan.UserId)
+	if err := DB.Select("user_id, status").First(&userPlan, userPlanId).Error; err != nil {
+		return err
 	}
 
 	updates := map[string]interface{}{
@@ -854,26 +981,31 @@ func UpdateUserPlanExpiry(userPlanId int, expiresAt int64) error {
 		}
 	}
 
-	return DB.Model(&UserPlan{}).
+	if err := DB.Model(&UserPlan{}).
 		Where("id = ?", userPlanId).
-		Updates(updates).Error
+		Updates(updates).Error; err != nil {
+		return err
+	}
+	return InvalidateUserPlanCache(userPlan.UserId)
 }
 
 // UpdateUserPlanPermissions updates the permission flags for a user plan
 func UpdateUserPlanPermissions(userPlanId int, allowSwitch, allowToggle int) error {
-	// Get user_id before update for cache invalidation
 	var userPlan UserPlan
-	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err == nil {
-		defer InvalidateUserPlanCache(userPlan.UserId)
+	if err := DB.Select("user_id").First(&userPlan, userPlanId).Error; err != nil {
+		return err
 	}
 
-	return DB.Model(&UserPlan{}).
+	if err := DB.Model(&UserPlan{}).
 		Where("id = ?", userPlanId).
 		Updates(map[string]interface{}{
 			"allow_user_switch": allowSwitch,
 			"allow_user_toggle": allowToggle,
 			"updated_at":        time.Now().UnixMilli(),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	return InvalidateUserPlanCache(userPlan.UserId)
 }
 
 // ToggleUserPlanAutoSwitch validates user ownership and toggle permission in
@@ -915,6 +1047,17 @@ func ToggleUserPlanAutoSwitch(userId int, userPlanId int, autoSwitch int) error 
 		if result.Error != nil {
 			return result.Error
 		}
+		if result.RowsAffected == 0 {
+			var stored UserPlan
+			if err := tx.Where("id = ? AND user_id = ? AND locked != 1", userPlanId, userId).
+				First(&stored).Error; err != nil {
+				return errors.New("套餐权限或状态已变化，请重试")
+			}
+			if stored.AutoSwitch != autoSwitch || (autoSwitch == 1 && stored.Pinned != 0) {
+				return errors.New("套餐权限或状态已变化，请重试")
+			}
+			return nil
+		}
 		if result.RowsAffected != 1 {
 			return errors.New("套餐权限或状态已变化，请重试")
 		}
@@ -923,8 +1066,7 @@ func ToggleUserPlanAutoSwitch(userId int, userPlanId int, autoSwitch int) error 
 	if err != nil {
 		return err
 	}
-	InvalidateUserPlanCache(userId)
-	return nil
+	return InvalidateUserPlanCache(userId)
 }
 
 // GetUserPlansByPlanId retrieves all user plans for a specific plan
@@ -954,7 +1096,7 @@ func GetUserPlansByPlanId(planId int, pageInfo *common.PageInfo) ([]*UserPlan, i
 // ExpireUserPlans marks expired user plans as expired (for background job)
 func ExpireUserPlans() (int64, error) {
 	now := time.Now().UnixMilli()
-	expiryCondition := "status = ? AND expires_at > 0 AND expires_at < ? AND NOT (queue_position > 0 AND started_at = 0)"
+	expiryCondition := "status = ? AND is_current = 0 AND paused_at = 0 AND expires_at > 0 AND expires_at < ? AND NOT (queue_position > 0 AND started_at = 0)"
 
 	var userIds []int
 	if err := DB.Model(&UserPlan{}).
@@ -979,12 +1121,13 @@ func ExpireUserPlans() (int64, error) {
 		return result.RowsAffected, result.Error
 	}
 
+	var invalidateErr error
 	for _, userId := range userIds {
 		if err := InvalidateUserPlanCache(userId); err != nil {
-			return result.RowsAffected, err
+			invalidateErr = errors.Join(invalidateErr, fmt.Errorf("user %d: %w", userId, err))
 		}
 	}
-	return result.RowsAffected, nil
+	return result.RowsAffected, invalidateErr
 }
 
 // AssignPlanToUser assigns a plan to a user with default settings from the plan
@@ -1149,9 +1292,7 @@ func RemovePlanFromUser(userId, planId int) error {
 	}
 
 	// 4. 清理缓存
-	InvalidateUserPlanCache(userId)
-
-	return nil
+	return InvalidateUserPlanCache(userId)
 }
 
 // RemovePlanByUserPlanId deletes a user plan by its ID (user_plan instance ID)
@@ -1225,9 +1366,7 @@ func RemovePlanByUserPlanId(userPlanId int) error {
 	}
 
 	// 4. 清理缓存
-	InvalidateUserPlanCache(userId)
-
-	return nil
+	return InvalidateUserPlanCache(userId)
 }
 
 // GetUserPlansAdmin retrieves user plans with pagination for admin
@@ -1440,12 +1579,15 @@ func AddPlanToQueue(userId int, planId int, quota int64, source string, sourceOr
 		return nil, err
 	}
 
-	// Invalidate cache
-	InvalidateUserPlanCache(userId)
-
 	// Recalculate queue positions if added to queue
 	if hasCurrentPlan {
-		_ = recalculateQueuePositions(userId)
+		if err := recalculateQueuePositions(userId); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := InvalidateUserPlanCache(userId); err != nil {
+		return nil, err
 	}
 
 	return userPlan, nil
@@ -1538,7 +1680,9 @@ func RevokeUserPlan(userPlanId int) (*UserPlan, *UserPlan, error) {
 		return nil, nil, err
 	}
 
-	InvalidateUserPlanCache(revoked.UserId)
+	if err := InvalidateUserPlanCache(revoked.UserId); err != nil {
+		return &revoked, next, err
+	}
 	return &revoked, next, nil
 }
 
@@ -1560,12 +1704,12 @@ func RemovePlanFromQueue(userPlanId int) error {
 	}
 
 	// Recalculate queue positions
-	_ = recalculateQueuePositions(userId)
+	if err := recalculateQueuePositions(userId); err != nil {
+		return err
+	}
 
 	// Invalidate cache
-	InvalidateUserPlanCache(userId)
-
-	return nil
+	return InvalidateUserPlanCache(userId)
 }
 
 // ReorderQueue allows admin to reorder a user's plan queue
@@ -1593,9 +1737,7 @@ func ReorderQueue(userId int, newOrder []int) error {
 	}
 
 	// Invalidate cache
-	InvalidateUserPlanCache(userId)
-
-	return nil
+	return InvalidateUserPlanCache(userId)
 }
 
 // GetEstimatedActivationTime calculates when a queued plan might activate
@@ -1635,7 +1777,7 @@ func GetEstimatedActivationTime(userPlanId int) (int64, error) {
 	// Get all queue plans before this one
 	var queuePlans []*UserPlan
 	err = DB.Preload("Plan").
-		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND queue_position < ? AND locked != 1",
+		Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0 AND queue_position < ? AND started_at = 0 AND locked != 1 AND quota > 0",
 			userId, UserPlanStatusActive, targetPlan.QueuePosition).
 		Order("queue_position ASC").
 		Find(&queuePlans).Error
@@ -1676,7 +1818,9 @@ func ActivateNextQueuedPlan(userId int) (*UserPlan, error) {
 		return nil, err
 	}
 	// Invalidate cache after successful transaction
-	InvalidateUserPlanCache(userId)
+	if err := InvalidateUserPlanCache(userId); err != nil {
+		return result, err
+	}
 	return result, nil
 }
 
@@ -1769,11 +1913,19 @@ func CompleteCurrentPlan(userId int, completionStatus int) (*UserPlan, error) {
 // CompleteCurrentPlanById transitions only the observed current plan and
 // activates its queued replacement in the same transaction.
 func CompleteCurrentPlanById(userId int, userPlanId int, completionStatus int) (*UserPlan, error) {
+	next, _, err := CompleteCurrentPlanByIdWithResult(userId, userPlanId, completionStatus)
+	return next, err
+}
+
+// CompleteCurrentPlanByIdWithResult also reports whether this call performed
+// the lifecycle transition. Callers use that signal for exactly-once side effects.
+func CompleteCurrentPlanByIdWithResult(userId int, userPlanId int, completionStatus int) (*UserPlan, bool, error) {
 	if userId <= 0 || userPlanId <= 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	var next *UserPlan
+	transitioned := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var current UserPlan
 		findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -1802,6 +1954,7 @@ func CompleteCurrentPlanById(userId int, userPlanId int, completionStatus int) (
 		if result.RowsAffected != 1 {
 			return nil
 		}
+		transitioned = true
 
 		activated, activateErr := activateNextQueuedPlanWithTx(tx, userId)
 		if activateErr != nil {
@@ -1811,22 +1964,34 @@ func CompleteCurrentPlanById(userId int, userPlanId int, completionStatus int) (
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	InvalidateUserPlanCache(userId)
-	return next, nil
+	if transitioned {
+		if err := InvalidateUserPlanCache(userId); err != nil {
+			return next, true, err
+		}
+	}
+	return next, transitioned, nil
 }
 
 // CompleteUserPlanIfDepleted marks the specified user plan as completed (quota exhausted)
 // ONLY if it is still the current active plan and quota <= 0, then activates the next queued plan.
 // This is safer than CompleteCurrentPlan(userId, ...) in concurrent environments because it targets by ID.
 func CompleteUserPlanIfDepleted(userId int, userPlanId int) (*UserPlan, error) {
+	next, _, err := CompleteUserPlanIfDepletedWithResult(userId, userPlanId)
+	return next, err
+}
+
+// CompleteUserPlanIfDepletedWithResult also reports whether this call
+// completed the observed plan, allowing idempotent lifecycle side effects.
+func CompleteUserPlanIfDepletedWithResult(userId int, userPlanId int) (*UserPlan, bool, error) {
 	if userId <= 0 || userPlanId <= 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	var next *UserPlan
+	transitioned := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UnixMilli()
 		var current UserPlan
@@ -1839,6 +2004,9 @@ func CompleteUserPlanIfDepleted(userId int, userPlanId int) (*UserPlan, error) {
 				return nil
 			}
 			return findErr
+		}
+		if current.AutoSwitch != 1 {
+			return nil
 		}
 
 		// Only complete if:
@@ -1861,10 +2029,7 @@ func CompleteUserPlanIfDepleted(userId int, userPlanId int) (*UserPlan, error) {
 			// Not current anymore or not depleted; no-op.
 			return nil
 		}
-		if current.AutoSwitch != 1 {
-			return nil
-		}
-
+		transitioned = true
 		p, err := activateNextQueuedPlanWithTx(tx, userId)
 		if err != nil {
 			return err
@@ -1873,10 +2038,13 @@ func CompleteUserPlanIfDepleted(userId int, userPlanId int) (*UserPlan, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	// Invalidate cache after transaction (even if no next plan).
-	InvalidateUserPlanCache(userId)
-	return next, nil
+	if transitioned {
+		if err := InvalidateUserPlanCache(userId); err != nil {
+			return next, true, err
+		}
+	}
+	return next, transitioned, nil
 }

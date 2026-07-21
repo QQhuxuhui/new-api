@@ -188,7 +188,7 @@ func TestExpireUserPlans_InvalidatesOnlyAffectedUserCaches(t *testing.T) {
 
 	now := time.Now()
 	expired := &UserPlan{
-		UserId: 101, Quota: 100, Status: UserPlanStatusActive, IsCurrent: 1,
+		UserId: 101, Quota: 100, Status: UserPlanStatusActive, IsCurrent: 0,
 		StartedAt: now.Add(-2 * time.Hour).UnixMilli(), ExpiresAt: now.Add(-time.Hour).UnixMilli(),
 	}
 	unexpired := &UserPlan{

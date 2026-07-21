@@ -1,0 +1,39 @@
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-opus-4-6","id":"msg_01CiGHaJJhbSGbNTEYrW9AHa","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":379,"cache_creation_input_tokens":25078,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":25078,"ephemeral_1h_input_tokens":0},"output_tokens":31,"service_tier":"standard","inference_geo":"not_available"}}   }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}       }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user is asking me to directly output the tag they entered. They said not to use any tools.\n\nThe","estimated_tokens":null} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" tag they entered is: <test_c2d35d24166b2073>","estimated_tokens":null}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EtcCCmMIDhgCKkB3KSTV9gDvPLzQ9MetummJ0MsyRcDc94pbGX/bbh8RGVbmOIxZqIoWDV/jtnQj0eO8EJtBHf6mwxGJLWEInjP2Mg9jbGF1ZGUtb3B1cy00LTY4AEIIdGhpbmtpbmcSDIxwwDNR8LBkXs17OhoMVgfb6f6xnherSzs6IjBOS+t/Yw1VHhdKsT0fV9lI2OgIGbQ1hgJOwnY+N0g/oWnOQzcn9bpAFToS0YxsjpAqoQFPooU8TaqjGlDu2O9YvPYOI04pPjAEigqu1ITfCF+1C27DLljeFgyRCJSICtaIc830yQ7RceRIyD2EffWLnBvPIEoB5hBqRJSLuB/3rSSV9PhvhG3+WuecCgpFQGzMCt5ms1rMQCfAtnJgMa/4qlDSSmXfYi0NdFsziU+CGI8RxP6zCvBtKCUTxEUNrMSKXzYFdxMwyear4O2vXlGZxrexJxgB"}  }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0    }
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"你输入的 tag 是：`<test_c2d35d"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"24166b2073>`"}           }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1        }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":379,"cache_creation_input_tokens":25078,"cache_read_input_tokens":0,"output_tokens":85,"output_tokens_details":{"thinking_tokens":54},"iterations":[{"input_tokens":379,"output_tokens":85,"cache_read_input_tokens":0,"cache_creation_input_tokens":25078,"cache_creation":{"ephemeral_5m_input_tokens":25078,"ephemeral_1h_input_tokens":0},"type":"message"}]},"context_management":{"applied_edits":[]}      }
+
+event: message_stop
+data: {"type":"message_stop"     }
+

@@ -1,0 +1,45 @@
+{
+  "model": "claude-opus-4-6",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Perform a web search for the query: AI news 2026-05-30"
+        }
+      ]
+    }
+  ],
+  "system": [
+    {
+      "type": "text",
+      "text": "x-anthropic-billing-header: cc_version=2.1.153.9bd; cc_entrypoint=cli; cch=14953;"
+    },
+    {
+      "type": "text",
+      "text": "You are Claude Code, Anthropic's official CLI for Claude."
+    },
+    {
+      "type": "text",
+      "text": "You are an assistant for performing a web search tool use"
+    }
+  ],
+  "tools": [
+    {
+      "type": "web_search_20250305",
+      "name": "web_search",
+      "max_uses": 8
+    }
+  ],
+  "tool_choice": {
+    "type": "tool",
+    "name": "web_search"
+  },
+  "metadata": {
+    "user_id": "{\"device_id\":\"1c3fa55e4081b6341f86e752973517254c2b34945e022f16137fa6b5061c281c\",\"account_uuid\":\"2630c30e-9084-414c-a66e-02dd741837cf\",\"session_id\":\"036db34e-9856-4956-940b-ae1b0b0db183\"}"
+  },
+  "max_tokens": 64000,
+  "temperature": 1,
+  "stream": true
+}

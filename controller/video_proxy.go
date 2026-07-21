@@ -77,8 +77,7 @@ func VideoProxy(c *gin.Context) {
 	}
 
 	var videoURL string
-	// 使用带拨号时 SSRF 校验的客户端抓取上游视频 URL（含渠道/上游返回的地址）。
-	client := service.GetSSRFProtectedHTTPClient()
+	useProtectedClient := true
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
@@ -127,6 +126,7 @@ func VideoProxy(c *gin.Context) {
 		// Default (Sora, etc.): Use original logic
 		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.TaskID)
 		req.Header.Set("Authorization", "Bearer "+channel.Key)
+		useProtectedClient = false
 	}
 
 	req.URL, err = url.Parse(videoURL)
@@ -141,16 +141,32 @@ func VideoProxy(c *gin.Context) {
 		return
 	}
 
-	// SSRF 防护：请求前校验上游视频 URL
-	if err := service.ValidateSSRFProtectedFetchURL(videoURL); err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Video URL blocked for task %s: %v", taskID, err))
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": gin.H{
-				"message": fmt.Sprintf("request blocked: %v", err),
-				"type":    "server_error",
-			},
-		})
-		return
+	// 同源豁免：视频地址与该渠道管理员配置的 base_url 同主机时视为可信，跳过 SSRF 校验。
+	// 用于内网自建上游（如 adobe2api:6001）——其私网 IP + 非白名单端口会被通用 SSRF 规则拦截。
+	// 仅豁免"host 完全一致"的场景，其余抓取仍走完整 SSRF 防护。
+	if useProtectedClient {
+		if base, parseErr := url.Parse(baseURL); parseErr == nil && base.Host != "" && base.Host == req.URL.Host {
+			useProtectedClient = false
+		}
+	}
+
+	var client *http.Client
+	if useProtectedClient {
+		if err := service.ValidateSSRFProtectedFetchURL(videoURL); err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Video URL blocked for task %s: %v", taskID, err))
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": gin.H{
+					"message": fmt.Sprintf("request blocked: %v", err),
+					"type":    "server_error",
+				},
+			})
+			return
+		}
+		client = service.GetSSRFProtectedHTTPClient()
+	} else {
+		trustedClient := *service.GetHttpClient()
+		trustedClient.CheckRedirect = nil
+		client = &trustedClient
 	}
 
 	resp, err := client.Do(req)

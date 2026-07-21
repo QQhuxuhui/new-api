@@ -906,6 +906,7 @@ func CreateUser(c *gin.Context) {
 type ManageRequest struct {
 	Id     int    `json:"id"`
 	Action string `json:"action"`
+	Reason string `json:"reason"`
 }
 
 // ManageUser Only admin user can do this
@@ -940,9 +941,19 @@ func ManageUser(c *gin.Context) {
 		})
 		return
 	}
+	previousStatus := user.Status
+	statusLifecycleAction := ""
 	switch req.Action {
 	case "disable":
+		if user.Status == common.UserStatusBanned {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "永久封禁用户不能改为临时禁用",
+			})
+			return
+		}
 		user.Status = common.UserStatusDisabled
+		statusLifecycleAction = "disable"
 		if user.Role == common.RoleRootUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -951,7 +962,56 @@ func ManageUser(c *gin.Context) {
 			return
 		}
 	case "enable":
+		if user.Status == common.UserStatusBanned {
+			var latestSnapshot model.UserAssetSnapshot
+			result := model.DB.Where("user_id = ? AND snapshot_type = ?", user.Id, model.SnapshotTypePermanentBan).
+				Order("created_at DESC, id DESC").
+				Limit(1).
+				Find(&latestSnapshot)
+			if result.Error != nil {
+				common.ApiError(c, result.Error)
+				return
+			}
+			if result.RowsAffected == 0 || !latestSnapshot.IsRestored() {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "永久封禁用户必须先通过资产快照恢复",
+				})
+				return
+			}
+		}
 		user.Status = common.UserStatusEnabled
+		statusLifecycleAction = "enable"
+	case "ban":
+		if user.Role == common.RoleRootUser {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法永久封禁超级管理员用户",
+			})
+			return
+		}
+		user.Status = common.UserStatusBanned
+		if previousStatus != common.UserStatusBanned {
+			statusLifecycleAction = "ban"
+		} else {
+			var activePlans int64
+			if err := model.DB.Model(&model.UserPlan{}).
+				Where("user_id = ? AND status = ?", user.Id, model.UserPlanStatusActive).
+				Count(&activePlans).Error; err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			var latestSnapshot model.UserAssetSnapshot
+			result := model.DB.Where("user_id = ? AND snapshot_type = ?", user.Id, model.SnapshotTypePermanentBan).
+				Order("created_at DESC, id DESC").Limit(1).Find(&latestSnapshot)
+			if result.Error != nil {
+				common.ApiError(c, result.Error)
+				return
+			}
+			if activePlans > 0 || result.RowsAffected == 0 || latestSnapshot.IsRestored() {
+				statusLifecycleAction = "ban"
+			}
+		}
 	case "delete":
 		if user.Role == common.RoleRootUser {
 			c.JSON(http.StatusOK, gin.H{
@@ -999,11 +1059,43 @@ func ManageUser(c *gin.Context) {
 			return
 		}
 		user.Role = common.RoleCommonUser
+	default:
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的操作",
+		})
+		return
 	}
 
 	if err := user.Update(false); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if statusLifecycleAction != "" {
+		adminId := c.GetInt("id")
+		adminUsername := c.GetString("username")
+		reason := req.Reason
+		if reason == "" {
+			reason = "管理员账户状态操作"
+		}
+		var lifecycleErr error
+		switch statusLifecycleAction {
+		case "disable":
+			lifecycleErr = service.OnTemporaryBan(user.Id, adminId, adminUsername, reason, c.ClientIP())
+		case "enable":
+			lifecycleErr = service.OnUnban(user.Id, adminId, adminUsername, c.ClientIP())
+		case "ban":
+			lifecycleErr = service.OnPermanentBan(user.Id, adminId, adminUsername, reason, c.ClientIP())
+		}
+		if lifecycleErr != nil {
+			user.Status = previousStatus
+			if rollbackErr := user.Update(false); rollbackErr != nil {
+				common.ApiError(c, fmt.Errorf("套餐状态处理失败: %v；用户状态回滚失败: %w", lifecycleErr, rollbackErr))
+				return
+			}
+			common.ApiError(c, lifecycleErr)
+			return
+		}
 	}
 	clearUser := model.User{
 		Role:   user.Role,

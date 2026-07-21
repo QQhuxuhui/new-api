@@ -1,0 +1,114 @@
+event: message_start
+data: {"message":{"content":[],"id":"req_vrtx_011CbXnDPxJrV1QMDBZab6CQ","model":"claude-opus-4-6","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"input_tokens":25154,"output_tokens":6}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"thinking":"","type":"thinking"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"thinking":"The user is asking me about","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" a PDF but","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" hasn","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":"'t provided any PDF","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" file","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" path","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" or content. They also","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" explicitly","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" say","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" \"Do not use any tools.\"","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" Without","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" a","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" PDF to","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" read","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" or","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" any","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" context","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" about what PDF","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" they're referring to, I cannot determine","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" what text it","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" contains. I need","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" to ask the","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":" user for clar","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"thinking":"ification.","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"signature":"RXVvRENtVUlEaEFDR0FJcVFJUlRlNTNPdXIxYXp2eEZJN1VTUEExWnJYY0w3ZFYyYXh3RWNnYmk3d3RRQ2FRb2NZU1pJdHBRL0NUZklOcjBsL1J5U3Y3Wno2Z2tXNFVOWDQ3QWhnVXlEMk5zWVhWa1pTMXZjSFZ6TFRRdE5qZ0FRZ2gwYUdsdWEybHVaeElNekFQVkNhOHNaNGVSU2F1VkdneTZ1UisvWlgxSzYrdTVaVndpTUsyR2pYV3NOeFhyd0NneDAwZzN6ZjZMR0NIWHpDZGJxQjZSemxQNjI1YWErR2hjRENmMlhqcnQ0bFdYTHVZZWt5cXlBaXhnWUZZam5namltbEpmUjVqUm1vdm1MY3JlaHFOcjZhSFlWVnYvQ3RLODJqVnh3OW9OWk9oc09sRFRDLzV4L1NlbVA0cGlhR0ZZbUpCWXhwUzduQUNUbWZMaW1YemFqNTVVVXBqc2FQdVRuY2hqbmlOY3ROcmkwakd6MVQzc2l2Qlhma0VlUzlDbEMvU3ZKK05ieFdlL0phV0xiWUNmMzBSSGtLS01vOWVNZmZCRGFveEFGd3QxZVFxWW1jL1NLWXk3K2RqR3RYV1JxeWlqNWxITjExczdibTBJSm16VWxUWXFpMHNEV1ZuQWltc3dmR0xZZndGZHZUZVkzVXpJMFlmazNJRWdkZ0JhV0gxdml4aHROeG9UK1NWRzdOUURXeFJRRHVzcTFjcmg4UERCbUdMRVA5WmpVc241WC9VbjNIUkFOKzBpY1Nqd2YySVJPOXlNZSs2S0pZd0ZiRVhmRm9McFUzZWxsZm1KRjJaeWRISGFHV1MwaUt1bEZrbUhIbnpycUx2MnAwSVRzL29Cc1VCdktDMjdraGdC","type":"signature_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":1,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"I don","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"'t see any PDF file referenced","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" in your message. Could you provide","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" the path to the PDF you'd like","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":" me to read","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"?","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":1,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"end_turn","stop_sequence":null},"type":"message_delta","usage":{"input_tokens":25154,"output_tokens":102}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

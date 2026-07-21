@@ -68,12 +68,17 @@ const CurrentPlanHero = ({
   const autoPending = pending(pendingAction, plan.id, 'auto-switch');
   const clearPending = pending(pendingAction, plan.id, 'clear-pin');
   const actionBusy = Boolean(pendingAction);
+  const autoSwitchEnabled = plan.auto_switch === 1;
   const clearPinHelp =
     plan.locked === 1
       ? plan.locked_reason || t('该套餐由管理员锁定，无法自行解锁')
-      : t(
-          '系统不会自动升级更换；额度用尽或故障仍自动处理。点击「解除」恢复自动调度，会一并开启自动切换。',
-        );
+      : autoSwitchEnabled
+        ? t(
+            '系统不会自动升级更换；额度用尽或故障仍自动处理。点击「解除」恢复自动调度，会一并开启自动切换。',
+          )
+        : t(
+            '系统已暂停自动升级、额度耗尽救援和渠道故障转移。点击「解除」将开启自动切换并恢复自动调度。',
+          );
 
   return (
     <Card className='!rounded-lg border border-semi-color-border shadow-sm'>
@@ -187,7 +192,7 @@ const CurrentPlanHero = ({
               tabIndex={!canToggle ? 0 : undefined}
             >
               <Switch
-                checked={plan.auto_switch === 1}
+                checked={autoSwitchEnabled}
                 disabled={!canToggle || (actionBusy && !autoPending)}
                 loading={autoPending}
                 aria-label={t('自动切换')}

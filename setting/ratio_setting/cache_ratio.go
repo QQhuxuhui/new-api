@@ -85,6 +85,33 @@ var defaultCacheRatio = map[string]float64{
 	"claude-opus-4-8-low":                 0.1,
 }
 
+var cacheRatioUpgradeDefaultKeys = []string{
+	"gpt-5.5",
+	"gpt-5.6-sol",
+	"gpt-5.6-terra",
+	"gpt-5.6-luna",
+	"claude-opus-4-6",
+	"claude-opus-4-6-thinking",
+	"claude-opus-4-6-max",
+	"claude-opus-4-6-high",
+	"claude-opus-4-6-medium",
+	"claude-opus-4-6-low",
+	"claude-opus-4-7",
+	"claude-opus-4-7-thinking",
+	"claude-opus-4-7-max",
+	"claude-opus-4-7-xhigh",
+	"claude-opus-4-7-high",
+	"claude-opus-4-7-medium",
+	"claude-opus-4-7-low",
+	"claude-opus-4-8",
+	"claude-opus-4-8-thinking",
+	"claude-opus-4-8-max",
+	"claude-opus-4-8-xhigh",
+	"claude-opus-4-8-high",
+	"claude-opus-4-8-medium",
+	"claude-opus-4-8-low",
+}
+
 var defaultCreateCacheRatio = map[string]float64{
 	// GPT-5.6 及以后引入显式 prompt cache 断点，缓存写入按 1.25x 输入价计费
 	// （OpenAI 官方，与 Claude 相同倍率；gpt-5.5 及更早无写入缓存计费）
@@ -165,6 +192,24 @@ func UpdateCacheRatioByJSONString(jsonStr string) error {
 		InvalidateExposedDataCache()
 	}
 	return err
+}
+
+func UpdateCacheRatioByJSONStringWithUpgradeDefaults(jsonStr string) error {
+	mergedRatios := make(map[string]float64)
+	if err := json.Unmarshal([]byte(jsonStr), &mergedRatios); err != nil {
+		return err
+	}
+	for _, model := range cacheRatioUpgradeDefaultKeys {
+		if _, exists := mergedRatios[model]; !exists {
+			mergedRatios[model] = defaultCacheRatio[model]
+		}
+	}
+
+	cacheRatioMapMutex.Lock()
+	cacheRatioMap = mergedRatios
+	cacheRatioMapMutex.Unlock()
+	InvalidateExposedDataCache()
+	return nil
 }
 
 // GetCacheRatio returns the cache ratio for a model

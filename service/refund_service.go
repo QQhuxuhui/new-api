@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/model"
+	"gorm.io/gorm"
 )
 
 // RefundService handles plan refund operations
@@ -51,13 +52,10 @@ func RequestRefund(userPlanId int, userId int) error {
 
 	// Update refund status
 	now := time.Now().UnixMilli()
-	return model.DB.Model(&model.UserPlan{}).
-		Where("id = ?", userPlanId).
-		Updates(map[string]interface{}{
-			"refund_status":       model.RefundStatusRequested,
-			"refund_requested_at": now,
-			"updated_at":          now,
-		}).Error
+	return model.UpdateUserPlanFields(userPlanId, map[string]interface{}{
+		"refund_status":       model.RefundStatusRequested,
+		"refund_requested_at": now,
+	})
 }
 
 // ProcessRefund handles admin approval/rejection of refund requests
@@ -94,37 +92,45 @@ func ApproveRefund(userPlanId int, adminId int, adminUsername string, ipAddress 
 
 	now := time.Now().UnixMilli()
 
-	// Update refund status and clear queue position (keep record for audit)
-	err = model.DB.Model(&model.UserPlan{}).
-		Where("id = ?", userPlanId).
-		Updates(map[string]interface{}{
-			"refund_status":       model.RefundStatusRefunded,
-			"refund_processed_at": now,
-			"refund_processed_by": adminId,
-			"status":              model.UserPlanStatusDisabled,
-			"queue_position":      0, // Remove from queue but keep record
-			"updated_at":          now,
-		}).Error
-	if err != nil {
-		return nil, err
-	}
+	// Update the refunded row and compact the remaining queue atomically.
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		update := tx.Model(&model.UserPlan{}).
+			Where("id = ? AND refund_status = ?", userPlanId, model.RefundStatusRequested).
+			Updates(map[string]interface{}{
+				"refund_status":       model.RefundStatusRefunded,
+				"refund_processed_at": now,
+				"refund_processed_by": adminId,
+				"status":              model.UserPlanStatusDisabled,
+				"queue_position":      0,
+				"updated_at":          now,
+			})
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected != 1 {
+			return errors.New("退款状态已变化，请重试")
+		}
 
-	// Reorder remaining queue positions for this user
-	// (Don't delete the record - keep for audit trail)
-	go func() {
-		// Recalculate queue positions for the user
 		var plans []*model.UserPlan
-		if err := model.DB.Where("user_id = ? AND is_current = 0 AND status = ?", userPlan.UserId, model.UserPlanStatusActive).
-			Order("purchase_order ASC").
-			Find(&plans).Error; err == nil {
-			for i, plan := range plans {
-				newPos := i + 1
-				if plan.QueuePosition != newPos {
-					model.DB.Model(&model.UserPlan{}).Where("id = ?", plan.Id).Update("queue_position", newPos)
+		if err := tx.Where("user_id = ? AND is_current = 0 AND status = ? AND queue_position > 0", userPlan.UserId, model.UserPlanStatusActive).
+			Order("queue_position ASC, purchase_order ASC, id ASC").
+			Find(&plans).Error; err != nil {
+			return err
+		}
+		for i, queuedPlan := range plans {
+			newPos := i + 1
+			if queuedPlan.QueuePosition != newPos {
+				if err := tx.Model(&model.UserPlan{}).Where("id = ?", queuedPlan.Id).
+					Update("queue_position", newPos).Error; err != nil {
+					return err
 				}
 			}
 		}
-	}()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	// Log admin action
 	_ = model.LogAdminAction(
@@ -149,7 +155,9 @@ func ApproveRefund(userPlanId int, adminId int, adminUsername string, ipAddress 
 	)
 
 	// Invalidate user plan cache
-	model.InvalidateUserPlanCache(userPlan.UserId)
+	if err := model.InvalidateUserPlanCache(userPlan.UserId); err != nil {
+		return nil, err
+	}
 
 	return &RefundResult{
 		Success: true,
@@ -177,15 +185,12 @@ func RejectRefund(userPlanId int, adminId int, adminUsername string, reason stri
 	now := time.Now().UnixMilli()
 
 	// Update refund status
-	err = model.DB.Model(&model.UserPlan{}).
-		Where("id = ?", userPlanId).
-		Updates(map[string]interface{}{
-			"refund_status":        model.RefundStatusRejected,
-			"refund_processed_at":  now,
-			"refund_processed_by":  adminId,
-			"refund_reject_reason": reason,
-			"updated_at":           now,
-		}).Error
+	err = model.UpdateUserPlanFields(userPlanId, map[string]interface{}{
+		"refund_status":        model.RefundStatusRejected,
+		"refund_processed_at":  now,
+		"refund_processed_by":  adminId,
+		"refund_reject_reason": reason,
+	})
 	if err != nil {
 		return err
 	}

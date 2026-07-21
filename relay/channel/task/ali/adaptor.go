@@ -136,7 +136,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	}
 	aliReq, err := a.convertToAliRequest(info, taskReq)
 	if err != nil {
-		return service.TaskErrorWrapper(err, "convert_to_ali_request_failed", http.StatusInternalServerError)
+		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 	}
 	a.aliReq = aliReq
 	logger.LogJson(c, "ali video request body", aliReq)
@@ -342,9 +342,73 @@ func normalizeWan27I2VInput(aliReq *AliVideoRequest, req relaycommon.TaskSubmitR
 	return nil
 }
 
+func validateAliVideoRequest(aliReq *AliVideoRequest, req relaycommon.TaskSubmitReq) error {
+	if aliReq.Parameters == nil {
+		return errors.New("parameters must not be null")
+	}
+	if aliReq.Parameters.Duration <= 0 {
+		return fmt.Errorf("duration must be greater than zero: %d", aliReq.Parameters.Duration)
+	}
+
+	if aliReq.Parameters.Size != "" {
+		if _, err := sizeToResolution(aliReq.Parameters.Size); err != nil {
+			return err
+		}
+	} else {
+		resolution := strings.ToUpper(strings.TrimSpace(aliReq.Parameters.Resolution))
+		if !strings.HasSuffix(resolution, "P") {
+			resolution += "P"
+		}
+		if !lo.Contains([]string{"480P", "720P", "1080P"}, resolution) {
+			return fmt.Errorf("invalid resolution: %s", aliReq.Parameters.Resolution)
+		}
+		aliReq.Parameters.Resolution = resolution
+	}
+
+	if err := normalizeWan27I2VInput(aliReq, req); err != nil {
+		return err
+	}
+	if !isWan27I2VModel(aliReq.Model) {
+		return nil
+	}
+
+	validMediaTypes := map[string]struct{}{
+		"first_frame":   {},
+		"last_frame":    {},
+		"driving_audio": {},
+	}
+	seenMediaTypes := make(map[string]struct{}, len(aliReq.Input.Media))
+	hasFirstFrame := false
+	for index := range aliReq.Input.Media {
+		mediaType := strings.TrimSpace(aliReq.Input.Media[index].Type)
+		mediaURL := strings.TrimSpace(aliReq.Input.Media[index].URL)
+		if _, ok := validMediaTypes[mediaType]; !ok {
+			return fmt.Errorf("invalid input.media[%d].type: %s", index, mediaType)
+		}
+		if _, exists := seenMediaTypes[mediaType]; exists {
+			return fmt.Errorf("duplicate input.media type: %s", mediaType)
+		}
+		if mediaURL == "" {
+			return fmt.Errorf("input.media[%d].url is required", index)
+		}
+		seenMediaTypes[mediaType] = struct{}{}
+		hasFirstFrame = hasFirstFrame || mediaType == "first_frame"
+		aliReq.Input.Media[index].Type = mediaType
+		aliReq.Input.Media[index].URL = mediaURL
+	}
+	if !hasFirstFrame {
+		return errors.New("wan2.7-i2v requires a first_frame media entry")
+	}
+	return nil
+}
+
 func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relaycommon.TaskSubmitReq) (*AliVideoRequest, error) {
+	upstreamModel := req.Model
+	if info != nil && info.ChannelMeta != nil && info.IsModelMapped {
+		upstreamModel = info.UpstreamModelName
+	}
 	aliReq := &AliVideoRequest{
-		Model: req.Model,
+		Model: upstreamModel,
 		Input: AliVideoInput{
 			Prompt: req.Prompt,
 			ImgURL: firstTaskImage(req),
@@ -358,7 +422,7 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 	// 处理分辨率映射
 	if req.Size != "" {
 		// text to video size must be contained *
-		if strings.Contains(req.Model, "t2v") && !strings.Contains(req.Size, "*") {
+		if strings.Contains(upstreamModel, "t2v") && !strings.Contains(req.Size, "*") {
 			return nil, fmt.Errorf("invalid size: %s, example: %s", req.Size, "1920*1080")
 		}
 		if strings.Contains(req.Size, "*") {
@@ -373,25 +437,29 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 		}
 	} else {
 		// 根据模型设置默认分辨率
-		if strings.Contains(req.Model, "t2v") { // image to video
-			if strings.HasPrefix(req.Model, "wan2.5") {
+		if strings.Contains(upstreamModel, "t2v") { // image to video
+			if strings.HasPrefix(upstreamModel, "wan2.5") {
 				aliReq.Parameters.Size = "1920*1080"
-			} else if strings.HasPrefix(req.Model, "wan2.2") {
+			} else if strings.HasPrefix(upstreamModel, "wan2.2") {
 				aliReq.Parameters.Size = "1920*1080"
 			} else {
 				aliReq.Parameters.Size = "1280*720"
 			}
 		} else {
-			if strings.HasPrefix(req.Model, "wan2.5") {
+			if strings.HasPrefix(upstreamModel, "wan2.5") {
 				aliReq.Parameters.Resolution = "1080P"
-			} else if strings.HasPrefix(req.Model, "wan2.2-i2v-flash") {
+			} else if strings.HasPrefix(upstreamModel, "wan2.2-i2v-flash") {
 				aliReq.Parameters.Resolution = "720P"
-			} else if strings.HasPrefix(req.Model, "wan2.2-i2v-plus") {
+			} else if strings.HasPrefix(upstreamModel, "wan2.2-i2v-plus") {
 				aliReq.Parameters.Resolution = "1080P"
 			} else {
 				aliReq.Parameters.Resolution = "720P"
 			}
 		}
+	}
+
+	if req.Duration < 0 {
+		return nil, fmt.Errorf("duration must not be negative: %d", req.Duration)
 	}
 
 	// 处理时长
@@ -401,9 +469,11 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 		seconds, err := strconv.Atoi(req.Seconds)
 		if err != nil {
 			return nil, errors.Wrap(err, "convert seconds to int failed")
-		} else {
-			aliReq.Parameters.Duration = seconds
 		}
+		if seconds <= 0 {
+			return nil, fmt.Errorf("seconds must be greater than zero: %d", seconds)
+		}
+		aliReq.Parameters.Duration = seconds
 	} else {
 		aliReq.Parameters.Duration = 5 // 默认5秒
 	}
@@ -420,8 +490,11 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 		}
 	}
 
-	if aliReq.Model != req.Model {
+	if aliReq.Model != upstreamModel {
 		return nil, errors.New("can't change model with metadata")
+	}
+	if err := validateAliVideoRequest(aliReq, req); err != nil {
+		return nil, err
 	}
 
 	info.PriceData.OtherRatios = map[string]float64{
@@ -434,10 +507,6 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 	}
 	for s, f := range ratios {
 		info.PriceData.OtherRatios[s] = f
-	}
-
-	if err := normalizeWan27I2VInput(aliReq, req); err != nil {
-		return nil, err
 	}
 
 	return aliReq, nil

@@ -110,6 +110,7 @@ const CompactPlanCard = ({
 
   return (
     <Card
+      data-plan-section={section}
       className={[
         '!rounded-lg border border-semi-color-border shadow-sm',
         'min-h-[210px] transition-colors duration-200 hover:border-semi-color-primary',
@@ -117,6 +118,14 @@ const CompactPlanCard = ({
         muted ? 'bg-semi-color-fill-0' : '',
       ].join(' ')}
       bodyStyle={{ padding: 16 }}
+      style={
+        muted
+          ? {
+              backgroundColor: 'var(--semi-color-fill-0)',
+              borderColor: 'var(--semi-color-border)',
+            }
+          : undefined
+      }
     >
       <article className='flex min-h-[178px] flex-col'>
         <div
@@ -139,6 +148,9 @@ const CompactPlanCard = ({
                 heading={6}
                 className='m-0 truncate'
                 title={planDisplayName(plan)}
+                style={
+                  muted ? { color: 'var(--semi-color-text-2)' } : undefined
+                }
               >
                 {planDisplayName(plan) || t('未知套餐')}
               </Title>
@@ -176,7 +188,12 @@ const CompactPlanCard = ({
               <span>{renderQuota(quota.remaining)}</span>
               <span>{renderQuota(quota.total)}</span>
             </div>
-            <Progress percent={quota.remainingPercent} showInfo={false} />
+            <Progress
+              percent={quota.remainingPercent}
+              showInfo={false}
+              stroke={muted ? 'var(--semi-color-text-3)' : undefined}
+              orbitStroke={muted ? 'var(--semi-color-fill-2)' : undefined}
+            />
             <Text
               size='small'
               type={

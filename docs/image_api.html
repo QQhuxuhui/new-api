@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image Generation API</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #333; min-height: 100vh; }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+  h1 { text-align: center; margin-bottom: 24px; font-size: 24px; color: #1a1a1a; }
+
+  .card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .card-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #555; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+
+  .form-row { display: flex; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+  .form-group { display: flex; flex-direction: column; flex: 1; min-width: 200px; }
+  .form-group.full { flex: 1 1 100%; }
+  label { font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #555; }
+  input, select, textarea {
+    padding: 8px 12px; border: 1px solid #d0d5dd; border-radius: 8px; font-size: 14px;
+    transition: border-color 0.2s; outline: none; font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.15); }
+  textarea { resize: vertical; min-height: 60px; }
+
+  .size-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .size-btn {
+    padding: 6px 16px; border: 2px solid #d0d5dd; border-radius: 8px; background: #fff;
+    cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.15s; color: #555;
+  }
+  .size-btn:hover { border-color: #4f8cff; color: #4f8cff; }
+  .size-btn.active { border-color: #4f8cff; background: #4f8cff; color: #fff; }
+
+  .btn-send {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 32px; background: #4f8cff; color: #fff; border: none; border-radius: 8px;
+    font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s;
+  }
+  .btn-send:hover { background: #3a6fd8; }
+  .btn-send:disabled { background: #a0b4d0; cursor: not-allowed; }
+  .btn-row { display: flex; gap: 12px; align-items: center; }
+
+  .spinner { display: none; width: 18px; height: 18px; border: 3px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .result-image { max-width: 100%; border-radius: 8px; border: 1px solid #e0e0e0; }
+  .result-text { background: #f7f8fa; border-radius: 8px; padding: 16px; font-size: 14px; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; border: 1px solid #e8e8e8; }
+  .result-error { background: #fff0f0; border: 1px solid #ffcccc; color: #cc0000; border-radius: 8px; padding: 16px; font-size: 14px; }
+
+  .history { display: flex; flex-direction: column; gap: 16px; }
+  .history-item { border: 1px solid #e8e8e8; border-radius: 10px; padding: 16px; background: #fafbfc; }
+  .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px; }
+  .history-tag { font-size: 12px; padding: 2px 10px; border-radius: 12px; background: #e8f0fe; color: #3a6fd8; font-weight: 600; }
+  .history-time { font-size: 12px; color: #999; }
+  .history-prompt { font-size: 13px; color: #666; margin-bottom: 10px; font-style: italic; }
+
+  .download-btn {
+    display: inline-block; margin-top: 8px; padding: 4px 14px; font-size: 12px;
+    background: #52c41a; color: #fff; border: none; border-radius: 6px; cursor: pointer; text-decoration: none;
+  }
+  .download-btn:hover { background: #3fad09; }
+
+  /* Reference images */
+  .ref-images-area { margin-top: 8px; }
+  .ref-images-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+  .ref-thumb-wrap {
+    position: relative; width: 80px; height: 80px; border-radius: 8px; overflow: hidden;
+    border: 2px solid #d0d5dd; flex-shrink: 0;
+  }
+  .ref-thumb-wrap img { width: 100%; height: 100%; object-fit: cover; }
+  .ref-thumb-remove {
+    position: absolute; top: 2px; right: 2px; width: 20px; height: 20px;
+    background: rgba(0,0,0,0.55); color: #fff; border: none; border-radius: 50%;
+    font-size: 14px; line-height: 20px; text-align: center; cursor: pointer;
+  }
+  .ref-thumb-remove:hover { background: rgba(200,0,0,0.8); }
+
+  .ref-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ref-btn {
+    padding: 5px 14px; border: 1px dashed #aab; border-radius: 8px; background: #fafbfc;
+    cursor: pointer; font-size: 13px; color: #555; transition: all 0.15s;
+  }
+  .ref-btn:hover { border-color: #4f8cff; color: #4f8cff; }
+
+  /* History use-as-ref button */
+  .use-ref-btn {
+    display: inline-block; margin-top: 8px; margin-left: 8px; padding: 4px 14px; font-size: 12px;
+    background: #4f8cff; color: #fff; border: none; border-radius: 6px; cursor: pointer;
+  }
+  .use-ref-btn:hover { background: #3a6fd8; }
+
+  /* Modal for picking history images */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100;
+    justify-content: center; align-items: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    background: #fff; border-radius: 14px; padding: 24px; max-width: 600px; width: 90%;
+    max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+  }
+  .modal-title { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
+  .modal-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+  .modal-thumb {
+    width: 100px; height: 100px; border-radius: 8px; overflow: hidden; cursor: pointer;
+    border: 3px solid transparent; transition: border-color 0.15s; flex-shrink: 0;
+  }
+  .modal-thumb:hover { border-color: #4f8cff; }
+  .modal-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .modal-empty { color: #999; font-size: 14px; padding: 20px 0; }
+  .modal-close {
+    margin-top: 14px; padding: 6px 20px; background: #eee; border: none; border-radius: 8px;
+    cursor: pointer; font-size: 13px;
+  }
+  .modal-close:hover { background: #ddd; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Image Generation API Tester</h1>
+
+  <!-- Config -->
+  <div class="card">
+    <div class="card-title">API 配置</div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <label>API Key</label>
+        <input id="apiKey" type="password" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+      </div>
+      <div class="form-group" style="flex:2">
+        <label>Model</label>
+        <input id="model" value="gemini-3.1-flash-image-preview" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Config -->
+  <div class="card">
+    <div class="card-title">图片配置</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>图片尺寸</label>
+        <div class="size-btns" id="sizeBtns">
+          <button class="size-btn active" data-size="">默认</button>
+          <button class="size-btn" data-size="512">512</button>
+          <button class="size-btn" data-size="1K">1K</button>
+          <button class="size-btn" data-size="2K">2K</button>
+          <button class="size-btn" data-size="4K">4K</button>
+        </div>
+      </div>
+      <div class="form-group" style="flex: 0 0 180px">
+        <label>宽高比 (可选)</label>
+        <select id="aspectRatio">
+          <option value="">不指定</option>
+          <option value="1:1">1:1</option>
+          <option value="16:9">16:9</option>
+          <option value="9:16">9:16</option>
+          <option value="4:3">4:3</option>
+          <option value="3:4">3:4</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reference Images -->
+  <div class="card">
+    <div class="card-title">参考图 (图生图，可选)</div>
+    <div class="ref-actions">
+      <label class="ref-btn" id="uploadRefBtn">
+        + 本地上传
+        <input type="file" id="refFileInput" accept="image/*" multiple hidden />
+      </label>
+      <button class="ref-btn" id="pickHistoryBtn">+ 从历史结果选取</button>
+    </div>
+    <div class="ref-images-list" id="refImagesList"></div>
+  </div>
+
+  <!-- Prompt -->
+  <div class="card">
+    <div class="card-title">提示词</div>
+    <div class="form-row">
+      <div class="form-group full">
+        <textarea id="prompt" rows="3" placeholder="画一只可爱的橘猫，白色背景">画一只可爱的橘猫，白色背景</textarea>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-send" id="sendBtn" onclick="sendRequest()">
+        <span class="spinner" id="spinner"></span>
+        发送请求
+      </button>
+      <span id="statusText" style="font-size:13px;color:#999;"></span>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div class="card" id="resultCard" style="display:none;">
+    <div class="card-title">结果</div>
+    <div class="history" id="history"></div>
+  </div>
+</div>
+
+<!-- Modal: pick from history -->
+<div class="modal-overlay" id="historyModal">
+  <div class="modal-box">
+    <div class="modal-title">选择历史结果图片</div>
+    <div class="modal-grid" id="historyModalGrid"></div>
+    <button class="modal-close" onclick="closeHistoryModal()">关闭</button>
+  </div>
+</div>
+
+<script>
+const API_URL = 'https://sparkcode.top/v1/chat/completions';
+const MAX_TOKENS = 4096;
+
+// ---- State ----
+let refImages = [];       // array of data-url strings
+let historyImages = [];   // array of data-url strings from results
+
+// ---- Size buttons ----
+document.getElementById('sizeBtns').addEventListener('click', e => {
+  const btn = e.target.closest('.size-btn');
+  if (!btn) return;
+  document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+});
+
+function getSelectedSize() {
+  const active = document.querySelector('.size-btn.active');
+  return active ? active.dataset.size : '';
+}
+
+function getSizeLabel() {
+  const size = getSelectedSize();
+  const aspect = document.getElementById('aspectRatio').value;
+  let label = size || '默认';
+  if (aspect) label += ' / ' + aspect;
+  return label;
+}
+
+// ---- Reference image management ----
+document.getElementById('refFileInput').addEventListener('change', e => {
+  Array.from(e.target.files).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = ev => { addRefImage(ev.target.result); };
+    reader.readAsDataURL(file);
+  });
+  e.target.value = '';
+});
+
+document.getElementById('pickHistoryBtn').addEventListener('click', openHistoryModal);
+
+function addRefImage(dataUrl) {
+  refImages.push(dataUrl);
+  renderRefImages();
+}
+
+function removeRefImage(idx) {
+  refImages.splice(idx, 1);
+  renderRefImages();
+}
+
+function renderRefImages() {
+  const list = document.getElementById('refImagesList');
+  list.innerHTML = '';
+  refImages.forEach((url, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ref-thumb-wrap';
+    wrap.innerHTML = `<img src="${url}" /><button class="ref-thumb-remove" title="移除">&times;</button>`;
+    wrap.querySelector('.ref-thumb-remove').addEventListener('click', () => removeRefImage(i));
+    list.appendChild(wrap);
+  });
+}
+
+// ---- History modal ----
+function openHistoryModal() {
+  const grid = document.getElementById('historyModalGrid');
+  grid.innerHTML = '';
+  if (historyImages.length === 0) {
+    grid.innerHTML = '<div class="modal-empty">暂无历史图片</div>';
+  } else {
+    historyImages.forEach(url => {
+      const thumb = document.createElement('div');
+      thumb.className = 'modal-thumb';
+      thumb.innerHTML = `<img src="${url}" />`;
+      thumb.addEventListener('click', () => {
+        addRefImage(url);
+        closeHistoryModal();
+      });
+      grid.appendChild(thumb);
+    });
+  }
+  document.getElementById('historyModal').classList.add('show');
+}
+
+function closeHistoryModal() {
+  document.getElementById('historyModal').classList.remove('show');
+}
+
+document.getElementById('historyModal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeHistoryModal();
+});
+
+// ---- Use-as-ref from history item ----
+function useAsRef(dataUrl) {
+  addRefImage(dataUrl);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ---- Build request ----
+function buildRequestBody() {
+  const model = document.getElementById('model').value.trim();
+  const prompt = document.getElementById('prompt').value.trim();
+  const size = getSelectedSize();
+  const aspect = document.getElementById('aspectRatio').value;
+
+  // Build message content
+  let content;
+  if (refImages.length > 0) {
+    // Multimodal: images + text
+    content = [];
+    refImages.forEach(dataUrl => {
+      content.push({ type: 'image_url', image_url: { url: dataUrl } });
+    });
+    content.push({ type: 'text', text: prompt });
+  } else {
+    content = prompt;
+  }
+
+  const body = {
+    model,
+    messages: [{ role: 'user', content }],
+    max_tokens: MAX_TOKENS
+  };
+
+  if (size || aspect) {
+    const imageConfig = {};
+    if (size) imageConfig.image_size = size;
+    if (aspect) imageConfig.aspect_ratio = aspect;
+    body.extra_body = { google: { image_config: imageConfig } };
+  }
+
+  return body;
+}
+
+// ---- Send request ----
+async function sendRequest() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!apiKey) { alert('请填写 API Key'); return; }
+
+  const btn = document.getElementById('sendBtn');
+  const spinner = document.getElementById('spinner');
+  const statusText = document.getElementById('statusText');
+
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
+  statusText.textContent = '请求中…';
+
+  const body = buildRequestBody();
+  const startTime = Date.now();
+
+  try {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey
+      },
+      body: JSON.stringify(body)
+    });
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const data = await resp.json();
+    statusText.textContent = `完成 (${elapsed}s)`;
+    addResult(data, body, elapsed);
+  } catch (err) {
+    statusText.textContent = '请求失败';
+    addError(err.message);
+  } finally {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+  }
+}
+
+// ---- Extract image data url from response ----
+function extractImageDataUrl(data) {
+  const content = data.choices?.[0]?.message?.content || '';
+
+  // markdown image with base64
+  const imgMatch = content.match(/!\[.*?\]\(data:image\/(png|jpeg|webp|gif);base64,([^)]+)\)/);
+  if (imgMatch) return `data:image/${imgMatch[1]};base64,${imgMatch[2]}`;
+
+  // raw data url
+  const rawMatch = content.match(/^data:image\/(png|jpeg|webp|gif);base64,(.+)$/s);
+  if (rawMatch) return `data:image/${rawMatch[1]};base64,${rawMatch[2]}`;
+
+  // inline_data in parts
+  const parts = data.choices?.[0]?.message?.parts || [];
+  const inlinePart = parts.find(p => p.inline_data);
+  if (inlinePart) {
+    const mime = inlinePart.inline_data.mime_type || 'image/png';
+    return `data:${mime};base64,${inlinePart.inline_data.data}`;
+  }
+
+  return null;
+}
+
+// ---- Display results ----
+function addResult(data, reqBody, elapsed) {
+  const card = document.getElementById('resultCard');
+  card.style.display = '';
+  const history = document.getElementById('history');
+  const item = document.createElement('div');
+  item.className = 'history-item';
+
+  const now = new Date().toLocaleTimeString('zh-CN');
+  const sizeLabel = getSizeLabel();
+  const promptContent = reqBody.messages[0].content;
+  const promptText = typeof promptContent === 'string'
+    ? promptContent
+    : (promptContent.find(p => p.type === 'text')?.text || '');
+  const hasRef = typeof promptContent !== 'string';
+
+  if (data.error) {
+    item.innerHTML = `
+      <div class="history-header">
+        <span class="history-tag">${sizeLabel}</span>
+        ${hasRef ? '<span class="history-tag" style="background:#fff3e0;color:#e65100;">图生图</span>' : ''}
+        <span class="history-time">${now} · ${elapsed}s</span>
+      </div>
+      <div class="history-prompt">${escapeHtml(promptText)}</div>
+      <div class="result-error">Error: ${escapeHtml(JSON.stringify(data.error, null, 2))}</div>
+    `;
+  } else {
+    const content = data.choices?.[0]?.message?.content || '';
+    const dataUrl = extractImageDataUrl(data);
+
+    let mediaHtml = '';
+    if (dataUrl) {
+      historyImages.push(dataUrl);
+      mediaHtml = `<img class="result-image" src="${dataUrl}" />`
+        + downloadLink(dataUrl)
+        + `<button class="use-ref-btn" onclick="useAsRef(historyImages[${historyImages.length - 1}])">用作参考图</button>`;
+    } else {
+      mediaHtml = `<div class="result-text">${escapeHtml(content)}</div>`;
+    }
+
+    const contentLen = content.length;
+    item.innerHTML = `
+      <div class="history-header">
+        <span class="history-tag">${sizeLabel}</span>
+        ${hasRef ? '<span class="history-tag" style="background:#fff3e0;color:#e65100;">图生图</span>' : ''}
+        <span class="history-time">${now} · ${elapsed}s · content长度: ${contentLen}</span>
+      </div>
+      <div class="history-prompt">${escapeHtml(promptText)}</div>
+      ${mediaHtml}
+    `;
+  }
+
+  history.prepend(item);
+}
+
+function addError(msg) {
+  const card = document.getElementById('resultCard');
+  card.style.display = '';
+  const history = document.getElementById('history');
+  const item = document.createElement('div');
+  item.className = 'history-item';
+  const now = new Date().toLocaleTimeString('zh-CN');
+  item.innerHTML = `
+    <div class="history-header">
+      <span class="history-tag">${getSizeLabel()}</span>
+      <span class="history-time">${now}</span>
+    </div>
+    <div class="result-error">网络错误: ${escapeHtml(msg)}</div>
+  `;
+  history.prepend(item);
+}
+
+function downloadLink(dataUrl) {
+  return `<a class="download-btn" href="${dataUrl}" download="image_${Date.now()}.png">下载图片</a>`;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>

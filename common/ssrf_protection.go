@@ -1,12 +1,19 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
+
+	"golang.org/x/net/idna"
 )
+
+const ssrfDNSLookupTimeout = 30 * time.Second
 
 // SSRFProtection SSRF防护配置
 type SSRFProtection struct {
@@ -29,46 +36,122 @@ var DefaultSSRFProtection = &SSRFProtection{
 	AllowedPorts:     []int{},
 }
 
-// isPrivateIP 检查IP是否为私有地址
+var specialPurposeIPPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.31.196.0/24"),
+	netip.MustParsePrefix("192.52.193.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("192.175.48.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("::/128"),
+	netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("100:0:0:1::/64"),
+	netip.MustParsePrefix("2001::/23"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("2620:4f:8000::/48"),
+	netip.MustParsePrefix("3fff::/20"),
+	netip.MustParsePrefix("5f00::/16"),
+	netip.MustParsePrefix("fc00::/7"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("ff00::/8"),
+}
+
+var allocatedPublicIPv6Prefixes = []netip.Prefix{
+	netip.MustParsePrefix("2001:200::/23"),
+	netip.MustParsePrefix("2001:400::/23"),
+	netip.MustParsePrefix("2001:600::/23"),
+	netip.MustParsePrefix("2001:800::/22"),
+	netip.MustParsePrefix("2001:c00::/23"),
+	netip.MustParsePrefix("2001:e00::/23"),
+	netip.MustParsePrefix("2001:1200::/23"),
+	netip.MustParsePrefix("2001:1400::/22"),
+	netip.MustParsePrefix("2001:1800::/23"),
+	netip.MustParsePrefix("2001:1a00::/23"),
+	netip.MustParsePrefix("2001:1c00::/22"),
+	netip.MustParsePrefix("2001:2000::/19"),
+	netip.MustParsePrefix("2001:4000::/23"),
+	netip.MustParsePrefix("2001:4200::/23"),
+	netip.MustParsePrefix("2001:4400::/23"),
+	netip.MustParsePrefix("2001:4600::/23"),
+	netip.MustParsePrefix("2001:4800::/23"),
+	netip.MustParsePrefix("2001:4a00::/23"),
+	netip.MustParsePrefix("2001:4c00::/23"),
+	netip.MustParsePrefix("2001:5000::/20"),
+	netip.MustParsePrefix("2001:8000::/19"),
+	netip.MustParsePrefix("2001:a000::/20"),
+	netip.MustParsePrefix("2001:b000::/20"),
+	netip.MustParsePrefix("2003::/18"),
+	netip.MustParsePrefix("2400::/12"),
+	netip.MustParsePrefix("2410::/12"),
+	netip.MustParsePrefix("2600::/12"),
+	netip.MustParsePrefix("2610::/23"),
+	netip.MustParsePrefix("2620::/23"),
+	netip.MustParsePrefix("2630::/12"),
+	netip.MustParsePrefix("2800::/12"),
+	netip.MustParsePrefix("2a00::/12"),
+	netip.MustParsePrefix("2a10::/12"),
+	netip.MustParsePrefix("2c00::/12"),
+}
+
+func isAllocatedPublicIPv6(address netip.Addr) bool {
+	for _, prefix := range allocatedPublicIPv6Prefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
+}
+
+// isPrivateIP 检查IP是否为私有或特殊用途地址
 func isPrivateIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+	address, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	address = address.Unmap()
+	if address.Is6() && !isAllocatedPublicIPv6(address) {
 		return true
 	}
 
-	// 检查私有网段
-	private := []net.IPNet{
-		{IP: net.IPv4(10, 0, 0, 0), Mask: net.CIDRMask(8, 32)},     // 10.0.0.0/8
-		{IP: net.IPv4(172, 16, 0, 0), Mask: net.CIDRMask(12, 32)},  // 172.16.0.0/12
-		{IP: net.IPv4(192, 168, 0, 0), Mask: net.CIDRMask(16, 32)}, // 192.168.0.0/16
-		{IP: net.IPv4(127, 0, 0, 0), Mask: net.CIDRMask(8, 32)},    // 127.0.0.0/8
-		{IP: net.IPv4(169, 254, 0, 0), Mask: net.CIDRMask(16, 32)}, // 169.254.0.0/16 (链路本地)
-		{IP: net.IPv4(224, 0, 0, 0), Mask: net.CIDRMask(4, 32)},    // 224.0.0.0/4 (组播)
-		{IP: net.IPv4(240, 0, 0, 0), Mask: net.CIDRMask(4, 32)},    // 240.0.0.0/4 (保留)
-	}
-
-	for _, privateNet := range private {
-		if privateNet.Contains(ip) {
+	for _, prefix := range specialPurposeIPPrefixes {
+		if prefix.Contains(address) {
 			return true
 		}
 	}
-
-	// 检查IPv6私有地址
-	if ip.To4() == nil {
-		// IPv6 loopback
-		if ip.Equal(net.IPv6loopback) {
-			return true
-		}
-		// IPv6 link-local
-		if strings.HasPrefix(ip.String(), "fe80:") {
-			return true
-		}
-		// IPv6 unique local
-		if strings.HasPrefix(ip.String(), "fc") || strings.HasPrefix(ip.String(), "fd") {
-			return true
-		}
-	}
-
 	return false
+}
+
+func normalizeDomain(domain string) (string, error) {
+	domain = strings.TrimRight(strings.TrimSpace(domain), ".")
+	if domain == "" {
+		return "", fmt.Errorf("invalid host")
+	}
+
+	asciiDomain, err := idna.Lookup.ToASCII(domain)
+	if err != nil {
+		return "", fmt.Errorf("invalid host %q: %v", domain, err)
+	}
+	asciiDomain = strings.ToLower(strings.TrimRight(asciiDomain, "."))
+	if asciiDomain == "" {
+		return "", fmt.Errorf("invalid host")
+	}
+	return asciiDomain, nil
 }
 
 // parsePortRanges 解析端口范围配置
@@ -149,22 +232,28 @@ func isDomainListed(domain string, list []string) bool {
 		return false
 	}
 
-	domain = strings.ToLower(domain)
+	domain, err := normalizeDomain(domain)
+	if err != nil {
+		return false
+	}
 	for _, item := range list {
-		item = strings.ToLower(strings.TrimSpace(item))
+		item = strings.TrimSpace(item)
 		if item == "" {
 			continue
 		}
-		// 精确匹配
+		wildcard := strings.HasPrefix(item, "*.")
+		if wildcard {
+			item = strings.TrimPrefix(item, "*.")
+		}
+		item, err = normalizeDomain(item)
+		if err != nil {
+			continue
+		}
 		if domain == item {
 			return true
 		}
-		// 通配符匹配 (*.example.com)
-		if strings.HasPrefix(item, "*.") {
-			suffix := strings.TrimPrefix(item, "*.")
-			if strings.HasSuffix(domain, "."+suffix) || domain == suffix {
-				return true
-			}
+		if wildcard && strings.HasSuffix(domain, "."+item) {
+			return true
 		}
 	}
 	return false
@@ -187,6 +276,7 @@ func isIPListed(ip net.IP, list []string) bool {
 	}
 
 	for _, whitelistCIDR := range list {
+		whitelistCIDR = strings.TrimSpace(whitelistCIDR)
 		_, network, err := net.ParseCIDR(whitelistCIDR)
 		if err != nil {
 			// 尝试作为单个IP处理
@@ -278,99 +368,91 @@ func (p *SSRFProtection) ValidateNetworkTarget(host string, port int) error {
 		return nil
 	}
 
-	if !p.isDomainAllowed(host) {
+	normalizedHost, err := normalizeDomain(host)
+	if err != nil {
+		return err
+	}
+	if !p.isDomainAllowed(normalizedHost) {
 		if p.DomainFilterMode {
-			return fmt.Errorf("domain not in whitelist: %s", host)
+			return fmt.Errorf("domain not in whitelist: %s", normalizedHost)
 		}
-		return fmt.Errorf("domain in blacklist: %s", host)
+		return fmt.Errorf("domain in blacklist: %s", normalizedHost)
 	}
 	return nil
 }
 
 // ValidateResolvedIP validates a domain's resolved IP immediately before dialing it.
 func (p *SSRFProtection) ValidateResolvedIP(host string, ip net.IP) error {
-	if !p.IsIPAccessAllowed(ip) {
+	if isPrivateIP(ip) && !p.AllowPrivateIp {
+		return p.ipAccessError(host, ip)
+	}
+	if p.ApplyIPFilterForDomain && !p.IsIPAccessAllowed(ip) {
 		return p.ipAccessError(host, ip)
 	}
 	return nil
 }
 
-// ValidateURL 验证URL是否安全
-func (p *SSRFProtection) ValidateURL(urlStr string) error {
-	// 解析URL
+func (p *SSRFProtection) validateURLTarget(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
-		return fmt.Errorf("invalid URL format: %v", err)
+		return "", fmt.Errorf("invalid URL format: %v", err)
 	}
 
-	// 只允许HTTP/HTTPS协议
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("unsupported protocol: %s (only http/https allowed)", u.Scheme)
+		return "", fmt.Errorf("unsupported protocol: %s (only http/https allowed)", u.Scheme)
 	}
 
-	// 解析主机和端口
-	host, portStr, err := net.SplitHostPort(u.Host)
-	if err != nil {
-		// 没有端口，使用默认端口
-		host = u.Hostname()
+	host := u.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("invalid host")
+	}
+	portStr := u.Port()
+	if portStr == "" {
+		portStr = "80"
 		if u.Scheme == "https" {
 			portStr = "443"
-		} else {
-			portStr = "80"
 		}
 	}
 
-	// 验证端口
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		return fmt.Errorf("invalid port: %s", portStr)
+		return "", fmt.Errorf("invalid port: %s", portStr)
 	}
 
-	if !p.isAllowedPort(port) {
-		return fmt.Errorf("port %d is not allowed", port)
+	if err := p.ValidateNetworkTarget(host, port); err != nil {
+		return "", err
 	}
+	return host, nil
+}
 
-	// 如果 host 是 IP，则跳过域名检查
-	if ip := net.ParseIP(host); ip != nil {
-		if !p.IsIPAccessAllowed(ip) {
-			if isPrivateIP(ip) {
-				return fmt.Errorf("private IP address not allowed: %s", ip.String())
-			}
-			if p.IpFilterMode {
-				return fmt.Errorf("ip not in whitelist: %s", ip.String())
-			}
-			return fmt.Errorf("ip in blacklist: %s", ip.String())
-		}
+func (p *SSRFProtection) ValidateURLTarget(urlStr string) error {
+	_, err := p.validateURLTarget(urlStr)
+	return err
+}
+
+// ValidateURL 验证URL是否安全
+func (p *SSRFProtection) ValidateURL(urlStr string) error {
+	host, err := p.validateURLTarget(urlStr)
+	if err != nil {
+		return err
+	}
+	if net.ParseIP(host) != nil {
 		return nil
 	}
 
-	// 先进行域名过滤
-	if !p.isDomainAllowed(host) {
-		if p.DomainFilterMode {
-			return fmt.Errorf("domain not in whitelist: %s", host)
-		}
-		return fmt.Errorf("domain in blacklist: %s", host)
+	host, err = normalizeDomain(host)
+	if err != nil {
+		return err
 	}
-
-	// 若未启用对域名应用IP过滤，则到此通过
-	if !p.ApplyIPFilterForDomain {
-		return nil
-	}
-
-	// 解析域名对应IP并检查
-	ips, err := net.LookupIP(host)
+	lookupCtx, cancel := context.WithTimeout(context.Background(), ssrfDNSLookupTimeout)
+	defer cancel()
+	ipAddresses, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
 	if err != nil {
 		return fmt.Errorf("DNS resolution failed for %s: %v", host, err)
 	}
-	for _, ip := range ips {
-		if !p.IsIPAccessAllowed(ip) {
-			if isPrivateIP(ip) && !p.AllowPrivateIp {
-				return fmt.Errorf("private IP address not allowed: %s resolves to %s", host, ip.String())
-			}
-			if p.IpFilterMode {
-				return fmt.Errorf("ip not in whitelist: %s resolves to %s", host, ip.String())
-			}
-			return fmt.Errorf("ip in blacklist: %s resolves to %s", host, ip.String())
+	for _, ipAddress := range ipAddresses {
+		if err := p.ValidateResolvedIP(host, ipAddress.IP); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -378,25 +460,23 @@ func (p *SSRFProtection) ValidateURL(urlStr string) error {
 
 // ValidateURLWithFetchSetting 使用FetchSetting配置验证URL
 func ValidateURLWithFetchSetting(urlStr string, enableSSRFProtection, allowPrivateIp bool, domainFilterMode bool, ipFilterMode bool, domainList, ipList, allowedPorts []string, applyIPFilterForDomain bool) error {
-	// 如果SSRF防护被禁用，直接返回成功
 	if !enableSSRFProtection {
 		return nil
 	}
-
-	// 解析端口范围配置
-	allowedPortInts, err := parsePortRanges(allowedPorts)
+	protection, err := NewSSRFProtectionFromFetchSetting(allowPrivateIp, domainFilterMode, ipFilterMode, domainList, ipList, allowedPorts, applyIPFilterForDomain)
 	if err != nil {
-		return fmt.Errorf("request reject - invalid port configuration: %v", err)
-	}
-
-	protection := &SSRFProtection{
-		AllowPrivateIp:         allowPrivateIp,
-		DomainFilterMode:       domainFilterMode,
-		DomainList:             domainList,
-		IpFilterMode:           ipFilterMode,
-		IpList:                 ipList,
-		AllowedPorts:           allowedPortInts,
-		ApplyIPFilterForDomain: applyIPFilterForDomain,
+		return err
 	}
 	return protection.ValidateURL(urlStr)
+}
+
+func ValidateURLTargetWithFetchSetting(urlStr string, enableSSRFProtection, allowPrivateIp bool, domainFilterMode bool, ipFilterMode bool, domainList, ipList, allowedPorts []string, applyIPFilterForDomain bool) error {
+	if !enableSSRFProtection {
+		return nil
+	}
+	protection, err := NewSSRFProtectionFromFetchSetting(allowPrivateIp, domainFilterMode, ipFilterMode, domainList, ipList, allowedPorts, applyIPFilterForDomain)
+	if err != nil {
+		return err
+	}
+	return protection.ValidateURLTarget(urlStr)
 }
