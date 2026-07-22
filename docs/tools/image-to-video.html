@@ -76,6 +76,18 @@
   .slot.hidden { display: none; }
 
   label.field-label { display: block; font-size: 13px; color: var(--text-dim); margin: 16px 0 7px; }
+
+  /* 提示词模板 */
+  .tpl-head { display: flex; align-items: baseline; justify-content: space-between; }
+  .tpl-tip { font-size: 11px; color: var(--text-dim); }
+  .tpl-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 9px; }
+  .tpl-chip {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    font-size: 12.5px; padding: 7px 12px; border-radius: 20px; cursor: pointer; transition: .15s;
+    display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  }
+  .tpl-chip:hover { border-color: var(--accent); background: rgba(108,140,255,.1); }
+  .tpl-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   textarea, input[type=text], input[type=password] {
     width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
     border-radius: 10px; padding: 11px 13px; font-size: 14px; font-family: inherit; outline: none; transition: .2s;
@@ -184,8 +196,12 @@
       </div>
       <input type="file" id="file" accept="image/jpeg,image/png,image/webp" hidden>
 
-      <label class="field-label">动作描述（提示词）</label>
-      <textarea id="prompt" placeholder="描述画面如何运动，例如：镜头缓缓推近，人物回眸微笑，发丝随风飘动"></textarea>
+      <div class="tpl-head">
+        <label class="field-label" style="margin-top:16px">动作描述（提示词）</label>
+        <span class="tpl-tip">点击模板一键填入 · 适合亚马逊选品</span>
+      </div>
+      <div class="tpl-row" id="tplRow"></div>
+      <textarea id="prompt" placeholder="描述画面如何运动，例如：镜头缓缓推近，产品保持不变，柔光扫过表面"></textarea>
 
       <label class="field-label">生成参数</label>
       <div class="opts">
@@ -288,6 +304,38 @@
   $('modalMask').addEventListener('click', function (e) {
     if (e.target === this && getToken()) this.classList.remove('show');
   });
+
+  /* ======== 提示词模板（亚马逊电商场景）======== */
+  // 每个模板都强调「以上传图片为准、保持产品不变」——这是电商图生视频最关键的一点
+  var KEEP = '以上传图片中的产品为准，保持其形状、颜色、材质、标签和包装完全不变、清晰可辨。';
+  var NEG = '扭曲, 变形, 多余的物体, 多余的产品, 多余的手, 文字错乱, 标签模糊, 颜色偏差, 包装破损';
+  var TEMPLATES = [
+    { icon: '✨', label: '产品揭示', prompt: '镜头从产品全貌开始，缓慢平滑地推近，灯光逐渐增强，背景有细微的光影流动，营造有力的产品揭示感。' + KEEP },
+    { icon: '🔄', label: '360°环绕', prompt: '镜头围绕产品缓慢环绕展示多个角度，加入柔和的影棚灯光和干净的反光，全程保持角度切换自然流畅。' + KEEP },
+    { icon: '🔍', label: '细节特写', prompt: '镜头缓慢做微距特写，突出产品的材质与工艺细节，加入细腻高光、柔和反光和精致打光。' + KEEP },
+    { icon: '🖼️', label: '静态精品页', prompt: '镜头固定不动，产品保持居中清晰，柔和的影棚光缓缓扫过表面，加入微妙反光，营造干净高级的详情页质感。' + KEEP },
+    { icon: '💎', label: '高端质感', prompt: '产品保持静止，镜头从左向右缓慢平移，加入柔和反光、干净灯光和从容的奢华氛围。' + KEEP },
+    { icon: '🌿', label: '生活场景', prompt: '在明亮真实的生活使用场景中展示产品，氛围自然愉悦，加入平滑的镜头运动和自然的环境动态。' + KEEP },
+    { icon: '📦', label: '开箱揭示', prompt: '产品作为唯一主角被干净利落地揭示出来，加入平滑的揭示运镜、柔和灯光，适度展现包装细节。' + KEEP },
+    { icon: '🔥', label: '再营销唤醒', prompt: '镜头对产品做轻缓的推近，配合干净灯光和简洁运动，让产品重新显得新鲜有吸引力，不改变原有设计。' + KEEP }
+  ];
+
+  function initTemplates() {
+    var row = $('tplRow');
+    TEMPLATES.forEach(function (tpl, i) {
+      var chip = document.createElement('button');
+      chip.className = 'tpl-chip';
+      chip.type = 'button';
+      chip.innerHTML = '<span>' + tpl.icon + '</span>' + tpl.label;
+      chip.onclick = function () {
+        $('prompt').value = tpl.prompt;
+        if (!$('negPrompt').value.trim()) $('negPrompt').value = NEG;
+        row.querySelectorAll('.tpl-chip').forEach(function (c) { c.classList.remove('active'); });
+        chip.classList.add('active');
+      };
+      row.appendChild(chip);
+    });
+  }
 
   /* ======== 分段选择器 ======== */
   function initSeg(id, onChange) {
@@ -527,7 +575,8 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  /* 初始化：按默认模型设置槽位数量 */
+  /* 初始化：模板 + 按默认模型设置槽位数量 */
+  initTemplates();
   applyImageCap();
 
   /* 首次进入无令牌时引导配置 */
