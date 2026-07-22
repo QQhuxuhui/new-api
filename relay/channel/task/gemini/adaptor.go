@@ -90,8 +90,10 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if err := taskcommon.UnmarshalMetadata(req.Metadata, params); err != nil {
 		return nil, errors.Wrap(err, "unmarshal metadata failed")
 	}
-	if params.DurationSeconds == 0 && req.Duration > 0 {
-		params.DurationSeconds = req.Duration
+	// 时长必须与 EstimateBilling 使用的 ResolveVeoDuration 同源，
+	// 否则会出现按 seconds 计费、上游按默认时长生成的偏差
+	if params.DurationSeconds == 0 {
+		params.DurationSeconds = ResolveVeoDuration(req.Metadata, req.Duration, req.Seconds)
 	}
 	if params.Resolution == "" && req.Size != "" {
 		params.Resolution = SizeToVeoResolution(req.Size)
