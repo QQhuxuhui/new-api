@@ -51,6 +51,39 @@ func ExtractMultipartImage(c *gin.Context, info *relaycommon.RelayInfo) *VeoImag
 	}
 }
 
+// VeoMaxReferenceImages caps how many images are forwarded upstream (Veo 3.1:
+// standard 3 / fast 2; adobe2api clamps per model, this is the hard ceiling).
+const VeoMaxReferenceImages = 3
+
+// CollectVeoImages parses up to VeoMaxReferenceImages images from the request
+// (multipart input_reference first, otherwise the images array) and splits them
+// into the first-frame image plus additional reference images.
+func CollectVeoImages(c *gin.Context, info *relaycommon.RelayInfo, images []string) (*VeoImageInput, []VeoImageInput) {
+	parsed := make([]*VeoImageInput, 0, VeoMaxReferenceImages)
+	if img := ExtractMultipartImage(c, info); img != nil {
+		parsed = append(parsed, img)
+	}
+	for _, raw := range images {
+		if len(parsed) >= VeoMaxReferenceImages {
+			break
+		}
+		if img := ParseImageInput(raw); img != nil {
+			parsed = append(parsed, img)
+		}
+	}
+	if len(parsed) == 0 {
+		return nil, nil
+	}
+	if len(parsed) > VeoMaxReferenceImages {
+		parsed = parsed[:VeoMaxReferenceImages]
+	}
+	refs := make([]VeoImageInput, 0, len(parsed)-1)
+	for _, img := range parsed[1:] {
+		refs = append(refs, *img)
+	}
+	return parsed[0], refs
+}
+
 // ParseImageInput parses an image string (data URI or raw base64) into a
 // VeoImageInput. Returns nil if the input is empty or invalid.
 // TODO: support downloading HTTP URL images and converting to base64

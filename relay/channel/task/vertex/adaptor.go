@@ -148,13 +148,10 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	req := v.(relaycommon.TaskSubmitReq)
 
 	instance := geminitask.VeoInstance{Prompt: req.Prompt}
-	if img := geminitask.ExtractMultipartImage(c, info); img != nil {
+	if img, refs := geminitask.CollectVeoImages(c, info, req.Images); img != nil {
 		instance.Image = img
-	} else if len(req.Images) > 0 {
-		if parsed := geminitask.ParseImageInput(req.Images[0]); parsed != nil {
-			instance.Image = parsed
-			info.Action = constant.TaskActionGenerate
-		}
+		instance.ReferenceImages = refs
+		info.Action = constant.TaskActionGenerate
 	}
 
 	params := &geminitask.VeoParameters{}

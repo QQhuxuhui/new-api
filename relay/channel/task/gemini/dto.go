@@ -11,7 +11,9 @@ type VeoImageInput struct {
 type VeoInstance struct {
 	Prompt string         `json:"prompt"`
 	Image  *VeoImageInput `json:"image,omitempty"`
-	// TODO: support referenceImages (style/asset references, up to 3 images)
+	// ReferenceImages carries additional reference images (Veo 3.1 supports up
+	// to 3 total: image + referenceImages). The upstream clamps per model.
+	ReferenceImages []VeoImageInput `json:"referenceImages,omitempty"`
 	// TODO: support lastFrame (first+last frame interpolation, Veo 3.1)
 }
 

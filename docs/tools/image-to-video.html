@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 图生视频工作台</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #181b24;
+    --panel-2: #1f2330;
+    --border: #2a2f3e;
+    --text: #e8eaf0;
+    --text-dim: #9aa1b2;
+    --accent: #6c8cff;
+    --accent-2: #8f6cff;
+    --ok: #4ade80;
+    --err: #f87171;
+    --radius: 14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 60px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 26px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .logo {
+    width: 40px; height: 40px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: flex; align-items: center; justify-content: center; font-size: 20px;
+  }
+  .brand h1 { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
+  .brand small { display: block; color: var(--text-dim); font-size: 12px; font-weight: 400; margin-top: 2px; }
+  .btn-ghost {
+    background: var(--panel); color: var(--text-dim); border: 1px solid var(--border);
+    padding: 8px 14px; border-radius: 10px; cursor: pointer; font-size: 13px; transition: .2s;
+  }
+  .btn-ghost:hover { color: var(--text); border-color: var(--accent); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .card h2 { font-size: 14px; color: var(--text-dim); font-weight: 600; margin-bottom: 14px; letter-spacing: 1px; }
+
+  /* 多图上传区 */
+  .upload-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .upload-head .cap { font-size: 12px; color: var(--text-dim); }
+  .slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 520px) { .slots { grid-template-columns: repeat(2, 1fr); } }
+  .slot {
+    position: relative; border: 2px dashed var(--border); border-radius: 12px;
+    aspect-ratio: 1 / 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; cursor: pointer; transition: .2s; overflow: hidden; text-align: center; padding: 8px;
+  }
+  .slot:hover, .slot.dragover { border-color: var(--accent); background: rgba(108,140,255,.06); }
+  .slot .plus { font-size: 26px; opacity: .8; line-height: 1; }
+  .slot .cap-txt { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+  .slot img.preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+  .slot .badge {
+    position: absolute; top: 6px; left: 6px; z-index: 2; background: rgba(0,0,0,.6); color: #fff;
+    font-size: 10px; padding: 2px 7px; border-radius: 20px; display: none;
+  }
+  .slot.filled .badge { display: block; }
+  .slot .clear-btn {
+    position: absolute; top: 6px; right: 6px; z-index: 2;
+    background: rgba(0,0,0,.65); border: none; color: #fff; width: 24px; height: 24px;
+    border-radius: 50%; cursor: pointer; font-size: 13px; display: none; line-height: 1;
+  }
+  .slot.filled .clear-btn { display: block; }
+  .slot.filled .plus, .slot.filled .cap-txt { display: none; }
+  .slot.hidden { display: none; }
+
+  label.field-label { display: block; font-size: 13px; color: var(--text-dim); margin: 16px 0 7px; }
+  textarea, input[type=text], input[type=password] {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 10px; padding: 11px 13px; font-size: 14px; font-family: inherit; outline: none; transition: .2s;
+  }
+  textarea:focus, input:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 88px; }
+
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .seg { display: flex; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .seg button {
+    flex: 1; background: none; border: none; color: var(--text-dim); padding: 9px 4px;
+    font-size: 13px; cursor: pointer; transition: .15s; white-space: nowrap;
+  }
+  .seg button.active { background: var(--accent); color: #fff; }
+  .seg button:disabled { opacity: .35; cursor: not-allowed; }
+
+  .hint { font-size: 12px; color: var(--text-dim); margin-top: 6px; line-height: 1.6; }
+
+  .btn-primary {
+    width: 100%; margin-top: 20px; padding: 14px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff; border: none; border-radius: 12px; font-size: 15px; font-weight: 600;
+    cursor: pointer; transition: .2s; letter-spacing: 2px;
+  }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* 结果区 */
+  .result-empty { color: var(--text-dim); font-size: 13px; text-align: center; padding: 70px 0; line-height: 2; }
+  .status-box { display: none; margin-bottom: 14px; }
+  .status-line { display: flex; align-items: center; gap: 10px; font-size: 14px; margin-bottom: 10px; }
+  .spinner {
+    width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 1s linear infinite; flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .progress-track { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+  .progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .6s; }
+  .error-box {
+    display: none; background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.35);
+    color: var(--err); border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.7; word-break: break-all; margin-bottom: 14px;
+  }
+  video { width: 100%; border-radius: 12px; background: #000; display: none; }
+  .dl-row { display: none; gap: 10px; margin-top: 12px; }
+  .dl-row a, .dl-row button {
+    flex: 1; text-align: center; text-decoration: none; padding: 11px; border-radius: 10px; font-size: 14px; cursor: pointer;
+  }
+  .dl-row a { background: var(--ok); color: #06281a; font-weight: 600; border: none; }
+  .dl-row button { background: var(--panel-2); color: var(--text-dim); border: 1px solid var(--border); }
+
+  /* 令牌弹窗 */
+  .modal-mask {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    align-items: center; justify-content: center; z-index: 50; padding: 20px;
+  }
+  .modal-mask.show { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 26px; width: 100%; max-width: 420px; }
+  .modal h3 { font-size: 16px; margin-bottom: 6px; }
+  .modal p { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; line-height: 1.7; }
+  .modal .btn-primary { margin-top: 16px; padding: 12px; }
+
+  footer { margin-top: 34px; text-align: center; color: var(--text-dim); font-size: 12px; line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">🎬</div>
+      <div>
+        <h1>AI 图生视频工作台</h1>
+        <small>上传一张图片，让它动起来</small>
+      </div>
+    </div>
+    <button class="btn-ghost" id="btnSettings">⚙️ 访问令牌</button>
+  </header>
+
+  <div class="grid">
+    <!-- 左：输入 -->
+    <div class="card">
+      <h2>创 作</h2>
+
+      <div class="upload-head">
+        <span></span>
+        <span class="cap" id="uploadCap">最多上传 2 张参考图</span>
+      </div>
+      <div class="slots" id="slots">
+        <div class="slot" data-idx="0">
+          <span class="badge">首图</span>
+          <button class="clear-btn" title="移除">✕</button>
+          <span class="plus">＋</span>
+          <span class="cap-txt">参考图 1</span>
+        </div>
+        <div class="slot" data-idx="1">
+          <span class="badge">参考</span>
+          <button class="clear-btn" title="移除">✕</button>
+          <span class="plus">＋</span>
+          <span class="cap-txt">参考图 2</span>
+        </div>
+        <div class="slot" data-idx="2">
+          <span class="badge">参考</span>
+          <button class="clear-btn" title="移除">✕</button>
+          <span class="plus">＋</span>
+          <span class="cap-txt">参考图 3</span>
+        </div>
+      </div>
+      <input type="file" id="file" accept="image/jpeg,image/png,image/webp" hidden>
+
+      <label class="field-label">动作描述（提示词）</label>
+      <textarea id="prompt" placeholder="描述画面如何运动，例如：镜头缓缓推近，人物回眸微笑，发丝随风飘动"></textarea>
+
+      <label class="field-label">生成参数</label>
+      <div class="opts">
+        <div>
+          <div class="seg" id="segModel">
+            <button data-v="veo-3.1-fast-generate-preview" class="active">快速版</button>
+            <button data-v="veo-3.1-generate-preview">高质量版</button>
+          </div>
+          <div class="hint">快速版出片更快，高质量版细节更好</div>
+        </div>
+        <div>
+          <div class="seg" id="segOrient">
+            <button data-v="landscape" class="active">横屏 16:9</button>
+            <button data-v="portrait">竖屏 9:16</button>
+          </div>
+        </div>
+        <div>
+          <div class="seg" id="segSeconds">
+            <button data-v="4" class="active">4 秒</button>
+            <button data-v="6">6 秒</button>
+            <button data-v="8">8 秒</button>
+          </div>
+        </div>
+        <div>
+          <div class="seg" id="segRes">
+            <button data-v="720p" class="active">720P</button>
+            <button data-v="1080p">1080P</button>
+          </div>
+          <div class="hint" id="resHint">1080P 仅支持 8 秒时长</div>
+        </div>
+      </div>
+
+      <label class="field-label">不希望出现的内容（可选）</label>
+      <input type="text" id="negPrompt" placeholder="例如：文字、水印、模糊">
+
+      <button class="btn-primary" id="btnGo">开始生成</button>
+    </div>
+
+    <!-- 右：结果 -->
+    <div class="card">
+      <h2>生成结果</h2>
+      <div class="result-empty" id="empty">🎥<br>生成的视频会显示在这里</div>
+
+      <div class="status-box" id="statusBox">
+        <div class="status-line">
+          <div class="spinner" id="spinner"></div>
+          <span id="statusText">正在提交任务…</span>
+        </div>
+        <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+      </div>
+
+      <div class="error-box" id="errorBox"></div>
+      <video id="player" controls playsinline></video>
+      <div class="dl-row" id="dlRow">
+        <a id="btnDownload" download="video.mp4">⬇ 下载视频</a>
+        <button id="btnAgain">再来一个</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>视频生成通常需要 1 - 3 分钟，请耐心等待，生成期间请勿关闭页面</footer>
+</div>
+
+<!-- 令牌设置弹窗 -->
+<div class="modal-mask" id="modalMask">
+  <div class="modal">
+    <h3>配置访问令牌</h3>
+    <p>请输入服务商提供的 API 令牌（sk- 开头）。令牌只保存在您自己的浏览器中，不会上传到任何第三方。</p>
+    <input type="password" id="tokenInput" placeholder="sk-...">
+    <button class="btn-primary" id="btnSaveToken">保 存</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ======== 配置 ======== */
+  var API_BASE = 'https://api.sparkcode.top';   // 平台地址（写死）
+  var TOKEN_KEY = 'i2v_api_token';
+  var MAX_IMAGE_BYTES = 20 * 1024 * 1024;       // 与服务端 20MB 限制一致
+  var POLL_INTERVAL_MS = 5000;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ======== 令牌管理 ======== */
+  function getToken() { return (localStorage.getItem(TOKEN_KEY) || '').trim(); }
+  function openTokenModal() {
+    $('tokenInput').value = getToken();
+    $('modalMask').classList.add('show');
+    $('tokenInput').focus();
+  }
+  $('btnSettings').onclick = openTokenModal;
+  $('btnSaveToken').onclick = function () {
+    var v = $('tokenInput').value.trim();
+    if (!v) { alert('令牌不能为空'); return; }
+    localStorage.setItem(TOKEN_KEY, v);
+    $('modalMask').classList.remove('show');
+  };
+  $('modalMask').addEventListener('click', function (e) {
+    if (e.target === this && getToken()) this.classList.remove('show');
+  });
+
+  /* ======== 分段选择器 ======== */
+  function initSeg(id, onChange) {
+    var seg = $(id);
+    seg.addEventListener('click', function (e) {
+      var btn = e.target.closest('button');
+      if (!btn || btn.disabled) return;
+      seg.querySelectorAll('button').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      if (onChange) onChange(btn.dataset.v);
+    });
+  }
+  function segValue(id) { return $(id).querySelector('button.active').dataset.v; }
+
+  // 每个模型支持的参考图张数
+  var MODEL_CAPS = { 'veo-3.1-fast-generate-preview': 2, 'veo-3.1-generate-preview': 3 };
+  function currentCap() { return MODEL_CAPS[segValue('segModel')] || 2; }
+
+  initSeg('segModel', function () { applyImageCap(); });
+  initSeg('segOrient');
+  initSeg('segSeconds');
+  // 1080P 仅支持 8 秒：切到 1080P 时锁定时长
+  initSeg('segRes', function (v) {
+    var lock = v === '1080p';
+    $('segSeconds').querySelectorAll('button').forEach(function (b) {
+      if (b.dataset.v !== '8') {
+        b.disabled = lock;
+        if (lock) b.classList.remove('active');
+      }
+    });
+    if (lock) {
+      $('segSeconds').querySelector('button[data-v="8"]').classList.add('active');
+    }
+  });
+
+  function currentSize() {
+    var res = segValue('segRes'), landscape = segValue('segOrient') === 'landscape';
+    if (res === '1080p') return landscape ? '1920x1080' : '1080x1920';
+    return landscape ? '1280x720' : '720x1280';
+  }
+
+  /* ======== 多图上传 ======== */
+  var slotData = [null, null, null];         // 每个槽位的 data URL
+  var slotEls = Array.prototype.slice.call(document.querySelectorAll('#slots .slot'));
+  var fileInput = $('file');
+  var activeSlot = 0;                          // 当前点击/拖入的目标槽位
+
+  slotEls.forEach(function (slot) {
+    var idx = Number(slot.dataset.idx);
+    slot.addEventListener('click', function (e) {
+      if (e.target.classList.contains('clear-btn')) return;
+      activeSlot = idx;
+      fileInput.value = '';
+      fileInput.click();
+    });
+    slot.querySelector('.clear-btn').addEventListener('click', function (e) {
+      e.stopPropagation();
+      clearSlot(idx);
+    });
+    ['dragover', 'dragleave', 'drop'].forEach(function (ev) {
+      slot.addEventListener(ev, function (e) {
+        e.preventDefault();
+        slot.classList.toggle('dragover', ev === 'dragover');
+        if (ev === 'drop' && e.dataTransfer.files.length) loadFileToSlot(idx, e.dataTransfer.files[0]);
+      });
+    });
+  });
+  fileInput.addEventListener('change', function () {
+    if (fileInput.files.length) loadFileToSlot(activeSlot, fileInput.files[0]);
+  });
+
+  function loadFileToSlot(idx, file) {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { alert('仅支持 JPG / PNG / WebP 格式的图片'); return; }
+    if (file.size > MAX_IMAGE_BYTES) { alert('图片不能超过 20MB'); return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+      slotData[idx] = reader.result;
+      var slot = slotEls[idx];
+      var old = slot.querySelector('img.preview');
+      if (old) old.remove();
+      var img = document.createElement('img');
+      img.className = 'preview';
+      img.src = reader.result;
+      slot.insertBefore(img, slot.querySelector('.badge'));
+      slot.classList.add('filled');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function clearSlot(idx) {
+    slotData[idx] = null;
+    var slot = slotEls[idx];
+    var old = slot.querySelector('img.preview');
+    if (old) old.remove();
+    slot.classList.remove('filled');
+  }
+
+  // 根据所选模型显示对应数量的槽位；超出上限的已填图片会被清掉
+  function applyImageCap() {
+    var cap = currentCap();
+    slotEls.forEach(function (slot, idx) {
+      var show = idx < cap;
+      slot.classList.toggle('hidden', !show);
+      if (!show && slotData[idx]) clearSlot(idx);
+    });
+    $('uploadCap').textContent = '最多上传 ' + cap + ' 张参考图';
+  }
+
+  function collectImages() {
+    var cap = currentCap();
+    return slotData.slice(0, cap).filter(function (u) { return !!u; });
+  }
+
+  /* ======== 生成流程 ======== */
+  var polling = null;
+
+  function setStatus(text, progress) {
+    $('empty').style.display = 'none';
+    $('statusBox').style.display = 'block';
+    $('statusText').textContent = text;
+    if (progress != null) $('progressBar').style.width = Math.max(3, progress) + '%';
+  }
+  function showError(msg) {
+    stopPolling();
+    $('statusBox').style.display = 'none';
+    $('errorBox').style.display = 'block';
+    $('errorBox').textContent = msg;
+    $('btnGo').disabled = false;
+  }
+  function resetResult() {
+    $('errorBox').style.display = 'none';
+    $('player').style.display = 'none';
+    $('dlRow').style.display = 'none';
+    $('progressBar').style.width = '0%';
+  }
+  function stopPolling() {
+    if (polling) { clearInterval(polling); polling = null; }
+  }
+
+  function apiFetch(path, options) {
+    options = options || {};
+    options.headers = Object.assign({ 'Authorization': 'Bearer ' + getToken() }, options.headers || {});
+    return fetch(API_BASE + path, options);
+  }
+
+  $('btnGo').onclick = function () {
+    if (!getToken()) { openTokenModal(); return; }
+    var images = collectImages();
+    if (images.length === 0) { alert('请至少上传一张图片'); return; }
+    var prompt = $('prompt').value.trim();
+    if (!prompt) { alert('请填写动作描述'); $('prompt').focus(); return; }
+
+    var body = {
+      model: segValue('segModel'),
+      prompt: prompt,
+      seconds: segValue('segSeconds'),
+      size: currentSize(),
+      images: images
+    };
+    var neg = $('negPrompt').value.trim();
+    if (neg) body.metadata = { negativePrompt: neg };
+
+    resetResult();
+    setStatus('正在提交任务…', 3);
+    $('btnGo').disabled = true;
+
+    apiFetch('/v1/videos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok || !(r.data.task_id || r.data.id)) {
+          throw new Error(extractError(r.data) || '任务提交失败，请稍后重试');
+        }
+        startPolling(r.data.task_id || r.data.id);
+      })
+      .catch(function (err) { showError('提交失败：' + err.message); });
+  };
+
+  function extractError(data) {
+    if (!data) return '';
+    if (data.error && data.error.message) return data.error.message;
+    return data.message || '';
+  }
+
+  function startPolling(taskId) {
+    var ticks = 0;
+    setStatus('任务已受理，排队生成中…', 5);
+    polling = setInterval(function () {
+      ticks++;
+      apiFetch('/v1/videos/' + encodeURIComponent(taskId))
+        .then(function (res) { return res.json(); })
+        .then(function (d) {
+          var st = (d.status || '').toLowerCase();
+          var progress = Number(d.progress) || 0;
+          if (st === 'completed') {
+            stopPolling();
+            setStatus('生成完成，正在拉取视频…', 100);
+            fetchVideo(taskId);
+          } else if (st === 'failed' || st === 'error' || st === 'cancelled') {
+            showError('生成失败：' + (extractError(d) || d.failure_reason || '上游服务异常，费用如已扣除将自动退回'));
+          } else {
+            // 服务端进度 + 时间兜底，避免长时间停在同一数字
+            var est = Math.min(90, Math.max(progress, ticks * 3));
+            setStatus('视频生成中（' + (progress || est) + '%）…', est);
+          }
+        })
+        .catch(function () { /* 单次轮询失败忽略，下一轮重试 */ });
+    }, POLL_INTERVAL_MS);
+  }
+
+  function fetchVideo(taskId) {
+    apiFetch('/v1/videos/' + encodeURIComponent(taskId) + '/content')
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        $('statusBox').style.display = 'none';
+        var player = $('player');
+        player.src = url;
+        player.style.display = 'block';
+        $('btnDownload').href = url;
+        $('btnDownload').download = 'video_' + taskId.slice(-8) + '.mp4';
+        $('dlRow').style.display = 'flex';
+        $('btnGo').disabled = false;
+        player.play().catch(function () {});
+      })
+      .catch(function (err) { showError('视频下载失败：' + err.message + '，请刷新后重试'); });
+  }
+
+  $('btnAgain').onclick = function () {
+    resetResult();
+    $('empty').style.display = 'block';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  /* 初始化：按默认模型设置槽位数量 */
+  applyImageCap();
+
+  /* 首次进入无令牌时引导配置 */
+  if (!getToken()) openTokenModal();
+})();
+</script>
+</body>
+</html>
