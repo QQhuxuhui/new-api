@@ -18,6 +18,13 @@ func TestNormalizeImageConfig(t *testing.T) {
 		{"strips camel auto", `{"aspectRatio":"auto"}`, ""},
 		{"strips free case-insensitive", `{"aspect_ratio":"FREE"}`, ""},
 		{"keeps valid ratio", `{"aspect_ratio":"16:9"}`, `{"aspect_ratio":"16:9"}`},
+		{"keeps flash-only ratio 1:8", `{"aspect_ratio":"1:8"}`, `{"aspect_ratio":"1:8"}`},
+		{"keeps 21:9", `{"aspectRatio":"21:9"}`, `{"aspectRatio":"21:9"}`},
+		{"strips non-standard 2:1", `{"aspect_ratio":"2:1"}`, ""},
+		{"strips non-standard 3:1", `{"aspectRatio":"3:1"}`, ""},
+		{"strips pixel size value", `{"aspect_ratio":"1024x1024"}`, ""},
+		{"strips empty ratio", `{"aspect_ratio":""}`, ""},
+		{"strips invalid but keeps sibling", `{"aspectRatio":"2:1","imageSize":"4K"}`, `{"imageSize":"4K"}`},
 		{"keeps sibling fields", `{"aspectRatio":"auto","imageSize":"2K"}`, `{"imageSize":"2K"}`},
 		{"invalid json unchanged", `{not-json`, `{not-json`},
 	}
