@@ -299,6 +299,106 @@ func chargeSplitForOverflow(relayInfo *relaycommon.RelayInfo, plan *model.UserPl
 	return true, false
 }
 
+// drainPlanQuota debits up to `amount` from user plan `userPlanId` and returns the
+// amount the plan actually absorbed. It performs the debit only — callers are
+// responsible for recordPlanChargeSideEffects, because the mixed-billing path must
+// not record side effects until the wallet leg has committed too.
+//
+// The plain settlement path debits all-or-nothing (DecreaseUserPlanQuotaIfEnough),
+// but pre-consume only gates on the *estimated* cost, so the settled cost routinely
+// exceeds what the plan still holds (long completions, per-call priced models,
+// models whose estimate truncates to zero). Refusing the debit in that case left the
+// plan frozen just above zero: never depleted, never completed, never switched, and
+// serving traffic for free. Draining what is there keeps the plan moving toward
+// depletion and lets the caller bill the shortfall elsewhere.
+//
+// A returned error means the debit hit a real infrastructure failure (DB unavailable,
+// row missing). That is deliberately NOT downgraded to a shortfall: callers must keep
+// propagating it so async task settlement still refunds and aborts instead of quietly
+// re-routing the charge. Running out of plan quota is not an error — it returns a
+// partial `charged` with a nil error.
+func drainPlanQuota(relayInfo *relaycommon.RelayInfo, userPlanId int, amount int64) (int64, error) {
+	if relayInfo == nil || userPlanId <= 0 || amount <= 0 {
+		return 0, nil
+	}
+
+	charged := int64(0)
+	remaining := amount
+
+	// Attempt 0 tries the full amount; later attempts retry with the quota currently
+	// in the DB. Bounded, because a concurrent settlement can shrink the plan between
+	// the read and the conditional update.
+	for attempt := 0; attempt < 3 && remaining > 0; attempt++ {
+		want := remaining
+		if attempt > 0 {
+			plan, err := model.GetUserPlanById(userPlanId)
+			if err != nil {
+				return charged, fmt.Errorf("read user_plan %d for settlement: %w", userPlanId, err)
+			}
+			if plan == nil || plan.Quota <= 0 {
+				break
+			}
+			if plan.Quota < want {
+				want = plan.Quota
+			}
+		}
+
+		ok, err := model.DecreaseUserPlanQuotaIfEnough(userPlanId, want)
+		if err != nil && !errors.Is(err, model.ErrUserPlanCacheInvalidation) {
+			return charged, fmt.Errorf("consume plan quota for user_plan %d: %w", userPlanId, err)
+		}
+		if err != nil {
+			common.SysLog(fmt.Sprintf("plan quota consumed but cache invalidation failed for user_plan %d: %v", userPlanId, err))
+		}
+		if !ok {
+			continue
+		}
+		charged += want
+		remaining -= want
+	}
+
+	return charged, nil
+}
+
+// billPlanShortfallToWallet charges `shortfall` to the user's wallet after the plan
+// was drained but still could not cover the settled cost.
+//
+// The wallet is allowed to go negative: the request has already been served, so
+// refusing the debit would hand it out for free. A negative balance is caught by the
+// pre-consume gate on the user's next request (pre_consume_quota.go:399), which is
+// the existing mechanism for cutting off over-drawn users.
+func billPlanShortfallToWallet(relayInfo *relaycommon.RelayInfo, userPlanId int, planCharged, shortfall int64) error {
+	if relayInfo == nil || shortfall <= 0 {
+		return nil
+	}
+
+	walletBefore, balErr := model.GetUserQuota(relayInfo.UserId, false)
+	if err := decreaseRelayUserQuota(relayInfo, int(shortfall)); err != nil {
+		common.SysError(fmt.Sprintf(
+			"CRITICAL: plan shortfall could not be billed user=%d user_plan=%d plan_charged=%d shortfall=%d: %v — request was served without full charge",
+			relayInfo.UserId, userPlanId, planCharged, shortfall, err))
+		return fmt.Errorf("bill plan shortfall to wallet for user %d: %w", relayInfo.UserId, err)
+	}
+
+	if balErr == nil && int64(walletBefore) < shortfall {
+		common.SysError(fmt.Sprintf(
+			"用户 %d 套餐 %d 结算超支：套餐扣除 %d，差额 %d 由钱包承担，扣费前余额 %d，余额已为负，下次请求将被预扣费拦截",
+			relayInfo.UserId, userPlanId, planCharged, shortfall, walletBefore))
+	}
+
+	// A shortfall means the plan is exhausted by definition. When it had nothing left
+	// to absorb the caller skips recordPlanChargeSideEffects, so drive the
+	// depletion/queue transition here — otherwise the plan stays active at zero and
+	// never switches.
+	if planCharged == 0 {
+		if _, err := completeDepletedPlanAndNotify(relayInfo.UserId, userPlanId); err != nil {
+			common.SysLog(fmt.Sprintf("plan settlement: failed to complete depleted user_plan %d: %v", userPlanId, err))
+		}
+	}
+
+	return nil
+}
+
 // recordPlanChargeSideEffects mirrors the daily-quota / rate-limit / depletion
 // tracking that the regular BillingSourcePlan branch in PostConsumeQuota runs.
 // Shared between chargeSplitForOverflow (normal success and refund-failed

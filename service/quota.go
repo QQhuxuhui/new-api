@@ -387,7 +387,7 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	// Check daily quota limit before consuming (prevents over-quota)
+	// Report (do not enforce) the plan's daily cap at settlement time.
 	// For plan billing: Use quota only (FinalPreConsumedQuota was never actually deducted from plan)
 	// For user balance billing: quota is the final consumption, not affected by pre-consume
 	if relayInfo.UserPlanId > 0 && (relayInfo.BillingSource == BillingSourcePlan || relayInfo.BillingSource == BillingSourcePlanAndUserBalance) {
@@ -400,10 +400,10 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		}
 		if planQuotaToCheck > 0 {
 			if err := CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, planQuotaToCheck); err != nil {
-				// Daily quota would be exceeded - refund pre-consumed quota
-				ReturnPreConsumedQuota(ctx, relayInfo)
-				logger.LogError(ctx, fmt.Sprintf("daily quota check failed: %v", err))
-				return
+				// Bill through: the daily cap throttles subsequent requests (enforced by
+				// middleware/distributor.go:167), it does not make this one free.
+				logger.LogWarn(ctx, fmt.Sprintf("套餐 %d 本次请求越过每日额度上限，仍照常计费，后续请求将被拦截: %v",
+					relayInfo.UserPlanId, err))
 			}
 		}
 	}
@@ -551,7 +551,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	// Check daily quota limit before consuming (prevents over-quota)
+	// Report (do not enforce) the plan's daily cap at settlement time.
 	// For plan billing: Use quota only (FinalPreConsumedQuota was never actually deducted from plan)
 	// For user balance billing: quota is the final consumption, not affected by pre-consume
 	if relayInfo.UserPlanId > 0 && (relayInfo.BillingSource == BillingSourcePlan || relayInfo.BillingSource == BillingSourcePlanAndUserBalance) {
@@ -564,10 +564,10 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		}
 		if planQuotaToCheck > 0 {
 			if err := CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, planQuotaToCheck); err != nil {
-				// Daily quota would be exceeded - refund pre-consumed quota
-				ReturnPreConsumedQuota(ctx, relayInfo)
-				logger.LogError(ctx, fmt.Sprintf("daily quota check failed: %v", err))
-				return
+				// Bill through: the daily cap throttles subsequent requests (enforced by
+				// middleware/distributor.go:167), it does not make this one free.
+				logger.LogWarn(ctx, fmt.Sprintf("套餐 %d 本次请求越过每日额度上限，仍照常计费，后续请求将被拦截: %v",
+					relayInfo.UserPlanId, err))
 			}
 		}
 	}
@@ -684,40 +684,37 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 
 		adjustTokenQuotaBestEffort(relayInfo, settledTokenQuotaDelta(relayInfo, quota, preConsumedQuota))
 	} else if relayInfo.BillingSource == BillingSourcePlan && relayInfo.UserPlanId > 0 {
-		// Plan billing: Deduct from plan quota ONLY, NOT from user balance
+		// Plan billing: Deduct from plan quota first, wallet only covers a shortfall.
 		// actualQuota = quota (delta) + preConsumedQuota (for plan, pre-consume was tracked but not deducted)
 		actualQuota := quota + preConsumedQuota
 
 		if actualQuota > 0 {
-			// Deduct plan quota based on actual consumption
-			charged, err := model.DecreaseUserPlanQuotaIfEnough(relayInfo.UserPlanId, int64(actualQuota))
-			if err != nil {
-				if errors.Is(err, model.ErrUserPlanCacheInvalidation) {
-					common.SysLog(fmt.Sprintf("plan quota consumed but cache invalidation failed for user_plan %d: %v", relayInfo.UserPlanId, err))
-				} else {
-					return fmt.Errorf("consume plan quota for user_plan %d: %w", relayInfo.UserPlanId, err)
+			// Pre-consume only gated on the *estimated* cost, so the settled cost can
+			// exceed what the plan still holds. Drain the plan for what it can absorb
+			// and bill the remainder to the wallet — refusing the debit outright used to
+			// leave the plan frozen just above zero (never depleted, never completed,
+			// never switched) while every subsequent request was served for free.
+			userPlanId := relayInfo.UserPlanId
+			planCharged, drainErr := drainPlanQuota(relayInfo, userPlanId, int64(actualQuota))
+			if planCharged > 0 {
+				recordPlanChargeSideEffects(relayInfo.UserId, userPlanId, planCharged)
+			}
+			if drainErr != nil {
+				// Infrastructure failure, not exhaustion — surface it so async task
+				// settlement refunds and aborts rather than silently re-routing the charge.
+				return drainErr
+			}
+
+			if shortfall := int64(actualQuota) - planCharged; shortfall > 0 {
+				if err := billPlanShortfallToWallet(relayInfo, userPlanId, planCharged, shortfall); err != nil {
+					return err
 				}
-			} else if !charged {
-				return fmt.Errorf("consume plan quota for user_plan %d: insufficient quota after concurrent settlement", relayInfo.UserPlanId)
-			}
-
-			// Record consumption for daily quota and rate limiting (Redis tracking)
-			costUSD := float64(actualQuota) / 500000.0
-
-			// Record daily quota usage
-			if incrErr := IncrDailyQuotaUsage(relayInfo.UserPlanId, int64(actualQuota)); incrErr != nil {
-				common.SysLog(fmt.Sprintf("failed to record daily quota for user_plan %d: %v", relayInfo.UserPlanId, incrErr))
-			}
-
-			// Record for rate limiting
-			requestId := fmt.Sprintf("%d-%d", relayInfo.UserId, time.Now().UnixNano())
-			if rateErr := RecordConsumptionForRateLimit(relayInfo.UserPlanId, costUSD, requestId); rateErr != nil {
-				common.SysLog(fmt.Sprintf("failed to record rate limit for user_plan %d: %v", relayInfo.UserPlanId, rateErr))
-			}
-
-			// If the current plan is depleted, activate the next queued plan (queue order).
-			if _, err := completeDepletedPlanAndNotify(relayInfo.UserId, relayInfo.UserPlanId); err != nil {
-				common.SysLog(fmt.Sprintf("failed to complete depleted user_plan %d: %v", relayInfo.UserPlanId, err))
+				// Record the real split so the consumption log — and any async task
+				// refund derived from it — reverses what was actually charged.
+				relayInfo.BillingSource = BillingSourcePlanAndUserBalance
+				relayInfo.FundingSettledQuota = actualQuota
+				relayInfo.FundingSettledPlanQuota = planCharged
+				relayInfo.FundingSettledWalletQuota = shortfall
 			}
 		} else if actualQuota < 0 {
 			// Refund to plan (only if there was actual plan consumption)
@@ -750,22 +747,24 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 				planCharge = planCap
 			}
 		}
-		userCharge := int64(actualQuota) - planCharge
-
-		planDebited := false
+		// Drain what the plan can actually absorb. It may hold less than planCap if a
+		// concurrent request settled against it in the meantime; whatever it cannot
+		// cover rolls into the wallet portion below so the full cost is still billed.
+		planDebited := int64(0)
 		if planCharge > 0 {
-			charged, err := model.DecreaseUserPlanQuotaIfEnough(relayInfo.UserPlanId, planCharge)
-			if err != nil {
-				if errors.Is(err, model.ErrUserPlanCacheInvalidation) {
-					common.SysLog(fmt.Sprintf("mixed plan quota consumed but cache invalidation failed for user_plan %d: %v", relayInfo.UserPlanId, err))
-				} else {
-					return fmt.Errorf("consume mixed plan quota for user_plan %d: %w", relayInfo.UserPlanId, err)
+			debited, drainErr := drainPlanQuota(relayInfo, relayInfo.UserPlanId, planCharge)
+			planDebited = debited
+			if drainErr != nil {
+				// Infrastructure failure, not exhaustion — propagate as before.
+				if rollbackErr := rollbackMixedPlanCharge(relayInfo.UserPlanId, planDebited, planDebited > 0); rollbackErr != nil {
+					common.SysError(fmt.Sprintf(
+						"CRITICAL: mixed settlement could not roll back partial plan debit user=%d user_plan=%d plan_debited=%d drain_err=%v rollback_err=%v",
+						relayInfo.UserId, relayInfo.UserPlanId, planDebited, drainErr, rollbackErr))
 				}
-			} else if !charged {
-				return fmt.Errorf("consume mixed plan quota for user_plan %d: insufficient quota after concurrent settlement", relayInfo.UserPlanId)
+				return fmt.Errorf("consume mixed plan quota for user_plan %d: %w", relayInfo.UserPlanId, drainErr)
 			}
-			planDebited = true
 		}
+		userCharge := int64(actualQuota) - planDebited
 
 		// Reconcile user balance: userCharge may differ from the pre-deducted remainder.
 		userPreDeduct := int64(relayInfo.UserBalancePreConsumedQuota)
@@ -773,8 +772,8 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 		if userDelta > 0 {
 			// Need to charge extra from user balance.
 			if err := decreaseRelayUserQuota(relayInfo, int(userDelta)); err != nil {
-				if rollbackErr := rollbackMixedPlanCharge(relayInfo.UserPlanId, planCharge, planDebited); rollbackErr != nil {
-					preservePartialMixedSettlement(relayInfo, planCharge, userPreDeduct, err, rollbackErr)
+				if rollbackErr := rollbackMixedPlanCharge(relayInfo.UserPlanId, planDebited, planDebited > 0); rollbackErr != nil {
+					preservePartialMixedSettlement(relayInfo, planDebited, userPreDeduct, err, rollbackErr)
 					adjustTokenQuotaBestEffort(relayInfo, settledTokenQuotaDelta(relayInfo, quota, preConsumedQuota))
 					return nil
 				}
@@ -783,8 +782,8 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 		} else if userDelta < 0 {
 			// Refund to user balance.
 			if err := increaseRelayUserQuota(relayInfo, int(-userDelta)); err != nil {
-				if rollbackErr := rollbackMixedPlanCharge(relayInfo.UserPlanId, planCharge, planDebited); rollbackErr != nil {
-					preservePartialMixedSettlement(relayInfo, planCharge, userPreDeduct, err, rollbackErr)
+				if rollbackErr := rollbackMixedPlanCharge(relayInfo.UserPlanId, planDebited, planDebited > 0); rollbackErr != nil {
+					preservePartialMixedSettlement(relayInfo, planDebited, userPreDeduct, err, rollbackErr)
 					adjustTokenQuotaBestEffort(relayInfo, settledTokenQuotaDelta(relayInfo, quota, preConsumedQuota))
 					return nil
 				}
@@ -792,19 +791,9 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 			}
 		}
 
-		if planDebited {
+		if planDebited > 0 {
 			// Record side effects only after both funding sources have committed.
-			costUSD := float64(planCharge) / 500000.0
-			if incrErr := IncrDailyQuotaUsage(relayInfo.UserPlanId, planCharge); incrErr != nil {
-				common.SysLog(fmt.Sprintf("failed to record daily quota for user_plan %d (mixed): %v", relayInfo.UserPlanId, incrErr))
-			}
-			requestId := fmt.Sprintf("%d-%d", relayInfo.UserId, time.Now().UnixNano())
-			if rateErr := RecordConsumptionForRateLimit(relayInfo.UserPlanId, costUSD, requestId); rateErr != nil {
-				common.SysLog(fmt.Sprintf("failed to record rate limit for user_plan %d (mixed): %v", relayInfo.UserPlanId, rateErr))
-			}
-			if _, err := completeDepletedPlanAndNotify(relayInfo.UserId, relayInfo.UserPlanId); err != nil {
-				common.SysLog(fmt.Sprintf("failed to complete depleted user_plan %d (mixed): %v", relayInfo.UserPlanId, err))
-			}
+			recordPlanChargeSideEffects(relayInfo.UserId, relayInfo.UserPlanId, planDebited)
 		}
 
 		adjustTokenQuotaBestEffort(relayInfo, quota)

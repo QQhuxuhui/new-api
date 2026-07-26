@@ -500,16 +500,16 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 			quota = 1
 		}
 
-		// Check daily quota limit before updating stats (prevents excessive over-quota)
-		// Note: Request has already been served, but we can prevent recording excessive usage.
-		// Only plan-charged portion should be checked against plan daily limit.
+		// The request that crosses the plan's daily cap is still billed. The cap is a
+		// throttle, not an amnesty: skipping settlement here used to serve that request
+		// for free AND drop its consumption log, making the loss invisible to
+		// reconciliation. Enforcement happens up front instead — settlement feeds
+		// IncrDailyQuotaUsage, and the next request is rejected by the middleware
+		// pre-check (middleware/distributor.go:167).
 		if planQuotaToCheck := calculatePlanQuotaForDailyCheck(relayInfo, quota); planQuotaToCheck > 0 {
 			if err := service.CheckDailyQuotaBeforeConsume(relayInfo.UserPlanId, planQuotaToCheck); err != nil {
-				// Daily quota would be exceeded - skip quota consumption and log error
-				// Request has already succeeded, but we won't charge the user
-				logger.LogError(ctx, fmt.Sprintf("daily quota check failed, skipping quota consumption: %v", err))
-				service.ReturnPreConsumedQuota(ctx, relayInfo)
-				return
+				logger.LogWarn(ctx, fmt.Sprintf("套餐 %d 本次请求越过每日额度上限，仍照常计费，后续请求将被拦截: %v",
+					relayInfo.UserPlanId, err))
 			}
 		}
 
