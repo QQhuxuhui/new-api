@@ -352,31 +352,31 @@ func (p *SSRFProtection) ipAccessError(host string, ip net.IP) error {
 func (p *SSRFProtection) ValidateNetworkTarget(host string, port int) error {
 	host = strings.TrimSpace(host)
 	if host == "" {
-		return fmt.Errorf("invalid host")
+		return NewFetchURLInputError(fmt.Errorf("invalid host"))
 	}
 	if port < 1 || port > 65535 {
-		return fmt.Errorf("invalid port: %d", port)
+		return NewFetchURLInputError(fmt.Errorf("invalid port: %d", port))
 	}
 	if !p.isAllowedPort(port) {
-		return fmt.Errorf("port %d is not allowed", port)
+		return NewFetchURLInputError(fmt.Errorf("port %d is not allowed", port))
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
 		if !p.IsIPAccessAllowed(ip) {
-			return p.ipAccessError("", ip)
+			return NewFetchURLInputError(p.ipAccessError("", ip))
 		}
 		return nil
 	}
 
 	normalizedHost, err := normalizeDomain(host)
 	if err != nil {
-		return err
+		return NewFetchURLInputError(err)
 	}
 	if !p.isDomainAllowed(normalizedHost) {
 		if p.DomainFilterMode {
-			return fmt.Errorf("domain not in whitelist: %s", normalizedHost)
+			return NewFetchURLInputError(fmt.Errorf("domain not in whitelist: %s", normalizedHost))
 		}
-		return fmt.Errorf("domain in blacklist: %s", normalizedHost)
+		return NewFetchURLInputError(fmt.Errorf("domain in blacklist: %s", normalizedHost))
 	}
 	return nil
 }
@@ -384,10 +384,10 @@ func (p *SSRFProtection) ValidateNetworkTarget(host string, port int) error {
 // ValidateResolvedIP validates a domain's resolved IP immediately before dialing it.
 func (p *SSRFProtection) ValidateResolvedIP(host string, ip net.IP) error {
 	if isPrivateIP(ip) && !p.AllowPrivateIp {
-		return p.ipAccessError(host, ip)
+		return NewFetchURLInputError(p.ipAccessError(host, ip))
 	}
 	if p.ApplyIPFilterForDomain && !p.IsIPAccessAllowed(ip) {
-		return p.ipAccessError(host, ip)
+		return NewFetchURLInputError(p.ipAccessError(host, ip))
 	}
 	return nil
 }
@@ -395,16 +395,16 @@ func (p *SSRFProtection) ValidateResolvedIP(host string, ip net.IP) error {
 func (p *SSRFProtection) validateURLTarget(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
-		return "", fmt.Errorf("invalid URL format: %v", err)
+		return "", NewFetchURLInputError(fmt.Errorf("invalid URL format: %v", err))
 	}
 
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("unsupported protocol: %s (only http/https allowed)", u.Scheme)
+		return "", NewFetchURLInputError(fmt.Errorf("unsupported protocol: %s (only http/https allowed)", u.Scheme))
 	}
 
 	host := u.Hostname()
 	if host == "" {
-		return "", fmt.Errorf("invalid host")
+		return "", NewFetchURLInputError(fmt.Errorf("invalid host"))
 	}
 	portStr := u.Port()
 	if portStr == "" {
@@ -416,7 +416,7 @@ func (p *SSRFProtection) validateURLTarget(urlStr string) (string, error) {
 
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		return "", fmt.Errorf("invalid port: %s", portStr)
+		return "", NewFetchURLInputError(fmt.Errorf("invalid port: %s", portStr))
 	}
 
 	if err := p.ValidateNetworkTarget(host, port); err != nil {
@@ -442,7 +442,7 @@ func (p *SSRFProtection) ValidateURL(urlStr string) error {
 
 	host, err = normalizeDomain(host)
 	if err != nil {
-		return err
+		return NewFetchURLInputError(err)
 	}
 	lookupCtx, cancel := context.WithTimeout(context.Background(), ssrfDNSLookupTimeout)
 	defer cancel()
@@ -461,7 +461,7 @@ func (p *SSRFProtection) ValidateURL(urlStr string) error {
 // ValidateURLWithFetchSetting 使用FetchSetting配置验证URL
 func ValidateURLWithFetchSetting(urlStr string, enableSSRFProtection, allowPrivateIp bool, domainFilterMode bool, ipFilterMode bool, domainList, ipList, allowedPorts []string, applyIPFilterForDomain bool) error {
 	if !enableSSRFProtection {
-		return nil
+		return ValidateFetchURLTargetSyntax(urlStr)
 	}
 	protection, err := NewSSRFProtectionFromFetchSetting(allowPrivateIp, domainFilterMode, ipFilterMode, domainList, ipList, allowedPorts, applyIPFilterForDomain)
 	if err != nil {
@@ -472,11 +472,22 @@ func ValidateURLWithFetchSetting(urlStr string, enableSSRFProtection, allowPriva
 
 func ValidateURLTargetWithFetchSetting(urlStr string, enableSSRFProtection, allowPrivateIp bool, domainFilterMode bool, ipFilterMode bool, domainList, ipList, allowedPorts []string, applyIPFilterForDomain bool) error {
 	if !enableSSRFProtection {
-		return nil
+		return ValidateFetchURLTargetSyntax(urlStr)
 	}
 	protection, err := NewSSRFProtectionFromFetchSetting(allowPrivateIp, domainFilterMode, ipFilterMode, domainList, ipList, allowedPorts, applyIPFilterForDomain)
 	if err != nil {
 		return err
+	}
+	return protection.ValidateURLTarget(urlStr)
+}
+
+// ValidateFetchURLTargetSyntax validates the URL shape without applying SSRF
+// allow/deny policy or resolving DNS.
+func ValidateFetchURLTargetSyntax(urlStr string) error {
+	protection := &SSRFProtection{
+		AllowPrivateIp:   true,
+		DomainFilterMode: false,
+		IpFilterMode:     false,
 	}
 	return protection.ValidateURLTarget(urlStr)
 }

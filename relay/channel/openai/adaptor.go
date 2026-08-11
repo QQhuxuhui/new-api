@@ -417,11 +417,36 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		writer := multipart.NewWriter(&requestBody)
 
 		writer.WriteField("model", request.Model)
+
+		// 转换成功后会把 c.Request.Header 的 Content-Type 改写成出站
+		// multipart（带新 boundary），因此入站格式判断必须用首次进入时缓存的
+		// 原始值：重试时 body 已回卷成原始 JSON，再看当前请求头会误判
+		inboundContentType := c.GetHeader("Content-Type")
+		if cached, ok := c.Get(imagesEditsInboundContentTypeKey); ok {
+			inboundContentType, _ = cached.(string)
+		} else {
+			c.Set(imagesEditsInboundContentTypeKey, inboundContentType)
+		}
+
+		if !strings.Contains(inboundContentType, "multipart/form-data") {
+			// 客户端用 JSON 调 /v1/images/edits（上游只收 multipart），
+			// 从 JSON 体里的 image/mask 还原出文件字段再转发。
+			// 客户端错误标记由各确定性校验点（结构/编码/数量/大小/mask）
+			// 在内部精确添加；图片 URL 下载的临时失败（DNS/超时/远端 5xx）
+			// 不带标记，保留跨渠道重试能力
+			if jsonErr := writeEditsFormFromJSON(c, request, writer); jsonErr != nil {
+				return nil, jsonErr
+			}
+			writer.Close()
+			c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+			return &requestBody, nil
+		}
+
 		// 使用已解析的 multipart 表单，避免重复解析
 		mf := c.Request.MultipartForm
 		if mf == nil {
 			if _, err := c.MultipartForm(); err != nil {
-				return nil, errors.New("failed to parse multipart form")
+				return nil, fmt.Errorf("failed to parse multipart form: %w", err)
 			}
 			mf = c.Request.MultipartForm
 		}
@@ -458,7 +483,9 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 
 					// If no image fields found at all
 					if !foundArrayImages && (len(imageFiles) == 0) {
-						return nil, errors.New("image is required")
+						// 合法 multipart 但缺 image 字段是确定性的客户端错误，
+						// 跨渠道重放必然同样失败
+						return nil, types.NewClientInputError(errors.New("image is required"))
 					}
 				}
 			}
@@ -524,7 +551,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 				_ = maskFile.Close()
 			}
 		} else {
-			return nil, errors.New("no multipart form data found")
+			return nil, types.NewClientInputError(errors.New("no multipart form data found"))
 		}
 
 		// 关闭 multipart 编写器以设置分界线

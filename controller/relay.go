@@ -246,6 +246,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	// - attempts 仅用于计数和日志，不再限制优先级遍历
 	const maxPriorityLevels = 1000
 	attempts := 0
+	// 转换器（如 JSON 图片编辑转 multipart）会把入站 Content-Type 改写成
+	// 出站值；每次重试须连同 body 一起恢复原始请求头，否则下一次转换会按
+	// 上一次的出站格式解析原始 body 而失败
+	originalContentType := c.Request.Header.Get("Content-Type")
 retryLoop:
 	for priorityIndex := basePriorityIndex; priorityIndex < basePriorityIndex+maxPriorityLevels; priorityIndex++ {
 		for {
@@ -305,12 +309,12 @@ retryLoop:
 					channel.Id, channel.Name, maskedKey))
 			}
 
-			// doUpstreamCall rewinds the buffered request body and issues a
-			// single upstream call using the appropriate handler. It is reused
-			// by executeSameChannelRetry for rule-configured in-place retries.
+			// doUpstreamCall rewinds the buffered request body (and the original
+			// Content-Type header) and issues a single upstream call using the
+			// appropriate handler. It is reused by executeSameChannelRetry for
+			// rule-configured in-place retries.
 			doUpstreamCall := func() *types.NewAPIError {
-				requestBody, _ := common.GetRequestBody(c)
-				c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+				rewindRequestForRetry(c, originalContentType)
 				switch relayFormat {
 				case types.RelayFormatOpenAIRealtime:
 					return relay.WssHelper(c, relayInfo)
@@ -337,7 +341,7 @@ retryLoop:
 			// Record channel health based on result
 			if newAPIError == nil {
 				// Success - record to health tracker
-				service.RecordChannelSuccess(channel.Id)
+				recordChannelOutcome(c, channel.Id)
 				return
 			}
 
@@ -347,7 +351,7 @@ retryLoop:
 				// Record timeout errors (504/524) to health tracker for statistical analysis
 				// Timeouts won't trigger immediate retry but will accumulate in health stats
 				// If timeouts occur frequently (>30% failure rate), the channel will be suspended
-				if shouldRecordChannelFailure(c, newAPIError.StatusCode, newAPIError.RuleMatchInput()) {
+				if shouldRecordChannelFailure(c, newAPIError) {
 					service.RecordChannelFailure(channel.Id, newAPIError.StatusCode, newAPIError.Error())
 				}
 
@@ -441,9 +445,8 @@ retryLoop:
 				// Track the failover channel
 				addUsedChannel(c, failoverChannel.Id)
 
-				// Reset request body for retry
-				requestBody, _ := common.GetRequestBody(c)
-				c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+				// Reset request body (and original Content-Type) for retry
+				rewindRequestForRetry(c, originalContentType)
 
 				// Attempt the relay with failover channel
 				switch relayFormat {
@@ -459,7 +462,7 @@ retryLoop:
 
 				// Record channel health based on result
 				if newAPIError == nil {
-					service.RecordChannelSuccess(failoverChannel.Id)
+					recordChannelOutcome(c, failoverChannel.Id)
 					logger.LogInfo(c, fmt.Sprintf("[CrossPlanFailover] success with channel=%d group=%s user_plan=%d", failoverChannel.Id, failoverGroup, relayInfo.UserPlanId))
 					return
 				}
@@ -468,7 +471,7 @@ retryLoop:
 				if newAPIError.GetErrorCode() != types.ErrorCodeContextCanceled {
 					lastUpstreamErr = newAPIError
 				}
-				if shouldRecordChannelFailure(c, newAPIError.StatusCode, newAPIError.RuleMatchInput()) {
+				if shouldRecordChannelFailure(c, newAPIError) {
 					service.RecordChannelFailure(failoverChannel.Id, newAPIError.StatusCode, newAPIError.Error())
 				}
 				logger.LogWarn(c, fmt.Sprintf("[CrossPlanFailover] failover channel=%d also failed: %s", failoverChannel.Id, newAPIError.Error()))
@@ -542,8 +545,7 @@ retryLoop:
 
 					addUsedChannel(c, channel.Id)
 
-					requestBody, _ := common.GetRequestBody(c)
-					c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+					rewindRequestForRetry(c, originalContentType)
 
 					var err *types.NewAPIError
 					switch relayFormat {
@@ -559,7 +561,7 @@ retryLoop:
 					attemptsWallet++
 
 					if err == nil {
-						service.RecordChannelSuccess(channel.Id)
+						recordChannelOutcome(c, channel.Id)
 						return
 					}
 
@@ -570,7 +572,7 @@ retryLoop:
 					if !shouldContinueWalletRetry(c, err, relayFormat == types.RelayFormatOpenAIRealtime) {
 						break
 					}
-					if shouldRecordChannelFailure(c, err.StatusCode, err.RuleMatchInput()) {
+					if shouldRecordChannelFailure(c, err) {
 						service.RecordChannelFailure(channel.Id, err.StatusCode, err.Error())
 					}
 					// 继续尝试钱包分组下一优先级
@@ -657,6 +659,34 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true // 允许跨域
 	},
+}
+
+// recordChannelOutcome 记录本次上游调用的健康结果。流已输出部分内容后发生
+// 空闲超时的（mid-stream timeout），虽按既有语义对已输出内容收尾计费，
+// 但必须计为渠道失败而非成功，否则频繁掐流的渠道会带着满分健康继续接量。
+func recordChannelOutcome(c *gin.Context, channelId int) {
+	if helper.MidStreamTimeoutOccurred(c) {
+		service.RecordChannelFailure(channelId, http.StatusGatewayTimeout, "mid-stream idle timeout")
+		return
+	}
+	service.RecordChannelSuccess(channelId)
+}
+
+// rewindRequestForRetry 恢复缓冲的请求体和原始 Content-Type。
+// 转换器（如 JSON 图片编辑转 multipart）会把 c.Request.Header 的
+// Content-Type 改写成出站值，出站请求头正是从这里复制的；重试若只回卷
+// body 不恢复请求头，下一个渠道会按上一次的出站格式解析原始 body。
+func rewindRequestForRetry(c *gin.Context, originalContentType string) {
+	// 重试复用同一个 gin.Context：清除上一次尝试的流式超时状态，
+	// 否则这次即使成功也可能被残留状态判成 504 或错记渠道失败
+	helper.ResetStreamTimeoutState(c)
+	requestBody, _ := common.GetRequestBody(c)
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+	if originalContentType != "" {
+		c.Request.Header.Set("Content-Type", originalContentType)
+	} else {
+		c.Request.Header.Del("Content-Type")
+	}
 }
 
 func addUsedChannel(c *gin.Context, channelId int) {
@@ -765,7 +795,25 @@ func applyClientRuleState(c *gin.Context, statusCode int, errorMessage string) b
 	return true
 }
 
-func shouldRecordChannelFailure(c *gin.Context, statusCode int, errorMessage string) bool {
+// shouldRecordChannelFailure 判定失败是否计入渠道健康统计。
+// SkipRetry 错误是请求级问题（非法输入、用户侧额度等），已决定不换渠道，
+// 也绝不计入渠道健康——即使管理员配置了匹配相应状态码/关键词的故障转移
+// 规则，也不能让重复的非法请求给正常渠道累计失败甚至触发暂停。
+// 本地准备阶段的可重试错误通过显式选项排除；不能按转换错误码整体排除，
+// 因为部分适配器会在 ConvertImageRequest 内调用所选渠道上传文件。
+func shouldRecordChannelFailure(c *gin.Context, newAPIError *types.NewAPIError) bool {
+	if newAPIError == nil || types.IsSkipRetryError(newAPIError) {
+		return false
+	}
+	if !types.IsRecordChannelHealth(newAPIError) {
+		return false
+	}
+	return shouldRecordChannelFailureRaw(c, newAPIError.StatusCode, newAPIError.RuleMatchInput())
+}
+
+// shouldRecordChannelFailureRaw 供只有状态码/消息可用的路径
+// （midjourney、task）使用；有完整 NewAPIError 时必须走上面的类型化入口
+func shouldRecordChannelFailureRaw(c *gin.Context, statusCode int, errorMessage string) bool {
 	if applyClientRuleState(c, statusCode, errorMessage) {
 		return false
 	}
@@ -777,7 +825,7 @@ func shouldRecordChannelFailure(c *gin.Context, statusCode int, errorMessage str
 }
 
 func shouldRecordTaskChannelFailure(c *gin.Context, taskErr *dto.TaskError) bool {
-	return taskErr != nil && !taskErr.LocalError && shouldRecordChannelFailure(c, taskErr.StatusCode, taskErr.Message)
+	return taskErr != nil && !taskErr.LocalError && shouldRecordChannelFailureRaw(c, taskErr.StatusCode, taskErr.Message)
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
@@ -1014,7 +1062,7 @@ func RelayMidjourney(c *gin.Context) {
 		// Record channel health on failure
 		errorMessage := fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)
 		// For Midjourney errors, record to health tracker if it's a server/upstream error
-		if shouldRecordChannelFailure(c, statusCode, errorMessage) {
+		if shouldRecordChannelFailureRaw(c, statusCode, errorMessage) {
 			service.RecordChannelFailure(channelId, statusCode, errorMessage)
 		}
 
@@ -1117,6 +1165,7 @@ func RelayTask(c *gin.Context) {
 
 	const maxPriorityLevelsTask = 1000
 	attemptsTask := 0
+	originalContentType := c.Request.Header.Get("Content-Type")
 	for priorityIndex := basePriorityIndex; priorityIndex < basePriorityIndex+maxPriorityLevelsTask; priorityIndex++ {
 		remainingRetries := maxPriorityLevelsTask - attemptsTask
 		if !shouldRetryTaskRelay(c, channelId, taskErr, remainingRetries) {
@@ -1160,8 +1209,7 @@ func RelayTask(c *gin.Context) {
 		c.Set("use_channel", useChannel)
 		logger.LogInfo(c, fmt.Sprintf("using channel #%d to retry (remain times %d)", channel.Id, attemptsTask))
 
-		requestBody, _ := common.GetRequestBody(c)
-		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+		rewindRequestForRetry(c, originalContentType)
 		if responseBuffer != nil {
 			responseBuffer.Reset()
 		}

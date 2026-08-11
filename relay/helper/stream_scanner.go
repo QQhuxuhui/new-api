@@ -5,9 +5,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -73,11 +75,37 @@ func NewEmptyStreamError(reason StreamExitReason) *types.NewAPIError {
 	}
 }
 
+// neverStreamTimeout 表示"永不超时"：用一个不可能触发的超长周期代替停表，
+// 避免 time.NewTicker(0) panic 并保持主循环 select 结构不变
+const neverStreamTimeout = time.Duration(math.MaxInt64)
+
+// resolveStreamTimeout 返回本次流式请求生效的空闲超时。
+// 渠道设置 stream_timeout_seconds 优先（0 或负数 = 永不超时），
+// 未设置时回退全局 STREAMING_TIMEOUT（同样支持 0 = 永不超时）。
+func resolveStreamTimeout(info *relaycommon.RelayInfo) time.Duration {
+	seconds := constant.StreamingTimeout
+	if info != nil && info.ChannelMeta != nil && info.ChannelSetting.StreamTimeoutSeconds != nil {
+		seconds = *info.ChannelSetting.StreamTimeoutSeconds
+	}
+	if seconds <= 0 {
+		return neverStreamTimeout
+	}
+	// 上限钳制：ValidateSettings 已拒绝超限值，这里兜底处理绕过校验的数据
+	// （如直接改库），既不静默变成"永不超时"，也杜绝乘法溢出 panic
+	if seconds > constant.MaxStreamTimeoutSeconds {
+		seconds = constant.MaxStreamTimeoutSeconds
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string) bool) StreamExitReason {
 
 	if resp == nil || dataHandler == nil {
 		return StreamExitNormal
 	}
+
+	// 每次尝试都以干净状态开始（重试复用同一个 gin.Context）
+	ResetStreamTimeoutState(c)
 
 	// 确保响应体总是被关闭
 	defer func() {
@@ -86,16 +114,17 @@ func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *r
 		}
 	}()
 
-	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
+	streamingTimeout := resolveStreamTimeout(info)
 
 	var (
-		stopChan   = make(chan bool, 3)      // 增加缓冲区避免阻塞
-		scanner    = bufio.NewScanner(resp.Body)
-		ticker     = time.NewTicker(streamingTimeout)
-		pingTicker *time.Ticker
-		taskChan   = make(chan writeTask, 10) // 任务队列
-		producerWg sync.WaitGroup             // 生产者（ping + scanner）等待组
-		writerWg   sync.WaitGroup             // 消费者（writer）等待组
+		stopChan      = make(chan bool, 3)      // 增加缓冲区避免阻塞
+		scanner       = bufio.NewScanner(resp.Body)
+		ticker        = time.NewTicker(streamingTimeout)
+		pingTicker    *time.Ticker
+		taskChan      = make(chan writeTask, 10) // 任务队列
+		producerWg    sync.WaitGroup             // 生产者（ping + scanner）等待组
+		writerWg      sync.WaitGroup             // 消费者（writer）等待组
+		sawStreamData atomic.Bool                // 是否已向 handler 投递过数据（区分首包超时与中途超时）
 	)
 
 	generalSettings := operation_setting.GetGeneralSetting()
@@ -184,7 +213,8 @@ func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *r
 	writerWg.Add(1)
 	gopool.Go(func() {
 		defer func() {
-			writerWg.Done()
+			// Done 必须在 stopChan 发送之后：外层 Wait() 通过后会 close(stopChan)，
+			// 若 Done 先执行，此处的发送会与 close 并发（data race / send on closed）
 			if r := recover(); r != nil {
 				logger.LogError(c, fmt.Sprintf("writer goroutine panic: %v", r))
 				common.SafeSendBool(stopChan, true)
@@ -192,6 +222,7 @@ func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *r
 			if common.DebugEnabled {
 				println("writer goroutine exited")
 			}
+			writerWg.Done()
 		}()
 
 		for {
@@ -257,7 +288,7 @@ func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *r
 		producerWg.Add(1)
 		gopool.Go(func() {
 			defer func() {
-				producerWg.Done()
+				// Done 最后执行，避免与外层 close(stopChan) 竞态（见 writer 注释）
 				if r := recover(); r != nil {
 					logger.LogError(c, fmt.Sprintf("ping goroutine panic: %v", r))
 					common.SafeSendBool(stopChan, true)
@@ -265,6 +296,7 @@ func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *r
 				if common.DebugEnabled {
 					println("ping goroutine exited")
 				}
+				producerWg.Done()
 			}()
 
 			// 添加超时保护，防止 goroutine 无限运行
@@ -332,7 +364,7 @@ func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *r
 	producerWg.Add(1)
 	common.RelayCtxGo(ctx, func() {
 		defer func() {
-			producerWg.Done()
+			// Done 最后执行，避免与外层 close(stopChan) 竞态（见 writer 注释）
 			if r := recover(); r != nil {
 				logger.LogError(c, fmt.Sprintf("scanner goroutine panic: %v", r))
 			}
@@ -340,6 +372,7 @@ func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *r
 			if common.DebugEnabled {
 				println("scanner goroutine exited")
 			}
+			producerWg.Done()
 		}()
 
 		for scanner.Scan() {
@@ -392,6 +425,7 @@ func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *r
 			}
 
 			info.SetFirstResponseTime()
+			sawStreamData.Store(true)
 
 			// 创建结果通道并发送任务
 			resultChan := make(chan writeResult, 1)
@@ -443,6 +477,16 @@ func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *r
 	case <-ticker.C:
 		// 超时处理逻辑
 		logger.LogError(c, "streaming timeout")
+		// 立即关闭上游 Body，解除 scanner.Scan 的阻塞——否则清理阶段要等
+		// 5 秒的 producer 退出超时，实际超时会比配置多约 5 秒
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		// 已输出过内容后才超时：标记 mid-stream 超时。外层据此改记渠道失败
+		// 而非成功，handler 据此跳过伪造的正常收尾（final chunk / [DONE]）
+		if sawStreamData.Load() {
+			common.SetContextKey(c, constant.ContextKeyMidStreamTimeout, true)
+		}
 		return StreamExitTimeout
 	case <-stopChan:
 		// 正常结束

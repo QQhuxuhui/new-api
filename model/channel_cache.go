@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,12 +20,54 @@ var group2model2channels map[string]map[string][]int // enabled channel
 var channelsIDM map[int]*Channel                     // all channels include disabled
 var channelSyncLock sync.RWMutex
 
+// alwaysHealthyChannels holds a precomputed map[int]bool of channels with
+// setting.always_healthy enabled. Stored via atomic.Value so IsChannelAlwaysHealthy
+// stays lock-free: it is called from selection loops that already hold
+// channelSyncLock.RLock, where re-acquiring the RLock would deadlock as soon as a
+// writer (InitChannelCache / CacheUpdateChannelStatus) queues behind the reader.
+var alwaysHealthyChannels atomic.Value
+
 // ErrPriorityExhausted is returned when all priority levels have been tried
 // and no healthy channels are available. This signals the caller to stop retrying.
 var ErrPriorityExhausted = errors.New("all priority levels exhausted")
 
+// IsChannelAlwaysHealthy reports whether the channel opted out of health degradation
+// (setting.always_healthy). With memory cache it reads the precomputed lock-free set,
+// safe inside selection loops that already hold channelSyncLock; without memory cache
+// it falls back to a DB read — callers must keep that path off per-candidate hot
+// loops (IsChannelHealthy/IsChannelWarning only consult it for channels that are
+// actually flagged in Redis, which is rare).
+func IsChannelAlwaysHealthy(channelID int) bool {
+	if common.MemoryCacheEnabled {
+		set, _ := alwaysHealthyChannels.Load().(map[int]bool)
+		return set[channelID]
+	}
+	channel, err := GetChannelById(channelID, true)
+	if err != nil || channel == nil {
+		return false
+	}
+	return channel.GetSettingReadonly().AlwaysHealthy
+}
+
+// buildAlwaysHealthySet computes the always-healthy lookup from a channel map.
+// Uses GetSettingReadonly so shared cached channels are never mutated.
+func buildAlwaysHealthySet(channels map[int]*Channel) map[int]bool {
+	set := make(map[int]bool)
+	for id, channel := range channels {
+		if channel != nil && channel.GetSettingReadonly().AlwaysHealthy {
+			set[id] = true
+		}
+	}
+	return set
+}
+
 // IsChannelHealthy checks if channel is suspended using health tracking
 func IsChannelHealthy(channelID int) bool {
+	// 内存缓存模式：豁免判断是无锁 map 查找，前置可直接短路 Redis 往返
+	if common.MemoryCacheEnabled && IsChannelAlwaysHealthy(channelID) {
+		return true
+	}
+
 	ctx := context.Background()
 	rdb := common.RDB
 
@@ -43,6 +86,12 @@ func IsChannelHealthy(channelID int) bool {
 
 	// Only return false if key exists (channel is actually suspended)
 	if suspended > 0 {
+		// DB 模式（无内存缓存）的豁免只对已被标记的渠道触发一次 DB 查询，
+		// 保证 MEMORY_CACHE_ENABLED=false 时 always_healthy 仍可靠生效，
+		// 同时避免在逐候选热循环里为未标记渠道做无谓查询
+		if !common.MemoryCacheEnabled && IsChannelAlwaysHealthy(channelID) {
+			return true
+		}
 		return false
 	}
 
@@ -52,6 +101,10 @@ func IsChannelHealthy(channelID int) bool {
 // IsChannelWarning checks if channel is in warning state (degraded but not suspended)
 // Fail open on Redis errors to avoid过度降权
 func IsChannelWarning(channelID int) bool {
+	if common.MemoryCacheEnabled && IsChannelAlwaysHealthy(channelID) {
+		return false
+	}
+
 	ctx := context.Background()
 	rdb := common.RDB
 
@@ -66,7 +119,15 @@ func IsChannelWarning(channelID int) bool {
 		return false
 	}
 
-	return exists > 0
+	if exists > 0 {
+		// 与 IsChannelHealthy 相同：DB 模式仅对已标记渠道回退 DB 查询
+		if !common.MemoryCacheEnabled && IsChannelAlwaysHealthy(channelID) {
+			return false
+		}
+		return true
+	}
+
+	return false
 }
 
 func InitChannelCache() {
@@ -137,6 +198,7 @@ func InitChannelCache() {
 		}
 	}
 	channelsIDM = newChannelId2channel
+	alwaysHealthyChannels.Store(buildAlwaysHealthySet(newChannelId2channel))
 	channelSyncLock.Unlock()
 	common.SysLog("channels synced from database")
 }
@@ -516,4 +578,18 @@ func CacheUpdateChannel(channel *Channel) {
 	}
 
 	channelsIDM[channel.Id] = channel
+
+	// Keep the lock-free always-healthy set in sync (copy-on-write under the
+	// same lock that serializes InitChannelCache's rebuild).
+	prev, _ := alwaysHealthyChannels.Load().(map[int]bool)
+	next := make(map[int]bool, len(prev)+1)
+	for id := range prev {
+		next[id] = true
+	}
+	if channel.GetSettingReadonly().AlwaysHealthy {
+		next[channel.Id] = true
+	} else {
+		delete(next, channel.Id)
+	}
+	alwaysHealthyChannels.Store(next)
 }

@@ -2,6 +2,7 @@ package zhipu
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -156,12 +157,32 @@ func streamMetaResponseZhipu2OpenAI(zhipuResponse *ZhipuStreamMetaResponse) (*dt
 
 func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	var usage *dto.Usage
+	helper.ApplyStreamIdleTimeout(c, resp, info) // 渠道级/全局流式空闲超时（原始扫描循环不经过 StreamScannerHandler）
+	streamCtx, cancelStream := context.WithCancel(c.Request.Context())
+	scanDone := make(chan struct{})
+	defer func() {
+		cancelStream()
+		service.CloseResponseBodyGracefully(resp)
+		<-scanDone
+	}()
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
-	dataChan := make(chan string)
-	metaChan := make(chan string)
-	stopChan := make(chan bool)
+	type streamEvent struct {
+		data   string
+		isMeta bool
+	}
+	eventChan := make(chan streamEvent)
 	go func() {
+		defer close(scanDone)
+		defer close(eventChan)
+		sendEvent := func(event streamEvent) bool {
+			select {
+			case eventChan <- event:
+				return true
+			case <-streamCtx.Done():
+				return false
+			}
+		}
 		for scanner.Scan() {
 			data := scanner.Text()
 			lines := strings.Split(data, "\n")
@@ -170,53 +191,120 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 					continue
 				}
 				if line[:5] == "data:" {
-					dataChan <- line[5:]
+					if !sendEvent(streamEvent{data: line[5:]}) {
+						return
+					}
 					if i != len(lines)-1 {
-						dataChan <- "\n"
+						if !sendEvent(streamEvent{data: "\n"}) {
+							return
+						}
 					}
 				} else if line[:5] == "meta:" {
-					metaChan <- line[5:]
+					if !sendEvent(streamEvent{data: line[5:], isMeta: true}) {
+						return
+					}
 				}
 			}
 		}
-		stopChan <- true
 	}()
-	helper.SetEventStreamHeaders(c)
-	c.Stream(func(w io.Writer) bool {
+	renderData := func(data string) bool {
+		response := streamResponseZhipu2OpenAI(data)
+		jsonResponse, err := json.Marshal(response)
+		if err != nil {
+			common.SysLog("error marshalling stream response: " + err.Error())
+			return true
+		}
+		helper.MarkPayloadWritten(c)
+		c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonResponse)})
+		return true
+	}
+	renderMeta := func(data string) bool {
+		var zhipuResponse ZhipuStreamMetaResponse
+		err := json.Unmarshal([]byte(data), &zhipuResponse)
+		if err != nil {
+			common.SysLog("error unmarshalling stream response: " + err.Error())
+			return true
+		}
+		response, zhipuUsage := streamMetaResponseZhipu2OpenAI(&zhipuResponse)
+		jsonResponse, err := json.Marshal(response)
+		if err != nil {
+			common.SysLog("error marshalling stream response: " + err.Error())
+			return true
+		}
+		usage = zhipuUsage
+		helper.MarkPayloadWritten(c)
+		c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonResponse)})
+		return true
+	}
+
+	// 提交响应头之前先等首个事件：c.Stream 每次回调后都会 Flush，一旦进入
+	// 就等于提交了 200，首包超时后再返回 504 也无法切换渠道了
+	var firstEvent streamEvent
+	gotFirst := false
+	sourceDone := false
+	for !gotFirst && !sourceDone {
 		select {
-		case data := <-dataChan:
-			response := streamResponseZhipu2OpenAI(data)
-			jsonResponse, err := json.Marshal(response)
-			if err != nil {
-				common.SysLog("error marshalling stream response: " + err.Error())
-				return true
+		case event, ok := <-eventChan:
+			if !ok {
+				sourceDone = true
+				continue
 			}
-			helper.MarkPayloadWritten(c)
-			c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonResponse)})
-			return true
-		case data := <-metaChan:
-			var zhipuResponse ZhipuStreamMetaResponse
-			err := json.Unmarshal([]byte(data), &zhipuResponse)
-			if err != nil {
-				common.SysLog("error unmarshalling stream response: " + err.Error())
-				return true
+			if event.isMeta {
+				var probe ZhipuStreamMetaResponse
+				if err := json.Unmarshal([]byte(event.data), &probe); err != nil {
+					common.SysLog("error unmarshalling stream response: " + err.Error())
+					continue
+				}
 			}
-			response, zhipuUsage := streamMetaResponseZhipu2OpenAI(&zhipuResponse)
-			jsonResponse, err := json.Marshal(response)
-			if err != nil {
-				common.SysLog("error marshalling stream response: " + err.Error())
-				return true
+			firstEvent, gotFirst = event, true
+		case <-streamCtx.Done():
+			return nil, helper.NewEmptyStreamError(helper.StreamExitClientGone)
+		}
+	}
+	if !gotFirst {
+		if timeoutErr := helper.RawStreamFirstByteTimeoutError(c); timeoutErr != nil {
+			return nil, timeoutErr
+		}
+		// 上游未发任何事件即正常结束：保持既有收尾语义
+		helper.SetEventStreamHeaders(c)
+		c.Render(-1, &common.CustomEvent{Data: "data: [DONE]"})
+		return usage, nil
+	}
+
+	helper.SetEventStreamHeaders(c)
+	pendingFirst := true
+	clientGone := c.Stream(func(w io.Writer) bool {
+		if pendingFirst {
+			pendingFirst = false
+			if firstEvent.isMeta {
+				return renderMeta(firstEvent.data)
 			}
-			usage = zhipuUsage
-			helper.MarkPayloadWritten(c)
-			c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonResponse)})
-			return true
-		case <-stopChan:
-			c.Render(-1, &common.CustomEvent{Data: "data: [DONE]"})
+			return renderData(firstEvent.data)
+		}
+		select {
+		case event, ok := <-eventChan:
+			if !ok {
+				if !helper.MidStreamTimeoutOccurred(c) {
+					c.Render(-1, &common.CustomEvent{Data: "data: [DONE]"})
+				}
+				return false
+			}
+			if event.isMeta {
+				return renderMeta(event.data)
+			}
+			return renderData(event.data)
+		case <-streamCtx.Done():
 			return false
 		}
 	})
-	service.CloseResponseBodyGracefully(resp)
+	cancelStream()
+	if clientGone || c.Request.Context().Err() != nil {
+		return nil, helper.NewEmptyStreamError(helper.StreamExitClientGone)
+	}
+	// 首包超时按空流 504 报错（可切换渠道）
+	if timeoutErr := helper.RawStreamFirstByteTimeoutError(c); timeoutErr != nil {
+		return nil, timeoutErr
+	}
 	return usage, nil
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 )
 
 // WorkerRequest Worker请求的数据结构
@@ -26,13 +27,14 @@ func DoWorkerRequest(req *WorkerRequest) (*http.Response, error) {
 		return nil, fmt.Errorf("worker not enabled")
 	}
 	if !system_setting.WorkerAllowHttpImageRequestEnabled && !strings.HasPrefix(req.URL, "https") {
-		return nil, fmt.Errorf("only support https url")
+		return nil, types.NewClientInputError(fmt.Errorf("only support https url"))
 	}
 
-	// SSRF防护：验证请求URL
+	// SSRF防护：验证请求URL。策略拒绝是确定性的客户端输入问题（URL 本身
+	// 不被允许），打 ClientInputError 标记供 relay 层免重试处理
 	fetchSetting := system_setting.GetFetchSetting()
 	if err := common.ValidateURLWithFetchSetting(req.URL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
-		return nil, fmt.Errorf("request reject: %v", err)
+		return nil, fmt.Errorf("request reject: %w", classifyFetchURLValidationError(err))
 	}
 
 	workerUrl := system_setting.WorkerUrl
@@ -58,12 +60,19 @@ func DoDownloadRequest(originUrl string, reason ...string) (resp *http.Response,
 		}
 		return DoWorkerRequest(req)
 	} else {
-		// SSRF防护：验证请求URL（非Worker模式）
+		// SSRF防护：验证请求URL（非Worker模式）。策略拒绝属确定性客户端错误
 		if err := ValidateSSRFProtectedFetchURL(originUrl); err != nil {
-			return nil, fmt.Errorf("request reject: %v", err)
+			return nil, fmt.Errorf("request reject: %w", classifyFetchURLValidationError(err))
 		}
 
 		common.SysLog(fmt.Sprintf("downloading from origin: %s, reason: %s", common.MaskSensitiveInfo(originUrl), strings.Join(reason, ", ")))
 		return GetSSRFProtectedHTTPClient().Get(originUrl)
 	}
+}
+
+func classifyFetchURLValidationError(err error) error {
+	if common.IsFetchURLInputError(err) {
+		return types.NewClientInputError(err)
+	}
+	return err
 }

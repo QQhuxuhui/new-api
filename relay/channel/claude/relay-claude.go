@@ -1061,7 +1061,13 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		return nil, helper.NewEmptyStreamError(exitReason)
 	}
 
-	HandleStreamFinalResponse(c, info, claudeInfo, requestMode)
+	// mid-stream 超时：跳过伪造的 message_stop 等正常收尾，让客户端感知
+	// 到流异常中断；已输出内容仍按既有语义计费
+	if helper.MidStreamTimeoutOccurred(c) {
+		logger.LogWarn(c, fmt.Sprintf("stream idle timeout after %d events; finishing without fabricated completion", streamEventCount))
+	} else {
+		HandleStreamFinalResponse(c, info, claudeInfo, requestMode)
+	}
 	return claudeInfo.Usage, nil
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 )
 
 // fakeResolver returns a fixed set of IPs regardless of the host, simulating a
@@ -55,6 +56,9 @@ func TestProtectedFetchDialerBlocksDNSRebinding(t *testing.T) {
 	_, err := dialer.DialContext(context.Background(), "tcp", "evil.example.com:443")
 	if err == nil {
 		t.Fatalf("expected dial to be blocked for domain resolving to private IP")
+	}
+	if !types.IsClientInputError(err) {
+		t.Fatalf("DNS rebinding policy rejection must be a client-input error, got %v", err)
 	}
 	if dialCalled {
 		t.Errorf("underlying dialer must NOT be called when resolved IP is blocked")
@@ -307,5 +311,23 @@ func TestProtectedFetchRedirectBlocksPrivateTarget(t *testing.T) {
 	}
 	if err := checkProtectedFetchRedirect(request, nil); err == nil {
 		t.Fatal("expected protected redirect into private address to be blocked")
+	} else if !types.IsClientInputError(err) {
+		t.Fatalf("redirect policy rejection must be a client-input error, got %v", err)
+	}
+}
+
+func TestProtectedFetchRedirectLimitIsClientInput(t *testing.T) {
+	request, err := http.NewRequest(http.MethodGet, "https://example.com/image.png", nil)
+	if err != nil {
+		t.Fatalf("create redirect request: %v", err)
+	}
+	via := make([]*http.Request, 10)
+
+	err = checkProtectedFetchRedirect(request, via)
+	if err == nil {
+		t.Fatal("expected redirect limit rejection")
+	}
+	if !types.IsClientInputError(err) {
+		t.Fatalf("redirect limit rejection must be a client-input error, got %v", err)
 	}
 }

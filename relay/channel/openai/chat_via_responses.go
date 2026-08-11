@@ -307,7 +307,10 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	}
 
 	// Send [DONE] marker. StreamScannerHandler does NOT forward [DONE] to the client.
-	helper.Done(c)
+	// mid-stream 超时不发 [DONE]，让客户端感知到流异常中断
+	if !helper.MidStreamTimeoutOccurred(c) {
+		helper.Done(c)
+	}
 
 	// Fall back to text-based token counting if usage is missing
 	if usage.CompletionTokens == 0 {

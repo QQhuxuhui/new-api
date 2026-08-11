@@ -103,7 +103,7 @@ func (t *ssrfProtectedRoundTripper) RoundTrip(req *http.Request) (*http.Response
 		return nil, fmt.Errorf("invalid request")
 	}
 	if err := ValidateSSRFProtectedFetchURL(req.URL.String()); err != nil {
-		return nil, err
+		return nil, classifyFetchURLValidationError(err)
 	}
 
 	var proxyURL *url.URL
@@ -187,7 +187,7 @@ func (d *protectedFetchDialer) DialContext(ctx context.Context, network, addr st
 		return nil, fmt.Errorf("invalid port: %s", portText)
 	}
 	if err := protection.ValidateNetworkTarget(host, port); err != nil {
-		return nil, err
+		return nil, classifyFetchURLValidationError(err)
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
@@ -210,7 +210,7 @@ func (d *protectedFetchDialer) DialContext(ctx context.Context, network, addr st
 			continue
 		}
 		if err := protection.ValidateResolvedIP(host, ip); err != nil {
-			return nil, err
+			return nil, classifyFetchURLValidationError(err)
 		}
 		ipText := ip.String()
 		if _, exists := seenIPs[ipText]; exists {

@@ -238,6 +238,10 @@ const EditChannelModal = (props) => {
     strip_placeholders: false,
     // 文本工具调用转换
     text_tool_call_conversion: false,
+    // 永远健康（豁免警告/暂停）
+    always_healthy: false,
+    // 渠道级流式超时（秒）：空=全局默认，0=永不超时
+    stream_timeout_seconds: '',
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -396,6 +400,8 @@ const EditChannelModal = (props) => {
     pass_through_body_enabled: false,
     system_prompt: '',
     user_prompt: '',
+    always_healthy: false,
+    stream_timeout_seconds: '',
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
@@ -626,6 +632,13 @@ const EditChannelModal = (props) => {
           data.strip_placeholders = parsedSettings.strip_placeholders || false;
           data.text_tool_call_conversion = parsedSettings.text_tool_call_conversion || false;
           data.native_align = parsedSettings.native_align || false;
+          data.always_healthy = parsedSettings.always_healthy || false;
+          // 注意 0 是合法值（永不超时），不能用 || 兜底
+          data.stream_timeout_seconds =
+            parsedSettings.stream_timeout_seconds === undefined ||
+            parsedSettings.stream_timeout_seconds === null
+              ? ''
+              : String(parsedSettings.stream_timeout_seconds);
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -643,6 +656,8 @@ const EditChannelModal = (props) => {
           data.strip_placeholders = false;
           data.text_tool_call_conversion = false;
           data.native_align = false;
+          data.always_healthy = false;
+          data.stream_timeout_seconds = '';
         }
       } else {
         data.force_format = false;
@@ -660,6 +675,8 @@ const EditChannelModal = (props) => {
         data.strip_placeholders = false;
         data.text_tool_call_conversion = false;
         data.native_align = false;
+        data.always_healthy = false;
+        data.stream_timeout_seconds = '';
       }
 
       if (data.settings) {
@@ -734,6 +751,8 @@ const EditChannelModal = (props) => {
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
         user_prompt: data.user_prompt,
+        always_healthy: data.always_healthy || false,
+        stream_timeout_seconds: data.stream_timeout_seconds ?? '',
       });
       // console.log(data);
     } else {
@@ -1017,6 +1036,8 @@ const EditChannelModal = (props) => {
       system_prompt: '',
       system_prompt_override: false,
       user_prompt: '',
+      always_healthy: false,
+      stream_timeout_seconds: '',
     });
     // 重置密钥模式状态
     setKeyMode('append');
@@ -1401,6 +1422,31 @@ const EditChannelModal = (props) => {
           shared_scope: localInputs.cache_sim_shared_scope || false,
         }
       : undefined;
+    // 渠道级流式超时：空=不写入（用全局默认），0 是合法值（永不超时）。
+    // 严格校验为非负整数，小数/带后缀等输入直接报错而不是静默截断
+    let streamTimeoutSetting = {};
+    if (
+      localInputs.stream_timeout_seconds !== undefined &&
+      localInputs.stream_timeout_seconds !== null &&
+      String(localInputs.stream_timeout_seconds).trim() !== ''
+    ) {
+      const rawStreamTimeout = String(
+        localInputs.stream_timeout_seconds,
+      ).trim();
+      if (!/^\d+$/.test(rawStreamTimeout)) {
+        showError(t('流式超时必须为非负整数（秒），0 表示永不超时'));
+        return;
+      }
+      const parsedStreamTimeout = parseInt(rawStreamTimeout, 10);
+      // 与服务端 constant.MaxStreamTimeoutSeconds 保持一致（7 天）
+      if (parsedStreamTimeout > 604800) {
+        showError(t('流式超时最大为 604800 秒（7 天）；如需不限制请填 0'));
+        return;
+      }
+      streamTimeoutSetting = {
+        stream_timeout_seconds: parsedStreamTimeout,
+      };
+    }
     const channelExtraSettings = {
       force_format: localInputs.force_format || false,
       thinking_to_content: localInputs.thinking_to_content || false,
@@ -1413,6 +1459,8 @@ const EditChannelModal = (props) => {
       ...(localInputs.strip_placeholders ? { strip_placeholders: true } : {}),
       ...(localInputs.text_tool_call_conversion ? { text_tool_call_conversion: true } : {}),
       ...(localInputs.native_align ? { native_align: true } : {}),
+      ...(localInputs.always_healthy ? { always_healthy: true } : {}),
+      ...streamTimeoutSetting,
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1485,6 +1533,10 @@ const EditChannelModal = (props) => {
     // 清理文本工具调用转换的临时字段
     delete localInputs.text_tool_call_conversion;
     delete localInputs.native_align;
+    // 清理永远健康的临时字段
+    delete localInputs.always_healthy;
+    // 清理流式超时的临时字段
+    delete localInputs.stream_timeout_seconds;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -3680,6 +3732,33 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         '开启后将 Claude 原生响应信封（消息ID前缀、ping、usage字段、字段顺序、stop_details、SSE填充）向第一方 Anthropic 对齐。缓存命中指纹需同时开启"缓存模拟"才能完整对齐。',
+                      )}
+                    />
+                    <Form.Switch
+                      field='always_healthy'
+                      label={t('永远健康')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('always_healthy', value)
+                      }
+                      extraText={t(
+                        '开启后该渠道永远不会进入警告或暂停状态（失败率统计仍会记录）。数据库层面的自动禁用仍由"是否自动禁用"开关独立控制。',
+                      )}
+                    />
+                    <Form.Input
+                      field='stream_timeout_seconds'
+                      label={t('流式超时（秒）')}
+                      placeholder={t('留空使用全局默认（300 秒）')}
+                      showClear
+                      onChange={(value) =>
+                        handleChannelSettingsChange(
+                          'stream_timeout_seconds',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '流式响应的空闲超时：首包等待或相邻数据块间隔超过该值即按超时处理（504）。留空使用全局 STREAMING_TIMEOUT（默认 300 秒）；填 0 表示永不超时；最大 604800 秒（7 天）。仅对本渠道生效。',
                       )}
                     />
 

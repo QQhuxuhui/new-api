@@ -69,4 +69,8 @@ const (
 	ContextKeyPingWritten    ContextKey = "relay_ping_written"    // bool: 仅写出过 SSE ping 注释（不算 payload，可安全重放）
 
 	ContextKeyWarningChannelSkipped ContextKey = "warning_channel_skipped" // bool: 本请求曾有渠道仅因 warning 掷骰被跳过，优先级耗尽时值得关骰补扫
+
+	ContextKeyMidStreamTimeout ContextKey = "mid_stream_timeout" // bool: 流已输出部分内容后发生空闲超时；外层改记渠道失败，handler 跳过伪造的正常收尾
+
+	ContextKeyStreamIdleTimeoutState ContextKey = "stream_idle_timeout_state" // *idleTimeoutBody: 原始扫描循环的空闲超时状态；定时器只改其原子字段，不写 Context
 )

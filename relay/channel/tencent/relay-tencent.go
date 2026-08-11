@@ -92,6 +92,7 @@ func streamResponseTencent2OpenAI(TencentResponse *TencentChatResponse) *dto.Cha
 
 func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	var responseText string
+	helper.ApplyStreamIdleTimeout(c, resp, info) // 渠道级/全局流式空闲超时（原始扫描循环不经过 StreamScannerHandler）
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
 
@@ -126,9 +127,16 @@ func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 		common.SysLog("error reading stream: " + err.Error())
 	}
 
-	helper.Done(c)
-
 	service.CloseResponseBodyGracefully(resp)
+
+	// 空闲超时：首包超时按空流 504 报错；中途超时不伪造 [DONE]，
+	// 让客户端感知到流异常中断（健康由外层依据 mid-stream 标记改记失败）
+	if timeoutErr := helper.RawStreamFirstByteTimeoutError(c); timeoutErr != nil {
+		return nil, timeoutErr
+	}
+	if !helper.MidStreamTimeoutOccurred(c) {
+		helper.Done(c)
+	}
 
 	return service.ResponseText2Usage(responseText, info.UpstreamModelName, info.PromptTokens), nil
 }

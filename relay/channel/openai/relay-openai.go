@@ -212,6 +212,10 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 
 	// 处理最后的响应
+	// mid-stream 超时：不再伪造正常收尾（最后一个 chunk / final response /
+	// [DONE]），让客户端感知到流异常中断；已输出内容仍按既有语义计费
+	midStreamTimeout := helper.MidStreamTimeoutOccurred(c)
+
 	shouldSendLastResp := true
 	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
 		&containStreamUsage, info, &shouldSendLastResp); err != nil {
@@ -219,7 +223,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 
 	if info.RelayFormat == types.RelayFormatOpenAI {
-		if shouldSendLastResp {
+		if shouldSendLastResp && !midStreamTimeout {
 			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
 		}
 	}
@@ -236,7 +240,11 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 
-	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	if midStreamTimeout {
+		logger.LogWarn(c, fmt.Sprintf("stream idle timeout after %d items; finishing without fabricated completion", streamItemCount))
+	} else {
+		HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	}
 
 	return usage, nil
 }

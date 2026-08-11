@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/types"
 
 	"golang.org/x/image/webp"
 )
@@ -64,40 +65,51 @@ func DecodeBase64FileData(base64String string) (string, string, error) {
 	return mimeType, base64String, nil
 }
 
-// GetImageFromUrl 获取图片的类型和base64编码的数据
+// GetImageFromUrl 获取图片的类型和base64编码的数据。
+// 错误分类：SSRF/URL 策略拒绝、非临时远端 4xx、非图片内容、大小超限属
+// 确定性客户端错误（带 ClientInputError 标记，重试必然同样失败）；网络/DNS/
+// 超时、408/425/429、远端 5xx、读取中断等临时故障保留重试能力。
 func GetImageFromUrl(url string) (mimeType string, data string, err error) {
 	resp, err := DoDownloadRequest(url)
 	if err != nil {
+		// %w 保留错误链：策略拒绝的 ClientInputError 标记随链透传
 		return "", "", fmt.Errorf("failed to download image: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Check HTTP status code
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
+		downloadErr := fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 && !isRetryableImageDownloadStatus(resp.StatusCode) {
+			// 远端明确的非临时 4xx（404/403 等）：URL 指向的资源确定性不可用
+			return "", "", types.NewClientInputError(downloadErr)
+		}
+		// 远端 5xx 等可能是临时故障
+		return "", "", downloadErr
 	}
 
 	contentType := resp.Header.Get("Content-Type")
 	if contentType != "application/octet-stream" && !strings.HasPrefix(contentType, "image/") {
-		return "", "", fmt.Errorf("invalid content type: %s, required image/*", contentType)
+		return "", "", types.NewClientInputError(fmt.Errorf("invalid content type: %s, required image/*", contentType))
 	}
 	maxImageSize := int64(constant.MaxFileDownloadMB * 1024 * 1024)
 
 	// Check Content-Length if available
 	if resp.ContentLength > maxImageSize {
-		return "", "", fmt.Errorf("image size %d exceeds maximum allowed size of %d bytes", resp.ContentLength, maxImageSize)
+		return "", "", types.NewClientInputError(fmt.Errorf("image size %d exceeds maximum allowed size of %d bytes", resp.ContentLength, maxImageSize))
 	}
 
 	// Use LimitReader to prevent reading oversized images
-	limitReader := io.LimitReader(resp.Body, maxImageSize)
+	limitReader := io.LimitReader(resp.Body, maxImageSize+1)
 	buffer := &bytes.Buffer{}
 
 	written, err := io.Copy(buffer, limitReader)
 	if err != nil {
+		// 传输中断等临时故障，保留重试
 		return "", "", fmt.Errorf("failed to read image data: %w", err)
 	}
-	if written >= maxImageSize {
-		return "", "", fmt.Errorf("image size exceeds maximum allowed size of %d bytes", maxImageSize)
+	if written > maxImageSize {
+		return "", "", types.NewClientInputError(fmt.Errorf("image size exceeds maximum allowed size of %d bytes", maxImageSize))
 	}
 
 	data = base64.StdEncoding.EncodeToString(buffer.Bytes())
@@ -107,12 +119,22 @@ func GetImageFromUrl(url string) (mimeType string, data string, err error) {
 	if mimeType == "application/octet-stream" {
 		_, format, _, err := DecodeBase64ImageData(data)
 		if err != nil {
-			return "", "", err
+			// 内容不是可识别的图片：确定性客户端错误
+			return "", "", types.NewClientInputError(err)
 		}
 		mimeType = "image/" + format
 	}
 
 	return mimeType, data, nil
+}
+
+func isRetryableImageDownloadStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests:
+		return true
+	default:
+		return false
+	}
 }
 
 func DecodeUrlImageData(imageUrl string) (image.Config, string, error) {

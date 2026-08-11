@@ -2,6 +2,7 @@ package cohere
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -84,6 +85,14 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	createdTime := common.GetTimestamp()
 	usage := &dto.Usage{}
 	responseText := ""
+	helper.ApplyStreamIdleTimeout(c, resp, info) // 渠道级/全局流式空闲超时（原始扫描循环不经过 StreamScannerHandler）
+	streamCtx, cancelStream := context.WithCancel(c.Request.Context())
+	scanDone := make(chan struct{})
+	defer func() {
+		cancelStream()
+		service.CloseResponseBodyGracefully(resp)
+		<-scanDone
+	}()
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		if atEOF && len(data) == 0 {
@@ -98,73 +107,136 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		return 0, nil, nil
 	})
 	dataChan := make(chan string)
-	stopChan := make(chan bool)
 	go func() {
+		defer close(scanDone)
+		defer close(dataChan)
 		for scanner.Scan() {
 			data := scanner.Text()
-			dataChan <- data
+			select {
+			case dataChan <- data:
+			case <-streamCtx.Done():
+				return
+			}
 		}
-		stopChan <- true
 	}()
-	helper.SetEventStreamHeaders(c)
 	isFirst := true
-	c.Stream(func(w io.Writer) bool {
+	renderData := func(data string) bool {
+		if isFirst {
+			isFirst = false
+			info.FirstResponseTime = time.Now()
+		}
+		data = strings.TrimSuffix(data, "\r")
+		var cohereResp CohereResponse
+		err := json.Unmarshal([]byte(data), &cohereResp)
+		if err != nil {
+			common.SysLog("error unmarshalling stream response: " + err.Error())
+			return true
+		}
+		var openaiResp dto.ChatCompletionsStreamResponse
+		openaiResp.Id = responseId
+		openaiResp.Created = createdTime
+		openaiResp.Object = "chat.completion.chunk"
+		openaiResp.Model = info.UpstreamModelName
+		if cohereResp.IsFinished {
+			finishReason := stopReasonCohere2OpenAI(cohereResp.FinishReason)
+			openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{
+				{
+					Delta:        dto.ChatCompletionsStreamResponseChoiceDelta{},
+					Index:        0,
+					FinishReason: &finishReason,
+				},
+			}
+			if cohereResp.Response != nil {
+				usage.PromptTokens = cohereResp.Response.Meta.BilledUnits.InputTokens
+				usage.CompletionTokens = cohereResp.Response.Meta.BilledUnits.OutputTokens
+			}
+		} else {
+			openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{
+				{
+					Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+						Role:    "assistant",
+						Content: &cohereResp.Text,
+					},
+					Index: 0,
+				},
+			}
+			responseText += cohereResp.Text
+		}
+		jsonStr, err := json.Marshal(openaiResp)
+		if err != nil {
+			common.SysLog("error marshalling stream response: " + err.Error())
+			return true
+		}
+		helper.MarkPayloadWritten(c)
+		c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonStr)})
+		return true
+	}
+
+	// 提交响应头之前先等首个事件：c.Stream 每次回调后都会 Flush，一旦进入
+	// 就等于提交了 200，首包超时后再返回 504 也无法切换渠道了。
+	// 此处尚未写出任何字节，可以安全地返回错误交给外层重试。
+	var firstData string
+	gotFirst := false
+	sourceDone := false
+	for !gotFirst && !sourceDone {
 		select {
-		case data := <-dataChan:
-			if isFirst {
-				isFirst = false
-				info.FirstResponseTime = time.Now()
+		case data, ok := <-dataChan:
+			if !ok {
+				sourceDone = true
+				continue
 			}
 			data = strings.TrimSuffix(data, "\r")
-			var cohereResp CohereResponse
-			err := json.Unmarshal([]byte(data), &cohereResp)
-			if err != nil {
+			var probe CohereResponse
+			if err := json.Unmarshal([]byte(data), &probe); err != nil {
 				common.SysLog("error unmarshalling stream response: " + err.Error())
-				return true
+				continue
 			}
-			var openaiResp dto.ChatCompletionsStreamResponse
-			openaiResp.Id = responseId
-			openaiResp.Created = createdTime
-			openaiResp.Object = "chat.completion.chunk"
-			openaiResp.Model = info.UpstreamModelName
-			if cohereResp.IsFinished {
-				finishReason := stopReasonCohere2OpenAI(cohereResp.FinishReason)
-				openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{
-					{
-						Delta:        dto.ChatCompletionsStreamResponseChoiceDelta{},
-						Index:        0,
-						FinishReason: &finishReason,
-					},
+			firstData, gotFirst = data, true
+		case <-streamCtx.Done():
+			return nil, helper.NewEmptyStreamError(helper.StreamExitClientGone)
+		}
+	}
+	if !gotFirst {
+		if timeoutErr := helper.RawStreamFirstByteTimeoutError(c); timeoutErr != nil {
+			return nil, timeoutErr
+		}
+		// 上游未发任何事件即正常结束：保持既有收尾语义
+		helper.SetEventStreamHeaders(c)
+		c.Render(-1, &common.CustomEvent{Data: "data: [DONE]"})
+		if usage.PromptTokens == 0 {
+			usage = service.ResponseText2Usage(responseText, info.UpstreamModelName, info.PromptTokens)
+		}
+		return usage, nil
+	}
+
+	helper.SetEventStreamHeaders(c)
+	pendingFirst := true
+	clientGone := c.Stream(func(w io.Writer) bool {
+		if pendingFirst {
+			pendingFirst = false
+			return renderData(firstData)
+		}
+		select {
+		case data, ok := <-dataChan:
+			if !ok {
+				if !helper.MidStreamTimeoutOccurred(c) {
+					c.Render(-1, &common.CustomEvent{Data: "data: [DONE]"})
 				}
-				if cohereResp.Response != nil {
-					usage.PromptTokens = cohereResp.Response.Meta.BilledUnits.InputTokens
-					usage.CompletionTokens = cohereResp.Response.Meta.BilledUnits.OutputTokens
-				}
-			} else {
-				openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{
-					{
-						Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
-							Role:    "assistant",
-							Content: &cohereResp.Text,
-						},
-						Index: 0,
-					},
-				}
-				responseText += cohereResp.Text
+				return false
 			}
-			jsonStr, err := json.Marshal(openaiResp)
-			if err != nil {
-				common.SysLog("error marshalling stream response: " + err.Error())
-				return true
-			}
-			helper.MarkPayloadWritten(c)
-			c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonStr)})
-			return true
-		case <-stopChan:
-			c.Render(-1, &common.CustomEvent{Data: "data: [DONE]"})
+			return renderData(data)
+		case <-streamCtx.Done():
 			return false
 		}
 	})
+	cancelStream()
+	if clientGone || c.Request.Context().Err() != nil {
+		return nil, helper.NewEmptyStreamError(helper.StreamExitClientGone)
+	}
+	// 首包超时按空流 504 报错（可切换渠道）
+	if timeoutErr := helper.RawStreamFirstByteTimeoutError(c); timeoutErr != nil {
+		return nil, timeoutErr
+	}
 	if usage.PromptTokens == 0 {
 		usage = service.ResponseText2Usage(responseText, info.UpstreamModelName, info.PromptTokens)
 	}

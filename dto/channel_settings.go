@@ -91,6 +91,15 @@ type ChannelSettings struct {
 	// iterations, SSE padding). Independent of cache simulation; cache *values* are
 	// layered in only when session_prefix cache simulation is enabled.
 	NativeAlign bool `json:"native_align,omitempty"`
+	// AlwaysHealthy: when true the channel is exempt from health degradation — it never
+	// enters the warning (降权掷骰) or suspended (临时暂停) state. Sliding-window request
+	// statistics are still recorded for observability. The database-level auto-disable
+	// remains governed solely by the channel's auto_ban switch.
+	AlwaysHealthy bool `json:"always_healthy,omitempty"`
+	// StreamTimeoutSeconds 渠道级流式空闲超时（秒），覆盖首包等待与相邻流事件
+	// 的间隔（每收到一行数据即重置）。nil 使用全局 STREAMING_TIMEOUT（默认
+	// 300 秒）；0 表示永不超时；>0 为自定义秒数。
+	StreamTimeoutSeconds *int `json:"stream_timeout_seconds,omitempty"`
 }
 
 type VertexKeyType string

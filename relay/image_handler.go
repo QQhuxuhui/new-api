@@ -55,7 +55,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	} else {
 		convertedRequest, err := adaptor.ConvertImageRequest(c, info, *request)
 		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed)
+			return newImageConversionError(err)
 		}
 
 		switch convertedRequest.(type) {
@@ -132,4 +132,16 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 
 	postConsumeQuota(c, info, usage.(*dto.Usage), logContent)
 	return nil
+}
+
+func newImageConversionError(err error) *types.NewAPIError {
+	if types.IsClientInputError(err) {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeConvertRequestFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+
+	options := make([]types.NewAPIErrorOptions, 0, 1)
+	if types.IsNoRecordChannelHealthError(err) {
+		options = append(options, types.ErrOptionWithNoRecordChannelHealth())
+	}
+	return types.NewError(err, types.ErrorCodeConvertRequestFailed, options...)
 }

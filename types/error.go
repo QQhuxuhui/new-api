@@ -89,13 +89,14 @@ const (
 )
 
 type NewAPIError struct {
-	Err            error
-	RelayError     any
-	skipRetry      bool
-	recordErrorLog *bool
-	errorType      ErrorType
-	errorCode      ErrorCode
-	StatusCode     int
+	Err                 error
+	RelayError          any
+	skipRetry           bool
+	recordErrorLog      *bool
+	recordChannelHealth *bool
+	errorType           ErrorType
+	errorCode           ErrorCode
+	StatusCode          int
 	// ruleMatchInput 保存故障转移/客户端错误规则匹配所用的完整文本
 	// （上游响应体不可解析时 Err 只保留状态码摘要，规则需按原始 body 匹配）
 	ruleMatchInput string
@@ -403,6 +404,15 @@ func ErrOptionWithNoRecordErrorLog() NewAPIErrorOptions {
 	}
 }
 
+// ErrOptionWithNoRecordChannelHealth marks failures that happen before the
+// selected channel is contacted, so they can remain retryable without
+// degrading that channel's health state.
+func ErrOptionWithNoRecordChannelHealth() NewAPIErrorOptions {
+	return func(e *NewAPIError) {
+		e.recordChannelHealth = common.GetPointer(false)
+	}
+}
+
 func ErrOptionWithHideErrMsg(replaceStr string) NewAPIErrorOptions {
 	return func(e *NewAPIError) {
 		if common.DebugEnabled {
@@ -421,6 +431,16 @@ func IsRecordErrorLog(e *NewAPIError) bool {
 		return true
 	}
 	return *e.recordErrorLog
+}
+
+func IsRecordChannelHealth(e *NewAPIError) bool {
+	if e == nil {
+		return false
+	}
+	if e.recordChannelHealth == nil {
+		return true
+	}
+	return *e.recordChannelHealth
 }
 
 func isLocalQuotaErrorCode(code ErrorCode) bool {

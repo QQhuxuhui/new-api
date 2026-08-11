@@ -988,6 +988,14 @@ func (channel *Channel) ValidateSettings() error {
 		if err != nil {
 			return err
 		}
+		if channelParams.StreamTimeoutSeconds != nil {
+			if *channelParams.StreamTimeoutSeconds < 0 {
+				return fmt.Errorf("stream_timeout_seconds 不能为负数（0 表示永不超时）")
+			}
+			if *channelParams.StreamTimeoutSeconds > constant.MaxStreamTimeoutSeconds {
+				return fmt.Errorf("stream_timeout_seconds 最大为 %d 秒（7 天）；如需不限制请配置 0（永不超时）", constant.MaxStreamTimeoutSeconds)
+			}
+		}
 	}
 	return nil
 }
@@ -1001,6 +1009,17 @@ func (channel *Channel) GetSetting() dto.ChannelSettings {
 			channel.Setting = nil // 清空设置以避免后续错误
 			_ = channel.Save()    // 保存修改
 		}
+	}
+	return setting
+}
+
+// GetSettingReadonly parses the setting JSON without GetSetting's error side
+// effects (nil-ing the field and saving the row). Safe on shared cached channels
+// and inside read-only endpoints.
+func (channel *Channel) GetSettingReadonly() dto.ChannelSettings {
+	setting := dto.ChannelSettings{}
+	if channel.Setting != nil && *channel.Setting != "" {
+		_ = common.Unmarshal([]byte(*channel.Setting), &setting)
 	}
 	return setting
 }

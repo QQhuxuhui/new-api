@@ -66,6 +66,7 @@ const ChannelHealthModal = ({
 
   // Extract health data with defaults (use empty object if health is null/undefined)
   const {
+    always_healthy = false,
     consecutive_failures = 0,
     current_failure_rate = 0,
     is_suspended = false,
@@ -109,6 +110,9 @@ const ChannelHealthModal = ({
 
   // Helper function: Get status badge
   const getStatusBadge = () => {
+    if (always_healthy) {
+      return <Tag color="teal" size="large">🛡️ 永远健康</Tag>;
+    }
     if (is_suspended) {
       return <Tag color="red" size="large">🔴 已暂停</Tag>;
     }

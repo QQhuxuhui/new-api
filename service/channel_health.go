@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/go-redis/redis/v8"
 )
 
@@ -44,6 +45,7 @@ const (
 // ChannelHealth represents the health state of a channel
 type ChannelHealth struct {
 	ChannelID           int       `json:"channel_id"`
+	AlwaysHealthy       bool      `json:"always_healthy"`       // channel opted out of warning/suspension transitions
 	ConsecutiveFailures int       `json:"consecutive_failures"` // consecutive high-failure-rate periods
 	CurrentFailureRate  float64   `json:"current_failure_rate"` // current window failure rate (0.0-1.0)
 	IsSuspended         bool      `json:"is_suspended"`
@@ -243,6 +245,14 @@ func RecordChannelFailure(channelID int, statusCode int, errorMessage string) er
 	// 1. Record this failure to sliding window
 	RecordChannelRequest(channelID, false)
 
+	// Always-healthy channels never transition to warning/suspended/disabled.
+	// Window statistics above are still recorded so the health panel stays truthful.
+	// (model.IsChannelAlwaysHealthy falls back to a DB read without memory cache;
+	// failure recording is low-frequency, so the extra query is fine.)
+	if model.IsChannelAlwaysHealthy(channelID) {
+		return nil
+	}
+
 	// 2. Check for immediate failover errors (bypass sample collection)
 	if ShouldImmediateFailover(statusCode, errorMessage) {
 		common.SysLog(fmt.Sprintf("Channel %d immediate failover triggered: %s", channelID, errorMessage))
@@ -385,7 +395,8 @@ func GetChannelHealth(channelID int) (*ChannelHealth, error) {
 	}
 
 	health := &ChannelHealth{
-		ChannelID: channelID,
+		ChannelID:     channelID,
+		AlwaysHealthy: model.IsChannelAlwaysHealthy(channelID),
 	}
 
 	// Get consecutive failures (now represents consecutive high-failure-rate periods)
@@ -600,8 +611,8 @@ func ResetChannelHealth(channelID int) error {
 		fmt.Sprintf(keySuspensionCount, channelID),
 	}
 
-	for _, key := range keys {
-		rdb.Del(ctx, key)
+	if err := deleteHealthKeys(ctx, keys); err != nil {
+		return fmt.Errorf("failed to reset channel %d health: %w", channelID, err)
 	}
 
 	// Preserve historical statistics (total_failures, total_successes, timestamps)
@@ -610,4 +621,45 @@ func ResetChannelHealth(channelID int) error {
 	common.SysLog(fmt.Sprintf("Channel %d health manually reset by admin", channelID))
 
 	return nil
+}
+
+// ClearChannelHealthState removes all real-time health flags including the
+// warning down-weight marker. Called when a channel turns on always_healthy so
+// the exemption takes effect immediately; unlike ResetChannelHealth it is not
+// part of the admin manual-reset semantics.
+func ClearChannelHealthState(channelID int) error {
+	ctx := context.Background()
+	rdb := common.RDB
+
+	if rdb == nil {
+		return fmt.Errorf("redis not available")
+	}
+
+	keys := []string{
+		fmt.Sprintf(keyFailures, channelID),
+		fmt.Sprintf(keySuspended, channelID),
+		fmt.Sprintf(keySuspensionCount, channelID),
+		fmt.Sprintf(keyWarning, channelID),
+	}
+
+	if err := deleteHealthKeys(ctx, keys); err != nil {
+		return fmt.Errorf("failed to clear channel %d health flags: %w", channelID, err)
+	}
+
+	common.SysLog(fmt.Sprintf("Channel %d health flags cleared (always_healthy enabled)", channelID))
+
+	return nil
+}
+
+// deleteHealthKeys 逐个删除并返回首个错误；即使某个删除失败也继续尝试
+// 其余 key，避免部分状态残留
+func deleteHealthKeys(ctx context.Context, keys []string) error {
+	rdb := common.RDB
+	var firstErr error
+	for _, key := range keys {
+		if err := rdb.Del(ctx, key).Err(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

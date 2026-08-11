@@ -97,6 +97,9 @@ func cozeChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 }
 
 func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	// 必须关闭上游 Body：包装器 Close 会停掉空闲超时定时器
+	defer service.CloseResponseBodyGracefully(resp)
+	helper.ApplyStreamIdleTimeout(c, resp, info) // 渠道级/全局流式空闲超时（原始扫描循环不经过 StreamScannerHandler）
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
 	helper.SetEventStreamHeaders(c)
@@ -136,6 +139,10 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 		handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info)
 	}
 
+	// 首包超时按空流 504 报错（可切换渠道），优先于 scanner 错误的 500 语义
+	if timeoutErr := helper.RawStreamFirstByteTimeoutError(c); timeoutErr != nil {
+		return nil, timeoutErr
+	}
 	if err := scanner.Err(); err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}

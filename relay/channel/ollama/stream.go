@@ -70,15 +70,26 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	defer service.CloseResponseBodyGracefully(resp)
 
 	helper.SetEventStreamHeaders(c)
+	helper.ApplyStreamIdleTimeout(c, resp, info) // 渠道级/全局流式空闲超时（原始扫描循环不经过 StreamScannerHandler）
 	scanner := bufio.NewScanner(resp.Body)
 	usage := &dto.Usage{}
 	var model = info.UpstreamModelName
 	var responseId = common.GetUUID()
 	var created = time.Now().Unix()
 	var toolCallIndex int
-	start := helper.GenerateStartEmptyResponse(responseId, created, model, nil)
-	if data, err := common.Marshal(start); err == nil {
-		_ = helper.StringData(c, string(data))
+	// 合成的 start chunk 必须等到上游真正有数据后再发：抢先写出会提交
+	// 200 响应头，首包超时时就无法返回 504 让外层切换渠道了
+	startSent := false
+	emitStart := func() {
+		if startSent {
+			return
+		}
+		startSent = true
+		if start := helper.GenerateStartEmptyResponse(responseId, created, model, nil); start != nil {
+			if data, err := common.Marshal(start); err == nil {
+				_ = helper.StringData(c, string(data))
+			}
+		}
 	}
 
 	for scanner.Scan() {
@@ -145,6 +156,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				}
 			}
 			if data, err := common.Marshal(delta); err == nil {
+				emitStart()
 				_ = helper.StringData(c, string(data))
 			}
 			continue
@@ -158,7 +170,8 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		if finishReason == "" {
 			finishReason = "stop"
 		}
-		// emit stop delta
+		// emit stop delta（done-only 流也要先补 start，保证序列完整）
+		emitStart()
 		if stop := helper.GenerateStopResponse(responseId, created, model, finishReason); stop != nil {
 			if data, err := common.Marshal(stop); err == nil {
 				_ = helper.StringData(c, string(data))
@@ -176,6 +189,11 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 	if err := scanner.Err(); err != nil && err != io.EOF {
 		logger.LogError(c, "ollama stream scan error: "+err.Error())
+	}
+	// 空闲超时：首包超时按空流 504 报错（可切换渠道）；中途超时由外层依据
+	// mid-stream 标记改记渠道失败，此处按既有语义对已输出内容收尾计费
+	if timeoutErr := helper.RawStreamFirstByteTimeoutError(c); timeoutErr != nil {
+		return nil, timeoutErr
 	}
 	return usage, nil
 }

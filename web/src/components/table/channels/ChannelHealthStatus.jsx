@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Tag, Tooltip } from '@douyinfe/semi-ui';
-import { IconTickCircle, IconClock, IconAlertTriangle } from '@douyinfe/semi-icons';
+import { IconTickCircle, IconClock, IconAlertTriangle, IconShield } from '@douyinfe/semi-icons';
 
 /**
  * 通道健康状态指示器组件
@@ -35,7 +35,24 @@ const ChannelHealthStatus = ({ health, onClick }) => {
     );
   }
 
-  const { is_suspended, consecutive_failures } = health;
+  const { is_suspended, consecutive_failures, always_healthy } = health;
+
+  // 永远健康（豁免警告/暂停）
+  if (always_healthy) {
+    return (
+      <Tooltip content="已开启永远健康，该渠道不会进入警告或暂停状态">
+        <Tag
+          color="teal"
+          size="small"
+          prefixIcon={<IconShield />}
+          onClick={onClick}
+          style={{ cursor: 'pointer' }}
+        >
+          永远健康
+        </Tag>
+      </Tooltip>
+    );
+  }
 
   // 已暂停状态
   if (is_suspended) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"golang.org/x/net/proxy"
 )
@@ -82,10 +83,10 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 func checkProtectedFetchRedirect(req *http.Request, via []*http.Request) error {
 	urlStr := req.URL.String()
 	if err := ValidateSSRFProtectedFetchURL(urlStr); err != nil {
-		return fmt.Errorf("redirect to %s blocked: %v", urlStr, err)
+		return fmt.Errorf("redirect to %s blocked: %w", urlStr, classifyFetchURLValidationError(err))
 	}
 	if len(via) >= 10 {
-		return fmt.Errorf("stopped after 10 redirects")
+		return types.NewClientInputError(fmt.Errorf("stopped after 10 redirects"))
 	}
 	return nil
 }

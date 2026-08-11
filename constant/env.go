@@ -1,6 +1,10 @@
 package constant
 
 var StreamingTimeout int
+
+// MaxStreamTimeoutSeconds 渠道级流式超时(stream_timeout_seconds)允许的最大值
+// （7 天）。超过该值保存时被拒绝；如需不限制请显式配置 0（永不超时）。
+const MaxStreamTimeoutSeconds = 7 * 24 * 60 * 60
 var DifyDebug bool
 var MaxFileDownloadMB int
 var ForceStreamOption bool

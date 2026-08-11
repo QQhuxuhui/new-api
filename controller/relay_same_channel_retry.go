@@ -48,6 +48,12 @@ func executeSameChannelRetry(
 		return nil
 	}
 
+	// SkipRetry 错误是请求级问题（非法输入、用户额度、客户端断开等），
+	// 即使管理员配置了匹配相应状态码的 retry_count 规则也不得原地重试
+	if types.IsSkipRetryError(err) {
+		return err
+	}
+
 	// Cannot retry if payload bytes have already been written to the client
 	// (e.g. an SSE stream that emitted a chunk before failing).
 	// ping 注释不算 payload，与跨渠道重试的豁免语义保持一致。
@@ -84,6 +90,10 @@ func executeSameChannelRetry(
 			return nil
 		} else {
 			err = next
+			// 重试返回的 SkipRetry 错误同样立即终止（如客户端断开）
+			if types.IsSkipRetryError(err) {
+				return err
+			}
 		}
 	}
 

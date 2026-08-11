@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	openaichannel "github.com/QuantumNous/new-api/relay/channel/openai"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -31,8 +32,21 @@ func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var channel *model.Channel
 		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
+		// JSON 版 images/edits 会经历「整体读入 → RawMessage → 解码 → multipart」
+		// 多份副本放大，必须在第一次 io.ReadAll 之前设置请求体上限，
+		// 超限在进入内存前直接 413（multipart 上传不受影响，走原有路径）
+		if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") &&
+			!strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, openaichannel.MaxImagesEditsJSONBodyBytes())
+		}
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
 		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				abortWithOpenAiMessage(c, http.StatusRequestEntityTooLarge,
+					fmt.Sprintf("request body too large: images/edits JSON accepts at most %d bytes", maxBytesErr.Limit))
+				return
+			}
 			abortWithOpenAiMessage(c, http.StatusBadRequest, "Invalid request, "+err.Error())
 			return
 		}
@@ -833,7 +847,8 @@ func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
 	var modelRequest ModelRequest
 	err := common.UnmarshalBodyReusable(c, &modelRequest)
 	if err != nil {
-		return nil, errors.New("无效的请求, " + err.Error())
+		// %w 保留错误链，上层需用 errors.As 识别 http.MaxBytesError 等类型
+		return nil, fmt.Errorf("无效的请求, %w", err)
 	}
 	return &modelRequest, nil
 }

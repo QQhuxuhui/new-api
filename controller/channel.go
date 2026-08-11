@@ -1050,6 +1050,15 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	model.InitChannelCache()
+	// If the channel was just marked always-healthy, clear any lingering
+	// warning/suspension flags so the exemption takes effect immediately.
+	if channel.GetSettingReadonly().AlwaysHealthy {
+		if clearErr := service.ClearChannelHealthState(channel.Id); clearErr != nil {
+			// 清理失败只记录不阻断更新：读/写路径守卫仍会豁免该渠道，
+			// 但残留的暂停标记在 DB 模式下要等 TTL 过期，需要留下线索
+			common.SysError(fmt.Sprintf("channel %d marked always_healthy but clearing health flags failed: %s", channel.Id, clearErr.Error()))
+		}
+	}
 	service.ResetProxyClientCache()
 	// Key-concurrency UI caches results for a few seconds; clear to avoid stale display after key/config edits.
 	service.ClearConcurrencyCache()
@@ -1870,6 +1879,15 @@ func GetAllChannelsHealth(c *gin.Context) {
 			"message": err.Error(),
 		})
 		return
+	}
+
+	// Annotate the always_healthy exemption from the already-loaded channel list
+	alwaysHealthyByID := make(map[int]bool, len(channels))
+	for _, channel := range channels {
+		alwaysHealthyByID[channel.Id] = channel.GetSettingReadonly().AlwaysHealthy
+	}
+	for _, health := range healthStates {
+		health.AlwaysHealthy = alwaysHealthyByID[health.ChannelID]
 	}
 
 	c.JSON(http.StatusOK, gin.H{
