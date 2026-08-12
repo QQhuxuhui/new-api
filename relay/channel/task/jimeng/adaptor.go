@@ -82,11 +82,13 @@ type TaskAdaptor struct {
 	accessKey   string
 	secretKey   string
 	baseURL     string
+	usesHMAC    bool
 }
 
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	a.ChannelType = info.ChannelType
 	a.baseURL = info.ChannelBaseUrl
+	a.usesHMAC = !isNewAPIRelay(info.ApiKey)
 
 	// apiKey format: "access_key|secret_key"
 	keyParts := strings.Split(info.ApiKey, "|")
@@ -127,6 +129,9 @@ func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info
 // 提交路径的覆盖由 DoTaskApiRequest 在 BuildRequestHeader 之后应用，
 // 因此必须把这些字段保护起来，否则签名作废。
 func (a *TaskAdaptor) SignedHeaderNames() []string {
+	if !a.usesHMAC {
+		return nil
+	}
 	return []string{"Host", "X-Date", "X-Content-Sha256", "Content-Type", "Authorization"}
 }
 
@@ -248,14 +253,13 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 
-	// 覆盖必须在签名之前应用：签名对 Host / Content-Type / X-Date 等做 canonical
-	// 计算，签完再改这些头会让请求与签名对不上。先落定最终请求头再签名，
-	// 覆盖既能生效、签名也依然有效。
-	taskcommon.ApplyExtraHeaders(req, extraHeaders)
-
 	if isNewAPIRelay(key) {
 		req.Header.Set("Authorization", "Bearer "+key)
+		// Bearer 中转没有 canonical 签名，显式覆盖保持最高优先级。
+		taskcommon.ApplyExtraHeaders(req, extraHeaders)
 	} else {
+		// HMAC 模式必须先应用覆盖，再按最终 Host / Content-Type 计算签名。
+		taskcommon.ApplyExtraHeaders(req, extraHeaders)
 		keyParts := strings.Split(key, "|")
 		if len(keyParts) != 2 {
 			return nil, fmt.Errorf("invalid api key format for jimeng: expected 'ak|sk'")
@@ -304,7 +308,11 @@ func (a *TaskAdaptor) signRequest(req *http.Request, accessKey, secretKey string
 	xDate := t.Format("20060102T150405Z")
 	shortDate := t.Format("20060102")
 
-	req.Header.Set("Host", req.URL.Host)
+	host := req.Host
+	if host == "" {
+		host = req.URL.Host
+	}
+	req.Header.Set("Host", host)
 	req.Header.Set("X-Date", xDate)
 	req.Header.Set("X-Content-Sha256", hexPayloadHash)
 
@@ -326,7 +334,7 @@ func (a *TaskAdaptor) signRequest(req *http.Request, accessKey, secretKey string
 	canonicalQueryString := strings.Join(queryParts, "&")
 
 	headersToSign := map[string]string{
-		"host":             req.URL.Host,
+		"host":             host,
 		"x-date":           xDate,
 		"x-content-sha256": hexPayloadHash,
 	}

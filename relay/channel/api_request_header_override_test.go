@@ -183,8 +183,10 @@ func TestProcessHeaderOverride_PassAllSkipsAllCredentialHeaders(t *testing.T) {
 	ctx := newHeaderOverrideCtx(t, map[string]string{
 		"Authorization":          "Bearer client-secret",
 		"api-key":                "client-azure-key",
+		"appid":                  "client-baidu-app-id",
 		"x-api-key":              "client-claude-key",
 		"x-goog-api-key":         "client-gemini-key",
+		"x-goog-user-project":    "client-billing-project",
 		"Sec-WebSocket-Protocol": "realtime,openai-insecure-api-key.client-key",
 		"X-Harmless":             "ok",
 	})
@@ -193,9 +195,10 @@ func TestProcessHeaderOverride_PassAllSkipsAllCredentialHeaders(t *testing.T) {
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
 	for _, blocked := range []string{
-		"authorization", "api-key", "x-api-key", "x-goog-api-key", "sec-websocket-protocol",
+		"authorization", "api-key", "appid", "x-api-key", "x-goog-api-key",
+		"x-goog-user-project", "sec-websocket-protocol",
 	} {
-		require.NotContains(t, headers, blocked)
+		require.Empty(t, headers.Values(blocked), blocked)
 	}
 	require.Equal(t, "ok", headers.Get("X-Harmless"))
 }

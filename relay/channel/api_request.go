@@ -177,12 +177,17 @@ var passthroughSkipHeaderNamesLower = map[string]struct{}{
 	// info.ApiKey 填充的头，否则客户端可以用同名头顶掉渠道密钥：
 	//   authorization  —— 绝大多数 adaptor
 	//   api-key        —— Azure（openai/adaptor.go）
+	//   appid          —— 百度千帆 v2
 	//   x-api-key      —— Claude
 	//   x-goog-api-key —— Gemini / PaLM
+	//   x-goog-user-project —— Vertex 配额/计费项目
 	"authorization":  {},
 	"api-key":        {},
+	"appid":          {},
 	"x-api-key":      {},
 	"x-goog-api-key": {},
+	// Vertex 的配额/计费项目同样属于渠道身份，不能由客户端通配覆盖。
+	"x-goog-user-project": {},
 
 	// WebSocket 握手头由 dialer 生成；Sec-WebSocket-Protocol 在 OpenAI Realtime
 	// 里承载 openai-insecure-api-key.<渠道密钥>，透传会顶掉鉴权子协议。

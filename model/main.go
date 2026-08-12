@@ -343,8 +343,66 @@ func migrateDB() error {
 //
 // 只统计未软删除的被邀请人，与列表页口径一致。Guarded by an options row so it
 // only runs once.
+type affCountDrift struct {
+	Id          int `gorm:"column:id"`
+	StoredCount int `gorm:"column:stored_count"`
+	RealCount   int `gorm:"column:real_count"`
+}
+
+func loadUserAffCountDrifts(tx *gorm.DB) ([]affCountDrift, error) {
+	var drifts []affCountDrift
+	err := tx.Raw(`
+		SELECT u.id AS id, u.aff_count AS stored_count, COALESCE(c.cnt, 0) AS real_count
+		FROM users u
+		LEFT JOIN (
+			SELECT inviter_id, COUNT(*) AS cnt
+			FROM users
+			WHERE deleted_at IS NULL AND inviter_id <> 0
+			GROUP BY inviter_id
+		) c ON c.inviter_id = u.id
+		WHERE u.deleted_at IS NULL AND u.aff_count <> COALESCE(c.cnt, 0)
+	`).Scan(&drifts).Error
+	return drifts, err
+}
+
+// applyUserAffCountDrifts uses a compare-and-swap update. If a registration,
+// inviter change, or deletion updates aff_count after the snapshot was read,
+// the stale correction affects zero rows instead of overwriting the live delta.
+func applyUserAffCountDrifts(tx *gorm.DB, drifts []affCountDrift) (int, error) {
+	type countTransition struct {
+		Stored int
+		Real   int
+	}
+	grouped := make(map[countTransition][]int)
+	for _, drift := range drifts {
+		transition := countTransition{Stored: drift.StoredCount, Real: drift.RealCount}
+		grouped[transition] = append(grouped[transition], drift.Id)
+	}
+
+	const chunkSize = 500
+	corrected := 0
+	for transition, ids := range grouped {
+		for start := 0; start < len(ids); start += chunkSize {
+			end := start + chunkSize
+			if end > len(ids) {
+				end = len(ids)
+			}
+			result := tx.Model(&User{}).
+				Where("id IN ? AND aff_count = ?", ids[start:end], transition.Stored).
+				UpdateColumn("aff_count", transition.Real)
+			if result.Error != nil {
+				return corrected, result.Error
+			}
+			corrected += int(result.RowsAffected)
+		}
+	}
+	return corrected, nil
+}
+
 func backfillUserAffCount() error {
-	const optionKey = "UserAffCountBackfilled"
+	// V2 replaces the snapshot-then-unconditional-update implementation. Using
+	// a new marker makes already-upgraded installations run the safe repair once.
+	const optionKey = "UserAffCountBackfilledV2"
 
 	var existing Option
 	if err := DB.Where(commonKeyCol+" = ?", optionKey).First(&existing).Error; err == nil {
@@ -356,56 +414,27 @@ func backfillUserAffCount() error {
 
 	common.SysLog("recomputing user aff_count from inviter relationship (one-time)")
 
-	// 分两步做，不能写成「UPDATE users ... WHERE aff_count <> (SELECT ... FROM users)」：
-	// MySQL 不允许在 UPDATE 目标表的子查询里读同一张表（ERROR 1093），
-	// 那样写在 MySQL 上会每次启动都失败重试。先纯 SELECT 聚合出差异行，
-	// 再按 id 批量 UPDATE，三种方言（MySQL/PostgreSQL/SQLite）行为一致。
-	type affCountDrift struct {
-		Id        int `gorm:"column:id"`
-		RealCount int `gorm:"column:real_count"`
-	}
-	var drifts []affCountDrift
-	if err := DB.Raw(`
-		SELECT u.id AS id, COALESCE(c.cnt, 0) AS real_count
-		FROM users u
-		LEFT JOIN (
-			SELECT inviter_id, COUNT(*) AS cnt
-			FROM users
-			WHERE deleted_at IS NULL AND inviter_id <> 0
-			GROUP BY inviter_id
-		) c ON c.inviter_id = u.id
-		WHERE u.deleted_at IS NULL AND u.aff_count <> COALESCE(c.cnt, 0)
-	`).Scan(&drifts).Error; err != nil {
-		return err
-	}
-
-	// 按目标值分组，同值的一条 UPDATE 搞定；再按 500 一批切分，避免超长 IN 列表。
-	byCount := make(map[int][]int, len(drifts))
-	for _, d := range drifts {
-		byCount[d.RealCount] = append(byCount[d.RealCount], d.Id)
-	}
-	const chunkSize = 500
 	corrected := 0
-	for realCount, ids := range byCount {
-		for start := 0; start < len(ids); start += chunkSize {
-			end := start + chunkSize
-			if end > len(ids) {
-				end = len(ids)
-			}
-			result := DB.Model(&User{}).Where("id IN ?", ids[start:end]).
-				UpdateColumn("aff_count", realCount)
-			if result.Error != nil {
-				return result.Error
-			}
-			corrected += int(result.RowsAffected)
+	const maxConvergencePasses = 10
+	for pass := 0; pass < maxConvergencePasses; pass++ {
+		drifts, err := loadUserAffCountDrifts(DB)
+		if err != nil {
+			return err
 		}
+		if len(drifts) == 0 {
+			if err := DB.Create(&Option{Key: optionKey, Value: "true"}).Error; err != nil {
+				return err
+			}
+			common.SysLog(fmt.Sprintf("user aff_count backfilled, %d rows corrected", corrected))
+			return nil
+		}
+		updated, err := applyUserAffCountDrifts(DB, drifts)
+		if err != nil {
+			return err
+		}
+		corrected += updated
 	}
-
-	if err := DB.Create(&Option{Key: optionKey, Value: "true"}).Error; err != nil {
-		return err
-	}
-	common.SysLog(fmt.Sprintf("user aff_count backfilled, %d rows corrected", corrected))
-	return nil
+	return errors.New("user aff_count backfill did not converge; retry on next startup")
 }
 
 // clearMasqueradeLegacyFlags zeroes DB columns that backed the removed

@@ -2,12 +2,14 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 
 	"github.com/glebarez/sqlite"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -102,6 +104,96 @@ func TestInviteUserAddsQuotaWhenConfigured(t *testing.T) {
 	}
 	if u.AffCount != 1 || u.AffQuota != 5000 || u.AffHistoryQuota != 5000 {
 		t.Fatalf("got count=%d quota=%d history=%d, want 1/5000/5000", u.AffCount, u.AffQuota, u.AffHistoryQuota)
+	}
+}
+
+func TestInviteUserTransactionRollsBackWhenInviterIsMissing(t *testing.T) {
+	setupAffCountTestDB(t)
+	saved := common.QuotaForInviter
+	common.QuotaForInviter = 0
+	defer func() { common.QuotaForInviter = saved }()
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		invitee := &User{
+			Username:  "orphan-invitee",
+			Password:  "x",
+			AffCode:   "orphan-aff",
+			InviterId: 999,
+		}
+		if err := tx.Create(invitee).Error; err != nil {
+			return err
+		}
+		return inviteUserTx(tx, 999)
+	})
+	if err == nil {
+		t.Fatal("missing inviter must abort the registration transaction")
+	}
+
+	var count int64
+	if err := DB.Unscoped().Model(&User{}).Where("username = ?", "orphan-invitee").Count(&count).Error; err != nil {
+		t.Fatalf("count rolled back invitee: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("invitee transaction committed despite missing inviter, count=%d", count)
+	}
+}
+
+func TestUserForDeletionQueryUsesForUpdateOnMySQL(t *testing.T) {
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(localhost:9910)/gorm?charset=utf8&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DisableAutomaticPing: true,
+		DryRun:               true,
+		Logger:               logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open dry-run mysql db: %v", err)
+	}
+
+	var row User
+	tx := userForDeletionQuery(db, 123).Take(&row)
+	if sql := tx.Statement.SQL.String(); !strings.Contains(sql, "FOR UPDATE") {
+		t.Fatalf("user deletion must lock the state row, got SQL: %s", sql)
+	}
+}
+
+func TestApplyUserAffCountDriftsDoesNotOverwriteConcurrentIncrement(t *testing.T) {
+	setupAffCountTestDB(t)
+	mustCreateUser(t, 1, "inviter", 0, 0)
+	mustCreateUser(t, 2, "invitee-a", 1, 0)
+
+	drifts, err := loadUserAffCountDrifts(DB)
+	if err != nil {
+		t.Fatalf("load drifts: %v", err)
+	}
+	if len(drifts) != 1 || drifts[0].StoredCount != 0 || drifts[0].RealCount != 1 {
+		t.Fatalf("unexpected initial drifts: %+v", drifts)
+	}
+
+	// 模拟回填读完快照后有新注册提交：关系数和实时计数一起 +1。
+	mustCreateUser(t, 3, "invitee-b", 1, 0)
+	if err := DB.Model(&User{}).Where("id = ?", 1).
+		UpdateColumn("aff_count", gorm.Expr("aff_count + 1")).Error; err != nil {
+		t.Fatalf("increment live aff_count: %v", err)
+	}
+
+	corrected, err := applyUserAffCountDrifts(DB, drifts)
+	if err != nil {
+		t.Fatalf("apply stale drifts: %v", err)
+	}
+	if corrected != 0 {
+		t.Fatalf("stale snapshot unexpectedly updated %d rows", corrected)
+	}
+	if got := affCountOf(t, 1); got != 1 {
+		t.Fatalf("stale backfill overwrote concurrent increment: aff_count=%d, want 1", got)
+	}
+
+	if err := backfillUserAffCount(); err != nil {
+		t.Fatalf("converging backfill: %v", err)
+	}
+	if got := affCountOf(t, 1); got != 2 {
+		t.Fatalf("aff_count=%d, want converged count 2", got)
 	}
 }
 

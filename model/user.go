@@ -14,6 +14,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
@@ -324,6 +325,13 @@ func HardDeleteUserById(id int) error {
 	return deleteUserAndReleaseInviterAffCount(id, true)
 }
 
+func userForDeletionQuery(tx *gorm.DB, userId int) *gorm.DB {
+	return tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).
+		Model(&User{}).
+		Select("inviter_id, deleted_at").
+		Where("id = ?", userId)
+}
+
 // deleteUserAndReleaseInviterAffCount 在同一事务里删除用户并回减其邀请人的 aff_count。
 //
 // 必须同事务 + 条件删除：先读 inviter_id、减计数、再删除的写法有两个洞——
@@ -342,10 +350,10 @@ func deleteUserAndReleaseInviterAffCount(userId int, unscoped bool) error {
 			InviterId int        `gorm:"column:inviter_id"`
 			DeletedAt *time.Time `gorm:"column:deleted_at"`
 		}
-		if err := tx.Unscoped().Model(&User{}).
-			Select("inviter_id, deleted_at").
-			Where("id = ?", userId).
-			Scan(&row).Error; err != nil {
+		if err := userForDeletionQuery(tx, userId).Take(&row).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
 			return err
 		}
 
@@ -412,7 +420,14 @@ func inviteUserTx(tx *gorm.DB, inviterId int) error {
 		updates["aff_quota"] = gorm.Expr("aff_quota + ?", common.QuotaForInviter)
 		updates["aff_history"] = gorm.Expr("aff_history + ?", common.QuotaForInviter)
 	}
-	return tx.Model(&User{}).Where("id = ?", inviterId).Updates(updates).Error
+	result := tx.Model(&User{}).Where("id = ?", inviterId).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("邀请人用户 #%d 不存在", inviterId)
+	}
+	return nil
 }
 
 const maxInviterChainDepth = 50
