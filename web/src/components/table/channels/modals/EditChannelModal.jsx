@@ -793,6 +793,9 @@ const EditChannelModal = (props) => {
               base_url: inputs['base_url'],
               type: inputs['type'],
               key: inputs['key'],
+              // 渠道尚未保存，把编辑框里的请求头覆盖一并带上，
+              // 否则依赖自定义请求头的上游拉不到模型列表
+              header_override: inputs['header_override'] || '',
             },
             { skipErrorHandler: true },
           );

@@ -157,6 +157,7 @@ const (
 var passthroughSkipHeaderNamesLower = map[string]struct{}{
 	// RFC 7230 逐跳（hop-by-hop）请求头。
 	"connection":          {},
+	"proxy-connection":    {},
 	"keep-alive":          {},
 	"proxy-authenticate":  {},
 	"proxy-authorization": {},
@@ -172,15 +173,49 @@ var passthroughSkipHeaderNamesLower = map[string]struct{}{
 	"content-length":  {},
 	"accept-encoding": {},
 
-	// 凭证绝不能被通配/正则规则带到上游。
+	// 凭证绝不能被通配/正则规则带到上游。这里必须覆盖所有 adaptor 会用
+	// info.ApiKey 填充的头，否则客户端可以用同名头顶掉渠道密钥：
+	//   authorization  —— 绝大多数 adaptor
+	//   api-key        —— Azure（openai/adaptor.go）
+	//   x-api-key      —— Claude
+	//   x-goog-api-key —— Gemini / PaLM
 	"authorization":  {},
+	"api-key":        {},
 	"x-api-key":      {},
 	"x-goog-api-key": {},
 
-	// WebSocket 握手头由 dialer 生成。
+	// WebSocket 握手头由 dialer 生成；Sec-WebSocket-Protocol 在 OpenAI Realtime
+	// 里承载 openai-insecure-api-key.<渠道密钥>，透传会顶掉鉴权子协议。
 	"sec-websocket-key":        {},
 	"sec-websocket-version":    {},
 	"sec-websocket-extensions": {},
+	"sec-websocket-protocol":   {},
+}
+
+// dynamicHopByHopHeaders 解析 Connection / Proxy-Connection 中声明的逐跳头。
+// RFC 7230 §6.1 允许在这两个头里动态列出仅限本跳的字段名，转发时必须剥掉，
+// 否则客户端可以借 "Connection: X-Hop" 把任意字段标成逐跳又照样送到上游。
+func dynamicHopByHopHeaders(h http.Header) map[string]struct{} {
+	if len(h) == 0 {
+		return nil
+	}
+	var names map[string]struct{}
+	for _, headerName := range []string{"Connection", "Proxy-Connection"} {
+		for _, value := range h.Values(headerName) {
+			for _, token := range strings.Split(value, ",") {
+				token = strings.ToLower(strings.TrimSpace(token))
+				// "close" / "keep-alive" 是连接指令而非字段名，忽略即可。
+				if token == "" || token == "close" || token == "keep-alive" {
+					continue
+				}
+				if names == nil {
+					names = make(map[string]struct{})
+				}
+				names[token] = struct{}{}
+			}
+		}
+	}
+	return names
 }
 
 var headerPassthroughRegexCache sync.Map // map[string]*regexp.Regexp
@@ -224,12 +259,16 @@ func isHeaderPassthroughRuleKey(key string) bool {
 	return strings.HasPrefix(lower, headerPassthroughRegexPrefix) || strings.HasPrefix(lower, headerPassthroughRegexPrefixV2)
 }
 
-func shouldSkipPassthroughHeader(name string) bool {
+func shouldSkipPassthroughHeader(name string, dynamicHop map[string]struct{}) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return true
 	}
-	_, ok := passthroughSkipHeaderNamesLower[strings.ToLower(name)]
+	lower := strings.ToLower(name)
+	if _, ok := passthroughSkipHeaderNamesLower[lower]; ok {
+		return true
+	}
+	_, ok := dynamicHop[lower]
 	return ok
 }
 
@@ -262,9 +301,9 @@ func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey str
 	if strings.Contains(template, "{api_key}") {
 		template = strings.ReplaceAll(template, "{api_key}", apiKey)
 	}
-	if strings.TrimSpace(template) == "" {
-		return "", false, nil
-	}
+	// 显式空值是有意义的配置：{"Authorization": ""} 用来把 adaptor 设置的凭证
+	// 覆盖成空，历史行为一直如此。只有 {client_header:...} 取不到值时才跳过，
+	// 那种情况下写入空头等于凭空造了一个客户端没发的字段。
 	return template, true, nil
 }
 
@@ -287,7 +326,10 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 		return headerOverride, nil
 	}
 
-	isChannelTest := c != nil && common2.GetContextKeyBool(c, constant2.ContextKeyChannelTest)
+	// 没有真实客户端请求时（渠道测试、拉取上游模型列表等带外调用），
+	// 透传规则和 {client_header:...} 都无从取值，一律跳过；普通静态覆盖照常生效。
+	hasClientRequest := c != nil && c.Request != nil
+	skipClientSignals := !hasClientRequest || common2.GetContextKeyBool(c, constant2.ContextKeyChannelTest)
 
 	// [DEBUG] 打印 HeadersOverride 配置
 	if common2.DebugEnabled {
@@ -299,7 +341,7 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 
 	passAll := false
 	var passthroughRegex []*regexp.Regexp
-	if !isChannelTest {
+	if !skipClientSignals {
 		for k := range info.HeadersOverride {
 			trimmedKey := strings.TrimSpace(k)
 			if trimmedKey == "" {
@@ -336,11 +378,9 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 	}
 
 	if passAll || len(passthroughRegex) > 0 {
-		if c == nil || c.Request == nil {
-			return nil, types.NewError(errors.New("missing request context for header passthrough"), types.ErrorCodeChannelHeaderOverrideInvalid)
-		}
+		dynamicHop := dynamicHopByHopHeaders(c.Request.Header)
 		for name := range c.Request.Header {
-			if shouldSkipPassthroughHeader(name) {
+			if shouldSkipPassthroughHeader(name, dynamicHop) {
 				continue
 			}
 			if !passAll {
@@ -379,7 +419,7 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 		if !ok {
 			return nil, types.NewError(nil, types.ErrorCodeChannelHeaderOverrideInvalid)
 		}
-		if isChannelTest && strings.HasPrefix(strings.TrimSpace(str), clientHeaderPlaceholderPrefix) {
+		if skipClientSignals && strings.HasPrefix(strings.TrimSpace(str), clientHeaderPlaceholderPrefix) {
 			continue
 		}
 
@@ -761,6 +801,15 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+
+	// 与 DoApiRequest 保持一致：任务渠道（Suno/Jimeng/Doubao/Gemini 等）同样
+	// 需要 header_override 的静态覆盖、占位符与客户端请求头透传。
+	headerOverride, err := processHeaderOverride(info, c)
+	if err != nil {
+		return nil, err
+	}
+	applyHeaderOverrideToRequest(req, headerOverride)
+
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)

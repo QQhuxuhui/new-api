@@ -11,12 +11,54 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
+
+// applyFetchModelsHeaderOverrides 把渠道的 header_override 叠加到已有的认证头上。
+// 拉取上游模型列表走的是带外 HTTP 调用，之前只设默认认证头，导致依赖自定义
+// 请求头的渠道虽然转发正常，模型列表却始终拉不到。
+//
+// 没有真实客户端请求，因此 ResolveHeaderOverride 传 nil context：
+// 透传规则与 {client_header:...} 会被自动跳过，只应用静态覆盖和 {api_key}。
+func applyFetchModelsHeaderOverrides(headers http.Header, key string, headerOverride map[string]interface{}) error {
+	if len(headerOverride) == 0 {
+		return nil
+	}
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey:          key,
+			HeadersOverride: headerOverride,
+		},
+	}
+	overrides, err := relaychannel.ResolveHeaderOverride(info, nil)
+	if err != nil {
+		return err
+	}
+	for name, value := range overrides {
+		headers.Set(name, value)
+	}
+	return nil
+}
+
+// parseHeaderOverrideJSON 解析前端直接传来的 header_override 文本（渠道尚未保存时用）。
+func parseHeaderOverrideJSON(raw string) (map[string]interface{}, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	overrideMap := make(map[string]interface{})
+	if err := common.Unmarshal([]byte(trimmed), &overrideMap); err != nil {
+		return nil, fmt.Errorf("header_override 解析失败: %w", err)
+	}
+	return overrideMap, nil
+}
 
 type OpenAIModel struct {
 	ID         string `json:"id"`
@@ -269,15 +311,20 @@ func FetchUpstreamModels(c *gin.Context) {
 		url = fmt.Sprintf("%s/v1/models", baseURL)
 	}
 
-	// 获取响应体 - 根据渠道类型决定是否添加 AuthHeader
-	var body []byte
+	// 获取响应体 - 根据渠道类型决定认证头，再叠加渠道的 header_override
 	key := strings.Split(channel.Key, "\n")[0]
+	var fetchHeaders http.Header
 	switch channel.Type {
 	case constant.ChannelTypeAnthropic:
-		body, err = GetResponseBody("GET", url, channel, GetClaudeAuthHeader(key))
+		fetchHeaders = GetClaudeAuthHeader(key)
 	default:
-		body, err = GetResponseBody("GET", url, channel, GetAuthHeader(key))
+		fetchHeaders = GetAuthHeader(key)
 	}
+	if err = applyFetchModelsHeaderOverrides(fetchHeaders, key, channel.GetHeaderOverride()); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	body, err := GetResponseBody("GET", url, channel, fetchHeaders)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -1077,6 +1124,8 @@ func FetchModels(c *gin.Context) {
 		BaseURL string `json:"base_url"`
 		Type    int    `json:"type"`
 		Key     string `json:"key"`
+		// 渠道可能尚未保存，header_override 由前端编辑框直接带过来
+		HeaderOverride string `json:"header_override"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1149,6 +1198,23 @@ func FetchModels(c *gin.Context) {
 
 	// Reuse the key variable already declared above
 	request.Header.Set("Authorization", "Bearer "+key)
+
+	// 渠道可能尚未保存，header_override 由前端编辑框直接带过来
+	headerOverride, err := parseHeaderOverrideJSON(req.HeaderOverride)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if err = applyFetchModelsHeaderOverrides(request.Header, key, headerOverride); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
 
 	response, err := client.Do(request)
 	if err != nil {

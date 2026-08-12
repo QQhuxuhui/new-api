@@ -176,3 +176,73 @@ func TestApplyHeaderOverrideToRequest_SetsHost(t *testing.T) {
 	require.Equal(t, "spoofed.example", req.Host)
 	require.Equal(t, "cli", req.Header.Get("X-App"))
 }
+
+func TestProcessHeaderOverride_PassAllSkipsAllCredentialHeaders(t *testing.T) {
+	// 覆盖所有 adaptor 会用 info.ApiKey 填充的头，任何一个漏掉都意味着
+	// 客户端可以用同名头顶掉渠道密钥。
+	ctx := newHeaderOverrideCtx(t, map[string]string{
+		"Authorization":          "Bearer client-secret",
+		"api-key":                "client-azure-key",
+		"x-api-key":              "client-claude-key",
+		"x-goog-api-key":         "client-gemini-key",
+		"Sec-WebSocket-Protocol": "realtime,openai-insecure-api-key.client-key",
+		"X-Harmless":             "ok",
+	})
+	info := newHeaderOverrideInfo(map[string]any{"*": ""})
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	for _, blocked := range []string{
+		"authorization", "api-key", "x-api-key", "x-goog-api-key", "sec-websocket-protocol",
+	} {
+		require.NotContains(t, headers, blocked)
+	}
+	require.Equal(t, "ok", headers["x-harmless"])
+}
+
+func TestProcessHeaderOverride_PassAllSkipsDynamicHopByHopHeaders(t *testing.T) {
+	ctx := newHeaderOverrideCtx(t, map[string]string{
+		"Connection":       "keep-alive, X-Hop",
+		"Proxy-Connection": "X-Proxy-Hop",
+		"X-Hop":            "should-not-leak",
+		"X-Proxy-Hop":      "should-not-leak",
+		"X-Keep":           "kept",
+	})
+	info := newHeaderOverrideInfo(map[string]any{"*": ""})
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.NotContains(t, headers, "x-hop")
+	require.NotContains(t, headers, "x-proxy-hop")
+	require.NotContains(t, headers, "proxy-connection")
+	require.Equal(t, "kept", headers["x-keep"])
+}
+
+func TestProcessHeaderOverride_ExplicitEmptyValueIsPreserved(t *testing.T) {
+	// 历史行为：{"Authorization": ""} 用来把 adaptor 设的凭证覆盖成空。
+	ctx := newHeaderOverrideCtx(t, nil)
+	info := newHeaderOverrideInfo(map[string]any{"Authorization": ""})
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	value, ok := headers["authorization"]
+	require.True(t, ok, "显式空值必须保留，否则真实渠道密钥不会被清掉")
+	require.Equal(t, "", value)
+}
+
+func TestProcessHeaderOverride_NilContextSkipsClientSignals(t *testing.T) {
+	// 拉取上游模型列表等带外调用传 nil context，不能报错，
+	// 且只应用静态覆盖。
+	info := newHeaderOverrideInfo(map[string]any{
+		"*":              "",
+		"re:^X-":         "",
+		"X-Upstream-App": "{client_header:X-App}",
+		"Authorization":  "Bearer {api_key}",
+	})
+
+	headers, err := processHeaderOverride(info, nil)
+	require.NoError(t, err)
+	require.Equal(t, "Bearer sk-channel-key", headers["authorization"])
+	require.NotContains(t, headers, "x-upstream-app")
+	require.Len(t, headers, 1)
+}
