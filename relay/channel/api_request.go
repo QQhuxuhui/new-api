@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	constant2 "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -143,10 +145,149 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 	}
 }
 
-// processHeaderOverride 处理请求头覆盖，支持变量替换
-// 支持的变量：{api_key}
-func processHeaderOverride(info *common.RelayInfo) (map[string]string, error) {
+const clientHeaderPlaceholderPrefix = "{client_header:"
+
+const (
+	headerPassthroughAllKey        = "*"
+	headerPassthroughRegexPrefix   = "re:"
+	headerPassthroughRegexPrefixV2 = "regex:"
+)
+
+// passthroughSkipHeaderNamesLower 列出永远不参与名字匹配透传的请求头。
+var passthroughSkipHeaderNamesLower = map[string]struct{}{
+	// RFC 7230 逐跳（hop-by-hop）请求头。
+	"connection":          {},
+	"keep-alive":          {},
+	"proxy-authenticate":  {},
+	"proxy-authorization": {},
+	"te":                  {},
+	"trailer":             {},
+	"transfer-encoding":   {},
+	"upgrade":             {},
+
+	"cookie": {},
+
+	// 由出站请求自行决定，透传会破坏上游连接。
+	"host":            {},
+	"content-length":  {},
+	"accept-encoding": {},
+
+	// 凭证绝不能被通配/正则规则带到上游。
+	"authorization":  {},
+	"x-api-key":      {},
+	"x-goog-api-key": {},
+
+	// WebSocket 握手头由 dialer 生成。
+	"sec-websocket-key":        {},
+	"sec-websocket-version":    {},
+	"sec-websocket-extensions": {},
+}
+
+var headerPassthroughRegexCache sync.Map // map[string]*regexp.Regexp
+
+func getHeaderPassthroughRegex(pattern string) (*regexp.Regexp, error) {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil, errors.New("empty regex pattern")
+	}
+	if v, ok := headerPassthroughRegexCache.Load(pattern); ok {
+		if re, ok := v.(*regexp.Regexp); ok {
+			return re, nil
+		}
+		headerPassthroughRegexCache.Delete(pattern)
+	}
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := headerPassthroughRegexCache.LoadOrStore(pattern, compiled)
+	if re, ok := actual.(*regexp.Regexp); ok {
+		return re, nil
+	}
+	return compiled, nil
+}
+
+// IsHeaderPassthroughRuleKey 判断 header_override 的某个 key 是否为透传规则而非普通覆盖。
+func IsHeaderPassthroughRuleKey(key string) bool {
+	return isHeaderPassthroughRuleKey(key)
+}
+
+func isHeaderPassthroughRuleKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	if key == headerPassthroughAllKey {
+		return true
+	}
+	lower := strings.ToLower(key)
+	return strings.HasPrefix(lower, headerPassthroughRegexPrefix) || strings.HasPrefix(lower, headerPassthroughRegexPrefixV2)
+}
+
+func shouldSkipPassthroughHeader(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return true
+	}
+	_, ok := passthroughSkipHeaderNamesLower[strings.ToLower(name)]
+	return ok
+}
+
+// applyHeaderOverridePlaceholders 解析单条 header_override 的值。
+// 返回的 bool 表示该头是否应当写入出站请求（取不到客户端头/空值时为 false）。
+func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey string) (string, bool, error) {
+	trimmed := strings.TrimSpace(template)
+	if strings.HasPrefix(trimmed, clientHeaderPlaceholderPrefix) {
+		afterPrefix := trimmed[len(clientHeaderPlaceholderPrefix):]
+		end := strings.Index(afterPrefix, "}")
+		if end < 0 || end != len(afterPrefix)-1 {
+			return "", false, fmt.Errorf("client_header placeholder must be the full value: %q", template)
+		}
+
+		name := strings.TrimSpace(afterPrefix[:end])
+		if name == "" {
+			return "", false, fmt.Errorf("client_header placeholder name is empty: %q", template)
+		}
+		if c == nil || c.Request == nil {
+			return "", false, fmt.Errorf("missing request context for client_header placeholder")
+		}
+		clientHeaderValue := c.Request.Header.Get(name)
+		if strings.TrimSpace(clientHeaderValue) == "" {
+			return "", false, nil
+		}
+		// 客户端提供的内容里不做 {api_key} 插值，避免把渠道密钥回填进客户端可控字符串。
+		return clientHeaderValue, true, nil
+	}
+
+	if strings.Contains(template, "{api_key}") {
+		template = strings.ReplaceAll(template, "{api_key}", apiKey)
+	}
+	if strings.TrimSpace(template) == "" {
+		return "", false, nil
+	}
+	return template, true, nil
+}
+
+// processHeaderOverride 处理请求头覆盖，支持变量替换与客户端请求头透传。
+//
+// 支持的变量：
+//   - {api_key}：替换为渠道 API Key
+//   - {client_header:<name>}：取客户端同名请求头的值
+//
+// 透传规则（只看 key，value 忽略）：
+//   - "*"：按名字透传全部客户端请求头（跳过逐跳头与凭证头）
+//   - "re:<regex>" / "regex:<regex>"：透传名字匹配该 Go 正则的请求头
+//
+// 透传先应用、普通覆盖后应用，因此显式覆盖优先级更高。
+// 渠道测试没有真实客户端请求，透传与 {client_header:...} 一律跳过。
+func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]string, error) {
 	headerOverride := make(map[string]string)
+	// ChannelMeta 是内嵌指针，未 InitChannelMeta 时访问 HeadersOverride 会 panic。
+	if info == nil || info.ChannelMeta == nil {
+		return headerOverride, nil
+	}
+
+	isChannelTest := c != nil && common2.GetContextKeyBool(c, constant2.ContextKeyChannelTest)
 
 	// [DEBUG] 打印 HeadersOverride 配置
 	if common2.DebugEnabled {
@@ -156,36 +297,136 @@ func processHeaderOverride(info *common.RelayInfo) (map[string]string, error) {
 		}
 	}
 
+	passAll := false
+	var passthroughRegex []*regexp.Regexp
+	if !isChannelTest {
+		for k := range info.HeadersOverride {
+			trimmedKey := strings.TrimSpace(k)
+			if trimmedKey == "" {
+				continue
+			}
+			lowerKey := strings.ToLower(trimmedKey)
+			if lowerKey == headerPassthroughAllKey {
+				passAll = true
+				continue
+			}
+
+			// 只用小写形式识别前缀，正则本体保留原始大小写：
+			// 请求头名字在 http.Header 里是规范化的（X-App），若把模式一起小写，
+			// "re:^X-" 会变成 "^x-" 而永远匹配不上。
+			var pattern string
+			switch {
+			case strings.HasPrefix(lowerKey, headerPassthroughRegexPrefix):
+				pattern = strings.TrimSpace(trimmedKey[len(headerPassthroughRegexPrefix):])
+			case strings.HasPrefix(lowerKey, headerPassthroughRegexPrefixV2):
+				pattern = strings.TrimSpace(trimmedKey[len(headerPassthroughRegexPrefixV2):])
+			default:
+				continue
+			}
+
+			if pattern == "" {
+				return nil, types.NewError(fmt.Errorf("header passthrough regex pattern is empty: %q", k), types.ErrorCodeChannelHeaderOverrideInvalid)
+			}
+			compiled, err := getHeaderPassthroughRegex(pattern)
+			if err != nil {
+				return nil, types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
+			}
+			passthroughRegex = append(passthroughRegex, compiled)
+		}
+	}
+
+	if passAll || len(passthroughRegex) > 0 {
+		if c == nil || c.Request == nil {
+			return nil, types.NewError(errors.New("missing request context for header passthrough"), types.ErrorCodeChannelHeaderOverrideInvalid)
+		}
+		for name := range c.Request.Header {
+			if shouldSkipPassthroughHeader(name) {
+				continue
+			}
+			if !passAll {
+				matched := false
+				lowerName := strings.ToLower(name)
+				for _, re := range passthroughRegex {
+					// 同时按规范名（X-App）和全小写名（x-app）匹配，
+					// 两种写法的模式都能用，不必强制写 (?i)。
+					if re.MatchString(name) || re.MatchString(lowerName) {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
+			}
+			value := strings.TrimSpace(c.Request.Header.Get(name))
+			if value == "" {
+				continue
+			}
+			headerOverride[strings.ToLower(strings.TrimSpace(name))] = value
+		}
+	}
+
 	for k, v := range info.HeadersOverride {
+		if isHeaderPassthroughRuleKey(k) {
+			continue
+		}
+		key := strings.TrimSpace(strings.ToLower(k))
+		if key == "" {
+			continue
+		}
+
 		str, ok := v.(string)
 		if !ok {
 			return nil, types.NewError(nil, types.ErrorCodeChannelHeaderOverrideInvalid)
 		}
-
-		// 替换支持的变量
-		if strings.Contains(str, "{api_key}") {
-			str = strings.ReplaceAll(str, "{api_key}", info.ApiKey)
+		if isChannelTest && strings.HasPrefix(strings.TrimSpace(str), clientHeaderPlaceholderPrefix) {
+			continue
 		}
 
-		headerOverride[k] = str
+		value, include, err := applyHeaderOverridePlaceholders(str, c, info.ApiKey)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
+		}
+		if !include {
+			continue
+		}
+
+		headerOverride[key] = value
 
 		// [DEBUG] 打印应用的头覆盖
 		if common2.DebugEnabled {
-			displayValue := str
-			lowerKey := strings.ToLower(k)
-			if strings.Contains(lowerKey, "key") || strings.Contains(lowerKey, "authorization") || strings.Contains(lowerKey, "secret") || strings.Contains(lowerKey, "token") {
-				if len(str) > 12 {
-					displayValue = str[:6] + "****" + str[len(str)-4:]
-				} else if len(str) > 4 {
-					displayValue = str[:2] + "****"
+			displayValue := value
+			if strings.Contains(key, "key") || strings.Contains(key, "authorization") || strings.Contains(key, "secret") || strings.Contains(key, "token") {
+				if len(value) > 12 {
+					displayValue = value[:6] + "****" + value[len(value)-4:]
+				} else if len(value) > 4 {
+					displayValue = value[:2] + "****"
 				} else {
 					displayValue = "****"
 				}
 			}
-			println(fmt.Sprintf("[DEBUG] Applying header override: %s = %s", k, displayValue))
+			println(fmt.Sprintf("[DEBUG] Applying header override: %s = %s", key, displayValue))
 		}
 	}
 	return headerOverride, nil
+}
+
+// ResolveHeaderOverride 暴露给包外解析最终生效的 header_override。
+func ResolveHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]string, error) {
+	return processHeaderOverride(info, c)
+}
+
+// applyHeaderOverrideToRequest 把解析后的覆盖写入出站请求；Host 需要同时写 req.Host 才会生效。
+func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]string) {
+	if req == nil {
+		return
+	}
+	for key, value := range headerOverride {
+		req.Header.Set(key, value)
+		if strings.EqualFold(key, "Host") {
+			req.Host = value
+		}
+	}
 }
 
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
@@ -224,13 +465,11 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 
 	// Step 2: 应用渠道的 header_override（最高优先级，可覆盖适配器设置的值）
-	headerOverride, err := processHeaderOverride(info)
+	headerOverride, err := processHeaderOverride(info, c)
 	if err != nil {
 		return nil, err
 	}
-	for key, value := range headerOverride {
-		headers.Set(key, value)
-	}
+	applyHeaderOverrideToRequest(req, headerOverride)
 
 	// [DEBUG] 打印上游请求信息（在设置完所有 header 之后）
 	debugPrintUpstreamRequest(req, bodyBytes)
@@ -274,13 +513,11 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	}
 
 	// Step 2: 应用渠道的 header_override（最高优先级，可覆盖适配器设置的值）
-	headerOverride, err := processHeaderOverride(info)
+	headerOverride, err := processHeaderOverride(info, c)
 	if err != nil {
 		return nil, err
 	}
-	for key, value := range headerOverride {
-		headers.Set(key, value)
-	}
+	applyHeaderOverrideToRequest(req, headerOverride)
 
 	// [DEBUG] 打印上游请求信息
 	debugPrintUpstreamRequest(req, nil)
@@ -312,7 +549,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 
 	// Step 2: 应用渠道的 header_override（最高优先级，可覆盖适配器设置的值）
-	headerOverride, err := processHeaderOverride(info)
+	headerOverride, err := processHeaderOverride(info, c)
 	if err != nil {
 		return nil, err
 	}

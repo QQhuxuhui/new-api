@@ -3426,6 +3426,28 @@ const EditChannelModal = (props) => {
                               <div>
                                 {t('渠道密钥')}: {'{api_key}'}
                               </div>
+                              <div>
+                                {t('客户端请求头')}: {'{client_header:头名}'}
+                              </div>
+                            </div>
+                          </div>
+                          <div>
+                            <Text type='tertiary' size='small'>
+                              {t('客户端请求头透传（键为规则，值留空即可）：')}
+                            </Text>
+                            <div className='text-xs text-tertiary ml-2'>
+                              <div>
+                                {t('透传全部')}: {'"*"'}
+                              </div>
+                              <div>
+                                {t('按正则透传')}: {'"re:^X-"'} /{' '}
+                                {'"regex:^X-"'}
+                              </div>
+                              <div>
+                                {t(
+                                  '凭证头与逐跳头不会被透传；显式覆盖优先于透传',
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>

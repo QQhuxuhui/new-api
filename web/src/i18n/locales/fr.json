@@ -2232,6 +2232,11 @@
     "订阅套餐": "Offre d’abonnement",
     "试用套餐": "Offre d’essai",
     "企业套餐": "Offre entreprise",
-    "已切换到该套餐。系统不会自动更换你的选择；额度用尽或渠道故障时仍会自动处理。": "Offre sélectionnée. Le système conservera votre choix, tout en gérant automatiquement l’épuisement du quota et les pannes de canal."
+    "已切换到该套餐。系统不会自动更换你的选择；额度用尽或渠道故障时仍会自动处理。": "Offre sélectionnée. Le système conservera votre choix, tout en gérant automatiquement l’épuisement du quota et les pannes de canal.",
+    "客户端请求头": "En-tête de requête client",
+    "客户端请求头透传（键为规则，值留空即可）：": "Transfert des en-têtes client (la clé est la règle, la valeur peut rester vide) :",
+    "透传全部": "Tout transférer",
+    "按正则透传": "Transférer par regex",
+    "凭证头与逐跳头不会被透传；显式覆盖优先于透传": "Les en-têtes d'identification et hop-by-hop ne sont jamais transférés ; les remplacements explicites priment"
   }
 }

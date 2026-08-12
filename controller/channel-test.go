@@ -132,6 +132,10 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	// false-positive/false-negative results for UA-sensitive upstreams.
 	c.Request.Header.Set("User-Agent", "new-api-channel-test/"+common.Version)
 
+	// 渠道测试没有真实客户端请求，标记出来让 header_override 的透传规则
+	// 和 {client_header:...} 占位符自动跳过，避免把测试请求头当成客户端身份发上游。
+	common.SetContextKey(c, constant.ContextKeyChannelTest, true)
+
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
 	group, _ := model.GetUserGroup(1, false)
