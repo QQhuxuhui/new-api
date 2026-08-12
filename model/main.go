@@ -326,6 +326,50 @@ func migrateDB() error {
 		common.SysLog("failed to clear masquerade legacy flags: " + err.Error())
 		// Don't fail startup, can be retried
 	}
+	// Recompute aff_count from the actual inviter relationship. Idempotent via options row.
+	if err := backfillUserAffCount(); err != nil {
+		common.SysLog("failed to backfill user aff_count: " + err.Error())
+		// Don't fail startup, can be retried
+	}
+	return nil
+}
+
+// backfillUserAffCount 用真实的邀请关系重算 users.aff_count。
+//
+// 历史 bug：递增 aff_count 的 inviteUser 被耦合在「邀请人奖励额度 > 0」的条件里
+// （model/user.go Insert），改用返佣结算把该奖励设为 0 之后，注册链路就再也不
+// 递增邀请人数了，钱包页显示的邀请人数长期偏小。修好递增逻辑只能保证之后正确，
+// 存量数据需要按 inviter_id 重算一次。
+//
+// 只统计未软删除的被邀请人，与列表页口径一致。Guarded by an options row so it
+// only runs once.
+func backfillUserAffCount() error {
+	const optionKey = "UserAffCountBackfilled"
+
+	var existing Option
+	if err := DB.Where(commonKeyCol+" = ?", optionKey).First(&existing).Error; err == nil {
+		// Already ran.
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	common.SysLog("recomputing user aff_count from inviter relationship (one-time)")
+
+	// 子查询按 inviter_id 统计，只更新与实际值不一致的行，避免全表无谓写入。
+	const countSubQuery = `(SELECT COUNT(*) FROM users AS invitees
+		WHERE invitees.inviter_id = users.id AND invitees.deleted_at IS NULL)`
+	result := DB.Model(&User{}).
+		Where("aff_count <> "+countSubQuery).
+		UpdateColumn("aff_count", gorm.Expr(countSubQuery))
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if err := DB.Create(&Option{Key: optionKey, Value: "true"}).Error; err != nil {
+		return err
+	}
+	common.SysLog(fmt.Sprintf("user aff_count backfilled, %d rows corrected", result.RowsAffected))
 	return nil
 }
 

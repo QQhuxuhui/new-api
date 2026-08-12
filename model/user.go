@@ -327,15 +327,27 @@ func HardDeleteUserById(id int) error {
 	return err
 }
 
+// inviteUser 记录一次成功的邀请：邀请人数 +1，并在配置了邀请人奖励时补上额度。
+//
+// 这里必须用原子 SQL 表达式，不能沿用「GetUserById + DB.Save(user)」：
+// DB.Save 会把整行字段一起写回，而 user 是若干毫秒前读出来的快照，
+// 邀请人此刻正在跑的请求对 quota / used_quota 的扣减会被这份快照覆盖掉。
+// 并发注册之间也会互相丢更新，导致 aff_count 少计。
+//
+// 注意 aff_count 与奖励额度是解耦的：邀请人数是邀请关系的计数，
+// 无论是否发放邀请奖励都必须维护（见 Insert 里的调用点注释）。
 func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
+	updates := map[string]interface{}{
+		"aff_count": gorm.Expr("aff_count + 1"),
+	}
+	if common.QuotaForInviter > 0 {
+		updates["aff_quota"] = gorm.Expr("aff_quota + ?", common.QuotaForInviter)
+		updates["aff_history"] = gorm.Expr("aff_history + ?", common.QuotaForInviter)
+	}
+	if err = DB.Model(&User{}).Where("id = ?", inviterId).Updates(updates).Error; err != nil {
 		return err
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+	return invalidateUserCache(inviterId)
 }
 
 const maxInviterChainDepth = 50
@@ -580,8 +592,11 @@ func (user *User) Insert(inviterId int) error {
 		if common.QuotaForInviter > 0 {
 			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
 		}
+		// 邀请人数必须无条件维护：它是邀请关系的计数，与是否发放邀请奖励无关。
+		// 此前这行被关在 QuotaForInviter > 0 里，改用返佣结算（service/aff_settle.go）
+		// 把邀请人奖励设为 0 之后，aff_count 就永远停在旧值，钱包页显示的邀请人数失真。
+		_ = inviteUser(inviterId)
 	}
 	return nil
 }
