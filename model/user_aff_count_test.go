@@ -195,3 +195,67 @@ func TestBackfillUserAffCountIsIdempotent(t *testing.T) {
 		t.Fatalf("aff_count = %d, want 77 (第二次运行应被 options 守卫跳过)", got)
 	}
 }
+
+// 回归：删除与回减必须同事务，且以删除语句的 RowsAffected 为唯一判据。
+func TestDeleteUserReleasesInviterAffCountOnce(t *testing.T) {
+	setupAffCountTestDB(t)
+	mustCreateUser(t, 1, "inviter", 0, 2)
+	mustCreateUser(t, 2, "invitee", 1, 0)
+
+	u := &User{Id: 2}
+	if err := u.Delete(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if got := affCountOf(t, 1); got != 1 {
+		t.Fatalf("aff_count = %d, want 1", got)
+	}
+
+	// 重复软删除不应再减（RowsAffected == 0）
+	if err := (&User{Id: 2}).Delete(); err != nil {
+		t.Fatalf("second delete: %v", err)
+	}
+	if got := affCountOf(t, 1); got != 1 {
+		t.Fatalf("aff_count = %d, want 1 (重复删除不能重复回减)", got)
+	}
+
+	// 对已软删除的行做物理删除，同样不能再减
+	if err := HardDeleteUserById(2); err != nil {
+		t.Fatalf("hard delete: %v", err)
+	}
+	if got := affCountOf(t, 1); got != 1 {
+		t.Fatalf("aff_count = %d, want 1 (软删后再硬删不能重复回减)", got)
+	}
+}
+
+func TestHardDeleteUserReleasesInviterAffCount(t *testing.T) {
+	setupAffCountTestDB(t)
+	mustCreateUser(t, 1, "inviter", 0, 1)
+	mustCreateUser(t, 2, "invitee", 1, 0)
+
+	if err := HardDeleteUserById(2); err != nil {
+		t.Fatalf("hard delete: %v", err)
+	}
+	if got := affCountOf(t, 1); got != 0 {
+		t.Fatalf("aff_count = %d, want 0", got)
+	}
+	// 删不存在的行不应改动计数
+	if err := HardDeleteUserById(999); err != nil {
+		t.Fatalf("delete missing: %v", err)
+	}
+	if got := affCountOf(t, 1); got != 0 {
+		t.Fatalf("aff_count = %d, want 0", got)
+	}
+}
+
+func TestDeleteClampsAffCountAtZero(t *testing.T) {
+	setupAffCountTestDB(t)
+	mustCreateUser(t, 1, "inviter", 0, 0) // 存量漂移：计数已是 0
+	mustCreateUser(t, 2, "invitee", 1, 0)
+
+	if err := (&User{Id: 2}).Delete(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if got := affCountOf(t, 1); got != 0 {
+		t.Fatalf("aff_count = %d, want 0 (不能减成负数)", got)
+	}
+}

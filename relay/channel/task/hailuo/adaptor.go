@@ -25,10 +25,11 @@ import (
 // https://platform.minimaxi.com/docs/api-reference/video-generation-intro
 type TaskAdaptor struct {
 	taskcommon.BaseBilling
-	ChannelType int
-	apiKey      string
-	baseURL     string
-	proxy       string
+	ChannelType  int
+	apiKey       string
+	baseURL      string
+	proxy        string
+	extraHeaders http.Header
 }
 
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
@@ -122,6 +123,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	a.apiKey = key
 	a.baseURL = baseUrl
 	a.proxy = proxy
+	a.extraHeaders = extraHeaders
 
 	uri := fmt.Sprintf("%s%s?task_id=%s", baseUrl, QueryTaskEndpoint, taskID)
 
@@ -271,6 +273,10 @@ func (a *TaskAdaptor) buildVideoURL(_, fileID string) (string, error) {
 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+
+	// 与首次状态查询保持一致：这条取视频地址的二次请求同样要带渠道 header_override，
+	// 否则依赖自定义头的渠道会「查到成功状态却拿不到视频地址」。
+	taskcommon.ApplyExtraHeaders(req, a.extraHeaders)
 
 	client, err := service.GetHttpClientWithProxy(a.proxy)
 	if err != nil {

@@ -294,12 +294,24 @@ func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey str
 		if strings.TrimSpace(clientHeaderValue) == "" {
 			return "", false, nil
 		}
+		// 客户端可控内容里含 CR/LF 一律丢弃，不当成错误：这是客户端输入，
+		// 报错会让正常请求失败，而带换行的头值只会被传输层拒绝。
+		if strings.ContainsAny(clientHeaderValue, "\r\n") {
+			return "", false, nil
+		}
 		// 客户端提供的内容里不做 {api_key} 插值，避免把渠道密钥回填进客户端可控字符串。
 		return clientHeaderValue, true, nil
 	}
 
 	if strings.Contains(template, "{api_key}") {
-		template = strings.ReplaceAll(template, "{api_key}", apiKey)
+		// 多 Key 渠道的密钥块以换行分隔，调用方应当只传本次使用的那一个；
+		// 这里再 Trim 一次兜底，避免把换行带进请求头值。
+		template = strings.ReplaceAll(template, "{api_key}", strings.TrimSpace(apiKey))
+	}
+	// 静态配置里出现 CR/LF 属于配置错误，明确报出来，
+	// 否则只会在传输层得到一句难以定位的 invalid header field value。
+	if strings.ContainsAny(template, "\r\n") {
+		return "", false, fmt.Errorf("header override value must not contain CR/LF: %q", template)
 	}
 	// 显式空值是有意义的配置：{"Authorization": ""} 用来把 adaptor 设置的凭证
 	// 覆盖成空，历史行为一直如此。只有 {client_header:...} 取不到值时才跳过，
@@ -468,6 +480,64 @@ func ResolveHeaderOverride(info *common.RelayInfo, c *gin.Context) (http.Header,
 	return processHeaderOverride(info, c)
 }
 
+// SignedHeaderGuard 由自行计算请求签名的适配器实现，声明参与 canonical 签名
+// 计算的请求头名字。
+//
+// 这些字段不允许被 header_override（含客户端请求头透传）改写：签名在适配器的
+// SetupRequestHeader / BuildRequestHeader 里就算好了，之后再改这些头会让请求与
+// 签名对不上，上游只会返回鉴权失败——覆盖不仅没生效，还把渠道打挂了。
+//
+// 自建出站请求、能自己控制顺序的适配器（如即梦）不需要实现本接口：
+// 在签名之前应用覆盖即可，那样覆盖真正生效且签名依然有效。
+type SignedHeaderGuard interface {
+	SignedHeaderNames() []string
+}
+
+// applyHeaderOverrideRespectingSignature 应用覆盖，但保护签名字段不被改写。
+func applyHeaderOverrideRespectingSignature(adaptor any, req *http.Request, headerOverride http.Header) {
+	guard, ok := adaptor.(SignedHeaderGuard)
+	if !ok {
+		applyHeaderOverrideToRequest(req, headerOverride)
+		return
+	}
+	names := guard.SignedHeaderNames()
+	if len(names) == 0 || req == nil {
+		applyHeaderOverrideToRequest(req, headerOverride)
+		return
+	}
+
+	saved := make(map[string][]string, len(names))
+	protectsHost := false
+	for _, n := range names {
+		canonical := http.CanonicalHeaderKey(strings.TrimSpace(n))
+		if canonical == "" {
+			continue
+		}
+		if strings.EqualFold(canonical, "Host") {
+			protectsHost = true
+		}
+		if existing, exists := req.Header[canonical]; exists {
+			saved[canonical] = append([]string(nil), existing...)
+		} else {
+			saved[canonical] = nil
+		}
+	}
+	savedHost := req.Host
+
+	applyHeaderOverrideToRequest(req, headerOverride)
+
+	for canonical, values := range saved {
+		if values == nil {
+			req.Header.Del(canonical)
+			continue
+		}
+		req.Header[canonical] = values
+	}
+	if protectsHost {
+		req.Host = savedHost
+	}
+}
+
 // ApplyHeaderOverrideToRequest 供包外（自建出站请求、绕过 DoApiRequest 的适配器）使用。
 func ApplyHeaderOverrideToRequest(req *http.Request, headerOverride http.Header) {
 	applyHeaderOverrideToRequest(req, headerOverride)
@@ -532,7 +602,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, err
 	}
-	applyHeaderOverrideToRequest(req, headerOverride)
+	applyHeaderOverrideRespectingSignature(a, req, headerOverride)
 
 	// [DEBUG] 打印上游请求信息（在设置完所有 header 之后）
 	debugPrintUpstreamRequest(req, bodyBytes)
@@ -580,7 +650,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, err
 	}
-	applyHeaderOverrideToRequest(req, headerOverride)
+	applyHeaderOverrideRespectingSignature(a, req, headerOverride)
 
 	// [DEBUG] 打印上游请求信息
 	debugPrintUpstreamRequest(req, nil)
@@ -834,7 +904,7 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 	if err != nil {
 		return nil, err
 	}
-	applyHeaderOverrideToRequest(req, headerOverride)
+	applyHeaderOverrideRespectingSignature(a, req, headerOverride)
 
 	resp, err := doRequest(c, req, info)
 	if err != nil {

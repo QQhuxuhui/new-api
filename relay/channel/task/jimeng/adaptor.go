@@ -121,6 +121,15 @@ func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info
 	return nil
 }
 
+// SignedHeaderNames 声明 signRequest 参与签名的请求头（见 signRequest：
+// Host / X-Date / X-Content-Sha256，Authorization 承载签名本身，
+// Content-Type 也在 canonical headers 里）。
+// 提交路径的覆盖由 DoTaskApiRequest 在 BuildRequestHeader 之后应用，
+// 因此必须把这些字段保护起来，否则签名作废。
+func (a *TaskAdaptor) SignedHeaderNames() []string {
+	return []string{"Host", "X-Date", "X-Content-Sha256", "Content-Type", "Authorization"}
+}
+
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
 	v, exists := c.Get("task_request")
 	if !exists {
@@ -239,6 +248,11 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 
+	// 覆盖必须在签名之前应用：签名对 Host / Content-Type / X-Date 等做 canonical
+	// 计算，签完再改这些头会让请求与签名对不上。先落定最终请求头再签名，
+	// 覆盖既能生效、签名也依然有效。
+	taskcommon.ApplyExtraHeaders(req, extraHeaders)
+
 	if isNewAPIRelay(key) {
 		req.Header.Set("Authorization", "Bearer "+key)
 	} else {
@@ -253,8 +267,6 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 			return nil, errors.Wrap(err, "sign request failed")
 		}
 	}
-	// 应用渠道 header_override（提交与轮询必须一致，否则依赖自定义头的上游查不到任务状态）
-	taskcommon.ApplyExtraHeaders(req, extraHeaders)
 	client, err := service.GetHttpClientWithProxy(proxy)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)

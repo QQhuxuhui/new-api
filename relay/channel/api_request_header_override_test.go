@@ -281,3 +281,74 @@ func TestApplyHeaderOverrideToRequest_KeepsDuplicateValues(t *testing.T) {
 	applyHeaderOverrideToRequest(req, http.Header{"X-Multi": []string{"a", "b"}})
 	require.Equal(t, []string{"a", "b"}, req.Header.Values("X-Multi"))
 }
+
+type signingTestAdaptor struct{ Adaptor }
+
+func (signingTestAdaptor) SignedHeaderNames() []string {
+	return []string{"Content-Type", "Host", "X-TC-Action"}
+}
+
+// 回归：签名字段不能被 header_override（含客户端透传）改写，
+// 否则请求与 canonical signature 对不上，上游只会返回鉴权失败。
+func TestApplyHeaderOverrideRespectingSignature_ProtectsSignedHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://upstream.example/", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-TC-Action", "ChatCompletions")
+	req.Host = "hunyuan.tencentcloudapi.com"
+
+	applyHeaderOverrideRespectingSignature(signingTestAdaptor{}, req, http.Header{
+		"Content-Type": []string{"text/plain"},
+		"X-Tc-Action":  []string{"Tampered"},
+		"Host":         []string{"evil.example"},
+		"X-Free":       []string{"ok"},
+	})
+
+	require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+	require.Equal(t, "ChatCompletions", req.Header.Get("X-TC-Action"))
+	require.Equal(t, "hunyuan.tencentcloudapi.com", req.Host)
+	// 非签名字段照常覆盖
+	require.Equal(t, "ok", req.Header.Get("X-Free"))
+}
+
+func TestApplyHeaderOverrideRespectingSignature_NoGuardAppliesEverything(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://upstream.example/", nil)
+	req.Header.Set("Content-Type", "application/json")
+
+	applyHeaderOverrideRespectingSignature(struct{}{}, req, http.Header{
+		"Content-Type": []string{"text/plain"},
+	})
+	require.Equal(t, "text/plain", req.Header.Get("Content-Type"))
+}
+
+// {api_key} 展开出的值不能带换行：多 Key 渠道的密钥块是换行分隔的，
+// 带进请求头会在传输层触发 invalid header field value。
+func TestProcessHeaderOverride_RejectsCRLFInStaticValue(t *testing.T) {
+	ctx := newHeaderOverrideCtx(t, nil)
+	info := newHeaderOverrideInfo(map[string]any{"X-Bad": "a\nb"})
+	_, err := processHeaderOverride(info, ctx)
+	require.Error(t, err)
+}
+
+func TestProcessHeaderOverride_TrimsApiKeyWhitespace(t *testing.T) {
+	ctx := newHeaderOverrideCtx(t, nil)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey:          "  sk-one  \n",
+			HeadersOverride: map[string]any{"Authorization": "Bearer {api_key}"},
+		},
+	}
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "Bearer sk-one", headers.Get("Authorization"))
+}
+
+func TestProcessHeaderOverride_DropsCRLFFromClientHeader(t *testing.T) {
+	ctx := newHeaderOverrideCtx(t, nil)
+	// 直接塞进 map，绕过 Header.Set 的校验，模拟异常输入
+	ctx.Request.Header["X-Evil"] = []string{"a\r\nInjected: 1"}
+	info := newHeaderOverrideInfo(map[string]any{"X-Up": "{client_header:X-Evil}"})
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Empty(t, headers.Values("X-Up"))
+}

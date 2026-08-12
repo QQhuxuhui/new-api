@@ -40,14 +40,18 @@ var GetTaskAdaptorFunc func(platform constant.TaskPlatform) TaskPollingAdaptor
 // ResolveChannelHeaderOverrideFunc 由 main 包注入，用于解析渠道的 header_override。
 // 与 GetTaskAdaptorFunc 同理：解析逻辑在 relay/channel 里，service 不能直接依赖它。
 // 轮询没有客户端请求，解析结果只含静态覆盖与 {api_key} 展开值。
-var ResolveChannelHeaderOverrideFunc func(ch *model.Channel) http.Header
+//
+// key 必须传本次轮询实际使用的那一个：多 Key 渠道的 ch.Key 是换行分隔的整块，
+// 直接拿它展开 {api_key} 会写出带换行的非法请求头值，也会让自定义鉴权头
+// 与适配器实际使用的凭证对不上。
+var ResolveChannelHeaderOverrideFunc func(ch *model.Channel, key string) http.Header
 
 // resolveChannelHeaderOverride 在未注入时安全退化为 nil，方便单测。
-func resolveChannelHeaderOverride(ch *model.Channel) http.Header {
+func resolveChannelHeaderOverride(ch *model.Channel, key string) http.Header {
 	if ResolveChannelHeaderOverrideFunc == nil || ch == nil {
 		return nil
 	}
-	return ResolveChannelHeaderOverrideFunc(ch)
+	return ResolveChannelHeaderOverrideFunc(ch, key)
 }
 
 const (
@@ -371,7 +375,7 @@ func updateSunoTasksWithKey(ctx context.Context, ch *model.Channel, key string, 
 	}
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"ids": taskIds,
-	}, proxy, resolveChannelHeaderOverride(ch))
+	}, proxy, resolveChannelHeaderOverride(ch, key))
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Get Task Do req error: %v", err))
 		return err
@@ -587,7 +591,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
-	}, proxy, resolveChannelHeaderOverride(ch))
+	}, proxy, resolveChannelHeaderOverride(ch, key))
 	if err != nil {
 		return fmt.Errorf("fetchTask failed for task %s: %w", taskId, err)
 	}
@@ -815,7 +819,7 @@ func recoverSuccessfulTaskSettlement(ctx context.Context, task *model.Task) erro
 		resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 			"task_id": task.GetUpstreamTaskID(),
 			"action":  task.Action,
-		}, channelSetting.Proxy, resolveChannelHeaderOverride(channel))
+		}, channelSetting.Proxy, resolveChannelHeaderOverride(channel, key))
 		if err != nil {
 			return fmt.Errorf("fetch task for settlement recovery: %w", err)
 		}

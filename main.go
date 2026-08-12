@@ -130,7 +130,7 @@ func main() {
 	// 同理注入 header_override 解析器：轮询也要带上渠道的自定义请求头，
 	// 否则依赖自定义头的上游「提交成功但查询失败」。
 	// 轮询没有客户端请求，传 nil context，只会解析出静态覆盖与 {api_key}。
-	service.ResolveChannelHeaderOverrideFunc = func(ch *model.Channel) http.Header {
+	service.ResolveChannelHeaderOverrideFunc = func(ch *model.Channel, key string) http.Header {
 		if ch == nil {
 			return nil
 		}
@@ -138,9 +138,11 @@ func main() {
 		if len(headerOverride) == 0 {
 			return nil
 		}
+		// key 用调用方传进来的本次实际凭证，不能用 ch.Key：多 Key 渠道的
+		// ch.Key 是换行分隔的整块，展开到 {api_key} 会产生非法请求头值。
 		resolved, err := relaychannel.ResolveHeaderOverride(&relaycommon.RelayInfo{
 			ChannelMeta: &relaycommon.ChannelMeta{
-				ApiKey:          ch.Key,
+				ApiKey:          key,
 				HeadersOverride: headerOverride,
 			},
 		}, nil)

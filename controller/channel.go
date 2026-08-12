@@ -26,6 +26,17 @@ import (
 //
 // 没有真实客户端请求，因此 ResolveHeaderOverride 传 nil context：
 // 透传规则与 {client_header:...} 会被自动跳过，只应用静态覆盖和 {api_key}。
+// applyFetchModelsHeaderOverridesToRequest 用于自建 *http.Request 的分支：
+// Host 覆盖只写 Header 不生效，必须同时写 req.Host。
+func applyFetchModelsHeaderOverridesToRequest(req *http.Request, key string, headerOverride map[string]interface{}) error {
+	resolved, err := resolveFetchModelsOverrideHeaders(key, headerOverride)
+	if err != nil {
+		return err
+	}
+	relaychannel.ApplyHeaderOverrideToRequest(req, resolved)
+	return nil
+}
+
 func applyFetchModelsHeaderOverrides(headers http.Header, key string, headerOverride map[string]interface{}) error {
 	resolved, err := resolveFetchModelsOverrideHeaders(key, headerOverride)
 	if err != nil {
@@ -1245,7 +1256,8 @@ func FetchModels(c *gin.Context) {
 		})
 		return
 	}
-	if err = applyFetchModelsHeaderOverrides(request.Header, key, headerOverride); err != nil {
+	// Host 覆盖必须同时写 request.Host，只写 Header 不生效
+	if err = applyFetchModelsHeaderOverridesToRequest(request, key, headerOverride); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": err.Error(),

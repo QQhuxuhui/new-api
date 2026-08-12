@@ -111,19 +111,22 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
-	err = Sign(c, req, info.ApiKey)
-	if err != nil {
-		return nil, fmt.Errorf("setup request header failed: %w", err)
-	}
-
 	// 这条路径自建请求、绕过了 channel.DoApiRequest，所以要自己应用 header_override，
 	// 否则即梦渠道的静态覆盖、占位符与客户端请求头透传全部失效。
-	// 放在 Sign 之后：签名只覆盖它自己写入的头，这里不去动它们。
+	//
+	// 必须在 Sign 之前应用：签名是对 Host / Content-Type 等字段做 canonical 计算的，
+	// 签完再改这些头会让请求与签名对不上，上游直接判鉴权失败。
+	// 先落定最终请求头，再基于最终形态签名。
 	headerOverride, err := channel.ResolveHeaderOverride(info, c)
 	if err != nil {
 		return nil, err
 	}
 	channel.ApplyHeaderOverrideToRequest(req, headerOverride)
+
+	err = Sign(c, req, info.ApiKey)
+	if err != nil {
+		return nil, fmt.Errorf("setup request header failed: %w", err)
+	}
 
 	resp, err := channel.DoRequest(c, req, info)
 	if err != nil {

@@ -321,45 +321,69 @@ func DeleteUserById(id int) (err error) {
 }
 
 func HardDeleteUserById(id int) error {
-	if id == 0 {
-		return errors.New("id 为空！")
-	}
-	if err := releaseInviterAffCount(id); err != nil {
-		common.SysLog(fmt.Sprintf("failed to release inviter aff_count for user %d: %v", id, err))
-	}
-	err := DB.Unscoped().Delete(&User{}, "id = ?", id).Error
-	return err
+	return deleteUserAndReleaseInviterAffCount(id, true)
 }
 
-// releaseInviterAffCount 在被邀请人被删除前，回减其邀请人的 aff_count。
+// deleteUserAndReleaseInviterAffCount 在同一事务里删除用户并回减其邀请人的 aff_count。
 //
-// 必须在删除之前调用：删除之后就读不到 inviter_id 了。
-// 已经软删除的行直接跳过——软删除时已经减过一次，硬删除再减会重复扣。
-// aff_count 的回填口径同样排除已软删除的被邀请人，两边保持一致。
-func releaseInviterAffCount(userId int) error {
+// 必须同事务 + 条件删除：先读 inviter_id、减计数、再删除的写法有两个洞——
+// 两个并发删除会各减一次但只真正删掉一条；删除失败则计数已经白减了。
+// 这里以「删除语句的 RowsAffected == 1」作为唯一判据，天然幂等。
+//
+// unscoped=false 走软删除，GORM 会带上 deleted_at IS NULL，重复软删 RowsAffected=0；
+// unscoped=true 走物理删除，此时若该行已软删除过（说明当时已减过），同样不再回减。
+func deleteUserAndReleaseInviterAffCount(userId int, unscoped bool) error {
 	if userId == 0 {
+		return errors.New("id 为空！")
+	}
+	var inviterId int
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var row struct {
+			InviterId int        `gorm:"column:inviter_id"`
+			DeletedAt *time.Time `gorm:"column:deleted_at"`
+		}
+		if err := tx.Unscoped().Model(&User{}).
+			Select("inviter_id, deleted_at").
+			Where("id = ?", userId).
+			Scan(&row).Error; err != nil {
+			return err
+		}
+
+		del := tx
+		if unscoped {
+			del = tx.Unscoped()
+		}
+		result := del.Delete(&User{}, "id = ?", userId)
+		if result.Error != nil {
+			return result.Error
+		}
+		// 本次没有真正删掉任何行（不存在，或软删除时已是删除态）——不回减
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		// 物理删除一条早已软删除的行：计数在软删除时已经减过
+		if unscoped && row.DeletedAt != nil {
+			return nil
+		}
+		if row.InviterId == 0 {
+			return nil
+		}
+		// 夹到 0，防止存量漂移把计数减成负数
+		if err := tx.Model(&User{}).
+			Where("id = ? AND aff_count > 0", row.InviterId).
+			UpdateColumn("aff_count", gorm.Expr("aff_count - 1")).Error; err != nil {
+			return err
+		}
+		inviterId = row.InviterId
 		return nil
-	}
-	var row struct {
-		InviterId int        `gorm:"column:inviter_id"`
-		DeletedAt *time.Time `gorm:"column:deleted_at"`
-	}
-	if err := DB.Unscoped().Model(&User{}).
-		Select("inviter_id, deleted_at").
-		Where("id = ?", userId).
-		Scan(&row).Error; err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	if row.InviterId == 0 || row.DeletedAt != nil {
-		return nil
+	if inviterId != 0 {
+		_ = invalidateUserCache(inviterId)
 	}
-	// 夹到 0，防止存量漂移把计数减成负数
-	if err := DB.Model(&User{}).
-		Where("id = ? AND aff_count > 0", row.InviterId).
-		UpdateColumn("aff_count", gorm.Expr("aff_count - 1")).Error; err != nil {
-		return err
-	}
-	return invalidateUserCache(row.InviterId)
+	return nil
 }
 
 // inviteUser 记录一次成功的邀请：邀请人数 +1，并在配置了邀请人奖励时补上额度。
@@ -372,6 +396,15 @@ func releaseInviterAffCount(userId int) error {
 // 注意 aff_count 与奖励额度是解耦的：邀请人数是邀请关系的计数，
 // 无论是否发放邀请奖励都必须维护（见 Insert 里的调用点注释）。
 func inviteUser(inviterId int) (err error) {
+	if err = inviteUserTx(DB, inviterId); err != nil {
+		return err
+	}
+	return invalidateUserCache(inviterId)
+}
+
+// inviteUserTx 是 inviteUser 的事务版本，供注册链路与用户行创建放在同一事务里。
+// 不做缓存失效：事务未提交时清缓存可能读回旧值，由调用方在提交后处理。
+func inviteUserTx(tx *gorm.DB, inviterId int) error {
 	updates := map[string]interface{}{
 		"aff_count": gorm.Expr("aff_count + 1"),
 	}
@@ -379,10 +412,7 @@ func inviteUser(inviterId int) (err error) {
 		updates["aff_quota"] = gorm.Expr("aff_quota + ?", common.QuotaForInviter)
 		updates["aff_history"] = gorm.Expr("aff_history + ?", common.QuotaForInviter)
 	}
-	if err = DB.Model(&User{}).Where("id = ?", inviterId).Updates(updates).Error; err != nil {
-		return err
-	}
-	return invalidateUserCache(inviterId)
+	return tx.Model(&User{}).Where("id = ?", inviterId).Updates(updates).Error
 }
 
 const maxInviterChainDepth = 50
@@ -596,9 +626,19 @@ func (user *User) Insert(inviterId int) error {
 		user.SetSetting(defaultSetting)
 	}
 
-	result := DB.Create(user)
-	if result.Error != nil {
-		return result.Error
+	// 用户行与邀请计数必须同事务：只写一个都会让 aff_count 与 inviter_id
+	// 关系对不上。一次性回填迁移带 marker、跑过就不再执行，运行期漂移
+	// 没有兜底，所以这里不能退化成「建好用户再尽力更新计数」。
+	if err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(user).Error; err != nil {
+			return err
+		}
+		if inviterId != 0 {
+			return inviteUserTx(tx, inviterId)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// 用户创建成功后，根据角色初始化边栏配置
@@ -635,16 +675,8 @@ func (user *User) Insert(inviterId int) error {
 			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
 		}
-		// 邀请人数必须无条件维护：它是邀请关系的计数，与是否发放邀请奖励无关。
-		// 此前这行被关在 QuotaForInviter > 0 里，改用返佣结算（service/aff_settle.go）
-		// 把邀请人奖励设为 0 之后，aff_count 就永远停在旧值，钱包页显示的邀请人数失真。
-		//
-		// 计数失败不阻断注册（用户已经建好了，回滚代价更大），但必须留痕：
-		// 静默吞掉会让 aff_count 再次悄悄漂移，而 inviter_id 已落库，
-		// 一次性回填迁移可以按真实关系把它重新算对。
-		if err := inviteUser(inviterId); err != nil {
-			common.SysLog(fmt.Sprintf("failed to record invite for inviter %d (invitee %d): %v", inviterId, user.Id, err))
-		}
+		// 邀请人数（aff_count）已在上面与用户行同事务写入，这里只补缓存失效。
+		_ = invalidateUserCache(inviterId)
 	}
 	return nil
 }
@@ -728,10 +760,7 @@ func (user *User) Delete() error {
 	if user.Id == 0 {
 		return errors.New("id 为空！")
 	}
-	if err := releaseInviterAffCount(user.Id); err != nil {
-		common.SysLog(fmt.Sprintf("failed to release inviter aff_count for user %d: %v", user.Id, err))
-	}
-	if err := DB.Delete(user).Error; err != nil {
+	if err := deleteUserAndReleaseInviterAffCount(user.Id, false); err != nil {
 		return err
 	}
 
@@ -743,11 +772,7 @@ func (user *User) HardDelete() error {
 	if user.Id == 0 {
 		return errors.New("id 为空！")
 	}
-	if err := releaseInviterAffCount(user.Id); err != nil {
-		common.SysLog(fmt.Sprintf("failed to release inviter aff_count for user %d: %v", user.Id, err))
-	}
-	err := DB.Unscoped().Delete(user).Error
-	return err
+	return deleteUserAndReleaseInviterAffCount(user.Id, true)
 }
 
 // ValidateAndFill check password & user status

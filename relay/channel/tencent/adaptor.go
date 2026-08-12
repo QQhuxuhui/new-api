@@ -61,6 +61,14 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	return nil
 }
 
+// SignedHeaderNames 声明参与 TC3-HMAC-SHA256 canonical 计算的请求头。
+// getTencentSign 的 signedHeaders 是 "content-type;host;x-tc-action"，
+// Authorization 承载签名本身、X-TC-Timestamp 参与 string2sign。
+// 这些字段被 header_override 或客户端透传改掉，签名就作废了。
+func (a *Adaptor) SignedHeaderNames() []string {
+	return []string{"Content-Type", "Host", "X-TC-Action", "X-TC-Timestamp", "Authorization"}
+}
+
 func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
 	if request == nil {
 		return nil, errors.New("request is nil")
