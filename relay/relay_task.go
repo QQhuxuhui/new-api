@@ -524,10 +524,19 @@ func tryRealtimeFetch(ctx context.Context, task *model.Task, isOpenAIVideoAPI bo
 	if task.PrivateData.Key != "" {
 		key = task.PrivateData.Key
 	}
+	extraHeaders, headerErr := channel.ResolveHeaderOverride(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey:          key,
+			HeadersOverride: channelModel.GetHeaderOverride(),
+		},
+	}, nil)
+	if headerErr != nil {
+		return nil
+	}
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
-	}, proxy)
+	}, proxy, extraHeaders)
 	if err != nil || resp == nil {
 		return nil
 	}

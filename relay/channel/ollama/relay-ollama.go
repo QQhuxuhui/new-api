@@ -293,7 +293,8 @@ func ollamaEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 }
 
 // FetchOllamaModels fetches the list of available models from Ollama server
-func FetchOllamaModels(baseURL, apiKey string, proxyURL ...string) ([]OllamaModelInfo, error) {
+// extraHeaders 为渠道 header_override 解析后的结果，允许为 nil。
+func FetchOllamaModels(baseURL, apiKey string, extraHeaders http.Header, proxyURL ...string) ([]OllamaModelInfo, error) {
 	url := fmt.Sprintf("%s/api/tags", baseURL)
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -304,6 +305,19 @@ func FetchOllamaModels(baseURL, apiKey string, proxyURL ...string) ([]OllamaMode
 	// Ollama typically doesn't require auth, but set it if provided
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	// 渠道 header_override（Host 需同时写 req.Host 才生效）
+	for name, values := range extraHeaders {
+		if len(values) == 0 {
+			continue
+		}
+		req.Header.Del(name)
+		for _, v := range values {
+			req.Header.Add(name, v)
+		}
+		if strings.EqualFold(name, "Host") {
+			req.Host = values[0]
+		}
 	}
 
 	resolvedProxyURL := ""

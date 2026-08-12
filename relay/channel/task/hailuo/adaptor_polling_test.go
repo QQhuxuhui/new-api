@@ -39,7 +39,7 @@ func TestPollingFileLookupReusesSelectedKeyAndProxy(t *testing.T) {
 	})
 	resp, err := adaptor.FetchTask("http://unreachable.invalid", selectedKey, map[string]any{
 		"task_id": "provider-task",
-	}, proxy.URL)
+	}, proxy.URL, nil)
 	if err != nil {
 		t.Fatalf("poll through proxy: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestCompletedTaskFileLookupFailureRemainsRetryable(t *testing.T) {
 	adaptor := &TaskAdaptor{}
 	resp, err := adaptor.FetchTask("http://unreachable.invalid", "selected-key", map[string]any{
 		"task_id": "provider-task",
-	}, proxy.URL)
+	}, proxy.URL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

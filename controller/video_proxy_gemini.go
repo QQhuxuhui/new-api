@@ -36,10 +36,14 @@ func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) 
 	}
 
 	proxy := channel.GetSetting().Proxy
+	extraHeaders, err := resolveFetchModelsOverrideHeaders(apiKey, channel.GetHeaderOverride())
+	if err != nil {
+		return "", fmt.Errorf("resolve header override failed: %w", err)
+	}
 	resp, err := adaptor.FetchTask(baseURL, apiKey, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
-	}, proxy)
+	}, proxy, extraHeaders)
 	if err != nil {
 		return "", fmt.Errorf("fetch task failed: %w", err)
 	}
@@ -171,10 +175,14 @@ func getVertexVideoURL(channel *model.Channel, task *model.Task) (string, error)
 		return "", fmt.Errorf("vertex key not available for task")
 	}
 
+	extraHeaders, err := resolveFetchModelsOverrideHeaders(key, channel.GetHeaderOverride())
+	if err != nil {
+		return "", fmt.Errorf("resolve header override failed: %w", err)
+	}
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
-	}, channel.GetSetting().Proxy)
+	}, channel.GetSetting().Proxy, extraHeaders)
 	if err != nil {
 		return "", fmt.Errorf("fetch task failed: %w", err)
 	}

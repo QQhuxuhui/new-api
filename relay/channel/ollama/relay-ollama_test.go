@@ -32,7 +32,7 @@ func TestFetchOllamaModels_RespectsFallbackTimeoutEnvWhenRelayTimeoutZero(t *tes
 	}))
 	t.Cleanup(server.Close)
 
-	_, err := FetchOllamaModels(server.URL, "")
+	_, err := FetchOllamaModels(server.URL, "", nil)
 	if err == nil {
 		t.Fatalf("expected timeout error, got nil")
 	}
@@ -56,7 +56,7 @@ func TestFetchOllamaModels_UsesProxyFromEnv(t *testing.T) {
 		_ = os.Unsetenv("OLLAMA_FETCH_PROXY")
 	})
 
-	_, err := FetchOllamaModels(upstream.URL, "")
+	_, err := FetchOllamaModels(upstream.URL, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "unsupported proxy scheme") {
 		t.Fatalf("expected unsupported proxy scheme error, got: %v", err)
 	}

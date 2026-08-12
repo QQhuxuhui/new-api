@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -141,8 +142,15 @@ func GetResponseBody(method, url string, channel *model.Channel, headers http.He
 	if err != nil {
 		return nil, err
 	}
-	for k := range headers {
-		req.Header.Add(k, headers.Get(k))
+	for k, values := range headers {
+		// 逐个 Add 保留同名多值；只取 Get 会丢掉第二个及以后的取值
+		for _, v := range values {
+			req.Header.Add(k, v)
+		}
+		// Host 必须同时写 req.Host，只写 Header 不生效
+		if strings.EqualFold(k, "Host") && len(values) > 0 {
+			req.Host = values[0]
+		}
 	}
 	client, err := service.NewProxyHttpClient(channel.GetSetting().Proxy)
 	if err != nil {

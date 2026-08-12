@@ -1384,7 +1384,9 @@ type GeminiModelsResponse struct {
 	NextPageToken string            `json:"nextPageToken"`
 }
 
-func FetchGeminiModels(baseURL, apiKey, proxyURL string) ([]string, error) {
+// extraHeaders 为渠道 header_override 解析后的结果，允许为 nil。
+// 依赖自定义请求头的上游，拉取模型列表时同样需要带上这些头。
+func FetchGeminiModels(baseURL, apiKey, proxyURL string, extraHeaders http.Header) ([]string, error) {
 	client, err := service.NewProxyHttpClient(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("创建HTTP客户端失败: %v", err)
@@ -1409,6 +1411,7 @@ func FetchGeminiModels(baseURL, apiKey, proxyURL string) ([]string, error) {
 		}
 
 		request.Header.Set("x-goog-api-key", apiKey)
+		applyExtraHeaders(request, extraHeaders)
 
 		response, err := client.Do(request)
 		if err != nil {
@@ -1447,4 +1450,21 @@ func FetchGeminiModels(baseURL, apiKey, proxyURL string) ([]string, error) {
 	}
 
 	return allModels, nil
+}
+
+// applyExtraHeaders 把已解析的 header_override 覆盖到出站请求上。
+// Host 必须同时写 req.Host，只写 Header 不生效。
+func applyExtraHeaders(req *http.Request, extraHeaders http.Header) {
+	for name, values := range extraHeaders {
+		if len(values) == 0 {
+			continue
+		}
+		req.Header.Del(name)
+		for _, v := range values {
+			req.Header.Add(name, v)
+		}
+		if strings.EqualFold(name, "Host") {
+			req.Host = values[0]
+		}
+	}
 }

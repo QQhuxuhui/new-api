@@ -356,20 +356,55 @@ func backfillUserAffCount() error {
 
 	common.SysLog("recomputing user aff_count from inviter relationship (one-time)")
 
-	// 子查询按 inviter_id 统计，只更新与实际值不一致的行，避免全表无谓写入。
-	const countSubQuery = `(SELECT COUNT(*) FROM users AS invitees
-		WHERE invitees.inviter_id = users.id AND invitees.deleted_at IS NULL)`
-	result := DB.Model(&User{}).
-		Where("aff_count <> "+countSubQuery).
-		UpdateColumn("aff_count", gorm.Expr(countSubQuery))
-	if result.Error != nil {
-		return result.Error
+	// 分两步做，不能写成「UPDATE users ... WHERE aff_count <> (SELECT ... FROM users)」：
+	// MySQL 不允许在 UPDATE 目标表的子查询里读同一张表（ERROR 1093），
+	// 那样写在 MySQL 上会每次启动都失败重试。先纯 SELECT 聚合出差异行，
+	// 再按 id 批量 UPDATE，三种方言（MySQL/PostgreSQL/SQLite）行为一致。
+	type affCountDrift struct {
+		Id        int `gorm:"column:id"`
+		RealCount int `gorm:"column:real_count"`
+	}
+	var drifts []affCountDrift
+	if err := DB.Raw(`
+		SELECT u.id AS id, COALESCE(c.cnt, 0) AS real_count
+		FROM users u
+		LEFT JOIN (
+			SELECT inviter_id, COUNT(*) AS cnt
+			FROM users
+			WHERE deleted_at IS NULL AND inviter_id <> 0
+			GROUP BY inviter_id
+		) c ON c.inviter_id = u.id
+		WHERE u.deleted_at IS NULL AND u.aff_count <> COALESCE(c.cnt, 0)
+	`).Scan(&drifts).Error; err != nil {
+		return err
+	}
+
+	// 按目标值分组，同值的一条 UPDATE 搞定；再按 500 一批切分，避免超长 IN 列表。
+	byCount := make(map[int][]int, len(drifts))
+	for _, d := range drifts {
+		byCount[d.RealCount] = append(byCount[d.RealCount], d.Id)
+	}
+	const chunkSize = 500
+	corrected := 0
+	for realCount, ids := range byCount {
+		for start := 0; start < len(ids); start += chunkSize {
+			end := start + chunkSize
+			if end > len(ids) {
+				end = len(ids)
+			}
+			result := DB.Model(&User{}).Where("id IN ?", ids[start:end]).
+				UpdateColumn("aff_count", realCount)
+			if result.Error != nil {
+				return result.Error
+			}
+			corrected += int(result.RowsAffected)
+		}
 	}
 
 	if err := DB.Create(&Option{Key: optionKey, Value: "true"}).Error; err != nil {
 		return err
 	}
-	common.SysLog(fmt.Sprintf("user aff_count backfilled, %d rows corrected", result.RowsAffected))
+	common.SysLog(fmt.Sprintf("user aff_count backfilled, %d rows corrected", corrected))
 	return nil
 }
 

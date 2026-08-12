@@ -319,8 +319,10 @@ func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey str
 //
 // 透传先应用、普通覆盖后应用，因此显式覆盖优先级更高。
 // 渠道测试没有真实客户端请求，透传与 {client_header:...} 一律跳过。
-func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]string, error) {
-	headerOverride := make(map[string]string)
+// 返回 http.Header 而非 map[string]string：同名多值的请求头（Accept、
+// anthropic-beta 等）必须原样带过去，压成单值会丢信息。
+func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (http.Header, error) {
+	headerOverride := make(http.Header)
 	// ChannelMeta 是内嵌指针，未 InitChannelMeta 时访问 HeadersOverride 会 panic。
 	if info == nil || info.ChannelMeta == nil {
 		return headerOverride, nil
@@ -398,11 +400,20 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 					continue
 				}
 			}
-			value := strings.TrimSpace(c.Request.Header.Get(name))
-			if value == "" {
+			values := c.Request.Header.Values(name)
+			kept := make([]string, 0, len(values))
+			for _, v := range values {
+				if strings.TrimSpace(v) != "" {
+					kept = append(kept, v)
+				}
+			}
+			if len(kept) == 0 {
 				continue
 			}
-			headerOverride[strings.ToLower(strings.TrimSpace(name))] = value
+			headerOverride.Del(name)
+			for _, v := range kept {
+				headerOverride.Add(name, v)
+			}
 		}
 	}
 
@@ -431,7 +442,8 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			continue
 		}
 
-		headerOverride[key] = value
+		// Set 会替换透传阶段收集到的同名多值，保证「显式覆盖优先」
+		headerOverride.Set(key, value)
 
 		// [DEBUG] 打印应用的头覆盖
 		if common2.DebugEnabled {
@@ -452,19 +464,30 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 }
 
 // ResolveHeaderOverride 暴露给包外解析最终生效的 header_override。
-func ResolveHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]string, error) {
+func ResolveHeaderOverride(info *common.RelayInfo, c *gin.Context) (http.Header, error) {
 	return processHeaderOverride(info, c)
 }
 
+// ApplyHeaderOverrideToRequest 供包外（自建出站请求、绕过 DoApiRequest 的适配器）使用。
+func ApplyHeaderOverrideToRequest(req *http.Request, headerOverride http.Header) {
+	applyHeaderOverrideToRequest(req, headerOverride)
+}
+
 // applyHeaderOverrideToRequest 把解析后的覆盖写入出站请求；Host 需要同时写 req.Host 才会生效。
-func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]string) {
+func applyHeaderOverrideToRequest(req *http.Request, headerOverride http.Header) {
 	if req == nil {
 		return
 	}
-	for key, value := range headerOverride {
-		req.Header.Set(key, value)
+	for key, values := range headerOverride {
+		if len(values) == 0 {
+			continue
+		}
+		req.Header.Del(key)
+		for _, v := range values {
+			req.Header.Add(key, v)
+		}
 		if strings.EqualFold(key, "Host") {
-			req.Host = value
+			req.Host = values[0]
 		}
 	}
 }
@@ -593,8 +616,11 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, err
 	}
-	for key, value := range headerOverride {
-		targetHeader.Set(key, value)
+	for key, values := range headerOverride {
+		targetHeader.Del(key)
+		for _, v := range values {
+			targetHeader.Add(key, v)
+		}
 	}
 
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))

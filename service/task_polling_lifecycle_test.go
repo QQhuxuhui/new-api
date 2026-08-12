@@ -34,7 +34,7 @@ type lifecycleTestAdaptor struct {
 }
 
 func (a *lifecycleTestAdaptor) Init(*relaycommon.RelayInfo) {}
-func (a *lifecycleTestAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy string) (*http.Response, error) {
+func (a *lifecycleTestAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy string, extraHeaders http.Header) (*http.Response, error) {
 	a.fetchCalls++
 	a.fetchBaseURL = baseURL
 	a.fetchKey = key

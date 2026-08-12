@@ -74,7 +74,10 @@ type TaskAdaptor interface {
 
 	// ── Polling ──────────────────────────────────────────────────────
 
-	FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error)
+	// extraHeaders 为渠道 header_override 解析后的结果（允许为 nil）。轮询跑在后台任务里，
+	// 没有客户端请求，因此只包含静态覆盖与 {api_key} 展开的结果。实现方需在发出请求前
+	// 调用 taskcommon.ApplyExtraHeaders 应用它，否则依赖自定义头的上游提交成功但查询失败。
+	FetchTask(baseUrl, key string, body map[string]any, proxy string, extraHeaders http.Header) (*http.Response, error)
 	ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error)
 }
 

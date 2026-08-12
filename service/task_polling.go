@@ -26,7 +26,7 @@ import (
 // TaskPollingAdaptor 定义轮询所需的最小适配器接口，避免 service -> relay 的循环依赖
 type TaskPollingAdaptor interface {
 	Init(info *relaycommon.RelayInfo)
-	FetchTask(baseURL string, key string, body map[string]any, proxy string) (*http.Response, error)
+	FetchTask(baseURL string, key string, body map[string]any, proxy string, extraHeaders http.Header) (*http.Response, error)
 	ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error)
 	// AdjustBillingOnComplete 在任务到达终态（成功/失败）时由轮询循环调用。
 	// 返回正数触发差额结算（补扣/退还），返回 0 保持预扣费金额不变。
@@ -36,6 +36,19 @@ type TaskPollingAdaptor interface {
 // GetTaskAdaptorFunc 由 main 包注入，用于获取指定平台的任务适配器。
 // 打破 service -> relay -> relay/channel -> service 的循环依赖。
 var GetTaskAdaptorFunc func(platform constant.TaskPlatform) TaskPollingAdaptor
+
+// ResolveChannelHeaderOverrideFunc 由 main 包注入，用于解析渠道的 header_override。
+// 与 GetTaskAdaptorFunc 同理：解析逻辑在 relay/channel 里，service 不能直接依赖它。
+// 轮询没有客户端请求，解析结果只含静态覆盖与 {api_key} 展开值。
+var ResolveChannelHeaderOverrideFunc func(ch *model.Channel) http.Header
+
+// resolveChannelHeaderOverride 在未注入时安全退化为 nil，方便单测。
+func resolveChannelHeaderOverride(ch *model.Channel) http.Header {
+	if ResolveChannelHeaderOverrideFunc == nil || ch == nil {
+		return nil
+	}
+	return ResolveChannelHeaderOverrideFunc(ch)
+}
 
 const (
 	refundReconciliationLimit       = 100
@@ -358,7 +371,7 @@ func updateSunoTasksWithKey(ctx context.Context, ch *model.Channel, key string, 
 	}
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"ids": taskIds,
-	}, proxy)
+	}, proxy, resolveChannelHeaderOverride(ch))
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Get Task Do req error: %v", err))
 		return err
@@ -574,7 +587,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
-	}, proxy)
+	}, proxy, resolveChannelHeaderOverride(ch))
 	if err != nil {
 		return fmt.Errorf("fetchTask failed for task %s: %w", taskId, err)
 	}
@@ -802,7 +815,7 @@ func recoverSuccessfulTaskSettlement(ctx context.Context, task *model.Task) erro
 		resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 			"task_id": task.GetUpstreamTaskID(),
 			"action":  task.Action,
-		}, channelSetting.Proxy)
+		}, channelSetting.Proxy, resolveChannelHeaderOverride(channel))
 		if err != nil {
 			return fmt.Errorf("fetch task for settlement recovery: %w", err)
 		}

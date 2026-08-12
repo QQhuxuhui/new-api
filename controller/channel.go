@@ -27,24 +27,41 @@ import (
 // 没有真实客户端请求，因此 ResolveHeaderOverride 传 nil context：
 // 透传规则与 {client_header:...} 会被自动跳过，只应用静态覆盖和 {api_key}。
 func applyFetchModelsHeaderOverrides(headers http.Header, key string, headerOverride map[string]interface{}) error {
-	if len(headerOverride) == 0 {
-		return nil
+	resolved, err := resolveFetchModelsOverrideHeaders(key, headerOverride)
+	if err != nil {
+		return err
 	}
+	for name, values := range resolved {
+		headers.Del(name)
+		for _, v := range values {
+			headers.Add(name, v)
+		}
+	}
+	return nil
+}
 
+// resolveFetchModelsOverrideHeaders 解析渠道 header_override，供各条拉取模型列表的
+// 分支（通用 /v1/models、Gemini、Ollama）统一使用。无渠道配置时返回 nil。
+func resolveFetchModelsOverrideHeaders(key string, headerOverride map[string]interface{}) (http.Header, error) {
+	if len(headerOverride) == 0 {
+		return nil, nil
+	}
 	info := &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ApiKey:          key,
 			HeadersOverride: headerOverride,
 		},
 	}
-	overrides, err := relaychannel.ResolveHeaderOverride(info, nil)
+	return relaychannel.ResolveHeaderOverride(info, nil)
+}
+
+// resolveFetchModelsOverrideHeadersFromJSON 处理渠道尚未保存、由前端直接传 JSON 文本的情况。
+func resolveFetchModelsOverrideHeadersFromJSON(key string, raw string) (http.Header, error) {
+	headerOverride, err := parseHeaderOverrideJSON(raw)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for name, value := range overrides {
-		headers.Set(name, value)
-	}
-	return nil
+	return resolveFetchModelsOverrideHeaders(key, headerOverride)
 }
 
 // parseHeaderOverrideJSON 解析前端直接传来的 header_override 文本（渠道尚未保存时用）。
@@ -250,7 +267,12 @@ func FetchUpstreamModels(c *gin.Context) {
 	if channel.Type == constant.ChannelTypeOllama {
 		key := strings.TrimSpace(channel.Key)
 		key = strings.Split(key, "\n")[0]
-		models, err := ollama.FetchOllamaModels(baseURL, key, channel.GetSetting().Proxy)
+		fetchHeaders, err := resolveFetchModelsOverrideHeaders(key, channel.GetHeaderOverride())
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		models, err := ollama.FetchOllamaModels(baseURL, key, fetchHeaders, channel.GetSetting().Proxy)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -284,7 +306,12 @@ func FetchUpstreamModels(c *gin.Context) {
 			return
 		}
 		key = strings.TrimSpace(key)
-		models, err := gemini.FetchGeminiModels(baseURL, key, channel.GetSetting().Proxy)
+		fetchHeaders, err := resolveFetchModelsOverrideHeaders(key, channel.GetHeaderOverride())
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		models, err := gemini.FetchGeminiModels(baseURL, key, channel.GetSetting().Proxy, fetchHeaders)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -1146,7 +1173,12 @@ func FetchModels(c *gin.Context) {
 	key = strings.Split(key, "\n")[0]
 
 	if req.Type == constant.ChannelTypeOllama {
-		models, err := ollama.FetchOllamaModels(baseURL, key)
+		fetchHeaders, err := resolveFetchModelsOverrideHeadersFromJSON(key, req.HeaderOverride)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+		models, err := ollama.FetchOllamaModels(baseURL, key, fetchHeaders)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -1168,7 +1200,12 @@ func FetchModels(c *gin.Context) {
 	}
 
 	if req.Type == constant.ChannelTypeGemini {
-		models, err := gemini.FetchGeminiModels(baseURL, key, "")
+		fetchHeaders, err := resolveFetchModelsOverrideHeadersFromJSON(key, req.HeaderOverride)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+		models, err := gemini.FetchGeminiModels(baseURL, key, "", fetchHeaders)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,

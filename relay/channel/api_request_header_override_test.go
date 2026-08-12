@@ -47,7 +47,7 @@ func TestProcessHeaderOverride_ApiKeyPlaceholderStillWorks(t *testing.T) {
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.Equal(t, "Bearer sk-channel-key", headers["authorization"])
+	require.Equal(t, "Bearer sk-channel-key", headers.Get("Authorization"))
 }
 
 func TestProcessHeaderOverride_PassAllForwardsClientHeaders(t *testing.T) {
@@ -63,14 +63,14 @@ func TestProcessHeaderOverride_PassAllForwardsClientHeaders(t *testing.T) {
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.Equal(t, "cli", headers["x-app"])
-	require.Equal(t, "claude-code-20250219", headers["anthropic-beta"])
+	require.Equal(t, "cli", headers.Get("X-App"))
+	require.Equal(t, "claude-code-20250219", headers.Get("Anthropic-Beta"))
 
 	// 凭证与逐跳头必须被跳过
-	require.NotContains(t, headers, "authorization")
-	require.NotContains(t, headers, "cookie")
-	require.NotContains(t, headers, "accept-encoding")
-	require.NotContains(t, headers, "transfer-encoding")
+	require.Empty(t, headers.Values("Authorization"))
+	require.Empty(t, headers.Values("Cookie"))
+	require.Empty(t, headers.Values("Accept-Encoding"))
+	require.Empty(t, headers.Values("Transfer-Encoding"))
 }
 
 func TestProcessHeaderOverride_RegexRuleOnlyForwardsMatches(t *testing.T) {
@@ -84,9 +84,9 @@ func TestProcessHeaderOverride_RegexRuleOnlyForwardsMatches(t *testing.T) {
 		info := newHeaderOverrideInfo(map[string]any{key: ""})
 		headers, err := processHeaderOverride(info, ctx)
 		require.NoError(t, err, key)
-		require.Equal(t, "cli", headers["x-app"], key)
-		require.Equal(t, "1", headers["x-stainless"], key)
-		require.NotContains(t, headers, "some-other", key)
+		require.Equal(t, "cli", headers.Get("X-App"), key)
+		require.Equal(t, "1", headers.Get("X-Stainless"), key)
+		require.Empty(t, headers.Values("Some-Other"), key)
 	}
 }
 
@@ -99,7 +99,7 @@ func TestProcessHeaderOverride_ExplicitOverrideBeatsPassthrough(t *testing.T) {
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.Equal(t, "forced", headers["x-app"])
+	require.Equal(t, "forced", headers.Get("X-App"))
 }
 
 func TestProcessHeaderOverride_ClientHeaderPlaceholder(t *testing.T) {
@@ -111,9 +111,9 @@ func TestProcessHeaderOverride_ClientHeaderPlaceholder(t *testing.T) {
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.Equal(t, "cli", headers["x-upstream-app"])
+	require.Equal(t, "cli", headers.Get("X-Upstream-App"))
 	// 客户端没有该头时不应写入空值
-	require.NotContains(t, headers, "x-missing")
+	require.Empty(t, headers.Values("X-Missing"))
 }
 
 func TestProcessHeaderOverride_ClientHeaderPlaceholderNoApiKeyInterpolation(t *testing.T) {
@@ -122,7 +122,7 @@ func TestProcessHeaderOverride_ClientHeaderPlaceholderNoApiKeyInterpolation(t *t
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.Equal(t, "value-{api_key}", headers["x-upstream-probe"])
+	require.Equal(t, "value-{api_key}", headers.Get("X-Upstream-Probe"))
 }
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughAndPlaceholder(t *testing.T) {
@@ -137,10 +137,10 @@ func TestProcessHeaderOverride_ChannelTestSkipsPassthroughAndPlaceholder(t *test
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.NotContains(t, headers, "x-app")
-	require.NotContains(t, headers, "x-upstream-app")
+	require.Empty(t, headers.Values("X-App"))
+	require.Empty(t, headers.Values("X-Upstream-App"))
 	// 普通静态覆盖在渠道测试下仍然生效
-	require.Equal(t, "kept", headers["x-static"])
+	require.Equal(t, "kept", headers.Get("X-Static"))
 }
 
 func TestProcessHeaderOverride_InvalidRegexRejected(t *testing.T) {
@@ -169,9 +169,9 @@ func TestIsHeaderPassthroughRuleKey(t *testing.T) {
 
 func TestApplyHeaderOverrideToRequest_SetsHost(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://upstream.example/v1/messages", nil)
-	applyHeaderOverrideToRequest(req, map[string]string{
-		"Host":  "spoofed.example",
-		"X-App": "cli",
+	applyHeaderOverrideToRequest(req, http.Header{
+		"Host":  []string{"spoofed.example"},
+		"X-App": []string{"cli"},
 	})
 	require.Equal(t, "spoofed.example", req.Host)
 	require.Equal(t, "cli", req.Header.Get("X-App"))
@@ -197,7 +197,7 @@ func TestProcessHeaderOverride_PassAllSkipsAllCredentialHeaders(t *testing.T) {
 	} {
 		require.NotContains(t, headers, blocked)
 	}
-	require.Equal(t, "ok", headers["x-harmless"])
+	require.Equal(t, "ok", headers.Get("X-Harmless"))
 }
 
 func TestProcessHeaderOverride_PassAllSkipsDynamicHopByHopHeaders(t *testing.T) {
@@ -212,10 +212,10 @@ func TestProcessHeaderOverride_PassAllSkipsDynamicHopByHopHeaders(t *testing.T) 
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.NotContains(t, headers, "x-hop")
-	require.NotContains(t, headers, "x-proxy-hop")
-	require.NotContains(t, headers, "proxy-connection")
-	require.Equal(t, "kept", headers["x-keep"])
+	require.Empty(t, headers.Values("X-Hop"))
+	require.Empty(t, headers.Values("X-Proxy-Hop"))
+	require.Empty(t, headers.Values("Proxy-Connection"))
+	require.Equal(t, "kept", headers.Get("X-Keep"))
 }
 
 func TestProcessHeaderOverride_ExplicitEmptyValueIsPreserved(t *testing.T) {
@@ -225,9 +225,9 @@ func TestProcessHeaderOverride_ExplicitEmptyValueIsPreserved(t *testing.T) {
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	value, ok := headers["authorization"]
+	values, ok := headers["Authorization"]
 	require.True(t, ok, "显式空值必须保留，否则真实渠道密钥不会被清掉")
-	require.Equal(t, "", value)
+	require.Equal(t, []string{""}, values)
 }
 
 func TestProcessHeaderOverride_NilContextSkipsClientSignals(t *testing.T) {
@@ -242,7 +242,42 @@ func TestProcessHeaderOverride_NilContextSkipsClientSignals(t *testing.T) {
 
 	headers, err := processHeaderOverride(info, nil)
 	require.NoError(t, err)
-	require.Equal(t, "Bearer sk-channel-key", headers["authorization"])
-	require.NotContains(t, headers, "x-upstream-app")
+	require.Equal(t, "Bearer sk-channel-key", headers.Get("Authorization"))
+	require.Empty(t, headers.Values("X-Upstream-App"))
 	require.Len(t, headers, 1)
+}
+
+func TestProcessHeaderOverride_PassAllKeepsDuplicateHeaderValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Add("X-Multi", "first")
+	ctx.Request.Header.Add("X-Multi", "second")
+
+	info := newHeaderOverrideInfo(map[string]any{"*": ""})
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"first", "second"}, headers.Values("X-Multi"))
+}
+
+func TestProcessHeaderOverride_ExplicitOverrideReplacesDuplicateValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Add("X-Multi", "first")
+	ctx.Request.Header.Add("X-Multi", "second")
+
+	info := newHeaderOverrideInfo(map[string]any{"*": "", "X-Multi": "forced"})
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"forced"}, headers.Values("X-Multi"))
+}
+
+func TestApplyHeaderOverrideToRequest_KeepsDuplicateValues(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://upstream.example/v1/messages", nil)
+	req.Header.Set("X-Multi", "stale")
+	applyHeaderOverrideToRequest(req, http.Header{"X-Multi": []string{"a", "b"}})
+	require.Equal(t, []string{"a", "b"}, req.Header.Values("X-Multi"))
 }

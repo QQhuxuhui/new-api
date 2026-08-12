@@ -18,6 +18,8 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -123,6 +125,30 @@ func main() {
 			return nil
 		}
 		return adaptor
+	}
+
+	// 同理注入 header_override 解析器：轮询也要带上渠道的自定义请求头，
+	// 否则依赖自定义头的上游「提交成功但查询失败」。
+	// 轮询没有客户端请求，传 nil context，只会解析出静态覆盖与 {api_key}。
+	service.ResolveChannelHeaderOverrideFunc = func(ch *model.Channel) http.Header {
+		if ch == nil {
+			return nil
+		}
+		headerOverride := ch.GetHeaderOverride()
+		if len(headerOverride) == 0 {
+			return nil
+		}
+		resolved, err := relaychannel.ResolveHeaderOverride(&relaycommon.RelayInfo{
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ApiKey:          ch.Key,
+				HeadersOverride: headerOverride,
+			},
+		}, nil)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("resolve header override for channel %d failed: %v", ch.Id, err))
+			return nil
+		}
+		return resolved
 	}
 
 	if common.IsMasterNode && constant.UpdateTask {

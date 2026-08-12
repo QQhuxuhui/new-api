@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -323,8 +324,42 @@ func HardDeleteUserById(id int) error {
 	if id == 0 {
 		return errors.New("id 为空！")
 	}
+	if err := releaseInviterAffCount(id); err != nil {
+		common.SysLog(fmt.Sprintf("failed to release inviter aff_count for user %d: %v", id, err))
+	}
 	err := DB.Unscoped().Delete(&User{}, "id = ?", id).Error
 	return err
+}
+
+// releaseInviterAffCount 在被邀请人被删除前，回减其邀请人的 aff_count。
+//
+// 必须在删除之前调用：删除之后就读不到 inviter_id 了。
+// 已经软删除的行直接跳过——软删除时已经减过一次，硬删除再减会重复扣。
+// aff_count 的回填口径同样排除已软删除的被邀请人，两边保持一致。
+func releaseInviterAffCount(userId int) error {
+	if userId == 0 {
+		return nil
+	}
+	var row struct {
+		InviterId int        `gorm:"column:inviter_id"`
+		DeletedAt *time.Time `gorm:"column:deleted_at"`
+	}
+	if err := DB.Unscoped().Model(&User{}).
+		Select("inviter_id, deleted_at").
+		Where("id = ?", userId).
+		Scan(&row).Error; err != nil {
+		return err
+	}
+	if row.InviterId == 0 || row.DeletedAt != nil {
+		return nil
+	}
+	// 夹到 0，防止存量漂移把计数减成负数
+	if err := DB.Model(&User{}).
+		Where("id = ? AND aff_count > 0", row.InviterId).
+		UpdateColumn("aff_count", gorm.Expr("aff_count - 1")).Error; err != nil {
+		return err
+	}
+	return invalidateUserCache(row.InviterId)
 }
 
 // inviteUser 记录一次成功的邀请：邀请人数 +1，并在配置了邀请人奖励时补上额度。
@@ -547,6 +582,13 @@ func (user *User) Insert(inviterId int) error {
 	//user.SetAccessToken(common.GetUUID())
 	user.AffCode = common.GetRandomString(4)
 
+	// inviterId 参数是邀请关系的唯一权威来源，必须落到字段上。
+	// 邮箱注册路径（controller/user.go）自己填了 InviterId，但 OAuth 路径
+	// （controller/github.go、controller/linuxdo.go）只传参不赋值，会造成
+	// 「邀请人 aff_count +1，被邀请人 inviter_id 仍为 0」的幽灵计数：
+	// 返佣结算和 aff_count 回填都按 inviter_id 找关系，这条记录会凭空消失。
+	user.InviterId = inviterId
+
 	// 初始化用户设置，包括默认的边栏配置
 	if user.Setting == "" {
 		defaultSetting := dto.UserSetting{}
@@ -596,7 +638,13 @@ func (user *User) Insert(inviterId int) error {
 		// 邀请人数必须无条件维护：它是邀请关系的计数，与是否发放邀请奖励无关。
 		// 此前这行被关在 QuotaForInviter > 0 里，改用返佣结算（service/aff_settle.go）
 		// 把邀请人奖励设为 0 之后，aff_count 就永远停在旧值，钱包页显示的邀请人数失真。
-		_ = inviteUser(inviterId)
+		//
+		// 计数失败不阻断注册（用户已经建好了，回滚代价更大），但必须留痕：
+		// 静默吞掉会让 aff_count 再次悄悄漂移，而 inviter_id 已落库，
+		// 一次性回填迁移可以按真实关系把它重新算对。
+		if err := inviteUser(inviterId); err != nil {
+			common.SysLog(fmt.Sprintf("failed to record invite for inviter %d (invitee %d): %v", inviterId, user.Id, err))
+		}
 	}
 	return nil
 }
@@ -680,6 +728,9 @@ func (user *User) Delete() error {
 	if user.Id == 0 {
 		return errors.New("id 为空！")
 	}
+	if err := releaseInviterAffCount(user.Id); err != nil {
+		common.SysLog(fmt.Sprintf("failed to release inviter aff_count for user %d: %v", user.Id, err))
+	}
 	if err := DB.Delete(user).Error; err != nil {
 		return err
 	}
@@ -691,6 +742,9 @@ func (user *User) Delete() error {
 func (user *User) HardDelete() error {
 	if user.Id == 0 {
 		return errors.New("id 为空！")
+	}
+	if err := releaseInviterAffCount(user.Id); err != nil {
+		common.SysLog(fmt.Sprintf("failed to release inviter aff_count for user %d: %v", user.Id, err))
 	}
 	err := DB.Unscoped().Delete(user).Error
 	return err

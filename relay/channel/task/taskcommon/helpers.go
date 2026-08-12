@@ -3,6 +3,8 @@ package taskcommon
 import (
 	"encoding/base64"
 	"fmt"
+	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -94,4 +96,29 @@ func (BaseBilling) AdjustBillingOnSubmit(_ *relaycommon.RelayInfo, _ []byte) map
 // AdjustBillingOnComplete returns 0 (keep pre-charged amount).
 func (BaseBilling) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
 	return 0
+}
+
+// ApplyExtraHeaders 把渠道 header_override 解析后的请求头覆盖到出站请求上。
+//
+// 任务轮询（FetchTask）跑在后台任务里，没有 gin.Context，因此只会收到静态
+// 覆盖与 {api_key} 展开的结果，透传规则与 {client_header:...} 已在解析阶段
+// 跳过。extraHeaders 允许为 nil。
+//
+// Host 必须同时写 req.Host，只写 Header 不生效。
+func ApplyExtraHeaders(req *http.Request, extraHeaders http.Header) {
+	if req == nil {
+		return
+	}
+	for name, values := range extraHeaders {
+		if len(values) == 0 {
+			continue
+		}
+		req.Header.Del(name)
+		for _, v := range values {
+			req.Header.Add(name, v)
+		}
+		if strings.EqualFold(name, "Host") {
+			req.Host = values[0]
+		}
+	}
 }
