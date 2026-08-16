@@ -1,0 +1,321 @@
+package dto
+
+import (
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// 图片档位常量。口径与 sub2api 的 ClassifyImageBillingTier 完全一致，
+// 两侧必须同步：new-api 用它做选路过滤，sub2api 用它做计费分档，
+// 一侧口径漂移会让"选到的渠道"和"被计费的档位"对不上。
+const (
+	ImageSizeTier1K = "1K"
+	ImageSizeTier2K = "2K"
+	ImageSizeTier4K = "4K"
+)
+
+// imageSizeTierRatioTable 是 gpt-image-2 各宽高比 × 各档位的实测原生尺寸。
+// 只保留尺寸（token 数是计费侧的事，选路用不到，抄过来只会随上游调价而腐烂）。
+var imageSizeTierRatioTable = map[string]map[string]string{
+	"1:1": {
+		ImageSizeTier1K: "1024x1024",
+		ImageSizeTier2K: "2048x2048",
+		ImageSizeTier4K: "2880x2880",
+	},
+	"5:4": {
+		ImageSizeTier1K: "1120x896",
+		ImageSizeTier2K: "2240x1792",
+		ImageSizeTier4K: "3200x2560",
+	},
+	"4:3": {
+		ImageSizeTier1K: "1152x864",
+		ImageSizeTier2K: "2304x1728",
+		ImageSizeTier4K: "3264x2448",
+	},
+	"3:2": {
+		ImageSizeTier1K: "1248x832",
+		ImageSizeTier2K: "2496x1664",
+		ImageSizeTier4K: "3504x2336",
+	},
+	"16:9": {
+		ImageSizeTier1K: "1280x720",
+		ImageSizeTier2K: "2560x1440",
+		ImageSizeTier4K: "3840x2160",
+	},
+	"21:9": {
+		ImageSizeTier1K: "1456x624",
+		ImageSizeTier2K: "3024x1296",
+		ImageSizeTier4K: "3696x1584",
+	},
+}
+
+type imageSizeGeometry struct {
+	Width  int
+	Height int
+	Ratio  string
+	Tier   string
+}
+
+var imageSizeIndex = buildImageSizeIndex()
+
+// buildImageSizeIndex 把比例表摊平成 "宽x高" → 档位 的查找表。
+// 5:4 / 4:3 / 3:2 / 16:9 同时登记竖版（转置）尺寸：OpenAI 对这些比例
+// 接受横竖两种写法，且两者属于同一档位。1:1 是正方形无需转置，
+// 21:9 上游未提供竖版，登记了反而会把不存在的尺寸判成合法档位。
+func buildImageSizeIndex() map[string]imageSizeGeometry {
+	transposable := map[string]bool{"5:4": true, "4:3": true, "3:2": true, "16:9": true}
+	index := make(map[string]imageSizeGeometry, 30)
+	for ratio, tiers := range imageSizeTierRatioTable {
+		for tier, size := range tiers {
+			width, height, ok := parseImageSizeDimensions(size)
+			if !ok {
+				continue
+			}
+			index[imageSizeDimensionsKey(width, height)] = imageSizeGeometry{
+				Width: width, Height: height, Ratio: ratio, Tier: tier,
+			}
+			if width != height && transposable[ratio] {
+				index[imageSizeDimensionsKey(height, width)] = imageSizeGeometry{
+					Width: height, Height: width, Ratio: ratio, Tier: tier,
+				}
+			}
+		}
+	}
+	return index
+}
+
+func lookupImageSize(width, height int) (imageSizeGeometry, bool) {
+	if width <= 0 || height <= 0 {
+		return imageSizeGeometry{}, false
+	}
+	geometry, ok := imageSizeIndex[imageSizeDimensionsKey(width, height)]
+	return geometry, ok
+}
+
+func imageSizeDimensionsKey(width, height int) string {
+	return fmt.Sprintf("%dx%d", width, height)
+}
+
+func parseImageSizeDimensions(size string) (int, int, bool) {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(size)), "x")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	width, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, false
+	}
+	height, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, false
+	}
+	if width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+	return width, height, true
+}
+
+// ClassifyImageRoutingTier 是**选路**用的档位判定，按最长边。
+//
+// 与下面按面积的 ClassifyImageBillingTier 并存，是因为两者回答的问题不同：
+// 计费问的是"这张图该按多少钱算"（面积语义，1280x768 计 1K）；
+// 选路问的是"上游那张尺寸表够不够得着这条边"。上游 adobe2api 的判据
+// （core/models/resolver.py:199-215 resolution_from_size）就是纯 max(w,h)：
+// <=1024 → 1K，<=2048 → 2K，否则 4K。选路口径必须与它逐字对应，
+// 否则过滤器预测不准上游会不会拒。
+//
+// 拿面积口径做选路的具体后果（实跑 515 个尺寸 + 14 天真实请求量）：
+// 2560x1440 / 2304x1728 / 2496x1664 / 3024x1296 这些实测表里的原生 2K 尺寸，
+// 面积口径判 2K 放行，上游按长边判 4K 照拒——渠道 190 的召回只有 45%。
+// 换长边后召回 100% 且零误杀（"上游放行 ⟹ 长边<=2048" 在 gpt 族严格成立）。
+//
+// sub2api 早就把这两个口径拆开了，见 openai_images.go:552 openAIImageSizeRequiresHighRes
+// 的注释："路由口径与计费档位解耦……路由仍按最长边判断"。
+func ClassifyImageRoutingTier(size string) (string, bool) {
+	trimmed := strings.TrimSpace(size)
+	switch strings.ToLower(trimmed) {
+	case "", "auto":
+		return "", false
+	case "1k":
+		return ImageSizeTier1K, true
+	case "2k":
+		return ImageSizeTier2K, true
+	case "4k":
+		return ImageSizeTier4K, true
+	}
+	width, height, ok := parseImageSizeDimensions(trimmed)
+	if !ok {
+		return "", false
+	}
+	longest := width
+	if height > longest {
+		longest = height
+	}
+	switch {
+	case longest <= 1024:
+		return ImageSizeTier1K, true
+	case longest <= 2048:
+		return ImageSizeTier2K, true
+	default:
+		return ImageSizeTier4K, true
+	}
+}
+
+// ImageQualityForcesHighestTier 判断 quality 参数是否独立要求 4K。
+//
+// 上游把 quality 单独映射成 output_resolution（adobe2api core/models/quality.py 的
+// 别名表 + api/routes/generation.py:801），high/4k/ultra 会直接 400，
+// **与 size 完全无关**：quality="high" 配 size="1024x1024" 一样被拒。
+// 只看 size 的话这一整维都在过滤器视野之外。
+func ImageQualityForcesHighestTier(quality string) bool {
+	switch strings.TrimSpace(strings.ToLower(quality)) {
+	case "high", "4k", "ultra":
+		return true
+	default:
+		return false
+	}
+}
+
+// ClassifyImageBillingTier 把请求里的 size 参数归到 1K/2K/4K 档位。
+// 第二个返回值为 false 表示"判不出档位"——调用方必须放行而不是拒绝：
+// size 可以是 auto、比例写法（"1:1"）、上游新增的未知写法，
+// 在选路阶段因为看不懂就拒绝渠道会把正常请求打成 503。
+//
+// 注意：这是**计费**口径（面积 + 实测表），与 sub2api 逐行对齐，是两边防漂移的锚点。
+// 选路请用上面的 ClassifyImageRoutingTier，不要改这个函数去迁就选路。
+func ClassifyImageBillingTier(size string) (string, bool) {
+	trimmed := strings.TrimSpace(size)
+	normalized := strings.ToLower(trimmed)
+	switch normalized {
+	case "", "auto":
+		return "", false
+	case "1k":
+		return ImageSizeTier1K, true
+	case "2k":
+		return ImageSizeTier2K, true
+	case "4k":
+		return ImageSizeTier4K, true
+	case "2048x2048", "2048x1152":
+		return ImageSizeTier2K, true
+	case "3840x2160", "2160x3840":
+		return ImageSizeTier4K, true
+	}
+
+	width, height, ok := parseImageSizeDimensions(trimmed)
+	if !ok {
+		return "", false
+	}
+	// 实测表命中时以模型原生档位为准：非方形的 2K 档长边天然超过 2048
+	// （如 2560x1440、2304x1728），按最长边会错判成 4K
+	if geometry, ok := lookupImageSize(width, height); ok {
+		return geometry.Tier, true
+	}
+	// 表外尺寸按像素总量兜底，与档位的面积语义一致（1K/2K/4K 各档不同
+	// 宽高比的面积近似 1024²/2048²/2880² 网格）。用除法比较避免用户提供
+	// 的超大尺寸在 width*height 时发生整数溢出并错误降档
+	switch {
+	case width <= 1024*1024/height:
+		return ImageSizeTier1K, true
+	case width <= 2048*2048/height:
+		return ImageSizeTier2K, true
+	default:
+		return ImageSizeTier4K, true
+	}
+}
+
+// NormalizeImageSizeTier 把用户/前端写入的档位名归一到常量形式。
+func NormalizeImageSizeTier(tier string) (string, bool) {
+	switch strings.ToUpper(strings.TrimSpace(tier)) {
+	case ImageSizeTier1K:
+		return ImageSizeTier1K, true
+	case ImageSizeTier2K:
+		return ImageSizeTier2K, true
+	case ImageSizeTier4K:
+		return ImageSizeTier4K, true
+	default:
+		return "", false
+	}
+}
+
+// AllImageSizeTiers 返回全部合法档位（升序），供前端下拉与错误提示使用。
+func AllImageSizeTiers() []string {
+	return []string{ImageSizeTier1K, ImageSizeTier2K, ImageSizeTier4K}
+}
+
+// ImageSizeCapability 声明渠道能承接哪些图片档位。
+//
+// 语义刻意做成"只有明确写了白名单才收紧"：
+//   - 整个结构为 nil（存量渠道 setting 里没有 image_sizes）    → 全部档位放行
+//   - Allowed 为空数组（管理员开了配置但一个都没勾）           → 全部档位放行
+//
+// 空数组不解释成"什么都不支持"是有意的：那种配置只可能是误操作，
+// 而它的后果是整条渠道对图片请求彻底消失且没有任何报错线索。
+type ImageSizeCapability struct {
+	// Allowed 是档位白名单，元素取值 1K/2K/4K。
+	Allowed []string `json:"allowed,omitempty"`
+}
+
+// Allow 判断该渠道能否承接 tier 档位的请求。
+// nil 接收者、空白名单、空 tier（分类失败）一律放行——选路过滤只做
+// "明确不支持时提前排除"，任何不确定都必须 fail open。
+func (c *ImageSizeCapability) Allow(tier string) bool {
+	if c == nil || len(c.Allowed) == 0 {
+		return true
+	}
+	normalizedTier, ok := NormalizeImageSizeTier(tier)
+	if !ok {
+		return true
+	}
+	// anyValid 区分"白名单里没有这一档"和"白名单整个写废了"。
+	// ValidateSettings 只在走 API 的写入路径上把关，SQL/后台脚本直接改 setting
+	// 绕得过去；全是垃圾项的白名单与空数组一样只可能是误操作，若按字面全拒，
+	// 该渠道会对所有图片请求隐身，线上唯一线索只有一行 incapable 计数。
+	anyValid := false
+	for _, allowed := range c.Allowed {
+		candidate, ok := NormalizeImageSizeTier(allowed)
+		if !ok {
+			continue
+		}
+		anyValid = true
+		if candidate == normalizedTier {
+			return true
+		}
+	}
+	return !anyValid
+}
+
+// Validate 校验白名单里的档位名合法，避免管理员写错字符串后
+// 变成一条永远匹配不上、却又静默排除所有图片请求的配置。
+func (c *ImageSizeCapability) Validate() error {
+	if c == nil {
+		return nil
+	}
+	for _, allowed := range c.Allowed {
+		if _, ok := NormalizeImageSizeTier(allowed); !ok {
+			return fmt.Errorf("image_sizes.allowed 含非法档位 %q，仅支持 %s",
+				allowed, strings.Join(AllImageSizeTiers(), "/"))
+		}
+	}
+	return nil
+}
+
+// NormalizedAllowed 返回去重、归一并排序后的白名单，便于日志与提示展示。
+func (c *ImageSizeCapability) NormalizedAllowed() []string {
+	if c == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(c.Allowed))
+	out := make([]string, 0, len(c.Allowed))
+	for _, allowed := range c.Allowed {
+		tier, ok := NormalizeImageSizeTier(allowed)
+		if !ok || seen[tier] {
+			continue
+		}
+		seen[tier] = true
+		out = append(out, tier)
+	}
+	sort.Strings(out)
+	return out
+}

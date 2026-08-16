@@ -11,6 +11,36 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// channelSelectFilterFromContext 把 distributor 在解析请求时算好的图片档位
+// 翻译成选路约束。这里是全仓唯一进 model 层选路的入口，六条调用路径
+// （首选 / 并发重试 / controller 重试 / warmup 补扫 / 跨套餐 failover /
+// 钱包降级）都收敛在下面两个 selectFrom 闭包，因此只需在此处取一次。
+//
+// 无 Context 的探针（plan_selector.planCanServeModel）调用的是不带 Filtered
+// 的老函数，行为完全不变。
+func channelSelectFilterFromContext(c *gin.Context) *model.ChannelSelectFilter {
+	if c == nil {
+		return nil
+	}
+	tier := common.GetContextKeyString(c, constant.ContextKeyImageSizeTier)
+	if tier == "" {
+		return nil
+	}
+	return &model.ChannelSelectFilter{ImageSizeTier: tier}
+}
+
+// markImageTierRejected 把"本轮确实有渠道因档位出局"从 model 层带回 Context。
+//
+// filter 每次选路新建，跨轮不累计；而无可用渠道的判定发生在所有优先级、
+// 所有分组都试完之后，所以必须落到 Context 上累计。只置位不清零：
+// 任何一轮排除过，就说明档位确实参与了这次失败。
+func markImageTierRejected(c *gin.Context, filter *model.ChannelSelectFilter) {
+	if c == nil || !filter.Rejected() {
+		return
+	}
+	common.SetContextKey(c, constant.ContextKeyImageTierRejected, true)
+}
+
 func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName string, retry int) (*model.Channel, string, error) {
 	return cacheGetRandomSatisfiedChannel(c, group, modelName, retry, false)
 }
@@ -28,12 +58,15 @@ func cacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 	selectGroup := group
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 
+	capabilityFilter := channelSelectFilterFromContext(c)
+
 	// selectFrom 统一记录"有渠道仅因 warning 掷骰被跳过"标记，供耗尽时补扫决策
 	selectFrom := func(g string) (*model.Channel, error) {
-		ch, warned, selErr := model.GetRandomSatisfiedChannelDetailed(g, modelName, retry, includeWarning)
+		ch, warned, selErr := model.GetRandomSatisfiedChannelDetailedFiltered(g, modelName, retry, includeWarning, capabilityFilter)
 		if warned {
 			common.SetContextKey(c, constant.ContextKeyWarningChannelSkipped, true)
 		}
+		markImageTierRejected(c, capabilityFilter)
 		return ch, selErr
 	}
 
@@ -140,11 +173,15 @@ func cacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 	selectGroup := group
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 
+	capabilityFilter := channelSelectFilterFromContext(c)
+
+	// excludeIds 由调用方跨轮复用，这里只读传下去，不做任何就地修改
 	selectFrom := func(g string) (*model.Channel, error) {
-		ch, warned, selErr := model.GetRandomSatisfiedChannelExcludingDetailed(g, modelName, retry, excludeIds, includeWarning)
+		ch, warned, selErr := model.GetRandomSatisfiedChannelExcludingDetailedFiltered(g, modelName, retry, excludeIds, includeWarning, capabilityFilter)
 		if warned {
 			common.SetContextKey(c, constant.ContextKeyWarningChannelSkipped, true)
 		}
+		markImageTierRejected(c, capabilityFilter)
 		return ch, selErr
 	}
 

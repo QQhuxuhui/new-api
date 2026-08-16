@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -26,6 +27,38 @@ import (
 type ModelRequest struct {
 	Model string `json:"model"`
 	Group string `json:"group,omitempty"`
+	// Size 必须是 RawMessage 而不是 string：common/gin.go 的表单解析在同名字段
+	// 重复出现时会把值塞成 []string，用 string 接会让整个 Unmarshal 报错，
+	// 而 ModelRequest 是全站共用的（chat/audio/video/embeddings 都过这里），
+	// 一个畸形 size 就能把无关请求打成 400。这里宽松接收，解析交给
+	// imageSizeFromRawJSON，拿不到就当没有。
+	Size json.RawMessage `json:"size,omitempty"`
+	// Quality 同上，宽松接收。它与 size 正交：上游把 high/4k/ultra 单独映射成
+	// 4K 档并直接拒绝，与请求的像素尺寸无关。
+	Quality json.RawMessage `json:"quality,omitempty"`
+}
+
+// imageSizeFromRawJSON 从宽松接收的 size 值里取出字符串形式。
+// 非字符串（数组 / 数字 / null / 对象）一律返回空串 —— 上层据此放弃分档并放行。
+// imageRequestPathNeedsTier 圈定"size 参数确实是图片分辨率"的路径。
+//
+// 其它协议也有叫 size 的字段但语义不同，不设 context 即等于不过滤。
+// 名单必须与 router/relay-router.go 里绑到 RelayFormatOpenAIImage 的路由一致：
+// 目前是 /v1/edits（别名，不带 images 前缀，最容易漏）、/v1/images/generations、
+// /v1/images/edits。新增图片路由时要同步这里，否则新入口会静默绕过档位过滤。
+func imageRequestPathNeedsTier(path string) bool {
+	return strings.HasPrefix(path, "/v1/images/") || path == "/v1/edits"
+}
+
+func imageSizeFromRawJSON(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var size string
+	if err := common.Unmarshal(raw, &size); err != nil {
+		return ""
+	}
+	return size
 }
 
 func Distribute() func(c *gin.Context) {
@@ -649,6 +682,17 @@ func Distribute() func(c *gin.Context) {
 							}
 						}
 						if channel == nil {
+							// 档位过滤在选路阶段静默排除渠道，泛化文案会让运维完全看不出
+							// 是"全组都不支持这个档位"还是"全挂了"，这里必须点名档位。
+							//
+							// 但只有真的排除过才点名：channel==nil 是所有失败原因的共同出口
+							// （渠道全挂、模型没配到这个分组、套餐把组滤空），仅凭"本次请求有档位"
+							// 就归咎于白名单，会把最常见的故障伪装成一个几乎不存在的配置问题。
+							if tier := common.GetContextKeyString(c, constant.ContextKeyImageSizeTier); tier != "" &&
+								common.GetContextKeyBool(c, constant.ContextKeyImageTierRejected) {
+								abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道：没有渠道声明支持 %s 档位图片（请检查渠道设置中的图片档位白名单，或改用其它尺寸）", usingGroup, modelRequest.Model, tier), string(types.ErrorCodeModelNotFound))
+								return
+							}
 							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", usingGroup, modelRequest.Model), string(types.ErrorCodeModelNotFound))
 							return
 						}
@@ -953,6 +997,9 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			return nil, false, err
 		}
 		modelRequest.Model = req.Model
+		// 顺带带走 size / quality：body 已经解析过一遍，抄两行等于零额外读取
+		modelRequest.Size = req.Size
+		modelRequest.Quality = req.Quality
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/realtime") {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01
@@ -970,14 +1017,33 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations") {
 		modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "dall-e")
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") {
+	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") || c.Request.URL.Path == "/v1/edits" {
+		// /v1/edits 是 router/relay-router.go:101 给图片中继开的别名，走同一套
+		// multipart 解析。原来只匹配 /v1/images/edits，别名请求的表单 model
+		// 从来没被解析过（存量缺陷），档位过滤又会跟着一起失效
 		//modelRequest.Model = common.GetStringIfEmpty(c.PostForm("model"), "gpt-image-1")
 		contentType := c.ContentType()
 		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {
 			req, err := getModelFromRequest(c)
-			if err == nil && req.Model != "" {
-				modelRequest.Model = req.Model
+			// size 的赋值必须在 req.Model != "" 之外：表单没带 model 字段时
+			// （合法，模型可由默认值兜底）不该把已经解析出来的 size 一起丢掉，
+			// 否则档位过滤会静默失效
+			if err == nil {
+				if req.Model != "" {
+					modelRequest.Model = req.Model
+				}
+				modelRequest.Size = req.Size
+				modelRequest.Quality = req.Quality
 			}
+		}
+	}
+	if imageRequestPathNeedsTier(c.Request.URL.Path) {
+		// quality 是独立于 size 的一维：上游把 high/4k/ultra 单独映射成 4K 并直接拒绝，
+		// quality="high" 配 size="1024x1024" 一样被拒。只看 size 会漏掉这整条路径。
+		if dto.ImageQualityForcesHighestTier(imageSizeFromRawJSON(modelRequest.Quality)) {
+			common.SetContextKey(c, constant.ContextKeyImageSizeTier, dto.ImageSizeTier4K)
+		} else if tier, ok := dto.ClassifyImageRoutingTier(imageSizeFromRawJSON(modelRequest.Size)); ok {
+			common.SetContextKey(c, constant.ContextKeyImageSizeTier, tier)
 		}
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/audio") {

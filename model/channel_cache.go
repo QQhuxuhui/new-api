@@ -222,10 +222,16 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 //   - 第二个返回值上报本次选择是否有渠道仅因 warning 掷骰被跳过，
 //     供上层决定耗尽时是否值得补扫。
 func GetRandomSatisfiedChannelDetailed(group string, model string, retry int, includeWarning bool) (*Channel, bool, error) {
+	return GetRandomSatisfiedChannelDetailedFiltered(group, model, retry, includeWarning, nil)
+}
+
+// GetRandomSatisfiedChannelDetailedFiltered 在 Detailed 之上追加渠道能力约束
+// （见 ChannelSelectFilter）。filter 为 nil / 未激活时行为与 Detailed 完全一致。
+func GetRandomSatisfiedChannelDetailedFiltered(group string, model string, retry int, includeWarning bool, filter *ChannelSelectFilter) (*Channel, bool, error) {
 	warningSkipped := false
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		channel, err := GetChannel(group, model, retry)
+		channel, err := GetChannelFiltered(group, model, retry, filter)
 		if err == nil && channel != nil && !IsChannelHealthy(channel.Id) {
 			return nil, warningSkipped, nil
 		}
@@ -259,6 +265,12 @@ func GetRandomSatisfiedChannelDetailed(group string, model string, retry int, in
 				// (no other priorities to try)
 				return nil, warningSkipped, ErrPriorityExhausted
 			}
+			// 与"单渠道被暂停"同样处理：没有别的优先级可试，直接宣告耗尽触发降级
+			if !channelSatisfiesFilter(channel, filter) {
+				common.SysLog(fmt.Sprintf("single channel %d does not support %s for group: %s, model: %s", channels[0], filter.Describe(), group, model))
+				filter.MarkRejected()
+				return nil, warningSkipped, ErrPriorityExhausted
+			}
 			return channel, warningSkipped, nil
 		}
 		return nil, warningSkipped, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
@@ -290,12 +302,19 @@ func GetRandomSatisfiedChannelDetailed(group string, model string, retry int, in
 	var targetWeights []int
 	var suspendedCount = 0
 	var warningSkippedCount = 0
+	var incapableCount = 0
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
 			if channel.GetPriority() == targetPriority {
 				// Filter out suspended channels using health tracking
 				if !IsChannelHealthy(channelId) {
 					suspendedCount++
+					continue
+				}
+				// 能力不匹配的渠道在这里就出局，不占用重试次数也不打上游
+				if !channelSatisfiesFilter(channel, filter) {
+					incapableCount++
+					filter.MarkRejected()
 					continue
 				}
 				// Probabilistic filter for warning-state channels
@@ -321,8 +340,8 @@ func GetRandomSatisfiedChannelDetailed(group string, model string, retry int, in
 		// Return nil (not error) to allow retry with next priority
 		// Only log once at the first miss to avoid flooding when priority跨度很大
 		if retry == 0 {
-			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, warning_skipped=%d)",
-				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, warningSkippedCount))
+			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, warning_skipped=%d, incapable=%d)",
+				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, warningSkippedCount, incapableCount))
 		}
 		return nil, warningSkipped, nil
 	}
@@ -370,11 +389,21 @@ func GetRandomSatisfiedChannelExcluding(group string, model string, retry int, e
 // includeWarning=true 关闭 warning 掷骰（耗尽后兜底补扫），第二个返回值上报
 // 本次选择是否有渠道仅因 warning 掷骰被跳过。
 func GetRandomSatisfiedChannelExcludingDetailed(group string, model string, retry int, excludeIds map[int]bool, includeWarning bool) (*Channel, bool, error) {
+	return GetRandomSatisfiedChannelExcludingDetailedFiltered(group, model, retry, excludeIds, includeWarning, nil)
+}
+
+// GetRandomSatisfiedChannelExcludingDetailedFiltered 在 ExcludingDetailed 之上追加
+// 渠道能力约束（见 ChannelSelectFilter）。
+//
+// excludeIds 是调用方跨多轮复用的长期 map（distributor 的 triedChannelIds、
+// wallet_fallback 的已尝试集合），本函数只读不写：把"能力不匹配"写进去会被
+// 上层永久误当成"已尝试过"，污染后续所有轮次的判断。
+func GetRandomSatisfiedChannelExcludingDetailedFiltered(group string, model string, retry int, excludeIds map[int]bool, includeWarning bool, filter *ChannelSelectFilter) (*Channel, bool, error) {
 	warningSkipped := false
 	if !common.MemoryCacheEnabled {
 		// For non-cached mode, fall back to basic selection
 		// TODO: implement exclusion for database queries if needed
-		channel, err := GetChannel(group, model, retry)
+		channel, err := GetChannelFiltered(group, model, retry, filter)
 		if err == nil && channel != nil && !IsChannelHealthy(channel.Id) {
 			return nil, warningSkipped, nil
 		}
@@ -413,6 +442,12 @@ func GetRandomSatisfiedChannelExcludingDetailed(group string, model string, retr
 				// (no other priorities to try)
 				return nil, warningSkipped, ErrPriorityExhausted
 			}
+			// 与"单渠道被暂停"同样处理：没有别的优先级可试，直接宣告耗尽触发降级
+			if !channelSatisfiesFilter(channel, filter) {
+				common.SysLog(fmt.Sprintf("single channel %d does not support %s for group: %s, model: %s (excluding)", channels[0], filter.Describe(), group, model))
+				filter.MarkRejected()
+				return nil, warningSkipped, ErrPriorityExhausted
+			}
 			return channel, warningSkipped, nil
 		}
 		return nil, warningSkipped, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
@@ -445,6 +480,7 @@ func GetRandomSatisfiedChannelExcludingDetailed(group string, model string, retr
 	var suspendedCount = 0
 	var excludedCount = 0
 	var warningSkippedCount = 0
+	var incapableCount = 0
 	for _, channelId := range channels {
 		// Skip if this channel was already tried
 		if excludeIds != nil && excludeIds[channelId] {
@@ -456,6 +492,13 @@ func GetRandomSatisfiedChannelExcludingDetailed(group string, model string, retr
 				// Filter out suspended channels using health tracking
 				if !IsChannelHealthy(channelId) {
 					suspendedCount++
+					continue
+				}
+				// 能力不匹配的渠道在这里就出局；注意只是本轮跳过，
+				// 绝不能写回 excludeIds（那是调用方跨轮复用的"已尝试"集合）
+				if !channelSatisfiesFilter(channel, filter) {
+					incapableCount++
+					filter.MarkRejected()
 					continue
 				}
 				// Probabilistic filter for warning-state channels
@@ -481,8 +524,8 @@ func GetRandomSatisfiedChannelExcludingDetailed(group string, model string, retr
 		// No more channels at this priority level (all tried or suspended)
 		// Log only on first miss to avoid flooding when priority跨度很大
 		if retry == 0 {
-			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d, warning_skipped=%d)",
-				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount, warningSkippedCount))
+			common.SysLog(fmt.Sprintf("no healthy channel at priority %d for group: %s, model: %s (total_channels=%d, priorities=%v, suspended=%d, excluded=%d, warning_skipped=%d, incapable=%d)",
+				targetPriority, group, model, len(channels), sortedUniquePriorities, suspendedCount, excludedCount, warningSkippedCount, incapableCount))
 		}
 		return nil, warningSkipped, nil
 	}

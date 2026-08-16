@@ -104,6 +104,13 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 }
 
 func GetChannel(group string, model string, retry int) (*Channel, error) {
+	return GetChannelFiltered(group, model, retry, nil)
+}
+
+// GetChannelFiltered 是 GetChannel 的带能力约束版本。
+// 单独开一个函数而不是改 GetChannel 签名：planCanServeModel 这类无 Context 的
+// 探针调用不关心档位，保持它们零改动、零行为变化。
+func GetChannelFiltered(group string, model string, retry int, filter *ChannelSelectFilter) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
@@ -131,6 +138,30 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 			return nil, nil
 		}
 		abilities = healthyAbilities
+
+		// 能力过滤排在健康过滤之后：批量查询只覆盖存活候选，
+		// 且 filter 未激活（所有非图片请求）时整段直接短路，不多打一条 SQL
+		if filter.Active() {
+			channelIds := make([]int, 0, len(abilities))
+			for _, ability := range abilities {
+				channelIds = append(channelIds, ability.ChannelId)
+			}
+			if rejected := filterChannelIdsByFilter(channelIds, filter); len(rejected) > 0 {
+				filter.MarkRejected()
+				capableAbilities := abilities[:0]
+				for _, ability := range abilities {
+					if !rejected[ability.ChannelId] {
+						capableAbilities = append(capableAbilities, ability)
+					}
+				}
+				if len(capableAbilities) == 0 {
+					// 返回 nil,nil 而非错误：语义同"本优先级无可用渠道"，
+					// 让上层继续遍历下一优先级，最终由 distributor 给出定制文案
+					return nil, nil
+				}
+				abilities = capableAbilities
+			}
+		}
 
 		// Randomly choose one
 		weightSum := uint(0)

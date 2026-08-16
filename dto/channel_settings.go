@@ -100,6 +100,11 @@ type ChannelSettings struct {
 	// 的间隔（每收到一行数据即重置）。nil 使用全局 STREAMING_TIMEOUT（默认
 	// 300 秒）；0 表示永不超时；>0 为自定义秒数。
 	StreamTimeoutSeconds *int `json:"stream_timeout_seconds,omitempty"`
+	// ImageSizes 声明该渠道能承接的图片档位白名单（1K/2K/4K）。选路阶段按
+	// 请求的 size 参数分档后直接排除不支持的渠道，不消耗重试次数也不打上游。
+	// 用指针 + omitempty：存量渠道重新序列化时不会凭空多出这个 key，
+	// nil 即"不限制"，保持向后兼容。
+	ImageSizes *ImageSizeCapability `json:"image_sizes,omitempty"`
 }
 
 type VertexKeyType string

@@ -131,6 +131,19 @@ const calcCostRatioPctFromParams = (totalMin, totalMax, fracMin, fracMax) => {
 };
 
 const _parseF = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+
+// 图片档位白名单：取值必须与后端 dto.ImageSizeTier* 常量一致，
+// 写错的档位名在后端只会变成一条"永远匹配不上"的配置
+const IMAGE_SIZE_TIER_OPTIONS = ['1K', '2K', '4K'];
+const normalizeImageSizeTiers = (raw) => {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  raw.forEach((item) => {
+    const tier = String(item ?? '').trim().toUpperCase();
+    if (IMAGE_SIZE_TIER_OPTIONS.includes(tier)) seen.add(tier);
+  });
+  return IMAGE_SIZE_TIER_OPTIONS.filter((tier) => seen.has(tier));
+};
 const clampCacheCostRatio = (pct) =>
   Math.min(90, Math.max(15, parseInt(pct) || 47));
 const lerp = (start, end, progress) => start + (end - start) * progress;
@@ -242,6 +255,8 @@ const EditChannelModal = (props) => {
     always_healthy: false,
     // 渠道级流式超时（秒）：空=全局默认，0=永不超时
     stream_timeout_seconds: '',
+    // 图片档位白名单：空数组=不限制（全部档位放行）
+    image_size_tiers: [],
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -260,6 +275,15 @@ const EditChannelModal = (props) => {
   const [modelModalVisible, setModelModalVisible] = useState(false);
   const [fetchedModels, setFetchedModels] = useState([]);
   const formApiRef = useRef(null);
+  // 保存本次加载到的原始 setting 对象。提交时表单只重建自己认识的 key，
+  // 不留底就会把后台/SQL 写入的自定义 key（如 image_sizes）在管理员随便
+  // 保存一次渠道（哪怕只改个名字）时静默抹掉。
+  const originalChannelSettingRef = useRef(null);
+  // 同理保存原始 settings（ChannelOtherSettings）。它更隐蔽：settings 不是注册
+  // 的表单字段，setValues 只写已注册字段，所以提交时 localInputs.settings 通常
+  // 是 undefined —— 存量的 azure_responses_version / vertex_key_type /
+  // disable_task_polling_sleep 会在任意一次保存中被整段重建掉。
+  const originalChannelOtherSettingRef = useRef(null);
   const [vertexKeys, setVertexKeys] = useState([]);
   const [vertexFileList, setVertexFileList] = useState([]);
   const vertexErroredNames = useRef(new Set()); // 避免重复报错
@@ -402,6 +426,7 @@ const EditChannelModal = (props) => {
     user_prompt: '',
     always_healthy: false,
     stream_timeout_seconds: '',
+    image_size_tiers: [],
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
@@ -581,6 +606,10 @@ const EditChannelModal = (props) => {
       if (data.setting) {
         try {
           const parsedSettings = JSON.parse(data.setting);
+          originalChannelSettingRef.current =
+            parsedSettings && typeof parsedSettings === 'object' && !Array.isArray(parsedSettings)
+              ? parsedSettings
+              : null;
           data.force_format = parsedSettings.force_format || false;
           data.thinking_to_content =
             parsedSettings.thinking_to_content || false;
@@ -633,6 +662,9 @@ const EditChannelModal = (props) => {
           data.text_tool_call_conversion = parsedSettings.text_tool_call_conversion || false;
           data.native_align = parsedSettings.native_align || false;
           data.always_healthy = parsedSettings.always_healthy || false;
+          data.image_size_tiers = normalizeImageSizeTiers(
+            parsedSettings.image_sizes && parsedSettings.image_sizes.allowed,
+          );
           // 注意 0 是合法值（永不超时），不能用 || 兜底
           data.stream_timeout_seconds =
             parsedSettings.stream_timeout_seconds === undefined ||
@@ -641,6 +673,8 @@ const EditChannelModal = (props) => {
               : String(parsedSettings.stream_timeout_seconds);
         } catch (error) {
           console.error('解析渠道设置失败:', error);
+          // 原值不可解析，没有可保留的未知 key
+          originalChannelSettingRef.current = null;
           data.force_format = false;
           data.thinking_to_content = false;
           data.proxy = '';
@@ -658,8 +692,10 @@ const EditChannelModal = (props) => {
           data.native_align = false;
           data.always_healthy = false;
           data.stream_timeout_seconds = '';
+          data.image_size_tiers = [];
         }
       } else {
+        originalChannelSettingRef.current = null;
         data.force_format = false;
         data.thinking_to_content = false;
         data.proxy = '';
@@ -677,11 +713,16 @@ const EditChannelModal = (props) => {
         data.native_align = false;
         data.always_healthy = false;
         data.stream_timeout_seconds = '';
+        data.image_size_tiers = [];
       }
 
       if (data.settings) {
         try {
           const parsedSettings = JSON.parse(data.settings);
+          originalChannelOtherSettingRef.current =
+            parsedSettings && typeof parsedSettings === 'object' && !Array.isArray(parsedSettings)
+              ? parsedSettings
+              : null;
           data.azure_responses_version =
             parsedSettings.azure_responses_version || '';
           // 读取 Vertex 密钥格式
@@ -700,6 +741,7 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_safety_identifier || false;
         } catch (error) {
           console.error('解析其他设置失败:', error);
+          originalChannelOtherSettingRef.current = null;
           data.azure_responses_version = '';
           data.region = '';
           data.vertex_key_type = 'json';
@@ -711,6 +753,7 @@ const EditChannelModal = (props) => {
           data.allow_safety_identifier = false;
         }
       } else {
+        originalChannelOtherSettingRef.current = null;
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
         data.vertex_key_type = 'json';
         data.aws_key_type = 'ak_sk';
@@ -753,6 +796,7 @@ const EditChannelModal = (props) => {
         user_prompt: data.user_prompt,
         always_healthy: data.always_healthy || false,
         stream_timeout_seconds: data.stream_timeout_seconds ?? '',
+        image_size_tiers: data.image_size_tiers || [],
       });
       // console.log(data);
     } else {
@@ -1030,6 +1074,9 @@ const EditChannelModal = (props) => {
   // 统一的模态框重置函数
   const resetModalState = () => {
     formApiRef.current?.reset();
+    // 关闭弹窗即丢弃上一条渠道的原始 setting/settings，避免下次打开另一条渠道时串味
+    originalChannelSettingRef.current = null;
+    originalChannelOtherSettingRef.current = null;
     // 重置渠道设置状态
     setChannelSettings({
       force_format: false,
@@ -1041,6 +1088,7 @@ const EditChannelModal = (props) => {
       user_prompt: '',
       always_healthy: false,
       stream_timeout_seconds: '',
+      image_size_tiers: [],
     });
     // 重置密钥模式状态
     setKeyMode('append');
@@ -1450,7 +1498,49 @@ const EditChannelModal = (props) => {
         stream_timeout_seconds: parsedStreamTimeout,
       };
     }
+    // 图片档位白名单：空数组 = 不限制，此时不写出 image_sizes 这个 key
+    const imageSizeTiers = normalizeImageSizeTiers(localInputs.image_size_tiers);
+    const imageSizesSetting =
+      imageSizeTiers.length > 0
+        ? { image_sizes: { allowed: imageSizeTiers } }
+        : {};
+
+    // 表单只重建自己认识的 key，原始 setting 里的其它 key（后台/SQL 写入的
+    // 自定义配置）必须原样带回，否则管理员改个渠道名就把它们抹了。
+    // 反过来，已知 key 一律以本次表单为准——它们的"关闭"语义就是不写出该 key，
+    // 若从原值里继承会导致关不掉。
+    const KNOWN_CHANNEL_SETTING_KEYS = [
+      'force_format',
+      'thinking_to_content',
+      'proxy',
+      'pass_through_body_enabled',
+      'system_prompt',
+      'system_prompt_override',
+      'user_prompt',
+      'cache_simulation',
+      'strip_placeholders',
+      'text_tool_call_conversion',
+      'native_align',
+      'always_healthy',
+      'stream_timeout_seconds',
+      'image_sizes',
+    ];
+    const preservedChannelSettings = {};
+    const originalChannelSetting = originalChannelSettingRef.current;
+    if (
+      originalChannelSetting &&
+      typeof originalChannelSetting === 'object' &&
+      !Array.isArray(originalChannelSetting)
+    ) {
+      Object.keys(originalChannelSetting).forEach((key) => {
+        if (!KNOWN_CHANNEL_SETTING_KEYS.includes(key)) {
+          preservedChannelSettings[key] = originalChannelSetting[key];
+        }
+      });
+    }
+
     const channelExtraSettings = {
+      ...preservedChannelSettings,
       force_format: localInputs.force_format || false,
       thinking_to_content: localInputs.thinking_to_content || false,
       proxy: localInputs.proxy || '',
@@ -1464,14 +1554,33 @@ const EditChannelModal = (props) => {
       ...(localInputs.native_align ? { native_align: true } : {}),
       ...(localInputs.always_healthy ? { always_healthy: true } : {}),
       ...streamTimeoutSetting,
+      ...imageSizesSetting,
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
     // 处理 settings 字段（包括企业账户设置和字段透传控制）
+    // 先铺原值：settings 不是注册字段，未在本次会话中改动过时 localInputs.settings
+    // 是 undefined，直接从 {} 重建会把表单不认识的 key 全部抹掉
     let settings = {};
+    const originalChannelOtherSetting = originalChannelOtherSettingRef.current;
+    if (
+      originalChannelOtherSetting &&
+      typeof originalChannelOtherSetting === 'object' &&
+      !Array.isArray(originalChannelOtherSetting)
+    ) {
+      settings = { ...originalChannelOtherSetting };
+    }
     if (localInputs.settings) {
       try {
-        settings = JSON.parse(localInputs.settings);
+        const parsedFormSettings = JSON.parse(localInputs.settings);
+        if (
+          parsedFormSettings &&
+          typeof parsedFormSettings === 'object' &&
+          !Array.isArray(parsedFormSettings)
+        ) {
+          // 本次会话里改动过的值优先于原值
+          settings = { ...settings, ...parsedFormSettings };
+        }
       } catch (error) {
         console.error('解析settings失败:', error);
       }
@@ -1540,6 +1649,8 @@ const EditChannelModal = (props) => {
     delete localInputs.always_healthy;
     // 清理流式超时的临时字段
     delete localInputs.stream_timeout_seconds;
+    // 清理图片档位白名单的临时字段
+    delete localInputs.image_size_tiers;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -3784,6 +3895,24 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         '流式响应的空闲超时：首包等待或相邻数据块间隔超过该值即按超时处理（504）。留空使用全局 STREAMING_TIMEOUT（默认 300 秒）；填 0 表示永不超时；最大 604800 秒（7 天）。仅对本渠道生效。',
+                      )}
+                    />
+                    <Form.Select
+                      field='image_size_tiers'
+                      label={t('支持的图片档位')}
+                      placeholder={t('留空表示不限制（全部档位都可路由到本渠道）')}
+                      multiple
+                      showClear
+                      optionList={IMAGE_SIZE_TIER_OPTIONS.map((tier) => ({
+                        label: tier,
+                        value: tier,
+                      }))}
+                      style={{ width: '100%' }}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('image_size_tiers', value)
+                      }
+                      extraText={t(
+                        'OpenAI 协议图片请求会按 size 参数换算成 1K/2K/4K 档位；勾选后，档位不在列表内的请求在选择渠道时就会跳过本渠道（不消耗重试次数、不请求上游）。留空 = 不限制。size 为 auto 或无法识别时一律放行。',
                       )}
                     />
 

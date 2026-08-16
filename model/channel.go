@@ -996,6 +996,11 @@ func (channel *Channel) ValidateSettings() error {
 				return fmt.Errorf("stream_timeout_seconds 最大为 %d 秒（7 天）；如需不限制请配置 0（永不超时）", constant.MaxStreamTimeoutSeconds)
 			}
 		}
+		// 写错档位名的白名单在运行时只会静默排除所有图片请求（Allow 永远匹配不上），
+		// 保存时就必须拦下来，否则排障要一路追到选路循环里才看得出来
+		if err := channelParams.ImageSizes.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
