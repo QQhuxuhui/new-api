@@ -231,7 +231,7 @@ func GetRandomSatisfiedChannelDetailedFiltered(group string, model string, retry
 	warningSkipped := false
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		channel, err := GetChannelFiltered(group, model, retry, filter)
+		channel, err := GetChannelFiltered(group, model, retry, nil, filter)
 		if err == nil && channel != nil && !IsChannelHealthy(channel.Id) {
 			return nil, warningSkipped, nil
 		}
@@ -401,9 +401,10 @@ func GetRandomSatisfiedChannelExcludingDetailed(group string, model string, retr
 func GetRandomSatisfiedChannelExcludingDetailedFiltered(group string, model string, retry int, excludeIds map[int]bool, includeWarning bool, filter *ChannelSelectFilter) (*Channel, bool, error) {
 	warningSkipped := false
 	if !common.MemoryCacheEnabled {
-		// For non-cached mode, fall back to basic selection
-		// TODO: implement exclusion for database queries if needed
-		channel, err := GetChannelFiltered(group, model, retry, filter)
+		// excludeIds 必须传下去：不传的话 controller/relay.go 的重试循环
+		// （靠"未用渠道耗尽→下一优先级"推进）会在同一个渠道上原地打转，
+		// 永远够不到下一优先级的兜底渠道
+		channel, err := GetChannelFiltered(group, model, retry, excludeIds, filter)
 		if err == nil && channel != nil && !IsChannelHealthy(channel.Id) {
 			return nil, warningSkipped, nil
 		}

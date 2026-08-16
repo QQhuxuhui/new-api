@@ -226,7 +226,7 @@ func TestGetChannelFiltered_DatabaseModeExcludesIncapableChannel(t *testing.T) {
 	restricted, unrestricted := setupCapabilityDBTest(t)
 
 	for attempt := 0; attempt < 20; attempt++ {
-		selected, err := GetChannelFiltered("cap", "gpt-image-2", 0, &ChannelSelectFilter{ImageSizeTier: "4K"})
+		selected, err := GetChannelFiltered("cap", "gpt-image-2", 0, nil, &ChannelSelectFilter{ImageSizeTier: "4K"})
 		if err != nil {
 			t.Fatalf("attempt %d: %v", attempt, err)
 		}
@@ -238,7 +238,7 @@ func TestGetChannelFiltered_DatabaseModeExcludesIncapableChannel(t *testing.T) {
 	// 2K 在受限渠道白名单内 + 权重压倒性 → 应该能选到它，证明不是把它永久排除
 	sawRestricted := false
 	for attempt := 0; attempt < 20; attempt++ {
-		selected, err := GetChannelFiltered("cap", "gpt-image-2", 0, &ChannelSelectFilter{ImageSizeTier: "2K"})
+		selected, err := GetChannelFiltered("cap", "gpt-image-2", 0, nil, &ChannelSelectFilter{ImageSizeTier: "2K"})
 		if err != nil {
 			t.Fatalf("2K attempt %d: %v", attempt, err)
 		}
@@ -309,7 +309,7 @@ func TestGetChannelFiltered_DatabaseModeAllIncapableYieldsNoChannel(t *testing.T
 		t.Fatalf("create ability: %v", err)
 	}
 
-	selected, err := GetChannelFiltered("allcap", "gpt-image-2", 0, &ChannelSelectFilter{ImageSizeTier: "4K"})
+	selected, err := GetChannelFiltered("allcap", "gpt-image-2", 0, nil, &ChannelSelectFilter{ImageSizeTier: "4K"})
 	if err != nil {
 		t.Fatalf("first priority: %v", err)
 	}
@@ -317,12 +317,12 @@ func TestGetChannelFiltered_DatabaseModeAllIncapableYieldsNoChannel(t *testing.T
 		t.Fatalf("selected incapable channel %d", selected.Id)
 	}
 	// 下一优先级必须报耗尽，避免 distributor 无限重试
-	if _, err = GetChannelFiltered("allcap", "gpt-image-2", 1, &ChannelSelectFilter{ImageSizeTier: "4K"}); !errors.Is(err, ErrPriorityExhausted) {
+	if _, err = GetChannelFiltered("allcap", "gpt-image-2", 1, nil, &ChannelSelectFilter{ImageSizeTier: "4K"}); !errors.Is(err, ErrPriorityExhausted) {
 		t.Fatalf("next priority err=%v, want ErrPriorityExhausted", err)
 	}
 
 	// fail open：判不出档位（空 tier）不得排除任何渠道
-	selected, err = GetChannelFiltered("allcap", "gpt-image-2", 0, &ChannelSelectFilter{ImageSizeTier: ""})
+	selected, err = GetChannelFiltered("allcap", "gpt-image-2", 0, nil, &ChannelSelectFilter{ImageSizeTier: ""})
 	if err != nil || selected == nil || selected.Id != channel.Id {
 		t.Fatalf("empty tier must fail open: channel=%v err=%v", selected, err)
 	}
@@ -381,7 +381,7 @@ func TestChannelSelectFilter_RejectedInDatabaseMode(t *testing.T) {
 	_, unrestricted := setupCapabilityDBTest(t)
 
 	filter := &ChannelSelectFilter{ImageSizeTier: "4K"}
-	selected, err := GetChannelFiltered("cap", "gpt-image-2", 0, filter)
+	selected, err := GetChannelFiltered("cap", "gpt-image-2", 0, nil, filter)
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}
@@ -394,11 +394,58 @@ func TestChannelSelectFilter_RejectedInDatabaseMode(t *testing.T) {
 
 	// 2K 两条都合格：不该置位
 	clean := &ChannelSelectFilter{ImageSizeTier: "2K"}
-	if _, err := GetChannelFiltered("cap", "gpt-image-2", 0, clean); err != nil {
+	if _, err := GetChannelFiltered("cap", "gpt-image-2", 0, nil, clean); err != nil {
 		t.Fatalf("2K select: %v", err)
 	}
 	if clean.Rejected() {
 		t.Fatal("2K 两条渠道都合格，Rejected 不该被置位")
+	}
+}
+
+// DB 模式必须真的排除已试渠道。controller/relay.go 的重试循环靠
+// "当前优先级的未用渠道耗尽 → getChannel 返回 nil → 进入下一优先级" 推进；
+// 不排除的话同一个渠道会被反复选中，请求永远够不到下一优先级的兜底渠道。
+// 这在只剩单个合格渠道的优先级上尤其致命（档位过滤本身就会造成这种局面）。
+func TestGetChannelFiltered_DatabaseModeHonoursExcludeIds(t *testing.T) {
+	restricted, unrestricted := setupCapabilityDBTest(t)
+
+	// 排除掉不受限的那条，只剩受限渠道；2K 在它白名单内，应当选中它
+	selected, err := GetChannelFiltered("cap", "gpt-image-2", 0,
+		map[int]bool{unrestricted.Id: true}, &ChannelSelectFilter{ImageSizeTier: "2K"})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if selected == nil || selected.Id != restricted.Id {
+		t.Fatalf("selected %v, want restricted channel %d (unrestricted was excluded)", selected, restricted.Id)
+	}
+
+	// 两条都排除 → nil,nil，让上层去下一优先级；绝不能再返回任何一条
+	both := map[int]bool{restricted.Id: true, unrestricted.Id: true}
+	selected, err = GetChannelFiltered("cap", "gpt-image-2", 0, both, nil)
+	if err != nil {
+		t.Fatalf("select with all excluded: %v", err)
+	}
+	if selected != nil {
+		t.Fatalf("selected %v, want nil so the retry loop advances to the next priority", selected)
+	}
+
+	// 排除集与档位过滤叠加把候选清空时同样是 nil,nil
+	selected, err = GetChannelFiltered("cap", "gpt-image-2", 0,
+		map[int]bool{unrestricted.Id: true}, &ChannelSelectFilter{ImageSizeTier: "4K"})
+	if err != nil {
+		t.Fatalf("select with exclude+tier: %v", err)
+	}
+	if selected != nil {
+		t.Fatalf("selected %v, want nil (unrestricted excluded, restricted rejects 4K)", selected)
+	}
+
+	// 回归：排除集不能被就地修改
+	caller := map[int]bool{unrestricted.Id: true}
+	if _, err := GetChannelFiltered("cap", "gpt-image-2", 0, caller, &ChannelSelectFilter{ImageSizeTier: "4K"}); err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if len(caller) != 1 || !caller[unrestricted.Id] {
+		t.Fatalf("caller excludeIds was mutated: %v", caller)
 	}
 }
 

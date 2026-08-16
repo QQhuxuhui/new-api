@@ -104,13 +104,13 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 }
 
 func GetChannel(group string, model string, retry int) (*Channel, error) {
-	return GetChannelFiltered(group, model, retry, nil)
+	return GetChannelFiltered(group, model, retry, nil, nil)
 }
 
-// GetChannelFiltered 是 GetChannel 的带能力约束版本。
+// GetChannelFiltered 是 GetChannel 的带排除集与能力约束版本。
 // 单独开一个函数而不是改 GetChannel 签名：planCanServeModel 这类无 Context 的
-// 探针调用不关心档位，保持它们零改动、零行为变化。
-func GetChannelFiltered(group string, model string, retry int, filter *ChannelSelectFilter) (*Channel, error) {
+// 探针调用两者都不关心，保持它们零改动、零行为变化。
+func GetChannelFiltered(group string, model string, retry int, excludeIds map[int]bool, filter *ChannelSelectFilter) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
@@ -138,6 +138,28 @@ func GetChannelFiltered(group string, model string, retry int, filter *ChannelSe
 			return nil, nil
 		}
 		abilities = healthyAbilities
+
+		// 已试渠道排除。这一步原本在 DB 模式下被整个跳过（channel_cache.go 里
+		// 那句 "TODO: implement exclusion for database queries"），后果是
+		// controller/relay.go 的重试循环失效：它靠"当前优先级的未用渠道耗尽 →
+		// getChannel 返回 nil → 进入下一优先级"来推进，而不排除已试渠道时
+		// 同一个渠道会被反复选中，永远走不到下一优先级的兜底渠道。
+		//
+		// 排在能力过滤之前：纯内存比较，先把候选缩小，能力过滤那条 IN 查询
+		// 就少查甚至完全不用查。
+		if len(excludeIds) > 0 {
+			untriedAbilities := abilities[:0]
+			for _, ability := range abilities {
+				if !excludeIds[ability.ChannelId] {
+					untriedAbilities = append(untriedAbilities, ability)
+				}
+			}
+			if len(untriedAbilities) == 0 {
+				// nil,nil = "本优先级无更多可用渠道"，上层据此进入下一优先级
+				return nil, nil
+			}
+			abilities = untriedAbilities
+		}
 
 		// 能力过滤排在健康过滤之后：批量查询只覆盖存活候选，
 		// 且 filter 未激活（所有非图片请求）时整段直接短路，不多打一条 SQL
