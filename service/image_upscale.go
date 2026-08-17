@@ -9,6 +9,9 @@ import (
 	_ "image/png"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,7 +68,72 @@ func (u *ImageUpscaler) Timeout() time.Duration {
 	return u.cfg.Timeout
 }
 
+// defaultImageUpscaleMaxConcurrency 是并发上限的保守默认值。
+//
+// 一次超分在内存里同时持有：上游 body（含 1K b64）、解码后的源图、4K 输出 PNG
+// （2880² 约 15–25MB）、它的 base64 副本（+33%）、sjson 改写副本，峰值约
+// 100–150MB/请求；且 90s 的超时预算意味着这些副本是长时间驻留而非一过性。
+// 本机有图片大 body 并发放大触发 OOM 的前科，因此必须有硬上限。
+const defaultImageUpscaleMaxConcurrency = 4
+
+// imageUpscaleMaxConcurrency 读 IMAGE_UPSCALE_MAX_CONCURRENCY；
+// 未设、非数字、<=0 一律回退默认值（配置错不应把上限放开）。
+func imageUpscaleMaxConcurrency() int {
+	raw := strings.TrimSpace(os.Getenv("IMAGE_UPSCALE_MAX_CONCURRENCY"))
+	if raw == "" {
+		return defaultImageUpscaleMaxConcurrency
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return defaultImageUpscaleMaxConcurrency
+	}
+	return n
+}
+
+var (
+	imageUpscaleSemaOnce sync.Once
+	imageUpscaleSema     chan struct{}
+)
+
+// imageUpscaleSemaphore 进程级并发令牌桶，与 upscaler 单例同生命周期。
+func imageUpscaleSemaphore() chan struct{} {
+	imageUpscaleSemaOnce.Do(func() {
+		imageUpscaleSema = make(chan struct{}, imageUpscaleMaxConcurrency())
+	})
+	return imageUpscaleSema
+}
+
+// acquireUpscaleSlot 取令牌；桶满时阻塞直到有人释放或 ctx 结束（超时/客户断开）。
+// ctx 结束返回错误 → relay 层按既有语义降级返回原图，不会变成 5xx。
+func acquireUpscaleSlot(ctx context.Context, sem chan struct{}) error {
+	if sem == nil {
+		return nil
+	}
+	select {
+	case sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("image upscale concurrency limit reached: %w", ctx.Err())
+	}
+}
+
+func releaseUpscaleSlot(sem chan struct{}) {
+	if sem == nil {
+		return
+	}
+	select {
+	case <-sem:
+	default:
+	}
+}
+
 func (u *ImageUpscaler) UpscaleImage(ctx context.Context, pngData []byte, targetW, targetH int) ([]byte, error) {
+	sem := imageUpscaleSemaphore()
+	if err := acquireUpscaleSlot(ctx, sem); err != nil {
+		return nil, err
+	}
+	defer releaseUpscaleSlot(sem)
+
 	prefix := u.keyFn()
 	srcKey, outKey := prefix+"/src.png", prefix+"/out.png"
 
