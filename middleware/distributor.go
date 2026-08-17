@@ -33,13 +33,21 @@ type ModelRequest struct {
 	// 一个畸形 size 就能把无关请求打成 400。这里宽松接收，解析交给
 	// imageSizeFromRawJSON，拿不到就当没有。
 	Size json.RawMessage `json:"size,omitempty"`
-	// Quality 同上，宽松接收。它与 size 正交：上游把 high/4k/ultra 单独映射成
-	// 4K 档并直接拒绝，与请求的像素尺寸无关。
+	// Quality 同上，宽松接收。它与 size 正交：high/4k/ultra 使用渠道级
+	// 独立能力开关过滤，不参与图片档位计算。
 	Quality json.RawMessage `json:"quality,omitempty"`
+	// 以下字段仅超分资格谓词使用（imageUpscaleEligible）：body 已解析过一遍，
+	// 抄几行等于零额外读取。RawMessage 兼容 JSON 与表单两种来源。
+	N                 json.RawMessage `json:"n,omitempty"`
+	ResponseFormat    json.RawMessage `json:"response_format,omitempty"`
+	Stream            json.RawMessage `json:"stream,omitempty"`
+	Background        json.RawMessage `json:"background,omitempty"`
+	OutputFormat      json.RawMessage `json:"output_format,omitempty"`
+	OutputCompression json.RawMessage `json:"output_compression,omitempty"`
+	PartialImages     json.RawMessage `json:"partial_images,omitempty"`
+	InputFidelity     json.RawMessage `json:"input_fidelity,omitempty"`
 }
 
-// imageSizeFromRawJSON 从宽松接收的 size 值里取出字符串形式。
-// 非字符串（数组 / 数字 / null / 对象）一律返回空串 —— 上层据此放弃分档并放行。
 // imageRequestPathNeedsTier 圈定"size 参数确实是图片分辨率"的路径。
 //
 // 其它协议也有叫 size 的字段但语义不同，不设 context 即等于不过滤。
@@ -50,15 +58,164 @@ func imageRequestPathNeedsTier(path string) bool {
 	return strings.HasPrefix(path, "/v1/images/") || path == "/v1/edits"
 }
 
+func imageEditsRequestPath(path string) bool {
+	return path == "/v1/images/edits" || path == "/v1/edits"
+}
+
+// imageStringValueFromRawJSON extracts the effective value of a permissive image
+// parameter. Repeated form fields arrive as []string; net/url Values.Get and the
+// relay validator both use the first value, so routing must do the same.
+func imageStringValueFromRawJSON(raw json.RawMessage, allowRepeatedFormValues bool) (string, bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var scalar *string
+	if err := common.Unmarshal(raw, &scalar); err == nil {
+		if scalar == nil {
+			return "", true
+		}
+		return *scalar, true
+	}
+	if allowRepeatedFormValues {
+		var values []string
+		if err := common.Unmarshal(raw, &values); err == nil {
+			if len(values) == 0 {
+				return "", true
+			}
+			return values[0], true
+		}
+	}
+	return "", false
+}
+
+// imageSizeFromRawJSON keeps the existing fail-open string API for size and
+// quality callers. Non-string values stay unclassified so later validation owns
+// the client error.
 func imageSizeFromRawJSON(raw json.RawMessage) string {
+	value, _ := imageStringValueFromRawJSON(raw, false)
+	return value
+}
+
+// imageSizeForTierClassification applies the same model default used by image
+// request validation, while leaving malformed non-string values unclassified.
+func imageSizeForTierClassification(model string, raw json.RawMessage, allowRepeatedFormValues bool) string {
+	if len(raw) == 0 {
+		return dto.DefaultImageSizeForModel(model)
+	}
+	size, ok := imageStringValueFromRawJSON(raw, allowRepeatedFormValues)
+	if !ok {
+		return ""
+	}
+	if size == "" {
+		return dto.DefaultImageSizeForModel(model)
+	}
+	return size
+}
+
+// extractImageParamValue 从 JSON RawMessage 提取图片参数值。
+// 支持 JSON 字符串、数字和布尔值，返回字符串表示。
+func extractImageParamValue(raw json.RawMessage, allowRepeatedFormValues bool) string {
 	if len(raw) == 0 {
 		return ""
 	}
-	var size string
-	if err := common.Unmarshal(raw, &size); err != nil {
-		return ""
+	// 尝试作为字符串解析
+	var scalar *string
+	if err := common.Unmarshal(raw, &scalar); err == nil {
+		if scalar == nil {
+			return ""
+		}
+		return *scalar
 	}
-	return size
+	// 尝试作为布尔值解析
+	var boolVal *bool
+	if err := common.Unmarshal(raw, &boolVal); err == nil {
+		if boolVal == nil {
+			return ""
+		}
+		if *boolVal {
+			return "true"
+		}
+		return "false"
+	}
+	// 尝试作为数字解析
+	var num *float64
+	if err := common.Unmarshal(raw, &num); err == nil {
+		if num == nil {
+			return ""
+		}
+		// 格式化为整数（如果是整数）或浮点数
+		if *num == float64(int64(*num)) {
+			return fmt.Sprintf("%d", int64(*num))
+		}
+		return fmt.Sprintf("%v", *num)
+	}
+	// 尝试作为字符串数组解析（表单重复值）
+	if allowRepeatedFormValues {
+		var values []string
+		if err := common.Unmarshal(raw, &values); err == nil {
+			if len(values) == 0 {
+				return ""
+			}
+			return values[0]
+		}
+	}
+	return ""
+}
+
+// imageUpscaleEligible 判定本图片请求是否具备超分资格。
+//
+// 口径与 sub2api 的按实际像素计费门（openai_images_usage_simulation.go 的
+// openAIImagesRequestSimulatable + isSimulatableOpenAIImagesModel）逐字对齐：
+// 只有那条路径会解码实际像素计费，形状不满足时 sub2api 透传上游 usage（降档
+// 后的量）——此时若仍超分，客户拿高清图按低档扣费，漏账。因此两侧必须同步：
+// sub2api 放宽模拟资格可以随后放宽这里（方向安全）；反向收紧必须先收紧这里。
+func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValues bool) bool {
+	switch strings.ToLower(strings.TrimSpace(m.Model)) {
+	case "gpt-image-2", "gpt-image-2-2026-04-21":
+	default:
+		return false
+	}
+	if len(m.PartialImages) > 0 || len(m.OutputCompression) > 0 || len(m.InputFidelity) > 0 {
+		return false
+	}
+	if n := extractImageParamValue(m.N, allowRepeatedFormValues); n != "" && n != "1" {
+		return false
+	}
+	s := extractImageParamValue(m.Stream, allowRepeatedFormValues)
+	if s != "" && strings.ToLower(s) != "false" {
+		return false
+	}
+	b := extractImageParamValue(m.Background, allowRepeatedFormValues)
+	if b != "" && strings.ToLower(b) != "opaque" {
+		return false
+	}
+	f := extractImageParamValue(m.OutputFormat, allowRepeatedFormValues)
+	if f != "" && strings.ToLower(f) != "png" {
+		return false
+	}
+	rf := extractImageParamValue(m.ResponseFormat, allowRepeatedFormValues)
+	if rf != "" && strings.ToLower(rf) != "b64_json" {
+		return false
+	}
+	// edits 带 mask 时 sub2api 不可模拟（HasMask）。multipart 表单里 mask 是文件字段。
+	if c.Request != nil && strings.Contains(c.ContentType(), "multipart") {
+		if _, _, err := c.Request.FormFile("mask"); err == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func noAvailableChannelMessage(group, modelName, tier string, tierRejected, qualityRejected bool) string {
+	switch {
+	case tier != "" && tierRejected && qualityRejected:
+		return fmt.Sprintf("分组 %s 下模型 %s 无可用渠道：部分候选渠道因不支持 %s 档位图片或高质量图片被排除，其余候选当前也不可用（请检查图片档位白名单、高质量图片开关及渠道状态）", group, modelName, tier)
+	case tier != "" && tierRejected:
+		return fmt.Sprintf("分组 %s 下模型 %s 无可用渠道：部分候选渠道因不支持 %s 档位图片被排除，其余候选当前也不可用（请检查图片档位白名单及渠道状态，或改用其它尺寸）", group, modelName, tier)
+	case qualityRejected:
+		return fmt.Sprintf("分组 %s 下模型 %s 无可用渠道：部分候选渠道因未开启高质量图片支持被排除，其余候选当前也不可用（请检查渠道的高质量图片开关及渠道状态）", group, modelName)
+	}
+	return fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", group, modelName)
 }
 
 func Distribute() func(c *gin.Context) {
@@ -68,7 +225,7 @@ func Distribute() func(c *gin.Context) {
 		// JSON 版 images/edits 会经历「整体读入 → RawMessage → 解码 → multipart」
 		// 多份副本放大，必须在第一次 io.ReadAll 之前设置请求体上限，
 		// 超限在进入内存前直接 413（multipart 上传不受影响，走原有路径）
-		if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") &&
+		if imageEditsRequestPath(c.Request.URL.Path) &&
 			!strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, openaichannel.MaxImagesEditsJSONBodyBytes())
 		}
@@ -614,47 +771,47 @@ func Distribute() func(c *gin.Context) {
 
 										// Try each untried child group
 										for _, childGroup := range untriedGroups {
-										// CRITICAL: Override ContextKeyPlanGroups before calling CacheGetRandomSatisfiedChannel
-										// The function prioritizes plan_groups over the passed group parameter (see service/channel_select.go:20-67)
-										// Without this, it would keep trying the failed plan groups instead of the new child group
-										c.Set(string(constant.ContextKeyPlanGroups), []string{childGroup})
+											// CRITICAL: Override ContextKeyPlanGroups before calling CacheGetRandomSatisfiedChannel
+											// The function prioritizes plan_groups over the passed group parameter (see service/channel_select.go:20-67)
+											// Without this, it would keep trying the failed plan groups instead of the new child group
+											c.Set(string(constant.ContextKeyPlanGroups), []string{childGroup})
 
-										for retry := 0; retry < 1000; retry++ {
-											channel, _, err = service.CacheGetRandomSatisfiedChannel(c, childGroup, modelRequest.Model, retry)
+											for retry := 0; retry < 1000; retry++ {
+												channel, _, err = service.CacheGetRandomSatisfiedChannel(c, childGroup, modelRequest.Model, retry)
 
-											if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
-												err = nil // Clear expected error
-												break     // Try next child group
-											}
+												if err != nil && errors.Is(err, model.ErrPriorityExhausted) {
+													err = nil // Clear expected error
+													break     // Try next child group
+												}
 
-											if err != nil {
-												break // System error, try next child group
+												if err != nil {
+													break // System error, try next child group
+												}
+
+												if channel != nil {
+													// Found channel! Switch to wallet billing mode
+													logger.LogInfo(c, fmt.Sprintf("[ChildGroupFallback] user=%d found channel=%d in group=%s, switching to wallet billing",
+														userId, channel.Id, childGroup))
+
+													// Clear plan context - switch to wallet billing
+													c.Set(string(constant.ContextKeyPlanId), 0)
+													c.Set(string(constant.ContextKeyUserPlanId), 0)
+													c.Set(string(constant.ContextKeyPlanName), "")
+
+													// Update group context
+													common.SetContextKey(c, constant.ContextKeyUsingGroup, childGroup)
+													common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{childGroup})
+													usingGroup = childGroup
+
+													setAutoGroupContext(c, usingGroup, channel)
+													break
+												}
 											}
 
 											if channel != nil {
-												// Found channel! Switch to wallet billing mode
-												logger.LogInfo(c, fmt.Sprintf("[ChildGroupFallback] user=%d found channel=%d in group=%s, switching to wallet billing",
-													userId, channel.Id, childGroup))
-
-												// Clear plan context - switch to wallet billing
-												c.Set(string(constant.ContextKeyPlanId), 0)
-												c.Set(string(constant.ContextKeyUserPlanId), 0)
-												c.Set(string(constant.ContextKeyPlanName), "")
-
-												// Update group context
-												common.SetContextKey(c, constant.ContextKeyUsingGroup, childGroup)
-												common.SetContextKey(c, constant.ContextKeyPlanGroups, []string{childGroup})
-												usingGroup = childGroup
-
-												setAutoGroupContext(c, usingGroup, channel)
-												break
+												break // Found channel, exit outer loop
 											}
 										}
-
-										if channel != nil {
-											break // Found channel, exit outer loop
-										}
-									}
 									}
 								}
 							}
@@ -688,12 +845,10 @@ func Distribute() func(c *gin.Context) {
 							// 但只有真的排除过才点名：channel==nil 是所有失败原因的共同出口
 							// （渠道全挂、模型没配到这个分组、套餐把组滤空），仅凭"本次请求有档位"
 							// 就归咎于白名单，会把最常见的故障伪装成一个几乎不存在的配置问题。
-							if tier := common.GetContextKeyString(c, constant.ContextKeyImageSizeTier); tier != "" &&
-								common.GetContextKeyBool(c, constant.ContextKeyImageTierRejected) {
-								abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道：没有渠道声明支持 %s 档位图片（请检查渠道设置中的图片档位白名单，或改用其它尺寸）", usingGroup, modelRequest.Model, tier), string(types.ErrorCodeModelNotFound))
-								return
-							}
-							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", usingGroup, modelRequest.Model), string(types.ErrorCodeModelNotFound))
+							tier := common.GetContextKeyString(c, constant.ContextKeyImageSizeTier)
+							tierRejected := common.GetContextKeyBool(c, constant.ContextKeyImageTierRejected)
+							qualityRejected := common.GetContextKeyBool(c, constant.ContextKeyImageQualityRejected)
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, noAvailableChannelMessage(usingGroup, modelRequest.Model, tier, tierRejected, qualityRejected), string(types.ErrorCodeModelNotFound))
 							return
 						}
 					}
@@ -1000,6 +1155,15 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		// 顺带带走 size / quality：body 已经解析过一遍，抄两行等于零额外读取
 		modelRequest.Size = req.Size
 		modelRequest.Quality = req.Quality
+		// 同时抄超分资格谓词需要的字段
+		modelRequest.N = req.N
+		modelRequest.ResponseFormat = req.ResponseFormat
+		modelRequest.Stream = req.Stream
+		modelRequest.Background = req.Background
+		modelRequest.OutputFormat = req.OutputFormat
+		modelRequest.OutputCompression = req.OutputCompression
+		modelRequest.PartialImages = req.PartialImages
+		modelRequest.InputFidelity = req.InputFidelity
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/realtime") {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01
@@ -1017,7 +1181,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations") {
 		modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "dall-e")
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") || c.Request.URL.Path == "/v1/edits" {
+	} else if imageEditsRequestPath(c.Request.URL.Path) {
 		// /v1/edits 是 router/relay-router.go:101 给图片中继开的别名，走同一套
 		// multipart 解析。原来只匹配 /v1/images/edits，别名请求的表单 model
 		// 从来没被解析过（存量缺陷），档位过滤又会跟着一起失效
@@ -1034,16 +1198,33 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 				}
 				modelRequest.Size = req.Size
 				modelRequest.Quality = req.Quality
+				// 同时抄超分资格谓词需要的字段
+				modelRequest.N = req.N
+				modelRequest.ResponseFormat = req.ResponseFormat
+				modelRequest.Stream = req.Stream
+				modelRequest.Background = req.Background
+				modelRequest.OutputFormat = req.OutputFormat
+				modelRequest.OutputCompression = req.OutputCompression
+				modelRequest.PartialImages = req.PartialImages
+				modelRequest.InputFidelity = req.InputFidelity
 			}
 		}
 	}
 	if imageRequestPathNeedsTier(c.Request.URL.Path) {
-		// quality 是独立于 size 的一维：上游把 high/4k/ultra 单独映射成 4K 并直接拒绝，
-		// quality="high" 配 size="1024x1024" 一样被拒。只看 size 会漏掉这整条路径。
-		if dto.ImageQualityForcesHighestTier(imageSizeFromRawJSON(modelRequest.Quality)) {
-			common.SetContextKey(c, constant.ContextKeyImageSizeTier, dto.ImageSizeTier4K)
-		} else if tier, ok := dto.ClassifyImageRoutingTier(imageSizeFromRawJSON(modelRequest.Size)); ok {
+		// 图片档位只由 size 决定；quality 使用独立渠道能力开关，二者互不改写。
+		allowRepeatedFormValues := slices.Contains(
+			[]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm},
+			c.ContentType(),
+		)
+		if tier, ok := dto.ClassifyImageRoutingTier(imageSizeForTierClassification(modelRequest.Model, modelRequest.Size, allowRepeatedFormValues)); ok {
 			common.SetContextKey(c, constant.ContextKeyImageSizeTier, tier)
+		}
+		quality, _ := imageStringValueFromRawJSON(modelRequest.Quality, allowRepeatedFormValues)
+		if dto.ImageQualityRequiresCapability(quality) {
+			common.SetContextKey(c, constant.ContextKeyImageHighQuality, true)
+		}
+		if imageUpscaleEligible(c, &modelRequest, allowRepeatedFormValues) {
+			common.SetContextKey(c, constant.ContextKeyImageUpscaleEligible, true)
 		}
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/audio") {
