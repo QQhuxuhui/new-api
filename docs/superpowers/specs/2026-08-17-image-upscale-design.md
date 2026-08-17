@@ -23,7 +23,7 @@
 |---|---|
 | 插入层 | new-api（不动 sub2api / cliproxyapi） |
 | 中间档派生 | 宽松：规则 `1K→4K` 使 2K 也可达（`(native_max, To]` 全部） |
-| 端点范围 | 仅 `/v1/images/generations`、`/v1/images/edits`；chat 出图路径不做 |
+| 端点范围 | 仅 `/v1/images/generations`（**勘误 2026-08-18**：edits 的 adaptor 转换路径不读 `request.Size`，降档无法抵达上游，实施期裁决 edits 整体退出本期超分、转后续迭代；原文含 edits）；chat 出图路径不做 |
 | 每渠道规则数 | 至多一条，校验层强制 |
 | GPU 平台 | RunPod Serverless（flex worker，scale-to-zero） |
 | 模型 | Real-ESRGAN x4plus（A 类忠实放大，不重绘） |
@@ -316,3 +316,10 @@ token 量显著高于 1K，走该 bug 路径的分组账单会相应变大 —�
 - 降级时对直连用户的自动退款；
 - B 类扩散重绘（Magnific 风格加细节）——接口留白：`ImageUpscaleRule` 未来可加
   `engine` 字段，RunPod 侧另起 endpoint，本期不设计。
+
+## 勘误（2026-08-18，实施期）
+
+1. **edits 退出本期范围**：§1/§6 中 `/v1/images/edits` 的超分支持移入 §14"明确不做"。原因：edits 的两条 adaptor 转换路径（multipart 逐字复制与 JSON 逐字复制）均不读取降档后的 `request.Size`，降档尺寸无法抵达上游；资格谓词已按路径排除 edits，其行为回到纯原生。后续迭代需在 adaptor 层实现 size 改写后方可纳入。
+2. **§8 论证修正**：sub2api 非模拟兜底路径实际只读 `data[].size` 项级声明，不读根级 `size`；无声明 size 时回落请求 size 判档，结论（改写后判档正确）不变，但"根级 size 兜底"论证前提有误。实现同时改写根级与项级，行为安全。
+3. **总开关语义补强**：路由派生可达集同样受 `IMAGE_UPSCALE_ENABLED`（经 `GetImageUpscaler() != nil`）约束，配置了 upscale 规则但模块未启用的渠道不派生，防止"配置先于开关落地"的失配窗口。
+4. **新增环境变量**：`IMAGE_UPSCALE_MAX_CONCURRENCY`（默认 4）——超分回程并发上限，防大 body 并发放大（本机曾有 global_oom 前科）。
