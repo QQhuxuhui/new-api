@@ -17,14 +17,21 @@ type ChannelSelectFilter struct {
 	// ImageSizeTier 为空表示本次请求判不出档位（auto、比例写法、解析失败），
 	// 此时一律不过滤：选路过滤只做"明确不支持时提前排除"，不确定必须 fail open。
 	ImageSizeTier string
+	// ImageHighQuality 表示 quality 为 high/4k/ultra，需要渠道独立声明支持。
+	ImageHighQuality bool
+	// UpscaleEligible 本请求具备超分资格（context 注入），派生可达集仅在 true 时生效
+	UpscaleEligible bool
 
-	// rejected 记录本次选路是否真的因档位排除掉过渠道，供无可用渠道时决定报错文案。
-	rejected bool
+	// 拒绝原因分开记录，避免把 quality 开关拒绝误报成 size 档位不支持。
+	rejected             bool
+	imageSizeRejected    bool
+	imageQualityRejected bool
+	imageSizeViaUpscale  int // 观测：经超分派生（而非原生白名单）通过的次数
 }
 
 // MarkRejected 由各条选路路径在真的排除掉渠道时调用。
 //
-// 没有这个信号的话，"无可用渠道"的报错只能靠"本次请求有没有档位"来决定文案，
+// 没有这个信号的话，"无可用渠道"的报错只能靠"本次请求有没有能力约束"来决定文案，
 // 而 channel==nil 是所有失败原因的共同出口——渠道全挂、模型没配到这个分组、
 // 套餐把组滤空都会走到那里。那样最常见的故障会被伪装成一个几乎不存在的
 // 白名单配置问题，把运维的排查方向带偏，比泛化文案更糟。
@@ -42,10 +49,38 @@ func (f *ChannelSelectFilter) Rejected() bool {
 	return f != nil && f.rejected
 }
 
+func (f *ChannelSelectFilter) markImageSizeRejected() {
+	if f != nil {
+		f.rejected = true
+		f.imageSizeRejected = true
+	}
+}
+
+func (f *ChannelSelectFilter) markImageQualityRejected() {
+	if f != nil {
+		f.rejected = true
+		f.imageQualityRejected = true
+	}
+}
+
+func (f *ChannelSelectFilter) markImageSizeViaUpscale() {
+	if f != nil {
+		f.imageSizeViaUpscale++
+	}
+}
+
+func (f *ChannelSelectFilter) ImageSizeRejected() bool {
+	return f != nil && f.imageSizeRejected
+}
+
+func (f *ChannelSelectFilter) ImageQualityRejected() bool {
+	return f != nil && f.imageQualityRejected
+}
+
 // Active 表示本次选路真的需要过滤。非图片请求恒为 false，
 // 用它把所有额外开销（DB 批量查询、逐渠道 setting 解析）挡在门外。
 func (f *ChannelSelectFilter) Active() bool {
-	return f != nil && f.ImageSizeTier != ""
+	return f != nil && (f.ImageSizeTier != "" || f.ImageHighQuality)
 }
 
 // Describe 供无可用渠道时的错误文案与日志使用。
@@ -53,7 +88,14 @@ func (f *ChannelSelectFilter) Describe() string {
 	if !f.Active() {
 		return ""
 	}
-	return fmt.Sprintf("图片档位 %s", f.ImageSizeTier)
+	switch {
+	case f.ImageSizeTier != "" && f.ImageHighQuality:
+		return fmt.Sprintf("图片档位 %s 与高质量图片能力", f.ImageSizeTier)
+	case f.ImageSizeTier != "":
+		return fmt.Sprintf("图片档位 %s", f.ImageSizeTier)
+	default:
+		return "高质量图片能力"
+	}
 }
 
 // channelSatisfiesFilter 判定单个渠道是否满足本次选路约束。
@@ -64,7 +106,21 @@ func channelSatisfiesFilter(channel *Channel, filter *ChannelSelectFilter) bool 
 		return true
 	}
 	setting := channel.GetSettingReadonly()
-	return setting.ImageSizes.Allow(filter.ImageSizeTier)
+	satisfied := true
+	if filter.ImageSizeTier != "" {
+		if !setting.ImageSizes.AllowWithUpscale(filter.ImageSizeTier, filter.UpscaleEligible) {
+			filter.markImageSizeRejected()
+			satisfied = false
+		} else if !setting.ImageSizes.Allow(filter.ImageSizeTier) {
+			// 原生不通、派生通 ⇒ 这条渠道的该档位是超分出来的，运营侧要看得见
+			filter.markImageSizeViaUpscale()
+		}
+	}
+	if filter.ImageHighQuality && setting.ImageQualityEnabled != nil && !*setting.ImageQualityEnabled {
+		filter.markImageQualityRejected()
+		satisfied = false
+	}
+	return satisfied
 }
 
 // channelSettingRow 只取选路过滤需要的两列，避免把 key 等大字段拉进内存。

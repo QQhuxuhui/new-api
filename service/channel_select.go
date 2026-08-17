@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// channelSelectFilterFromContext 把 distributor 在解析请求时算好的图片档位
-// 翻译成选路约束。这里是全仓唯一进 model 层选路的入口，六条调用路径
+// channelSelectFilterFromContext 把 distributor 在解析请求时算好的图片档位与
+// 高质量要求翻译成选路约束。这里是全仓唯一进 model 层选路的入口，六条调用路径
 // （首选 / 并发重试 / controller 重试 / warmup 补扫 / 跨套餐 failover /
 // 钱包降级）都收敛在下面两个 selectFrom 闭包，因此只需在此处取一次。
 //
@@ -23,22 +23,29 @@ func channelSelectFilterFromContext(c *gin.Context) *model.ChannelSelectFilter {
 		return nil
 	}
 	tier := common.GetContextKeyString(c, constant.ContextKeyImageSizeTier)
-	if tier == "" {
+	highQuality := common.GetContextKeyBool(c, constant.ContextKeyImageHighQuality)
+	upscaleEligible := common.GetContextKeyBool(c, constant.ContextKeyImageUpscaleEligible)
+	if tier == "" && !highQuality {
 		return nil
 	}
-	return &model.ChannelSelectFilter{ImageSizeTier: tier}
+	return &model.ChannelSelectFilter{ImageSizeTier: tier, ImageHighQuality: highQuality, UpscaleEligible: upscaleEligible}
 }
 
-// markImageTierRejected 把"本轮确实有渠道因档位出局"从 model 层带回 Context。
+// markImageCapabilityRejected 把本轮真实发生的图片能力拒绝原因带回 Context。
 //
 // filter 每次选路新建，跨轮不累计；而无可用渠道的判定发生在所有优先级、
 // 所有分组都试完之后，所以必须落到 Context 上累计。只置位不清零：
-// 任何一轮排除过，就说明档位确实参与了这次失败。
-func markImageTierRejected(c *gin.Context, filter *model.ChannelSelectFilter) {
+// 任何一轮排除过，就说明对应的图片能力约束确实参与了这次失败。
+func markImageCapabilityRejected(c *gin.Context, filter *model.ChannelSelectFilter) {
 	if c == nil || !filter.Rejected() {
 		return
 	}
-	common.SetContextKey(c, constant.ContextKeyImageTierRejected, true)
+	if filter.ImageSizeRejected() {
+		common.SetContextKey(c, constant.ContextKeyImageTierRejected, true)
+	}
+	if filter.ImageQualityRejected() {
+		common.SetContextKey(c, constant.ContextKeyImageQualityRejected, true)
+	}
 }
 
 func CacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName string, retry int) (*model.Channel, string, error) {
@@ -66,7 +73,7 @@ func cacheGetRandomSatisfiedChannel(c *gin.Context, group string, modelName stri
 		if warned {
 			common.SetContextKey(c, constant.ContextKeyWarningChannelSkipped, true)
 		}
-		markImageTierRejected(c, capabilityFilter)
+		markImageCapabilityRejected(c, capabilityFilter)
 		return ch, selErr
 	}
 
@@ -181,7 +188,7 @@ func cacheGetRandomSatisfiedChannelExcluding(c *gin.Context, group string, model
 		if warned {
 			common.SetContextKey(c, constant.ContextKeyWarningChannelSkipped, true)
 		}
-		markImageTierRejected(c, capabilityFilter)
+		markImageCapabilityRejected(c, capabilityFilter)
 		return ch, selErr
 	}
 
