@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -27,6 +28,14 @@ func TestLoadImageUpscaleConfig(t *testing.T) {
 	}
 	if cfg.S3Region != "auto" {
 		t.Fatalf("默认 region 应 auto, got %v", cfg.S3Region)
+	}
+
+	t.Setenv("IMAGE_UPSCALE_S3_ENDPOINT", "https://acc.r2.cloudflarestorage.com/")
+	if got := loadImageUpscaleConfigFromEnv(); got == nil || strings.HasSuffix(got.S3Endpoint, "/") {
+		if got == nil {
+			t.Fatal("S3Endpoint 带尾斜杠应正常加载")
+		}
+		t.Fatalf("S3Endpoint 应去除尾斜杠, got %q", got.S3Endpoint)
 	}
 
 	t.Setenv("IMAGE_UPSCALE_TIMEOUT", "120s")

@@ -30,7 +30,7 @@ func loadImageUpscaleConfigFromEnv() *ImageUpscaleConfig {
 		Endpoint:    strings.TrimRight(os.Getenv("IMAGE_UPSCALE_RUNPOD_ENDPOINT"), "/"),
 		APIKey:      os.Getenv("IMAGE_UPSCALE_RUNPOD_API_KEY"),
 		Timeout:     90 * time.Second,
-		S3Endpoint:  os.Getenv("IMAGE_UPSCALE_S3_ENDPOINT"),
+		S3Endpoint:  strings.TrimRight(os.Getenv("IMAGE_UPSCALE_S3_ENDPOINT"), "/"),
 		S3Region:    os.Getenv("IMAGE_UPSCALE_S3_REGION"),
 		S3Bucket:    os.Getenv("IMAGE_UPSCALE_S3_BUCKET"),
 		S3AccessKey: os.Getenv("IMAGE_UPSCALE_S3_AK"),
