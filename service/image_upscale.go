@@ -58,7 +58,12 @@ func GetImageUpscaler() *ImageUpscaler {
 }
 
 // Timeout 暴露给 relay 层做 context.WithTimeout。
-func (u *ImageUpscaler) Timeout() time.Duration { return u.cfg.Timeout }
+func (u *ImageUpscaler) Timeout() time.Duration {
+	if u == nil {
+		return 90 * time.Second
+	}
+	return u.cfg.Timeout
+}
 
 func (u *ImageUpscaler) UpscaleImage(ctx context.Context, pngData []byte, targetW, targetH int) ([]byte, error) {
 	prefix := u.keyFn()
@@ -84,6 +89,9 @@ func (u *ImageUpscaler) UpscaleImage(ctx context.Context, pngData []byte, target
 	if err != nil {
 		return nil, err
 	}
+	if jobID == "" || status == "" {
+		return nil, fmt.Errorf("runpod submit: malformed response (jobID=%q, status=%q)", jobID, status)
+	}
 	for status != "COMPLETED" {
 		switch status {
 		case "FAILED", "CANCELLED", "TIMED_OUT":
@@ -96,6 +104,9 @@ func (u *ImageUpscaler) UpscaleImage(ctx context.Context, pngData []byte, target
 		}
 		if status, err = u.runpodStatus(ctx, jobID); err != nil {
 			return nil, err
+		}
+		if status == "" {
+			return nil, fmt.Errorf("runpod status: malformed response (status='')")
 		}
 	}
 

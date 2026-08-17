@@ -140,3 +140,36 @@ func TestUpscaleImageRunpodFailed(t *testing.T) {
 		t.Fatal("FAILED 状态必须报错")
 	}
 }
+
+func TestImageUpscalerTimeout(t *testing.T) {
+	var u *ImageUpscaler
+	if u == nil {
+		// 应该不 panic，而是返回安全默认值
+		d := u.Timeout()
+		if d != 90*time.Second {
+			t.Fatalf("nil receiver Timeout() 应返回 90s，got %v", d)
+		}
+	}
+}
+
+func TestUpscaleImageMalformedRunpodResponse(t *testing.T) {
+	store := newMemStore()
+	rp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/run" {
+			// 返回畸形 JSON（缺少 id 和 status）
+			_ = json.NewEncoder(w).Encode(map[string]any{"garbage": true})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "j", "status": "COMPLETED"})
+	}))
+	defer rp.Close()
+	u := &ImageUpscaler{
+		cfg: &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: 5 * time.Second},
+		store: store, http: rp.Client(),
+		keyFn: func() string { return "upscale/test/req4" }, pollInterval: 10 * time.Millisecond,
+	}
+	// 应该立即报错，而不是轮询到超时
+	if _, err := u.UpscaleImage(context.Background(), pngBytes(t, 32, 32), 128, 128); err == nil {
+		t.Fatal("畸形 RunPod 响应必须立即报错")
+	}
+}
