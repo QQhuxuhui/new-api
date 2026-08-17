@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/sjson"
 )
 
 func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
@@ -38,6 +40,14 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError)
 	}
 
+	var upscalePlan *imageUpscalePlan
+	if service.GetImageUpscaler() != nil {
+		upscalePlan = resolveImageUpscalePlan(c, info, request.Size)
+	}
+	if upscalePlan != nil {
+		request.Size = upscalePlan.DowngradedSize
+	}
+
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
@@ -50,6 +60,19 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		body, err := common.GetRequestBody(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+		if upscalePlan != nil {
+			if strings.Contains(c.ContentType(), "multipart") {
+				// multipart 透传无法安全改写表单 size：放弃超分，纯原生直通。
+				// （该组合 = edits + passthrough 渠道 + 超分规则，运营上应避免。）
+				logger.LogWarn(c, "image_upscale: multipart passthrough, skip upscale")
+				upscalePlan = nil
+			} else if rewritten, err := sjson.SetBytes(body, "size", upscalePlan.DowngradedSize); err == nil {
+				body = rewritten
+			} else {
+				logger.LogWarn(c, fmt.Sprintf("image_upscale: passthrough size rewrite failed, skip upscale: %v", err))
+				upscalePlan = nil
+			}
 		}
 		requestBody = bytes.NewBuffer(body)
 	} else {
@@ -105,6 +128,31 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		}
 	}
 
+	if upscalePlan != nil && httpResp != nil && !info.IsStream {
+		upstreamBody, readErr := io.ReadAll(httpResp.Body)
+		_ = httpResp.Body.Close()
+		if readErr != nil {
+			return types.NewOpenAIError(readErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+		}
+		upscaler := service.GetImageUpscaler()
+		upscaleCtx, cancel := context.WithTimeout(c.Request.Context(), upscaler.Timeout())
+		newBody, upErr := service.RewriteImageResponseWithUpscale(
+			upscaleCtx, upstreamBody, upscalePlan.TargetW, upscalePlan.TargetH, upscaler.UpscaleImage)
+		cancel()
+		if upErr != nil {
+			// 降级：返回上游原图（降档尺寸）。sub2api 按实际像素计费 ⇒ 自动按低档收，
+			// 不会多收；绝不因超分失败吞掉一次已付费的生成。
+			logger.LogWarn(c, fmt.Sprintf("image_upscale_degraded: %v", upErr))
+			newBody = upstreamBody
+		} else {
+			logger.LogInfo(c, fmt.Sprintf("image_upscale_done: %s→%dx%d",
+				upscalePlan.FromTier, upscalePlan.TargetW, upscalePlan.TargetH))
+		}
+		httpResp.Body = io.NopCloser(bytes.NewReader(newBody))
+		httpResp.ContentLength = int64(len(newBody))
+		httpResp.Header.Del("Content-Length")
+	}
+
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
 	if newAPIError != nil {
 		// reset status code 重置状态码
@@ -126,8 +174,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 
 	var logContent string
 
-	if len(request.Size) > 0 {
-		logContent = fmt.Sprintf("大小 %s, 品质 %s, 张数 %d", request.Size, quality, request.N)
+	if len(imageReq.Size) > 0 {
+		logContent = fmt.Sprintf("大小 %s, 品质 %s, 张数 %d", imageReq.Size, quality, request.N)
+		if upscalePlan != nil {
+			logContent += fmt.Sprintf("（%s 超分）", upscalePlan.FromTier)
+		}
 	}
 
 	postConsumeQuota(c, info, usage.(*dto.Usage), logContent)
