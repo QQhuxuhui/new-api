@@ -65,4 +65,14 @@ func TestResolveImageUpscalePlan(t *testing.T) {
 	if resolveImageUpscalePlan(planCtx("4K", true), noRule, "3840x2160") != nil {
 		t.Fatal("无规则渠道不应产出 plan")
 	}
+	nilImageSizes := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{
+				ImageSizes: nil,
+			},
+		},
+	}
+	if resolveImageUpscalePlan(planCtx("4K", true), nilImageSizes, "3840x2160") != nil {
+		t.Fatal("ImageSizes 为 nil 不应产出 plan")
+	}
 }

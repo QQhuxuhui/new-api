@@ -40,8 +40,9 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError)
 	}
 
+	upscaler := service.GetImageUpscaler()
 	var upscalePlan *imageUpscalePlan
-	if service.GetImageUpscaler() != nil {
+	if upscaler != nil {
 		upscalePlan = resolveImageUpscalePlan(c, info, request.Size)
 	}
 	if upscalePlan != nil {
@@ -134,7 +135,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		if readErr != nil {
 			return types.NewOpenAIError(readErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 		}
-		upscaler := service.GetImageUpscaler()
+		// c.Request.Context() 已取消时超分立即失败并走降级返回原图，属预期行为。
 		upscaleCtx, cancel := context.WithTimeout(c.Request.Context(), upscaler.Timeout())
 		newBody, upErr := service.RewriteImageResponseWithUpscale(
 			upscaleCtx, upstreamBody, upscalePlan.TargetW, upscalePlan.TargetH, upscaler.UpscaleImage)
