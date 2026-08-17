@@ -400,6 +400,12 @@ func GenRelayInfoGemini(c *gin.Context, request dto.Request) *RelayInfo {
 func GenRelayInfoImage(c *gin.Context, request dto.Request) *RelayInfo {
 	info := genBaseRelayInfo(c, request)
 	info.RelayFormat = types.RelayFormatOpenAIImage
+	if c.Request.URL.Path == "/v1/edits" {
+		requestURL := *c.Request.URL
+		requestURL.Path = "/v1/images/edits"
+		requestURL.RawPath = ""
+		info.RequestURLPath = requestURL.String()
+	}
 	return info
 }
 

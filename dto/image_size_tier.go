@@ -16,6 +16,18 @@ const (
 	ImageSizeTier4K = "4K"
 )
 
+// DefaultImageSizeForModel returns the size applied later by image request
+// validation. Routing must use the same default so omitted sizes do not bypass
+// channel capability filtering.
+func DefaultImageSizeForModel(model string) string {
+	switch model {
+	case "dall-e", "dall-e-2", "dall-e-3":
+		return "1024x1024"
+	default:
+		return ""
+	}
+}
+
 // imageSizeTierRatioTable 是 gpt-image-2 各宽高比 × 各档位的实测原生尺寸。
 // 只保留尺寸（token 数是计费侧的事，选路用不到，抄过来只会随上游调价而腐烂）。
 var imageSizeTierRatioTable = map[string]map[string]string{
@@ -163,13 +175,13 @@ func ClassifyImageRoutingTier(size string) (string, bool) {
 	}
 }
 
-// ImageQualityForcesHighestTier 判断 quality 参数是否独立要求 4K。
+// ImageQualityRequiresCapability 判断 quality 参数是否需要渠道显式支持高质量图片。
 //
 // 上游把 quality 单独映射成 output_resolution（adobe2api core/models/quality.py 的
 // 别名表 + api/routes/generation.py:801），high/4k/ultra 会直接 400，
 // **与 size 完全无关**：quality="high" 配 size="1024x1024" 一样被拒。
-// 只看 size 的话这一整维都在过滤器视野之外。
-func ImageQualityForcesHighestTier(quality string) bool {
+// 因此它使用独立渠道开关，绝不参与图片 size 档位计算。
+func ImageQualityRequiresCapability(quality string) bool {
 	switch strings.TrimSpace(strings.ToLower(quality)) {
 	case "high", "4k", "ultra":
 		return true

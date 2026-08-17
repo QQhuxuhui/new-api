@@ -1,9 +1,28 @@
 package dto
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
+
+func TestDefaultImageSizeForModel(t *testing.T) {
+	cases := map[string]string{
+		"dall-e":      "1024x1024",
+		"dall-e-2":    "1024x1024",
+		"dall-e-3":    "1024x1024",
+		"gpt-image-1": "",
+		"gpt-image-2": "",
+		"":            "",
+	}
+	for model, want := range cases {
+		t.Run(model, func(t *testing.T) {
+			if got := DefaultImageSizeForModel(model); got != want {
+				t.Fatalf("DefaultImageSizeForModel(%q) = %q, want %q", model, got, want)
+			}
+		})
+	}
+}
 
 func TestClassifyImageBillingTier(t *testing.T) {
 	cases := []struct {
@@ -187,15 +206,15 @@ func TestBillingTierUnchangedAtDivergencePoints(t *testing.T) {
 	}
 }
 
-func TestImageQualityForcesHighestTier(t *testing.T) {
+func TestImageQualityRequiresCapability(t *testing.T) {
 	for _, q := range []string{"high", "HIGH", " 4k ", "ultra", "4K"} {
-		if !ImageQualityForcesHighestTier(q) {
-			t.Fatalf("quality %q should force 4K", q)
+		if !ImageQualityRequiresCapability(q) {
+			t.Fatalf("quality %q should require the independent channel capability", q)
 		}
 	}
 	for _, q := range []string{"", "auto", "medium", "low", "standard", "hd", "2k", "1k", "garbage"} {
-		if ImageQualityForcesHighestTier(q) {
-			t.Fatalf("quality %q must not force 4K", q)
+		if ImageQualityRequiresCapability(q) {
+			t.Fatalf("quality %q must not require the high-quality capability", q)
 		}
 	}
 }
@@ -212,7 +231,7 @@ func TestImageSizeCapability_Validate(t *testing.T) {
 	}
 }
 
-// 存量渠道的 setting 反序列化后再序列化，不能凭空多出 image_sizes
+// 存量渠道的 setting 反序列化后再序列化，不能凭空多出图片能力配置。
 func TestChannelSettings_ImageSizesOmittedWhenAbsent(t *testing.T) {
 	var settings ChannelSettings
 	if err := json.Unmarshal([]byte(`{"proxy":"","always_healthy":true}`), &settings); err != nil {
@@ -220,6 +239,9 @@ func TestChannelSettings_ImageSizesOmittedWhenAbsent(t *testing.T) {
 	}
 	if settings.ImageSizes != nil {
 		t.Fatal("ImageSizes should stay nil when absent")
+	}
+	if settings.ImageQualityEnabled != nil {
+		t.Fatal("ImageQualityEnabled should stay nil when absent")
 	}
 	encoded, err := json.Marshal(settings)
 	if err != nil {
@@ -231,6 +253,9 @@ func TestChannelSettings_ImageSizesOmittedWhenAbsent(t *testing.T) {
 	}
 	if _, ok := roundTrip["image_sizes"]; ok {
 		t.Fatalf("image_sizes must not be emitted for legacy settings, got %s", encoded)
+	}
+	if _, ok := roundTrip["image_quality_enabled"]; ok {
+		t.Fatalf("image_quality_enabled must not be emitted for legacy settings, got %s", encoded)
 	}
 }
 
@@ -247,5 +272,22 @@ func TestChannelSettings_ImageSizesRoundTrip(t *testing.T) {
 	}
 	if !settings.ImageSizes.Allow(ImageSizeTier1K) {
 		t.Fatal("1K should be allowed by the parsed allowlist")
+	}
+}
+
+func TestChannelSettings_ImageQualityEnabledRoundTrip(t *testing.T) {
+	var settings ChannelSettings
+	if err := json.Unmarshal([]byte(`{"image_quality_enabled":false}`), &settings); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if settings.ImageQualityEnabled == nil || *settings.ImageQualityEnabled {
+		t.Fatalf("ImageQualityEnabled = %v, want explicit false", settings.ImageQualityEnabled)
+	}
+	encoded, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(encoded, []byte(`"image_quality_enabled":false`)) {
+		t.Fatalf("explicit false must survive round trip, got %s", encoded)
 	}
 }

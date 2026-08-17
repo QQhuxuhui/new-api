@@ -29,10 +29,19 @@ func TestChannelSelectFilterFromContext(t *testing.T) {
 		t.Fatalf("empty tier must fail open (nil filter), got %+v", filter)
 	}
 
+	common.SetContextKey(c, constant.ContextKeyImageHighQuality, true)
+	qualityFilter := channelSelectFilterFromContext(c)
+	if qualityFilter == nil || !qualityFilter.ImageHighQuality || qualityFilter.ImageSizeTier != "" {
+		t.Fatalf("filter = %+v, want independent ImageHighQuality constraint", qualityFilter)
+	}
+	if !qualityFilter.Active() {
+		t.Fatal("high-quality-only filter must be Active")
+	}
+
 	common.SetContextKey(c, constant.ContextKeyImageSizeTier, "4K")
 	filter := channelSelectFilterFromContext(c)
-	if filter == nil || filter.ImageSizeTier != "4K" {
-		t.Fatalf("filter = %+v, want ImageSizeTier=4K", filter)
+	if filter == nil || filter.ImageSizeTier != "4K" || !filter.ImageHighQuality {
+		t.Fatalf("filter = %+v, want ImageSizeTier=4K plus ImageHighQuality", filter)
 	}
 	if !filter.Active() {
 		t.Fatal("filter with a tier must be Active")

@@ -257,6 +257,8 @@ const EditChannelModal = (props) => {
     stream_timeout_seconds: '',
     // 图片档位白名单：空数组=不限制（全部档位放行）
     image_size_tiers: [],
+    // 高质量图片能力：默认开启，关闭时才写入显式 false
+    image_quality_enabled: true,
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -665,6 +667,8 @@ const EditChannelModal = (props) => {
           data.image_size_tiers = normalizeImageSizeTiers(
             parsedSettings.image_sizes && parsedSettings.image_sizes.allowed,
           );
+          data.image_quality_enabled =
+            parsedSettings.image_quality_enabled !== false;
           // 注意 0 是合法值（永不超时），不能用 || 兜底
           data.stream_timeout_seconds =
             parsedSettings.stream_timeout_seconds === undefined ||
@@ -693,6 +697,7 @@ const EditChannelModal = (props) => {
           data.always_healthy = false;
           data.stream_timeout_seconds = '';
           data.image_size_tiers = [];
+          data.image_quality_enabled = true;
         }
       } else {
         originalChannelSettingRef.current = null;
@@ -714,6 +719,7 @@ const EditChannelModal = (props) => {
         data.always_healthy = false;
         data.stream_timeout_seconds = '';
         data.image_size_tiers = [];
+        data.image_quality_enabled = true;
       }
 
       if (data.settings) {
@@ -1504,6 +1510,11 @@ const EditChannelModal = (props) => {
       imageSizeTiers.length > 0
         ? { image_sizes: { allowed: imageSizeTiers } }
         : {};
+    // 存量渠道未配置时默认放行；只有管理员明确关闭才持久化 false。
+    const imageQualitySetting =
+      localInputs.image_quality_enabled === false
+        ? { image_quality_enabled: false }
+        : {};
 
     // 表单只重建自己认识的 key，原始 setting 里的其它 key（后台/SQL 写入的
     // 自定义配置）必须原样带回，否则管理员改个渠道名就把它们抹了。
@@ -1524,6 +1535,7 @@ const EditChannelModal = (props) => {
       'always_healthy',
       'stream_timeout_seconds',
       'image_sizes',
+      'image_quality_enabled',
     ];
     const preservedChannelSettings = {};
     const originalChannelSetting = originalChannelSettingRef.current;
@@ -1555,6 +1567,7 @@ const EditChannelModal = (props) => {
       ...(localInputs.always_healthy ? { always_healthy: true } : {}),
       ...streamTimeoutSetting,
       ...imageSizesSetting,
+      ...imageQualitySetting,
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1651,6 +1664,8 @@ const EditChannelModal = (props) => {
     delete localInputs.stream_timeout_seconds;
     // 清理图片档位白名单的临时字段
     delete localInputs.image_size_tiers;
+    // 清理高质量图片开关的临时字段
+    delete localInputs.image_quality_enabled;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -3913,6 +3928,21 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         'OpenAI 协议图片请求会按 size 参数换算成 1K/2K/4K 档位；勾选后，档位不在列表内的请求在选择渠道时就会跳过本渠道（不消耗重试次数、不请求上游）。留空 = 不限制。size 为 auto 或无法识别时一律放行。',
+                      )}
+                    />
+                    <Form.Switch
+                      field='image_quality_enabled'
+                      label={t('支持高质量图片')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange(
+                          'image_quality_enabled',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '独立控制 quality=high/4k/ultra 的图片请求是否可路由到本渠道，不影响由 size 参数计算的 1K/2K/4K 图片档位。关闭后，这类请求会在选择渠道时跳过本渠道。',
                       )}
                     />
 

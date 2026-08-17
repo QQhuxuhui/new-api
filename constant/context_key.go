@@ -71,9 +71,11 @@ const (
 
 	ContextKeyWarningChannelSkipped ContextKey = "warning_channel_skipped" // bool: 本请求曾有渠道仅因 warning 掷骰被跳过，优先级耗尽时值得关骰补扫
 
-	ContextKeyImageSizeTier ContextKey = "image_size_tier" // string: 本次图片请求的档位（1K/2K/4K），空=判不出档位不过滤；选路阶段据此排除不支持该档位的渠道
+	ContextKeyImageSizeTier    ContextKey = "image_size_tier"    // string: 本次图片请求的档位（1K/2K/4K），空=判不出档位不过滤；选路阶段据此排除不支持该档位的渠道
+	ContextKeyImageHighQuality ContextKey = "image_high_quality" // bool: quality 为 high/4k/ultra，需要渠道的独立高质量图片开关放行
 
-	ContextKeyImageTierRejected ContextKey = "image_tier_rejected" // bool: 本请求确实有渠道因档位被排除；无可用渠道时据此决定是否点名档位，避免把"渠道全挂"误报成白名单配置错误
+	ContextKeyImageTierRejected    ContextKey = "image_tier_rejected"    // bool: 本请求确实有渠道因档位被排除；无可用渠道时据此决定是否点名档位，避免把"渠道全挂"误报成白名单配置错误
+	ContextKeyImageQualityRejected ContextKey = "image_quality_rejected" // bool: 本请求确实有渠道因关闭高质量图片支持被排除
 
 	ContextKeyMidStreamTimeout ContextKey = "mid_stream_timeout" // bool: 流已输出部分内容后发生空闲超时；外层改记渠道失败，handler 跳过伪造的正常收尾
 
