@@ -170,6 +170,14 @@ func extractImageParamValue(raw json.RawMessage, allowRepeatedFormValues bool) s
 // 后的量）——此时若仍超分，客户拿高清图按低档扣费，漏账。因此两侧必须同步：
 // sub2api 放宽模拟资格可以随后放宽这里（方向安全）；反向收紧必须先收紧这里。
 func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValues bool) bool {
+	// 超分范围仅限 generations：edits（含 /v1/edits 别名）的 adaptor 转换路径不读
+	// request.Size —— multipart 子路径从 mf.Value 逐字复制表单字段，JSON 子路径从原始
+	// body 的 raw map 逐字复制非文件字段，两条都不会把降档后的 request.Size 序列化出去，
+	// 降档无法抵达上游。第一期 edits 走纯原生（不派生、不降档、不超分），
+	// 避免"选路按派生命中低档渠道、出站却仍带高档尺寸"的必然失配。
+	if c.Request == nil || c.Request.URL == nil || c.Request.URL.Path != "/v1/images/generations" {
+		return false
+	}
 	switch strings.ToLower(strings.TrimSpace(m.Model)) {
 	case "gpt-image-2", "gpt-image-2-2026-04-21":
 	default:

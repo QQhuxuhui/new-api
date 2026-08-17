@@ -16,7 +16,38 @@ func eligCtx() *gin.Context {
 	return c
 }
 
+func eligCtxPath(path string) *gin.Context {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", path, nil)
+	c.Request.Header.Set("Content-Type", "application/json")
+	return c
+}
+
 func raw(s string) json.RawMessage { return json.RawMessage(s) }
+
+// TestImageUpscaleEligiblePathScope 锁定第一期的范围裁决：只有 generations 具备超分资格。
+// edits 的 adaptor 转换路径不读 request.Size，降档无法抵达上游，因此必须在资格谓词
+// 就退出，让选路不派生、relay 不降档，走纯原生。
+func TestImageUpscaleEligiblePathScope(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"generations 不受影响", "/v1/images/generations", true},
+		{"edits 退出超分", "/v1/images/edits", false},
+		{"edits 别名 /v1/edits 退出超分", "/v1/edits", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &ModelRequest{Model: "gpt-image-2"}
+			if got := imageUpscaleEligible(eligCtxPath(tc.path), m, false); got != tc.want {
+				t.Fatalf("path=%s eligible=%v want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestImageUpscaleEligible(t *testing.T) {
 	base := func() *ModelRequest { return &ModelRequest{Model: "gpt-image-2"} }
