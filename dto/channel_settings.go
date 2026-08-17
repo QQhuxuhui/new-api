@@ -105,6 +105,9 @@ type ChannelSettings struct {
 	// 用指针 + omitempty：存量渠道重新序列化时不会凭空多出这个 key，
 	// nil 即"不限制"，保持向后兼容。
 	ImageSizes *ImageSizeCapability `json:"image_sizes,omitempty"`
+	// ImageQualityEnabled 声明渠道是否支持 high/4k/ultra 这组高质量图片请求。
+	// nil 与 true 都放行，只有显式 false 才在选路阶段排除，保证存量渠道兼容。
+	ImageQualityEnabled *bool `json:"image_quality_enabled,omitempty"`
 }
 
 type VertexKeyType string
