@@ -115,3 +115,41 @@ func TestUpscaleFromTier(t *testing.T) {
 		t.Fatalf("from 应取规则声明的 2K, got %q/%v", from, ok)
 	}
 }
+
+func TestMapImageSizeForUpscale(t *testing.T) {
+	cases := []struct {
+		name        string
+		requestSize string
+		fromTier    string
+		wantDown    string
+		wantW       int
+		wantH       int
+		wantOK      bool
+	}{
+		{"16:9 4K → 1K", "3840x2160", "1K", "1280x720", 3840, 2160, true},
+		{"16:9 竖版（转置）", "2160x3840", "1K", "720x1280", 2160, 3840, true},
+		{"1:1 表内 4K", "2880x2880", "1K", "1024x1024", 2880, 2880, true},
+		{"字面 4K（无比例→1:1）", "4K", "1K", "1024x1024", 2880, 2880, true},
+		{"字面 2K", "2K", "1K", "1024x1024", 2048, 2048, true},
+		{"3:2 2K → 1K", "2496x1664", "1K", "1248x832", 2496, 1664, true},
+		{"表外比例就近（≈2:1 归 16:9）", "3600x1800", "1K", "1280x720", 3600, 1800, true},
+		{"21:9 竖版回退 16:9 竖版", "1584x3696", "1K", "720x1280", 1584, 3696, true},
+		{"from=2K 降档", "2880x2880", "2K", "2048x2048", 2880, 2880, true},
+		{"解析不了", "auto", "1K", "", 0, 0, false},
+		{"from 非法", "3840x2160", "8K", "", 0, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			down, w, h, ok := MapImageSizeForUpscale(tc.requestSize, tc.fromTier)
+			if ok != tc.wantOK {
+				t.Fatalf("ok=%v want %v", ok, tc.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if down != tc.wantDown || w != tc.wantW || h != tc.wantH {
+				t.Fatalf("got (%s,%d,%d) want (%s,%d,%d)", down, w, h, tc.wantDown, tc.wantW, tc.wantH)
+			}
+		})
+	}
+}

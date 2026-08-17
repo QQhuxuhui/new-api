@@ -2,6 +2,7 @@ package dto
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -455,4 +456,58 @@ func (c *ImageSizeCapability) UpscaleFromTier(tier string, upscaleEligible bool)
 		return "", false
 	}
 	return c.NormalizedUpscale().From, true
+}
+
+// upscaleRatioAspects 是比例表各行的横版宽高比数值（宽/高），用于就近匹配。
+var upscaleRatioAspects = []struct {
+	Ratio  string
+	Aspect float64
+}{
+	{"1:1", 1.0}, {"5:4", 1.25}, {"4:3", 4.0 / 3.0},
+	{"3:2", 1.5}, {"16:9", 16.0 / 9.0}, {"21:9", 21.0 / 9.0},
+}
+
+// MapImageSizeForUpscale 把用户请求的 size 翻译成【出站降档尺寸 + 超分目标宽高】。
+//
+//   - "WxH" 写法：目标 = 精确 WxH（超分能命中任意尺寸，比原生表更准）；
+//     比例就近匹配表内横版行，竖版（H>W）取转置。21:9 上游无竖版
+//     （见 buildImageSizeIndex 注释），竖版就近回退 16:9 转置。
+//   - "4K"/"2K" 字面档位：无比例信息，按 1:1 处理，目标 = 表内 [1:1][档位]。
+//   - 解析不了（auto/垃圾）或 fromTier 非法：ok=false，调用方放弃超分。
+func MapImageSizeForUpscale(requestSize string, fromTier string) (string, int, int, bool) {
+	from, okFrom := NormalizeImageSizeTier(fromTier)
+	if !okFrom {
+		return "", 0, 0, false
+	}
+	trimmed := strings.TrimSpace(requestSize)
+	if tier, ok := NormalizeImageSizeTier(trimmed); ok {
+		target := imageSizeTierRatioTable["1:1"][tier]
+		tw, th, _ := parseImageSizeDimensions(target)
+		down := imageSizeTierRatioTable["1:1"][from]
+		return down, tw, th, true
+	}
+	width, height, ok := parseImageSizeDimensions(trimmed)
+	if !ok {
+		return "", 0, 0, false
+	}
+	portrait := height > width
+	longer, shorter := float64(width), float64(height)
+	if portrait {
+		longer, shorter = float64(height), float64(width)
+	}
+	aspect := longer / shorter
+	best, bestDiff := "1:1", math.MaxFloat64
+	for _, cand := range upscaleRatioAspects {
+		if diff := math.Abs(math.Log(aspect) - math.Log(cand.Aspect)); diff < bestDiff {
+			best, bestDiff = cand.Ratio, diff
+		}
+	}
+	if portrait && best == "21:9" {
+		best = "16:9" // 21:9 无竖版原生尺寸，就近回退
+	}
+	dw, dh, _ := parseImageSizeDimensions(imageSizeTierRatioTable[best][from])
+	if portrait {
+		dw, dh = dh, dw
+	}
+	return fmt.Sprintf("%dx%d", dw, dh), width, height, true
 }
