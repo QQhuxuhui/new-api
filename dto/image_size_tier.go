@@ -16,6 +16,18 @@ const (
 	ImageSizeTier4K = "4K"
 )
 
+// DefaultImageSizeForModel returns the size applied later by image request
+// validation. Routing must use the same default so omitted sizes do not bypass
+// channel capability filtering.
+func DefaultImageSizeForModel(model string) string {
+	switch model {
+	case "dall-e", "dall-e-2", "dall-e-3":
+		return "1024x1024"
+	default:
+		return ""
+	}
+}
+
 // imageSizeTierRatioTable 是 gpt-image-2 各宽高比 × 各档位的实测原生尺寸。
 // 只保留尺寸（token 数是计费侧的事，选路用不到，抄过来只会随上游调价而腐烂）。
 var imageSizeTierRatioTable = map[string]map[string]string{
@@ -163,13 +175,13 @@ func ClassifyImageRoutingTier(size string) (string, bool) {
 	}
 }
 
-// ImageQualityForcesHighestTier 判断 quality 参数是否独立要求 4K。
+// ImageQualityRequiresCapability 判断 quality 参数是否需要渠道显式支持高质量图片。
 //
 // 上游把 quality 单独映射成 output_resolution（adobe2api core/models/quality.py 的
 // 别名表 + api/routes/generation.py:801），high/4k/ultra 会直接 400，
 // **与 size 完全无关**：quality="high" 配 size="1024x1024" 一样被拒。
-// 只看 size 的话这一整维都在过滤器视野之外。
-func ImageQualityForcesHighestTier(quality string) bool {
+// 因此它使用独立渠道开关，绝不参与图片 size 档位计算。
+func ImageQualityRequiresCapability(quality string) bool {
 	switch strings.TrimSpace(strings.ToLower(quality)) {
 	case "high", "4k", "ultra":
 		return true
@@ -244,6 +256,28 @@ func AllImageSizeTiers() []string {
 	return []string{ImageSizeTier1K, ImageSizeTier2K, ImageSizeTier4K}
 }
 
+// ImageUpscaleRule 声明渠道的超分能力：把 From 档原生出图放大到 To 档返回。
+// 每渠道至多一条（结构上是单对象非数组）。选路据此派生可达档位（宽松：
+// (max(allowed), To] 全部可达），出站请求降档为 From，回程在 relay 层超分。
+type ImageUpscaleRule struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// imageSizeTierRank 给档位排序：1K=1 < 2K=2 < 4K=3，非法=0。
+func imageSizeTierRank(tier string) int {
+	switch tier {
+	case ImageSizeTier1K:
+		return 1
+	case ImageSizeTier2K:
+		return 2
+	case ImageSizeTier4K:
+		return 3
+	default:
+		return 0
+	}
+}
+
 // ImageSizeCapability 声明渠道能承接哪些图片档位。
 //
 // 语义刻意做成"只有明确写了白名单才收紧"：
@@ -255,6 +289,8 @@ func AllImageSizeTiers() []string {
 type ImageSizeCapability struct {
 	// Allowed 是档位白名单，元素取值 1K/2K/4K。
 	Allowed []string `json:"allowed,omitempty"`
+	// Upscale 声明超分规则，见 ImageUpscaleRule。nil = 无超分能力。
+	Upscale *ImageUpscaleRule `json:"upscale,omitempty"`
 }
 
 // Allow 判断该渠道能否承接 tier 档位的请求。
@@ -286,6 +322,47 @@ func (c *ImageSizeCapability) Allow(tier string) bool {
 	return !anyValid
 }
 
+// maxAllowedTierRank 返回白名单里最高档位的 rank；无有效项返回 0。
+func (c *ImageSizeCapability) maxAllowedTierRank() int {
+	maxRank := 0
+	for _, tier := range c.NormalizedAllowed() {
+		if r := imageSizeTierRank(tier); r > maxRank {
+			maxRank = r
+		}
+	}
+	return maxRank
+}
+
+// NormalizedUpscale 返回归一化后的合法超分规则；任何不合法（allowed 为空、
+// from∉allowed、to 非法或不高于 max(allowed)）一律返回 nil —— 与 Allow() 的
+// anyValid 兜底同款：SQL/后台脚本绕过 Validate 直改 setting 时，写废的规则
+// 必须静默退化为"无规则"，绝不让渠道行为进入未定义状态。
+func (c *ImageSizeCapability) NormalizedUpscale() *ImageUpscaleRule {
+	if c == nil || c.Upscale == nil {
+		return nil
+	}
+	from, okF := NormalizeImageSizeTier(c.Upscale.From)
+	to, okT := NormalizeImageSizeTier(c.Upscale.To)
+	if !okF || !okT {
+		return nil
+	}
+	maxRank := c.maxAllowedTierRank()
+	if maxRank == 0 || imageSizeTierRank(to) <= maxRank {
+		return nil
+	}
+	fromInAllowed := false
+	for _, tier := range c.NormalizedAllowed() {
+		if tier == from {
+			fromInAllowed = true
+			break
+		}
+	}
+	if !fromInAllowed {
+		return nil
+	}
+	return &ImageUpscaleRule{From: from, To: to}
+}
+
 // Validate 校验白名单里的档位名合法，避免管理员写错字符串后
 // 变成一条永远匹配不上、却又静默排除所有图片请求的配置。
 func (c *ImageSizeCapability) Validate() error {
@@ -296,6 +373,34 @@ func (c *ImageSizeCapability) Validate() error {
 		if _, ok := NormalizeImageSizeTier(allowed); !ok {
 			return fmt.Errorf("image_sizes.allowed 含非法档位 %q，仅支持 %s",
 				allowed, strings.Join(AllImageSizeTiers(), "/"))
+		}
+	}
+	if c.Upscale != nil {
+		from, okF := NormalizeImageSizeTier(c.Upscale.From)
+		if !okF {
+			return fmt.Errorf("image_sizes.upscale.from 含非法档位 %q，仅支持 %s",
+				c.Upscale.From, strings.Join(AllImageSizeTiers(), "/"))
+		}
+		to, okT := NormalizeImageSizeTier(c.Upscale.To)
+		if !okT {
+			return fmt.Errorf("image_sizes.upscale.to 含非法档位 %q，仅支持 %s",
+				c.Upscale.To, strings.Join(AllImageSizeTiers(), "/"))
+		}
+		maxRank := c.maxAllowedTierRank()
+		if maxRank == 0 {
+			return fmt.Errorf("image_sizes.upscale 需要 allowed 声明原生档位：空白名单是全放行语义，叠加超分规则自相矛盾")
+		}
+		if imageSizeTierRank(to) <= maxRank {
+			return fmt.Errorf("image_sizes.upscale.to=%s 必须严格高于 allowed 最高档，否则规则无意义", to)
+		}
+		fromInAllowed := false
+		for _, tier := range c.NormalizedAllowed() {
+			if tier == from {
+				fromInAllowed = true
+			}
+		}
+		if !fromInAllowed {
+			return fmt.Errorf("image_sizes.upscale.from=%s 必须是 allowed 中的原生档位", from)
 		}
 	}
 	return nil
