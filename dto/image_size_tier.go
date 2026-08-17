@@ -424,3 +424,35 @@ func (c *ImageSizeCapability) NormalizedAllowed() []string {
 	sort.Strings(out)
 	return out
 }
+
+// AllowWithUpscale 是选路口径的可达性判定：原生 Allow 之外，若本请求具备
+// 超分资格（upscaleEligible，见 middleware 谓词）且渠道有合法超分规则，则
+// (max(allowed), To] 区间的档位全部派生可达（宽松语义：能超到 4K 必然能超到
+// 2K，同一张卡输出更小）。不具资格/无规则时与 Allow 完全一致。
+func (c *ImageSizeCapability) AllowWithUpscale(tier string, upscaleEligible bool) bool {
+	if c.Allow(tier) {
+		return true
+	}
+	if !upscaleEligible {
+		return false
+	}
+	rule := c.NormalizedUpscale()
+	if rule == nil {
+		return false
+	}
+	tierRank := imageSizeTierRank(tier)
+	// Allow 已 false ⇒ tier 是合法档位且不在白名单（非法档位 Allow 会放行）
+	return tierRank > c.maxAllowedTierRank() && tierRank <= imageSizeTierRank(rule.To)
+}
+
+// UpscaleFromTier 判定本请求是否走超分模式：tier 非原生但派生可达时返回
+// (规则的 From 档, true)，relay 层据此降档出站并在回程放大。
+func (c *ImageSizeCapability) UpscaleFromTier(tier string, upscaleEligible bool) (string, bool) {
+	if c == nil || !upscaleEligible || c.Allow(tier) {
+		return "", false
+	}
+	if !c.AllowWithUpscale(tier, upscaleEligible) {
+		return "", false
+	}
+	return c.NormalizedUpscale().From, true
+}
