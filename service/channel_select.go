@@ -24,7 +24,15 @@ func channelSelectFilterFromContext(c *gin.Context) *model.ChannelSelectFilter {
 	}
 	tier := common.GetContextKeyString(c, constant.ContextKeyImageSizeTier)
 	highQuality := common.GetContextKeyBool(c, constant.ContextKeyImageHighQuality)
-	upscaleEligible := common.GetContextKeyBool(c, constant.ContextKeyImageUpscaleEligible)
+	// 派生可达集必须与 relay 层的超分总开关同生共死：只要 GetImageUpscaler() 为 nil
+	// （IMAGE_UPSCALE_ENABLED 未设、配置缺失、S3 初始化失败、env 被回滚），relay 就不会
+	// 建 plan、不会降档，此时若选路仍按派生把 4K 流量送进只支持 1K 的渠道，出站请求
+	// 会带着原始 4K 尺寸打向上游，必然 4xx。灰度流程（先给渠道配 upscale 规则、再开
+	// 模块开关）天然制造这个窗口，因此在唯一的 filter 构造处一并收紧。
+	//
+	// 注意：单测/无配置环境下 GetImageUpscaler() 恒为 nil，UpscaleEligible 因此恒 false，
+	// 即等价于未启用超分时的原有选路行为（AllowWithUpscale ≡ Allow），不影响既有断言。
+	upscaleEligible := common.GetContextKeyBool(c, constant.ContextKeyImageUpscaleEligible) && GetImageUpscaler() != nil
 	if tier == "" && !highQuality {
 		return nil
 	}
