@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/tidwall/gjson"
@@ -92,5 +93,71 @@ func TestNormalizeImageResponseSize(t *testing.T) {
 	bad := []byte(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString([]byte("not-an-image")) + `"}]}`)
 	if _, _, err := NormalizeImageResponseSize(context.Background(), bad, 1024, 1024, fakeUp(nil, nil)); err == nil {
 		t.Fatal("非图片字节必须报错")
+	}
+}
+
+// TestNormalizeImageResponseSizeDimensionCap 锁定规整链路的单边像素上限。
+//
+// 规整的目标尺寸直接取用户请求的任意 WxH，源图尺寸由上游决定，两头都没有超分
+// 那样的 Upscale.To 封顶。worker 的 16GB 档前提是"源图 ≤2048 + tiling"，而
+// Real-ESRGAN x4 会先把源图放大 4 倍再 Lanczos 精确缩放——4096 的源图中间态就是
+// 16384²。所以任一边超过上限就必须直接放弃规整（原样返回、changed=false、
+// 不报错），绝不能把这种任务扔给 worker。
+func TestNormalizeImageResponseSizeDimensionCap(t *testing.T) {
+	const cap = normalizeMaxDimension
+
+	cases := []struct {
+		name             string
+		srcW, srcH       int
+		targetW, targetH int
+	}{
+		{"源图宽超上限", cap + 1, 512, 1024, 1024},
+		{"源图高超上限", 512, cap + 1, 1024, 1024},
+		{"目标宽超上限", 512, 512, cap + 1, 1024},
+		{"目标高超上限", 512, 512, 1024, cap + 1},
+		{"源图与目标同时超上限", cap + 1, cap + 1, cap + 2, cap + 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := pngBytes(t, tc.srcW, tc.srcH)
+			body := []byte(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(src) + `"}]}`)
+			called := false
+			up := func(_ context.Context, _ []byte, _, _ int) ([]byte, error) {
+				called = true
+				return nil, errors.New("worker 不该被调用")
+			}
+			out, changed, err := NormalizeImageResponseSize(context.Background(), body, tc.targetW, tc.targetH, up)
+			if err != nil {
+				t.Fatalf("超上限属'不适用'而非'失败'，不应报错: %v", err)
+			}
+			if changed {
+				t.Fatal("超上限时必须返回 changed=false")
+			}
+			if called {
+				t.Fatal("超上限时绝不能调用 worker")
+			}
+			if string(out) != string(body) {
+				t.Fatal("超上限时必须原样返回上游 body")
+			}
+		})
+	}
+}
+
+// 边界值本身（恰好等于上限）仍在能力范围内，必须正常规整。
+func TestNormalizeImageResponseSizeAtCapStillNormalizes(t *testing.T) {
+	const cap = normalizeMaxDimension
+	src := pngBytes(t, cap, cap)
+	body := []byte(`{"size":"1x1","data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(src) + `"}]}`)
+	want := pngBytes(t, cap, 1024)
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, cap, 1024, fakeUp(want, nil))
+	if err != nil {
+		t.Fatalf("恰好等于上限应正常规整: %v", err)
+	}
+	if !changed {
+		t.Fatal("尺寸不一致且未超上限，应 changed=true")
+	}
+	wantSize := strconv.Itoa(cap) + "x1024"
+	if got := gjson.GetBytes(out, "size").String(); got != wantSize {
+		t.Fatalf("声明 size 未改写: got %s want %s", got, wantSize)
 	}
 }

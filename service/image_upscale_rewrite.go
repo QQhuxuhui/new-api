@@ -18,6 +18,15 @@ import (
 
 type imageUpscaleFunc func(ctx context.Context, png []byte, targetW, targetH int) ([]byte, error)
 
+// normalizeMaxDimension 是尺寸规整链路的单边像素上限。
+//
+// 规整的目标尺寸直接来自用户请求的任意 WxH，源图尺寸则由上游决定，两头都没有
+// 像超分那样的 Upscale.To 封顶。worker 的 16GB 档前提是"源图 ≤2048 + tiling"
+// （spec §8），而 Real-ESRGAN x4 会先把源图放大 4 倍再 Lanczos 精确缩放，
+// 4096 的源图中间态就是 16384²。所以任一边超过该上限就直接放弃规整、原样返回，
+// 宁可尺寸不精确，也不拿一个能打爆 worker 的任务去换。
+const normalizeMaxDimension = 4096
+
 // extractFirstImage 取出 data[0].b64_json 的原始字节（资格谓词已保证 n=1）。
 func extractFirstImage(body []byte) ([]byte, error) {
 	items := gjson.GetBytes(body, "data")
@@ -92,6 +101,12 @@ func NormalizeImageResponseSize(ctx context.Context, body []byte, targetW, targe
 		return nil, false, fmt.Errorf("decode image dims: %w", err)
 	}
 	if cfg.Width == targetW && cfg.Height == targetH {
+		return body, false, nil
+	}
+	// 源图或目标任一边超上限 → 不重采样、不报错，原样返回（changed=false）。
+	// 不报错是刻意的：这属于"不适用"而非"失败"，调用方不该记一条降级告警。
+	if cfg.Width > normalizeMaxDimension || cfg.Height > normalizeMaxDimension ||
+		targetW > normalizeMaxDimension || targetH > normalizeMaxDimension {
 		return body, false, nil
 	}
 	out, err := up(ctx, src, targetW, targetH)
