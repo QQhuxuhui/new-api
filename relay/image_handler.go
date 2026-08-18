@@ -46,7 +46,14 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		upscalePlan = resolveImageUpscalePlan(c, info, request.Size)
 	}
 	if upscalePlan != nil {
-		request.Size = upscalePlan.DowngradedSize
+		// edits 的两条出站转换路径都不读 request.Size，须改写各自的真实数据源
+		// （multipart 表单 / JSON 缓存体）。改写不了就整体放弃超分：此时
+		// request.Size 也保持原样，绝不会出现"降档发出、回程不放大"的少给。
+		if downgradeEditsRequestSize(c, info, upscalePlan) {
+			request.Size = upscalePlan.DowngradedSize
+		} else {
+			upscalePlan = nil
+		}
 	}
 
 	adaptor := GetAdaptor(info.ApiType)
