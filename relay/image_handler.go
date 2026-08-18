@@ -40,6 +40,12 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError)
 	}
 
+	// 上一轮（同一请求的前一个渠道）若做过 edits 降档，改的是跨重试共享的
+	// multipart 表单 / KeyRequestBody 缓存体，controller 的重试回卷不认识它们。
+	// 这里无条件先恢复到原始尺寸，再决定本渠道要不要重新降档——否则重试到无
+	// 超分规则的渠道时上游会收到陈旧的降档尺寸（4K 计费拿 1K 图）。
+	restoreEditsRequestSize(c)
+
 	upscaler := service.GetImageUpscaler()
 	var upscalePlan *imageUpscalePlan
 	if upscaler != nil {

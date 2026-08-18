@@ -75,6 +75,13 @@ const (
 	ContextKeyImageHighQuality ContextKey = "image_high_quality" // bool: quality 为 high/4k/ultra，需要渠道的独立高质量图片开关放行
 	ContextKeyImageUpscaleEligible ContextKey = "image_upscale_eligible" // bool: 本请求形状具备超分资格（与 sub2api openAIImagesRequestSimulatable 对齐），选路可用派生档位、relay 可降档超分
 
+	// 超分降档改写的是【跨重试共享】的可变数据源（multipart 表单 map / KeyRequestBody
+	// 缓存体），而 controller 的重试回卷只回卷 Body 与 Content-Type，不认识这两处。
+	// 故首次降档前把原值存进以下两个键，ImageHelper 每次进入（含重试重进）先恢复，
+	// 保证换到无超分规则的渠道时上游收到的是原始尺寸。恢复后原值继续留存，供再次降档循环使用。
+	ContextKeyImageEditsOriginalBody     ContextKey = "image_edits_original_body"      // []byte: 首次降档前的 JSON 请求体原文
+	ContextKeyImageEditsOriginalFormSize ContextKey = "image_edits_original_form_size" // []string: 首次降档前 MultipartForm.Value["size"] 的原值；nil 切片 = 原本就没有该字段
+
 	ContextKeyImageTierRejected    ContextKey = "image_tier_rejected"    // bool: 本请求确实有渠道因档位被排除；无可用渠道时据此决定是否点名档位，避免把"渠道全挂"误报成白名单配置错误
 	ContextKeyImageQualityRejected ContextKey = "image_quality_rejected" // bool: 本请求确实有渠道因关闭高质量图片支持被排除
 

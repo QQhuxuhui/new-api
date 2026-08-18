@@ -188,3 +188,165 @@ func TestDowngradeEditsRequestSizeMultipartParseFailure(t *testing.T) {
 		t.Fatal("multipart 解析失败时必须放弃超分")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// C1 重试泄漏回归：降档改的是跨重试共享的可变状态（multipart 表单 map /
+// KeyRequestBody 缓存体），controller 的 rewindRequestForRetry 只回卷
+// Body/Content-Type，不认识它们。ImageHelper 每次进入先 restoreEditsRequestSize，
+// 保证"渠道 A 降档 → A 失败 → 重试到无超分规则的渠道 B"时 B 收到原始尺寸。
+// 下面的测试直接模拟两次进入：第一次降档，第二次 plan=nil（B 没规则，
+// downgradeEditsRequestSize 根本不会被调用），断言数据源已回到原值。
+// ---------------------------------------------------------------------------
+
+func TestRestoreEditsRequestSizeMultipartAcrossRetry(t *testing.T) {
+	c := newMultipartEditsCtx(t, "2880x2880")
+
+	// 第一次进入：渠道 A 有超分规则，降档。
+	restoreEditsRequestSize(c) // 首次进入时无原值可恢复，必须是 no-op
+	if got := c.Request.MultipartForm.Value["size"]; len(got) != 1 || got[0] != "2880x2880" {
+		t.Fatalf("首次 restore 不应改动表单: %v", got)
+	}
+	if !downgradeEditsRequestSize(c, editsInfo(relayconstant.RelayModeImagesEdits), editsPlan()) {
+		t.Fatal("第一次降档应成功")
+	}
+	if got := c.Request.MultipartForm.Value["size"]; len(got) != 1 || got[0] != "1440x1440" {
+		t.Fatalf("第一次未降档: %v", got)
+	}
+
+	// 第二次进入：渠道 A 失败，重试到无超分规则的渠道 B（plan=nil）。
+	restoreEditsRequestSize(c)
+	if got := c.Request.MultipartForm.Value["size"]; len(got) != 1 || got[0] != "2880x2880" {
+		t.Fatalf("重试到无规则渠道时表单 size 未恢复为原值: %v", got)
+	}
+	// 其余字段不受影响
+	if v := c.Request.MultipartForm.Value["prompt"]; len(v) != 1 || v[0] != "make it pretty" {
+		t.Fatalf("恢复过程破坏了 prompt: %v", v)
+	}
+	if len(c.Request.MultipartForm.File["image"]) != 1 {
+		t.Fatalf("恢复过程丢失 image 文件字段: %v", c.Request.MultipartForm.File)
+	}
+}
+
+// 原值保留：恢复后若再重试到另一个有超分规则的渠道，降档要以【原值】为基准
+// 再来一次，而不是把降档值当成新原值锁死。
+func TestRestoreEditsRequestSizeMultipartRepeatedDowngrade(t *testing.T) {
+	c := newMultipartEditsCtx(t, "2880x2880")
+	if !downgradeEditsRequestSize(c, editsInfo(relayconstant.RelayModeImagesEdits), editsPlan()) {
+		t.Fatal("第一次降档应成功")
+	}
+	restoreEditsRequestSize(c)
+	if !downgradeEditsRequestSize(c, editsInfo(relayconstant.RelayModeImagesEdits), editsPlan()) {
+		t.Fatal("第二次降档应成功")
+	}
+	if got := c.Request.MultipartForm.Value["size"]; len(got) != 1 || got[0] != "1440x1440" {
+		t.Fatalf("第二次降档结果不对: %v", got)
+	}
+	restoreEditsRequestSize(c)
+	if got := c.Request.MultipartForm.Value["size"]; len(got) != 1 || got[0] != "2880x2880" {
+		t.Fatalf("第二轮恢复后仍应是最初的原值: %v", got)
+	}
+}
+
+// 表单原本没有 size 字段：降档会补一个进去，恢复必须把它整个删掉，
+// 而不是留一个空值——否则上游会把空 size 当成显式请求。
+func TestRestoreEditsRequestSizeMultipartRemovesAddedField(t *testing.T) {
+	c := newMultipartEditsCtx(t, "2880x2880")
+	delete(c.Request.MultipartForm.Value, "size")
+	if !downgradeEditsRequestSize(c, editsInfo(relayconstant.RelayModeImagesEdits), editsPlan()) {
+		t.Fatal("缺 size 字段时降档应成功")
+	}
+	if got := c.Request.MultipartForm.Value["size"]; len(got) != 1 || got[0] != "1440x1440" {
+		t.Fatalf("未补入降档 size: %v", got)
+	}
+	restoreEditsRequestSize(c)
+	if _, exists := c.Request.MultipartForm.Value["size"]; exists {
+		t.Fatalf("原本不存在的 size 字段恢复后应被删除: %v", c.Request.MultipartForm.Value["size"])
+	}
+}
+
+func TestRestoreEditsRequestSizeJSONAcrossRetry(t *testing.T) {
+	const original = `{"model":"gpt-image-2","prompt":"hi","size":"2880x2880","image":"data:image/png;base64,AAAA"}`
+	c := newJSONEditsCtx(original)
+
+	restoreEditsRequestSize(c) // 首次进入无原值，no-op
+	if cached, _ := common.GetRequestBody(c); string(cached) != original {
+		t.Fatalf("首次 restore 不应改动缓存体: %s", cached)
+	}
+	if !downgradeEditsRequestSize(c, editsInfo(relayconstant.RelayModeImagesEdits), editsPlan()) {
+		t.Fatal("第一次降档应成功")
+	}
+	cached, _ := common.GetRequestBody(c)
+	if got := gjson.GetBytes(cached, "size").String(); got != "1440x1440" {
+		t.Fatalf("第一次未降档: %s", cached)
+	}
+
+	// 重试到无超分规则的渠道：downgradeEditsRequestSize 不会被调用，
+	// 只有 restore 能把缓存体拉回原始 4K。
+	restoreEditsRequestSize(c)
+	cached, _ = common.GetRequestBody(c)
+	if got := gjson.GetBytes(cached, "size").String(); got != "2880x2880" {
+		t.Fatalf("重试到无规则渠道时缓存体 size 未恢复为原值: %s", cached)
+	}
+	if string(cached) != original {
+		t.Fatalf("恢复后缓存体应与原文逐字一致: got %s want %s", cached, original)
+	}
+}
+
+// JSON 侧同样要能"恢复→再降档→再恢复"循环，且基准始终是最初的原文。
+func TestRestoreEditsRequestSizeJSONRepeatedDowngrade(t *testing.T) {
+	const original = `{"model":"gpt-image-2","size":"2880x2880"}`
+	c := newJSONEditsCtx(original)
+	for i := 0; i < 3; i++ {
+		restoreEditsRequestSize(c)
+		if cached, _ := common.GetRequestBody(c); string(cached) != original {
+			t.Fatalf("第 %d 轮恢复后应回到原文: %s", i, cached)
+		}
+		if !downgradeEditsRequestSize(c, editsInfo(relayconstant.RelayModeImagesEdits), editsPlan()) {
+			t.Fatalf("第 %d 轮降档应成功", i)
+		}
+		cached, _ := common.GetRequestBody(c)
+		if got := gjson.GetBytes(cached, "size").String(); got != "1440x1440" {
+			t.Fatalf("第 %d 轮降档结果不对: %s", i, cached)
+		}
+	}
+}
+
+// 从未降档过的请求上调用 restore 必须完全无副作用（generations、
+// 非 edits 路径、超分未启用等都会走到这里）。
+func TestRestoreEditsRequestSizeNoopWithoutDowngrade(t *testing.T) {
+	const original = `{"model":"gpt-image-2","size":"2880x2880"}`
+	c := newJSONEditsCtx(original)
+	// generations 路径：降档函数放行但不记录原值
+	if !downgradeEditsRequestSize(c, editsInfo(relayconstant.RelayModeImagesGenerations), editsPlan()) {
+		t.Fatal("generations 应直接放行")
+	}
+	restoreEditsRequestSize(c)
+	if cached, _ := common.GetRequestBody(c); string(cached) != original {
+		t.Fatalf("未降档过的请求体不应被 restore 改动: %s", cached)
+	}
+
+	mc := newMultipartEditsCtx(t, "2880x2880")
+	restoreEditsRequestSize(mc)
+	if got := mc.Request.MultipartForm.Value["size"]; len(got) != 1 || got[0] != "2880x2880" {
+		t.Fatalf("未降档过的表单不应被 restore 改动: %v", got)
+	}
+
+	// nil context 与无 MultipartForm 的上下文都不能 panic
+	restoreEditsRequestSize(nil)
+}
+
+// passthrough 分支不经由 downgradeEditsRequestSize 记录原值（它自带改写逻辑），
+// restore 对它同样是 no-op，不会误删客户端真实传入的 size。
+func TestRestoreEditsRequestSizePassThroughNoop(t *testing.T) {
+	const original = `{"model":"gpt-image-2","size":"2880x2880"}`
+	c := newJSONEditsCtx(original)
+	info := editsInfo(relayconstant.RelayModeImagesEdits)
+	info.ChannelSetting = dto.ChannelSettings{PassThroughBodyEnabled: true}
+	if !downgradeEditsRequestSize(c, info, editsPlan()) {
+		t.Fatal("passthrough 应直接放行")
+	}
+	restoreEditsRequestSize(c)
+	if cached, _ := common.GetRequestBody(c); string(cached) != original {
+		t.Fatalf("passthrough 下 restore 不应改动缓存体: %s", cached)
+	}
+}
