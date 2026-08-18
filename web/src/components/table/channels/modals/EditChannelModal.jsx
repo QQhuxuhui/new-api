@@ -135,6 +135,8 @@ const _parseF = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n 
 // 图片档位白名单：取值必须与后端 dto.ImageSizeTier* 常量一致，
 // 写错的档位名在后端只会变成一条"永远匹配不上"的配置
 const IMAGE_SIZE_TIER_OPTIONS = ['1K', '2K', '4K'];
+// 档位序：与后端 dto.imageSizeTierRank 一致（1K<2K<4K）
+const IMAGE_SIZE_TIER_RANK = { '1K': 1, '2K': 2, '4K': 3 };
 const normalizeImageSizeTiers = (raw) => {
   if (!Array.isArray(raw)) return [];
   const seen = new Set();
@@ -257,6 +259,8 @@ const EditChannelModal = (props) => {
     stream_timeout_seconds: '',
     // 图片档位白名单：空数组=不限制（全部档位放行）
     image_size_tiers: [],
+    // 超分目标档位：空=关闭。from 不需要选，保存时自动取已勾选的最高原生档
+    image_upscale_to: '',
     // 高质量图片能力：默认开启，关闭时才写入显式 false
     image_quality_enabled: true,
   };
@@ -429,6 +433,7 @@ const EditChannelModal = (props) => {
     always_healthy: false,
     stream_timeout_seconds: '',
     image_size_tiers: [],
+    image_upscale_to: '',
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
@@ -667,6 +672,18 @@ const EditChannelModal = (props) => {
           data.image_size_tiers = normalizeImageSizeTiers(
             parsedSettings.image_sizes && parsedSettings.image_sizes.allowed,
           );
+          // 超分规则回显：只认合法目标档，畸形值当作未配置（与后端 fail-open 一致）
+          {
+            const upscaleRule =
+              parsedSettings.image_sizes && parsedSettings.image_sizes.upscale;
+            const upscaleTo =
+              upscaleRule && typeof upscaleRule === 'object'
+                ? String(upscaleRule.to ?? '').trim().toUpperCase()
+                : '';
+            data.image_upscale_to = IMAGE_SIZE_TIER_OPTIONS.includes(upscaleTo)
+              ? upscaleTo
+              : '';
+          }
           data.image_quality_enabled =
             parsedSettings.image_quality_enabled !== false;
           // 注意 0 是合法值（永不超时），不能用 || 兜底
@@ -697,6 +714,7 @@ const EditChannelModal = (props) => {
           data.always_healthy = false;
           data.stream_timeout_seconds = '';
           data.image_size_tiers = [];
+          data.image_upscale_to = '';
           data.image_quality_enabled = true;
         }
       } else {
@@ -719,6 +737,7 @@ const EditChannelModal = (props) => {
         data.always_healthy = false;
         data.stream_timeout_seconds = '';
         data.image_size_tiers = [];
+        data.image_upscale_to = '';
         data.image_quality_enabled = true;
       }
 
@@ -803,6 +822,7 @@ const EditChannelModal = (props) => {
         always_healthy: data.always_healthy || false,
         stream_timeout_seconds: data.stream_timeout_seconds ?? '',
         image_size_tiers: data.image_size_tiers || [],
+        image_upscale_to: data.image_upscale_to || '',
       });
       // console.log(data);
     } else {
@@ -1506,25 +1526,43 @@ const EditChannelModal = (props) => {
     }
     // 图片档位白名单：空数组 = 不限制，此时不写出 image_sizes 这个 key
     const imageSizeTiers = normalizeImageSizeTiers(localInputs.image_size_tiers);
-    // image_sizes.upscale（超分规则）目前没有表单入口，只能由后台/SQL 写入。
-    // 它是 image_sizes 的子字段，而 image_sizes 在 KNOWN_CHANNEL_SETTING_KEYS 里，
-    // 拿不到"未知 key 原样带回"那层保护——不显式 merge 的话，管理员改个渠道名
-    // 保存一次就会把 upscale 静默抹掉（表现为超分失效且无任何报错）。
-    // 注意白名单被清空时不带回 upscale：服务端 Validate 要求 upscale 必须有
-    // 非空 allowed 声明原生档位，只写 upscale 会直接保存失败。
-    const previousUpscaleRule =
-      originalChannelSettingRef.current &&
-      typeof originalChannelSettingRef.current === 'object' &&
-      originalChannelSettingRef.current.image_sizes &&
-      typeof originalChannelSettingRef.current.image_sizes === 'object'
-        ? originalChannelSettingRef.current.image_sizes.upscale
-        : undefined;
+    // 超分规则（image_sizes.upscale）：表单是唯一权威——下拉选了目标就写出
+    // {from: 已勾选最高原生档, to: 目标}，选"关闭"（空）就不写（即删除规则）。
+    // 与后端 Validate 同口径的前置校验放在这里，把"保存被服务端拒绝且界面
+    // 无法修正"的死角（改了档位勾选导致规则失配）挡在提交前，给出可操作提示。
+    const upscaleTo = String(localInputs.image_upscale_to ?? '')
+      .trim()
+      .toUpperCase();
+    const maxNativeTier =
+      imageSizeTiers.length > 0
+        ? imageSizeTiers[imageSizeTiers.length - 1]
+        : '';
+    let imageUpscaleRule = null;
+    if (IMAGE_SIZE_TIER_OPTIONS.includes(upscaleTo)) {
+      if (!maxNativeTier) {
+        showError(
+          t('已选择超分目标，但未勾选任何原生图片档位；请先勾选上游真实支持的档位，或将超分放大设为关闭'),
+        );
+        return;
+      }
+      if (
+        IMAGE_SIZE_TIER_RANK[upscaleTo] <= IMAGE_SIZE_TIER_RANK[maxNativeTier]
+      ) {
+        showError(
+          t('超分目标必须高于已勾选的最高原生档位（当前最高 ') +
+            maxNativeTier +
+            t('）；请调高目标或将超分放大设为关闭'),
+        );
+        return;
+      }
+      imageUpscaleRule = { from: maxNativeTier, to: upscaleTo };
+    }
     const imageSizesSetting =
       imageSizeTiers.length > 0
         ? {
             image_sizes: {
               allowed: imageSizeTiers,
-              ...(previousUpscaleRule ? { upscale: previousUpscaleRule } : {}),
+              ...(imageUpscaleRule ? { upscale: imageUpscaleRule } : {}),
             },
           }
         : {};
@@ -3948,6 +3986,51 @@ const EditChannelModal = (props) => {
                         'OpenAI 协议图片请求会按 size 参数换算成 1K/2K/4K 档位；勾选后，档位不在列表内的请求在选择渠道时就会跳过本渠道（不消耗重试次数、不请求上游）。留空 = 不限制。size 为 auto 或无法识别时一律放行。',
                       )}
                     />
+                    {(() => {
+                      const nativeTiers = normalizeImageSizeTiers(
+                        inputs.image_size_tiers,
+                      );
+                      const maxNativeTier =
+                        nativeTiers.length > 0
+                          ? nativeTiers[nativeTiers.length - 1]
+                          : '';
+                      const upscaleTargets = IMAGE_SIZE_TIER_OPTIONS.filter(
+                        (tier) =>
+                          maxNativeTier &&
+                          IMAGE_SIZE_TIER_RANK[tier] >
+                            IMAGE_SIZE_TIER_RANK[maxNativeTier],
+                      );
+                      const upscaleDisabled = upscaleTargets.length === 0;
+                      return (
+                        <Form.Select
+                          field='image_upscale_to'
+                          label={t('超分放大')}
+                          placeholder={
+                            !maxNativeTier
+                              ? t('需先勾选原生图片档位')
+                              : upscaleDisabled
+                                ? t('已原生支持最高档位')
+                                : t('关闭')
+                          }
+                          showClear
+                          disabled={upscaleDisabled}
+                          optionList={upscaleTargets.map((tier) => ({
+                            label: t('超分到 ') + tier,
+                            value: tier,
+                          }))}
+                          style={{ width: '100%' }}
+                          onChange={(value) =>
+                            handleChannelSettingsChange(
+                              'image_upscale_to',
+                              value ?? '',
+                            )
+                          }
+                          extraText={t(
+                            '把上游原生生成的图放大到更高档位返回：自动从已勾选的最高原生档位放大到所选目标（例如勾选 1K/2K 并选“超分到 4K”，则按 2K 生成、放大为用户请求的精确 4K 尺寸）。清空 = 关闭。需要服务端已启用图片超分模块；仅对 /v1/images/generations 的 gpt-image-2 生效。',
+                          )}
+                        />
+                      );
+                    })()}
                     <Form.Switch
                       field='image_quality_enabled'
                       label={t('支持高质量图片')}
