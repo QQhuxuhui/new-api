@@ -46,6 +46,7 @@ type ModelRequest struct {
 	OutputCompression json.RawMessage `json:"output_compression,omitempty"`
 	PartialImages     json.RawMessage `json:"partial_images,omitempty"`
 	InputFidelity     json.RawMessage `json:"input_fidelity,omitempty"`
+	Mask              json.RawMessage `json:"mask,omitempty"`
 }
 
 // imageRequestPathNeedsTier 圈定"size 参数确实是图片分辨率"的路径。
@@ -170,12 +171,16 @@ func extractImageParamValue(raw json.RawMessage, allowRepeatedFormValues bool) s
 // 后的量）——此时若仍超分，客户拿高清图按低档扣费，漏账。因此两侧必须同步：
 // sub2api 放宽模拟资格可以随后放宽这里（方向安全）；反向收紧必须先收紧这里。
 func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValues bool) bool {
-	// 超分范围仅限 generations：edits（含 /v1/edits 别名）的 adaptor 转换路径不读
-	// request.Size —— multipart 子路径从 mf.Value 逐字复制表单字段，JSON 子路径从原始
-	// body 的 raw map 逐字复制非文件字段，两条都不会把降档后的 request.Size 序列化出去，
-	// 降档无法抵达上游。第一期 edits 走纯原生（不派生、不降档、不超分），
-	// 避免"选路按派生命中低档渠道、出站却仍带高档尺寸"的必然失配。
-	if c.Request == nil || c.Request.URL == nil || c.Request.URL.Path != "/v1/images/generations" {
+	// 超分范围：generations 与 edits（含 /v1/edits 别名），但 edits 带 mask 时排除。
+	// sub2api 的 HasMask 拒模拟，所以超分亦需拒 mask，避免漏账。mask 在 multipart
+	// 表单里是文件字段，在 JSON body 里是字符串 URL 或对象。
+	if c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+	path := c.Request.URL.Path
+	isEdits := imageEditsRequestPath(path)
+	isGenerations := path == "/v1/images/generations"
+	if !isGenerations && !isEdits {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(m.Model)) {
@@ -208,6 +213,13 @@ func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValu
 	// edits 带 mask 时 sub2api 不可模拟（HasMask）。multipart 表单里 mask 是文件字段。
 	if c.Request != nil && strings.Contains(c.ContentType(), "multipart") {
 		if _, _, err := c.Request.FormFile("mask"); err == nil {
+			return false
+		}
+	}
+	// JSON body 的 mask 字段：任何非空且非 null / 空字符串字面量都视为带 mask。
+	if len(m.Mask) > 0 {
+		trimmed := strings.TrimSpace(string(m.Mask))
+		if trimmed != "" && trimmed != "null" && trimmed != `""` {
 			return false
 		}
 	}
@@ -1172,6 +1184,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		modelRequest.OutputCompression = req.OutputCompression
 		modelRequest.PartialImages = req.PartialImages
 		modelRequest.InputFidelity = req.InputFidelity
+		modelRequest.Mask = req.Mask
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/realtime") {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01

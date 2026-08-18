@@ -26,9 +26,8 @@ func eligCtxPath(path string) *gin.Context {
 
 func raw(s string) json.RawMessage { return json.RawMessage(s) }
 
-// TestImageUpscaleEligiblePathScope 锁定第一期的范围裁决：只有 generations 具备超分资格。
-// edits 的 adaptor 转换路径不读 request.Size，降档无法抵达上游，因此必须在资格谓词
-// 就退出，让选路不派生、relay 不降档，走纯原生。
+// TestImageUpscaleEligiblePathScope 锁定范围裁决：generations 与 edits（无 mask）具备超分资格。
+// 与 sub2api 的 HasMask 拒模拟对齐，edits 带 mask 时排除。
 func TestImageUpscaleEligiblePathScope(t *testing.T) {
 	cases := []struct {
 		name string
@@ -36,8 +35,8 @@ func TestImageUpscaleEligiblePathScope(t *testing.T) {
 		want bool
 	}{
 		{"generations 不受影响", "/v1/images/generations", true},
-		{"edits 退出超分", "/v1/images/edits", false},
-		{"edits 别名 /v1/edits 退出超分", "/v1/edits", false},
+		{"edits 无 mask 通过", "/v1/images/edits", true},
+		{"edits 别名 /v1/edits 无 mask 通过", "/v1/edits", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,6 +78,32 @@ func TestImageUpscaleEligible(t *testing.T) {
 			tc.mut(m)
 			if got := imageUpscaleEligible(eligCtx(), m, false); got != tc.want {
 				t.Fatalf("eligible=%v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestImageUpscaleEligibleEditsWithMask 验证 edits 路径对 mask 的处理。
+func TestImageUpscaleEligibleEditsWithMask(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		mask json.RawMessage
+		want bool
+	}{
+		{"edits 无 mask", "/v1/images/edits", nil, true},
+		{"edits 别名无 mask", "/v1/edits", nil, true},
+		{"edits mask URL 字符串拒", "/v1/images/edits", raw(`"https://example.com/mask.png"`), false},
+		{"edits mask 对象拒", "/v1/images/edits", raw(`{"image_url":"https://example.com/mask.png"}`), false},
+		{"edits mask=null 通", "/v1/images/edits", raw(`null`), true},
+		{"edits mask=空字符串 通", "/v1/images/edits", raw(`""`), true},
+		{"generations 无 mask", "/v1/images/generations", nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &ModelRequest{Model: "gpt-image-2", Mask: tc.mask}
+			if got := imageUpscaleEligible(eligCtxPath(tc.path), m, false); got != tc.want {
+				t.Fatalf("path=%s mask=%s eligible=%v want %v", tc.path, string(tc.mask), got, tc.want)
 			}
 		})
 	}
