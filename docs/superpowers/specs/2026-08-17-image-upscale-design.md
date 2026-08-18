@@ -323,3 +323,20 @@ token 量显著高于 1K，走该 bug 路径的分组账单会相应变大 —�
 2. **§8 论证修正**：sub2api 非模拟兜底路径实际只读 `data[].size` 项级声明，不读根级 `size`；无声明 size 时回落请求 size 判档，结论（改写后判档正确）不变，但"根级 size 兜底"论证前提有误。实现同时改写根级与项级，行为安全。
 3. **总开关语义补强**：路由派生可达集同样受 `IMAGE_UPSCALE_ENABLED`（经 `GetImageUpscaler() != nil`）约束，配置了 upscale 规则但模块未启用的渠道不派生，防止"配置先于开关落地"的失配窗口。
 4. **新增环境变量**：`IMAGE_UPSCALE_MAX_CONCURRENCY`（默认 4）——超分回程并发上限，防大 body 并发放大（本机曾有 global_oom 前科）。
+
+## 增补二（2026-08-18）：edits 纳入超分
+
+背景：4K 流量 95%+ 是 `/v1/images/edits`（48h 内 185 承接 122 单/3h），全部原生直通，超分毛利未覆盖。
+当初排除 edits 的四项风险重估：①上游无视降档 size 出怪尺寸 → 已被 worker 双向重采样+精确目标
+消解；②需侵入共享 adaptor → 改在 ImageHelper 层改写输入（JSON: `c.Set(common.KeyRequestBody)`
+重写缓存体；multipart: 解析后改 `c.Request.MultipartForm.Value["size"]`），adaptor 逐字段复制机制
+自然带出，公共代码零改动；③JSON mask 检测缺失 → 本次补齐；④测试面 → 照单全测。
+196 上游 48h 内成功承接 824 单 edits，能力已证。
+
+范围与口径：
+- 放行条件 = 现谓词 + 路径扩展到 edits + **无 mask**（multipart 的 mask 文件检测已有，
+  补 JSON body 的 `mask` 字段检测）。与 sub2api `HasMask` 拒模拟的口径对齐：带 mask 的
+  请求 sub2api 不按像素计费，超分即漏账，继续走原生。
+- passthrough + multipart 组合仍不超分（透传体无法安全重组，维持现状跳过）。
+- 出站降档：非透传 JSON edits 重写缓存 body 的 size；非透传 multipart 改表单 size 值；
+  透传 JSON 沿用 sjson。回程超分/规整逻辑不变。
