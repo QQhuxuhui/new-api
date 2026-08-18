@@ -113,3 +113,65 @@ func TestImageUpscaleEligibleEditsWithMask(t *testing.T) {
 		})
 	}
 }
+
+// TestImageUpscaleEligibleQualityWhitelist 锁定 quality 白名单与 sub2api 的
+// normalizeOpenAIImageQuality（openai_images_usage_simulation.go）逐字对齐：
+// 只有 ""/auto/low/medium/high 会被 normalize 接受，其余取值让
+// applyOpenAIImagesUsageSimulation 直接 `return body, OpenAIUsage{}, "", false`
+// ——整条按实际像素计费的模拟路径关闭，透传上游（降档后）的 usage。
+// 此时若这边仍判合资格并超分到 4K，客户拿高清图按低档扣费，即漏账。
+//
+// 注意 4k/ultra/hd/standard 不是臆造的取值：本仓 dto.ImageQualityRequiresCapability
+// 自己就把 high/4k/ultra 识别为"高质量图片"标记，说明这类流量真实存在。
+func TestImageUpscaleEligibleQualityWhitelist(t *testing.T) {
+	cases := []struct {
+		name    string
+		quality json.RawMessage
+		want    bool
+	}{
+		{"缺省（键不存在）通", nil, true},
+		{"quality 空串通", raw(`""`), true},
+		{"quality=auto 通", raw(`"auto"`), true},
+		{"quality=low 通", raw(`"low"`), true},
+		{"quality=medium 通", raw(`"medium"`), true},
+		{"quality=high 通", raw(`"high"`), true},
+		{"quality=HIGH 大小写归一后通", raw(`"HIGH"`), true},
+		{"quality 带空白归一后通", raw(`" high "`), true},
+		{"quality=4k 拒", raw(`"4k"`), false},
+		{"quality=ultra 拒", raw(`"ultra"`), false},
+		{"quality=hd 拒（dall-e 风格取值同样关掉模拟）", raw(`"hd"`), false},
+		{"quality=standard 拒", raw(`"standard"`), false},
+		{"quality=null 视同缺省通", raw(`null`), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &ModelRequest{Model: "gpt-image-2", Quality: tc.quality}
+			if got := imageUpscaleEligible(eligCtxPath("/v1/images/generations"), m, false); got != tc.want {
+				t.Fatalf("quality=%s eligible=%v want %v", string(tc.quality), got, tc.want)
+			}
+		})
+	}
+}
+
+// edits 路径同样受 quality 白名单约束（模拟门是请求级的，与路径无关）。
+func TestImageUpscaleEligibleQualityAppliesToEdits(t *testing.T) {
+	m := &ModelRequest{Model: "gpt-image-2", Quality: raw(`"4k"`)}
+	if imageUpscaleEligible(eligCtxPath("/v1/images/edits"), m, false) {
+		t.Fatal("edits + quality=4k 必须判不合资格")
+	}
+	if imageUpscaleEligible(eligCtxPath("/v1/edits"), m, false) {
+		t.Fatal("/v1/edits 别名 + quality=4k 必须判不合资格")
+	}
+}
+
+// 表单来源的重复 quality 值走 []string 分支，取首值判定，口径与 JSON 一致。
+func TestImageUpscaleEligibleQualityRepeatedFormValues(t *testing.T) {
+	m := &ModelRequest{Model: "gpt-image-2", Quality: raw(`["4k","low"]`)}
+	if imageUpscaleEligible(eligCtxPath("/v1/images/edits"), m, true) {
+		t.Fatal("表单重复值取首值 4k，必须判不合资格")
+	}
+	m2 := &ModelRequest{Model: "gpt-image-2", Quality: raw(`["low","4k"]`)}
+	if !imageUpscaleEligible(eligCtxPath("/v1/images/edits"), m2, true) {
+		t.Fatal("表单重复值取首值 low，应判合资格")
+	}
+}

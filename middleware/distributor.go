@@ -210,6 +210,19 @@ func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValu
 	if rf != "" && strings.ToLower(rf) != "b64_json" {
 		return false
 	}
+	// quality 白名单必须与 sub2api 的 normalizeOpenAIImageQuality
+	// （backend/internal/service/openai_images_usage_simulation.go）逐字一致：
+	// 该函数只接受 ""/auto/low/medium/high，其它一律 ok=false，而
+	// applyOpenAIImagesUsageSimulation 一旦 normalize 失败就整条模拟路径关闭、
+	// 透传上游 usage。本仓自己的 dto.ImageQualityRequiresCapability 把
+	// high/4k/ultra 都当真实流量识别，所以 quality:"4k"/"ultra"/"hd"/"standard"
+	// 这类取值确实会到达这里——放行它们就会"降档生成→超分到 4K→sub2api 按
+	// 上游 1K 的 token 量计费"，即漏账。故白名单外一律判不合资格。
+	switch strings.ToLower(strings.TrimSpace(extractImageParamValue(m.Quality, allowRepeatedFormValues))) {
+	case "", "auto", "low", "medium", "high":
+	default:
+		return false
+	}
 	// edits 带 mask 时 sub2api 不可模拟（HasMask）。multipart 表单里 mask 是文件字段。
 	if c.Request != nil && strings.Contains(c.ContentType(), "multipart") {
 		if _, _, err := c.Request.FormFile("mask"); err == nil {
