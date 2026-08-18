@@ -185,7 +185,7 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 				return nil, errors.New("size must be one of 256x256, 512x512, or 1024x1024 for dall-e-2 or dall-e")
 			}
 			if imageRequest.Size == "" {
-				imageRequest.Size = "1024x1024"
+				imageRequest.Size = dto.DefaultImageSizeForModel(imageRequest.Model)
 			}
 		} else if imageRequest.Model == "dall-e-3" {
 			if imageRequest.Size != "" && imageRequest.Size != "1024x1024" && imageRequest.Size != "1024x1792" && imageRequest.Size != "1792x1024" {
@@ -195,7 +195,7 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 				imageRequest.Quality = "standard"
 			}
 			if imageRequest.Size == "" {
-				imageRequest.Size = "1024x1024"
+				imageRequest.Size = dto.DefaultImageSizeForModel(imageRequest.Model)
 			}
 		} else if imageRequest.Model == "gpt-image-1" {
 			if imageRequest.Quality == "" {
