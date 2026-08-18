@@ -216,12 +216,20 @@ func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValu
 			return false
 		}
 	}
-	// JSON body 的 mask 字段：任何非空且非 null / 空字符串字面量都视为带 mask。
+	// JSON body 的 mask 字段：键【存在即拒】，显式 null 与空串一并算带 mask。
+	//
+	// 口径来自 sub2api：`req.HasMask = gjson.GetBytes(body, "mask").Exists()`
+	// （backend/internal/service/openai_images.go）。gjson 的 Exists() 是
+	// `t.Type != Null || len(t.Raw) != 0`——显式 JSON null 的 Raw == "null"
+	// （4 字节）→ true；`""` 是 String 类型 → 也是 true。即 sub2api 对
+	// mask:null / mask:"" 一律拒绝模拟。这里若放行它们，就会出现"降档生成→
+	// 超分到 4K→sub2api 模拟门被 HasMask 关掉→按上游 1K 量计费"的漏账，
+	// 正是 spec §10 禁止的"new-api 比 sub2api 松"方向。
+	//
+	// Go 的 json.RawMessage 与 gjson.Exists() 在此精确等价：键缺失时 Mask 为
+	// nil（len==0），显式 null 会收到 4 字节 "null"（len>0）。
 	if len(m.Mask) > 0 {
-		trimmed := strings.TrimSpace(string(m.Mask))
-		if trimmed != "" && trimmed != "null" && trimmed != `""` {
-			return false
-		}
+		return false
 	}
 	return true
 }

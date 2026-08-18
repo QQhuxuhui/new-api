@@ -95,8 +95,13 @@ func TestImageUpscaleEligibleEditsWithMask(t *testing.T) {
 		{"edits 别名无 mask", "/v1/edits", nil, true},
 		{"edits mask URL 字符串拒", "/v1/images/edits", raw(`"https://example.com/mask.png"`), false},
 		{"edits mask 对象拒", "/v1/images/edits", raw(`{"image_url":"https://example.com/mask.png"}`), false},
-		{"edits mask=null 通", "/v1/images/edits", raw(`null`), true},
-		{"edits mask=空字符串 通", "/v1/images/edits", raw(`""`), true},
+		// mask 键存在即拒，显式 null 与空串一并算带 mask。sub2api 用
+		// `gjson.GetBytes(body,"mask").Exists()` 置 HasMask，而 gjson 的
+		// Exists() = `t.Type != Null || len(t.Raw) != 0`：显式 null 的 Raw 是
+		// 4 字节 "null" → true，`""` 是 String 类型 → 也是 true。两者在
+		// sub2api 侧都会关掉模拟门，这边若放行就会"超分到 4K 却按 1K 计费"。
+		{"edits mask=null 拒（sub2api Exists() 对显式 null 为 true）", "/v1/images/edits", raw(`null`), false},
+		{"edits mask=空字符串 拒（sub2api Exists() 对空串为 true）", "/v1/images/edits", raw(`""`), false},
 		{"generations 无 mask", "/v1/images/generations", nil, true},
 	}
 	for _, tc := range cases {
