@@ -1557,14 +1557,30 @@ const EditChannelModal = (props) => {
       if (
         IMAGE_SIZE_TIER_RANK[upscaleTo] <= IMAGE_SIZE_TIER_RANK[maxNativeTier]
       ) {
-        showError(
-          t('超分目标必须高于已勾选的最高原生档位（当前最高 ') +
-            maxNativeTier +
-            t('）；请调高目标或将超分放大设为关闭'),
+        // 下拉的可选项 = 严格高于 maxNativeTier 的档位（与渲染处同口径）。
+        // 当 maxNativeTier 已是最高档时该集合为空、Select 被 disable、showClear
+        // 随之失效 —— 此时报错等于把渠道锁死：存量的 image_upscale_to 永远
+        // 不合法，界面上又没有任何入口清除它，管理员连改个渠道名都保存不了。
+        // 这种情况静默丢弃规则并提示即可：上游已原生支持最高档，超分本就无意义。
+        const hasSelectableTarget = IMAGE_SIZE_TIER_OPTIONS.some(
+          (tier) =>
+            IMAGE_SIZE_TIER_RANK[tier] > IMAGE_SIZE_TIER_RANK[maxNativeTier],
         );
-        return;
+        if (!hasSelectableTarget) {
+          showInfo(t('已原生支持最高档位，超分规则已移除'));
+        } else {
+          // 仍有合法选项可选时保留硬阻塞：这是管理员可以自行修正的配置错误，
+          // 静默丢弃反而会让"我明明选了超分"的意图无声消失。
+          showError(
+            t('超分目标必须高于已勾选的最高原生档位（当前最高 ') +
+              maxNativeTier +
+              t('）；请调高目标或将超分放大设为关闭'),
+          );
+          return;
+        }
+      } else {
+        imageUpscaleRule = { from: maxNativeTier, to: upscaleTo };
       }
-      imageUpscaleRule = { from: maxNativeTier, to: upscaleTo };
     }
     const imageSizeNormalize = localInputs.image_size_normalize === true;
     const imageSizesSetting =
