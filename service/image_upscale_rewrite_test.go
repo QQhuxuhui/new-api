@@ -64,3 +64,33 @@ func TestRewriteFailurePropagates(t *testing.T) {
 		t.Fatal("无 b64_json（url 响应）必须报错——资格谓词已排除该形状，走到这说明上游违约")
 	}
 }
+
+func TestNormalizeImageResponseSize(t *testing.T) {
+	src := pngBytes(t, 1254, 1254)
+	body := []byte(`{"size":"1024x1024","data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(src) + `"}]}`)
+
+	// 尺寸不一致 → 走重采样并改写
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 1024, 1024, fakeUp(pngBytes(t, 1024, 1024), nil))
+	if err != nil || !changed {
+		t.Fatalf("mismatch 应触发规整: changed=%v err=%v", changed, err)
+	}
+	if gjson.GetBytes(out, "size").String() != "1024x1024" {
+		t.Fatal("声明 size 应为规整后尺寸")
+	}
+
+	// 尺寸一致 → 原样返回不动
+	match := []byte(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(pngBytes(t, 1024, 1024)) + `"}]}`)
+	out2, changed2, err := NormalizeImageResponseSize(context.Background(), match, 1024, 1024, fakeUp(nil, errors.New("不应被调用")))
+	if err != nil || changed2 {
+		t.Fatalf("一致时应 no-op: changed=%v err=%v", changed2, err)
+	}
+	if string(out2) != string(match) {
+		t.Fatal("一致时 body 应原样")
+	}
+
+	// 解码失败 → 报错（调用方降级）
+	bad := []byte(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString([]byte("not-an-image")) + `"}]}`)
+	if _, _, err := NormalizeImageResponseSize(context.Background(), bad, 1024, 1024, fakeUp(nil, nil)); err == nil {
+		t.Fatal("非图片字节必须报错")
+	}
+}

@@ -36,3 +36,21 @@ func resolveImageUpscalePlan(c *gin.Context, info *relaycommon.RelayInfo, reques
 	}
 	return &imageUpscalePlan{DowngradedSize: down, TargetW: w, TargetH: h, FromTier: from}
 }
+
+// resolveImageNormalizeTarget 决定是否走"尺寸规整"：渠道开了 normalize、请求
+// 具备超分资格（形状同谓词）、且用户 size 是可解析的精确 WxH 时，返回目标宽高。
+// 与超分 plan 互斥使用：有 plan 时超分链本身就会精确落到请求尺寸，无需规整。
+// 字面档位（1K/2K/4K）与 auto 没有精确像素语义，不规整。
+func resolveImageNormalizeTarget(c *gin.Context, info *relaycommon.RelayInfo, requestSize string) (int, int, bool) {
+	if !info.ChannelSetting.ImageSizes.NormalizeEnabled() {
+		return 0, 0, false
+	}
+	if !common.GetContextKeyBool(c, constant.ContextKeyImageUpscaleEligible) {
+		return 0, 0, false
+	}
+	w, h, ok := dto.ParseImageSizeWH(requestSize)
+	if !ok {
+		return 0, 0, false
+	}
+	return w, h, true
+}

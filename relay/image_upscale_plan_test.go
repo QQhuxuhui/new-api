@@ -76,3 +76,40 @@ func TestResolveImageUpscalePlan(t *testing.T) {
 		t.Fatal("ImageSizes 为 nil 不应产出 plan")
 	}
 }
+
+func TestResolveImageNormalizeTarget(t *testing.T) {
+	infoNorm := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{
+				ImageSizes: &dto.ImageSizeCapability{Normalize: true},
+			},
+		},
+	}
+
+	if w, h, ok := resolveImageNormalizeTarget(planCtx("1K", true), infoNorm, "1024x1024"); !ok || w != 1024 || h != 1024 {
+		t.Fatalf("开启 normalize + 精确 WxH 应返回目标, got %d %d %v", w, h, ok)
+	}
+	if _, _, ok := resolveImageNormalizeTarget(planCtx("1K", false), infoNorm, "1024x1024"); ok {
+		t.Fatal("不具资格不应规整")
+	}
+	if _, _, ok := resolveImageNormalizeTarget(planCtx("", true), infoNorm, "auto"); ok {
+		t.Fatal("auto 无精确像素语义不应规整")
+	}
+	if _, _, ok := resolveImageNormalizeTarget(planCtx("2K", true), infoNorm, "2K"); ok {
+		t.Fatal("字面档位不应规整")
+	}
+	infoOff := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{
+				ImageSizes: &dto.ImageSizeCapability{Allowed: []string{"1K"}},
+			},
+		},
+	}
+	if _, _, ok := resolveImageNormalizeTarget(planCtx("1K", true), infoOff, "1024x1024"); ok {
+		t.Fatal("未开 normalize 不应规整")
+	}
+	infoNil := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	if _, _, ok := resolveImageNormalizeTarget(planCtx("1K", true), infoNil, "1024x1024"); ok {
+		t.Fatal("ImageSizes 为 nil 不应规整且不 panic")
+	}
+}

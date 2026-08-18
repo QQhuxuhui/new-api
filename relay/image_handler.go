@@ -152,6 +152,30 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		httpResp.Body = io.NopCloser(bytes.NewReader(newBody))
 		httpResp.ContentLength = int64(len(newBody))
 		httpResp.Header.Del("Content-Length")
+	} else if upscaler != nil && httpResp != nil && !info.IsStream {
+		// 尺寸规整：无超分 plan 时，若渠道开了 normalize 且用户请求精确 WxH，
+		// 上游实际出图尺寸不符则经同一条重采样链调整到请求尺寸（缩小纯 Lanczos，
+		// 放大走 ESRGAN）。尺寸一致时零额外调用；失败降级返回原图。
+		if tw, th, ok := resolveImageNormalizeTarget(c, info, imageReq.Size); ok {
+			upstreamBody, readErr := io.ReadAll(httpResp.Body)
+			_ = httpResp.Body.Close()
+			if readErr != nil {
+				return types.NewOpenAIError(readErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+			}
+			normCtx, cancel := context.WithTimeout(c.Request.Context(), upscaler.Timeout())
+			newBody, changed, normErr := service.NormalizeImageResponseSize(
+				normCtx, upstreamBody, tw, th, upscaler.UpscaleImage)
+			cancel()
+			if normErr != nil {
+				logger.LogWarn(c, fmt.Sprintf("image_normalize_degraded: %v", normErr))
+				newBody = upstreamBody
+			} else if changed {
+				logger.LogInfo(c, fmt.Sprintf("image_normalize_done: →%dx%d", tw, th))
+			}
+			httpResp.Body = io.NopCloser(bytes.NewReader(newBody))
+			httpResp.ContentLength = int64(len(newBody))
+			httpResp.Header.Del("Content-Length")
+		}
 	}
 
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)

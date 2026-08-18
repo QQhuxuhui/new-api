@@ -261,6 +261,8 @@ const EditChannelModal = (props) => {
     image_size_tiers: [],
     // 超分目标档位：空=关闭。from 不需要选，保存时自动取已勾选的最高原生档
     image_upscale_to: '',
+    // 尺寸规整：上游实际出图尺寸与请求的精确 WxH 不符时回程重采样到请求尺寸
+    image_size_normalize: false,
     // 高质量图片能力：默认开启，关闭时才写入显式 false
     image_quality_enabled: true,
   };
@@ -434,6 +436,7 @@ const EditChannelModal = (props) => {
     stream_timeout_seconds: '',
     image_size_tiers: [],
     image_upscale_to: '',
+    image_size_normalize: false,
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
@@ -683,6 +686,9 @@ const EditChannelModal = (props) => {
             data.image_upscale_to = IMAGE_SIZE_TIER_OPTIONS.includes(upscaleTo)
               ? upscaleTo
               : '';
+            data.image_size_normalize =
+              !!(parsedSettings.image_sizes &&
+                 parsedSettings.image_sizes.normalize === true);
           }
           data.image_quality_enabled =
             parsedSettings.image_quality_enabled !== false;
@@ -715,6 +721,7 @@ const EditChannelModal = (props) => {
           data.stream_timeout_seconds = '';
           data.image_size_tiers = [];
           data.image_upscale_to = '';
+          data.image_size_normalize = false;
           data.image_quality_enabled = true;
         }
       } else {
@@ -738,6 +745,7 @@ const EditChannelModal = (props) => {
         data.stream_timeout_seconds = '';
         data.image_size_tiers = [];
         data.image_upscale_to = '';
+        data.image_size_normalize = false;
         data.image_quality_enabled = true;
       }
 
@@ -823,6 +831,7 @@ const EditChannelModal = (props) => {
         stream_timeout_seconds: data.stream_timeout_seconds ?? '',
         image_size_tiers: data.image_size_tiers || [],
         image_upscale_to: data.image_upscale_to || '',
+        image_size_normalize: data.image_size_normalize || false,
       });
       // console.log(data);
     } else {
@@ -1557,12 +1566,16 @@ const EditChannelModal = (props) => {
       }
       imageUpscaleRule = { from: maxNativeTier, to: upscaleTo };
     }
+    const imageSizeNormalize = localInputs.image_size_normalize === true;
     const imageSizesSetting =
-      imageSizeTiers.length > 0
+      imageSizeTiers.length > 0 || imageSizeNormalize
         ? {
             image_sizes: {
-              allowed: imageSizeTiers,
+              ...(imageSizeTiers.length > 0
+                ? { allowed: imageSizeTiers }
+                : {}),
               ...(imageUpscaleRule ? { upscale: imageUpscaleRule } : {}),
+              ...(imageSizeNormalize ? { normalize: true } : {}),
             },
           }
         : {};
@@ -4031,6 +4044,21 @@ const EditChannelModal = (props) => {
                         />
                       );
                     })()}
+                    <Form.Switch
+                      field='image_size_normalize'
+                      label={t('尺寸规整')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange(
+                          'image_size_normalize',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '上游实际出图尺寸与用户请求的精确宽高（WxH 写法）不一致时，回程自动重采样到请求尺寸：缩小走 Lanczos、放大走超分链。适用于不严格遵守 size 参数的上游（如 web 逆向线路）。size 为 auto 或档位字面量（1K/2K/4K）的请求不受影响。需要服务端已启用图片超分模块。',
+                      )}
+                    />
                     <Form.Switch
                       field='image_quality_enabled'
                       label={t('支持高质量图片')}

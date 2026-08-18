@@ -292,6 +292,10 @@ type ImageSizeCapability struct {
 	Allowed []string `json:"allowed,omitempty"`
 	// Upscale 声明超分规则，见 ImageUpscaleRule。nil = 无超分能力。
 	Upscale *ImageUpscaleRule `json:"upscale,omitempty"`
+	// Normalize 声明"尺寸规整"：上游实际出图尺寸与用户请求的精确 WxH 不一致时，
+	// 回程经超分链路重采样到请求尺寸（放大走 ESRGAN，缩小纯 Lanczos）。
+	// 与 Allowed/Upscale 正交：不要求配置档位白名单，也不参与选路派生。
+	Normalize bool `json:"normalize,omitempty"`
 }
 
 // Allow 判断该渠道能否承接 tier 档位的请求。
@@ -510,4 +514,15 @@ func MapImageSizeForUpscale(requestSize string, fromTier string) (string, int, i
 		dw, dh = dh, dw
 	}
 	return fmt.Sprintf("%dx%d", dw, dh), width, height, true
+}
+
+// NormalizeEnabled 判定该渠道是否开启"尺寸规整"。nil 接收者安全（未配置=关闭）。
+func (c *ImageSizeCapability) NormalizeEnabled() bool {
+	return c != nil && c.Normalize
+}
+
+// ParseImageSizeWH 把 "WxH" 写法解析为精确宽高（导出给 relay 的尺寸规整用）。
+// 字面档位（1K/2K/4K）、auto、比例写法等没有精确像素语义，返回 false。
+func ParseImageSizeWH(size string) (int, int, bool) {
+	return parseImageSizeDimensions(size)
 }
