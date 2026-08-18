@@ -142,6 +142,10 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		}
 	}
 
+	// 超分实际降级（RunPod 失败/超时/结果校验失败，返回的是降档原图）标记，
+	// 落库日志据此写"超分降级"而非"超分"，避免对账时把 1K 图读成 4K。
+	upscaleDegraded := false
+
 	if upscalePlan != nil && httpResp != nil && !info.IsStream {
 		upstreamBody, readErr := io.ReadAll(httpResp.Body)
 		_ = httpResp.Body.Close()
@@ -158,6 +162,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 			// 不会多收；绝不因超分失败吞掉一次已付费的生成。
 			logger.LogWarn(c, fmt.Sprintf("image_upscale_degraded: %v", upErr))
 			newBody = upstreamBody
+			upscaleDegraded = true
 		} else {
 			logger.LogInfo(c, fmt.Sprintf("image_upscale_done: %s→%dx%d",
 				upscalePlan.FromTier, upscalePlan.TargetW, upscalePlan.TargetH))
@@ -215,7 +220,12 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if len(imageReq.Size) > 0 {
 		logContent = fmt.Sprintf("大小 %s, 品质 %s, 张数 %d", imageReq.Size, quality, request.N)
 		if upscalePlan != nil {
-			logContent += fmt.Sprintf("（%s 超分）", upscalePlan.FromTier)
+			if upscaleDegraded {
+				// 降级后客户拿到的是降档尺寸的原图，日志必须如实标注。
+				logContent += fmt.Sprintf("（%s 超分降级）", upscalePlan.FromTier)
+			} else {
+				logContent += fmt.Sprintf("（%s 超分）", upscalePlan.FromTier)
+			}
 		}
 	}
 
