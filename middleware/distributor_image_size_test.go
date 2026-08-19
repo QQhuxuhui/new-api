@@ -310,6 +310,26 @@ func TestGetModelRequest_MultipartEditsAliasCapturesModelAndSize(t *testing.T) {
 	}
 }
 
+func TestGetModelRequest_MultipartEditsTextMaskDisablesUpscale(t *testing.T) {
+	for _, path := range []string{"/v1/images/edits", "/v1/edits"} {
+		t.Run(path, func(t *testing.T) {
+			contentType, body := buildMultipart(t, map[string]string{
+				"model": "gpt-image-2",
+				"size":  "3840x2160",
+				"mask":  "data:image/png;base64,AAAA",
+			})
+			c, _ := newTestContext("POST", path, contentType, body)
+
+			if _, _, err := getModelRequest(c); err != nil {
+				t.Fatalf("getModelRequest: %v", err)
+			}
+			if common.GetContextKeyBool(c, constant.ContextKeyImageUpscaleEligible) {
+				t.Fatal("multipart edits with a text mask must not be eligible for upscale")
+			}
+		})
+	}
+}
+
 // JSON 版 edits 走的是通用 JSON 分支，同样要采到 size
 func TestGetModelRequest_JSONEditsCapturesSize(t *testing.T) {
 	c, _ := newTestContext("POST", "/v1/images/edits", "application/json",

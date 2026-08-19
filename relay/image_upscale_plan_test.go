@@ -46,6 +46,9 @@ func TestResolveImageUpscalePlan(t *testing.T) {
 	if plan.DowngradedSize != "1280x720" || plan.TargetW != 3840 || plan.TargetH != 2160 || plan.FromTier != "1K" {
 		t.Fatalf("plan 错误: %+v", plan)
 	}
+	if resolveImageUpscalePlan(planCtx("4K", true), infoWithUpscale(), "4097x1024") != nil {
+		t.Fatal("目标尺寸超过单边上限时不应产出 plan")
+	}
 	if resolveImageUpscalePlan(planCtx("1K", true), infoWithUpscale(), "1024x1024") != nil {
 		t.Fatal("原生档位不应产出 plan")
 	}

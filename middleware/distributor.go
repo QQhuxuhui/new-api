@@ -188,6 +188,14 @@ func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValu
 	default:
 		return false
 	}
+	// 上游仍可自行拒绝不支持的 size；这里只阻止超出本地 worker 预算的精确
+	// WxH 进入派生选路，避免先降档选到 1K 渠道后再提交超大重采样任务。
+	if size, ok := imageStringValueFromRawJSON(m.Size, allowRepeatedFormValues); ok {
+		if width, height, exact := dto.ParseImageSizeWH(size); exact &&
+			!dto.ImageResampleDimensionsAllowed(width, height) {
+			return false
+		}
+	}
 	if len(m.PartialImages) > 0 || len(m.OutputCompression) > 0 || len(m.InputFidelity) > 0 {
 		return false
 	}
@@ -1249,6 +1257,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 				modelRequest.OutputCompression = req.OutputCompression
 				modelRequest.PartialImages = req.PartialImages
 				modelRequest.InputFidelity = req.InputFidelity
+				modelRequest.Mask = req.Mask
 			}
 		}
 	}

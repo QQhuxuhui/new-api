@@ -10,6 +10,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
@@ -25,7 +26,7 @@ type imageUpscaleFunc func(ctx context.Context, png []byte, targetW, targetH int
 // （spec §8），而 Real-ESRGAN x4 会先把源图放大 4 倍再 Lanczos 精确缩放，
 // 4096 的源图中间态就是 16384²。所以任一边超过该上限就直接放弃规整、原样返回，
 // 宁可尺寸不精确，也不拿一个能打爆 worker 的任务去换。
-const normalizeMaxDimension = 4096
+const normalizeMaxDimension = dto.ImageResampleMaxDimension
 
 // extractFirstImage 取出 data[0].b64_json 的原始字节（资格谓词已保证 n=1）。
 func extractFirstImage(body []byte) ([]byte, error) {

@@ -1,11 +1,13 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	miniredis "github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
 )
@@ -27,6 +29,19 @@ func imageSizesSetting(tiers ...string) *string {
 	quoted = append(quoted, `]}}`...)
 	setting := string(quoted)
 	return &setting
+}
+
+func imageSizesWithDisabledQualitySetting(tiers ...string) *string {
+	disabled := false
+	encoded, err := json.Marshal(dto.ChannelSettings{
+		ImageSizes:          &dto.ImageSizeCapability{Allowed: tiers},
+		ImageQualityEnabled: &disabled,
+	})
+	if err != nil {
+		panic(err)
+	}
+	value := string(encoded)
+	return &value
 }
 
 // 内存缓存路径：两条同优先级渠道，其一只声明 1K，请求 4K 时必须恒选另一条
@@ -53,7 +68,7 @@ func setupCapabilityCacheTest(t *testing.T) func() {
 		"single": {"gpt-image-2": {201}},
 	}
 	channelsIDM = map[int]*Channel{
-		201: {Id: 201, Name: "only-1k", Priority: &priority, Weight: &weight, Setting: imageSizesSetting("1K")},
+		201: {Id: 201, Name: "only-1k", Priority: &priority, Weight: &weight, Setting: imageSizesWithDisabledQualitySetting("1K")},
 		202: {Id: 202, Name: "unrestricted", Priority: &priority, Weight: &weight},
 	}
 	channelSyncLock.Unlock()
@@ -96,6 +111,26 @@ func TestMemoryCacheSelection_ExcludesChannelsWithoutRequestedTier(t *testing.T)
 	}
 	if !seen[201] || !seen[202] {
 		t.Fatalf("1K requests should reach both channels, saw %v", seen)
+	}
+}
+
+func TestMemoryCacheSelection_ExcludesChannelWithQualityDisabled(t *testing.T) {
+	cleanup := setupCapabilityCacheTest(t)
+	defer cleanup()
+
+	for _, filter := range []*ChannelSelectFilter{
+		{ImageHighQuality: true},
+		{ImageSizeTier: "1K", ImageHighQuality: true},
+	} {
+		for attempt := 0; attempt < 30; attempt++ {
+			channel, _, err := GetRandomSatisfiedChannelDetailedFiltered("cap", "gpt-image-2", 0, false, filter)
+			if err != nil {
+				t.Fatalf("filter %+v attempt %d: %v", filter, attempt, err)
+			}
+			if channel == nil || channel.Id != 202 {
+				t.Fatalf("filter %+v attempt %d selected %v, want legacy channel 202", filter, attempt, channel)
+			}
+		}
 	}
 }
 
@@ -195,7 +230,7 @@ func setupCapabilityDBTest(t *testing.T) (restricted *Channel, unrestricted *Cha
 	restricted = &Channel{
 		Name: "db-only-1k", Key: "test",
 		Status: common.ChannelStatusEnabled, Group: "cap", Models: "gpt-image-2", Priority: &priority,
-		Setting: imageSizesSetting("1K", "2K"),
+		Setting: imageSizesWithDisabledQualitySetting("1K", "2K"),
 	}
 	unrestricted = &Channel{
 		Name: "db-unrestricted", Key: "test",
@@ -249,6 +284,25 @@ func TestGetChannelFiltered_DatabaseModeExcludesIncapableChannel(t *testing.T) {
 	}
 	if !sawRestricted {
 		t.Fatal("2K requests should still be able to reach the restricted channel")
+	}
+}
+
+func TestGetChannelFiltered_DatabaseModeExcludesChannelWithQualityDisabled(t *testing.T) {
+	_, unrestricted := setupCapabilityDBTest(t)
+
+	for _, filter := range []*ChannelSelectFilter{
+		{ImageHighQuality: true},
+		{ImageSizeTier: "2K", ImageHighQuality: true},
+	} {
+		for attempt := 0; attempt < 20; attempt++ {
+			selected, err := GetChannelFiltered("cap", "gpt-image-2", 0, nil, filter)
+			if err != nil {
+				t.Fatalf("filter %+v attempt %d: %v", filter, attempt, err)
+			}
+			if selected == nil || selected.Id != unrestricted.Id {
+				t.Fatalf("filter %+v attempt %d selected %v, want legacy channel %d", filter, attempt, selected, unrestricted.Id)
+			}
+		}
 	}
 }
 
@@ -375,6 +429,37 @@ func TestChannelSelectFilter_RejectedOnlyWhenActuallyFiltered(t *testing.T) {
 			t.Fatal("没有渠道因档位出局，Rejected 不该被置位——否则报错文案会甩锅给白名单")
 		}
 	})
+}
+
+func TestChannelSatisfiesFilter_QualityCapabilityIsIndependentFromSize(t *testing.T) {
+	disabledSetting := `{"image_sizes":{"allowed":["1K"]},"image_quality_enabled":false}`
+	enabledSetting := `{"image_sizes":{"allowed":["1K"]},"image_quality_enabled":true}`
+	disabled := &Channel{Setting: &disabledSetting}
+	enabled := &Channel{Setting: &enabledSetting}
+	legacy := &Channel{}
+
+	qualityOnly := &ChannelSelectFilter{ImageHighQuality: true}
+	if channelSatisfiesFilter(disabled, qualityOnly) {
+		t.Fatal("channel with image_quality_enabled=false must reject high-quality request")
+	}
+	if !qualityOnly.ImageQualityRejected() || qualityOnly.ImageSizeRejected() {
+		t.Fatalf("quality rejection flags are wrong: %+v", qualityOnly)
+	}
+
+	if !channelSatisfiesFilter(enabled, &ChannelSelectFilter{ImageHighQuality: true}) {
+		t.Fatal("channel with image_quality_enabled=true should accept high-quality request")
+	}
+	if !channelSatisfiesFilter(legacy, &ChannelSelectFilter{ImageHighQuality: true}) {
+		t.Fatal("legacy channel without image_quality_enabled must fail open")
+	}
+
+	sizeOnly := &ChannelSelectFilter{ImageSizeTier: "4K"}
+	if channelSatisfiesFilter(disabled, sizeOnly) {
+		t.Fatal("quality switch must not bypass the independent size allowlist")
+	}
+	if !sizeOnly.ImageSizeRejected() || sizeOnly.ImageQualityRejected() {
+		t.Fatalf("size rejection flags are wrong: %+v", sizeOnly)
+	}
 }
 
 func TestChannelSelectFilter_RejectedInDatabaseMode(t *testing.T) {

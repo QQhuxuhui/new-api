@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -42,6 +43,12 @@ func StartConcurrencyCleanupTask() {
 	// 从环境变量加载阈值配置（在 .env 加载之后）
 	loadLeakThresholdFromEnv()
 
+	// 单实例且独占 Redis 时可显式开启启动重置，清理上次异常退出留下的计数。
+	// 多实例或滚动发布默认跳过，避免清掉其他实例的真实在途请求。
+	if cleaned := resetAllConcurrencyOnStartup(); cleaned > 0 {
+		common.SysLog(fmt.Sprintf("Reset %d residual concurrency counters on startup", cleaned))
+	}
+
 	// 清理间隔设为泄漏阈值的一半，确保及时发现泄漏
 	// 例如：阈值 2 分钟，则每 1 分钟扫描一次
 	cleanupInterval := ConcurrencyLeakThreshold / 2
@@ -60,6 +67,49 @@ func StartConcurrencyCleanupTask() {
 	}()
 
 	common.SysLog(fmt.Sprintf("Concurrency cleanup task started (interval: %v, threshold: %v)", cleanupInterval, ConcurrencyLeakThreshold))
+}
+
+// resetAllConcurrencyOnStartup 清空所有并发计数 key 及其时间戳，返回清掉的计数器个数。
+// 仅在 CONCURRENCY_RESET_ON_STARTUP=true 且单实例独占 Redis 时执行。
+func resetAllConcurrencyOnStartup() int {
+	// Redis 并发计数是集群共享状态：滚动发布时，新实例不能清掉其他
+	// 实例的在途请求。只有运维明确保证单实例、独占 Redis 时才允许全量重置。
+	if !common.RedisEnabled || !strings.EqualFold(strings.TrimSpace(os.Getenv("CONCURRENCY_RESET_ON_STARTUP")), "true") {
+		return 0
+	}
+
+	ctx := context.Background()
+	cursor := uint64(0)
+	cleanedCount := 0
+
+	for {
+		scanCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		keys, nextCursor, err := common.RDB.Scan(scanCtx, cursor, "channel:key:*:concurrent", 100).Result()
+		cancel()
+
+		if err != nil {
+			common.SysError(fmt.Sprintf("Startup concurrency reset scan error: %v", err))
+			break
+		}
+
+		for _, key := range keys {
+			delCtx, delCancel := context.WithTimeout(ctx, 1*time.Second)
+			err := common.RDB.Del(delCtx, key, GetConcurrencyTimestampKey(key)).Err()
+			delCancel()
+			if err != nil {
+				common.SysError(fmt.Sprintf("Startup concurrency reset del error: key=%s, err=%v", key, err))
+				continue
+			}
+			cleanedCount++
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return cleanedCount
 }
 
 // cleanupStaleConcurrency 清理可疑的并发计数

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -55,6 +57,7 @@ func pngBytes(t *testing.T, w, h int) []byte {
 func TestUpscaleImageHappyPath(t *testing.T) {
 	store := newMemStore()
 	var gotInput map[string]any
+	var cancelCalls atomic.Int32
 	polls := 0
 	rp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -72,6 +75,9 @@ func TestUpscaleImageHappyPath(t *testing.T) {
 				status = "COMPLETED"
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-1", "status": status})
+		case r.URL.Path == "/cancel/job-1":
+			cancelCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-1", "status": "CANCELLED"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -79,10 +85,10 @@ func TestUpscaleImageHappyPath(t *testing.T) {
 	defer rp.Close()
 
 	u := &ImageUpscaler{
-		cfg:   &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: 10 * time.Second},
-		store: store,
-		http:  rp.Client(),
-		keyFn: func() string { return "upscale/test/req1" },
+		cfg:          &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: 10 * time.Second},
+		store:        store,
+		http:         rp.Client(),
+		keyFn:        func() string { return "upscale/test/req1" },
 		pollInterval: 10 * time.Millisecond,
 	}
 	out, err := u.UpscaleImage(context.Background(), pngBytes(t, 32, 32), 128, 128)
@@ -99,6 +105,133 @@ func TestUpscaleImageHappyPath(t *testing.T) {
 	}
 	if _, err := store.GetObject(context.Background(), "upscale/test/req1/src.png"); err != nil {
 		t.Fatal("源图应已上传到存储")
+	}
+	if got := cancelCalls.Load(); got != 0 {
+		t.Fatalf("COMPLETED 任务不应取消，cancel calls=%d", got)
+	}
+}
+
+func TestUpscaleImageRejectsOversizedTargetBeforeSideEffects(t *testing.T) {
+	store := newMemStore()
+	var runpodCalls atomic.Int32
+	rp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		runpodCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-oversized", "status": "FAILED"})
+	}))
+	defer rp.Close()
+	u := &ImageUpscaler{
+		cfg:   &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: 5 * time.Second},
+		store: store, http: rp.Client(),
+		keyFn: func() string { return "upscale/test/oversized" }, pollInterval: time.Millisecond,
+	}
+
+	if _, err := u.UpscaleImage(context.Background(), pngBytes(t, 32, 32), 4097, 1024); err == nil {
+		t.Fatal("超过单边上限的目标必须报错")
+	}
+	if got := runpodCalls.Load(); got != 0 {
+		t.Fatalf("超限目标不得提交 RunPod，calls=%d", got)
+	}
+	store.mu.Lock()
+	stored := len(store.data)
+	store.mu.Unlock()
+	if stored != 0 {
+		t.Fatalf("超限目标不得上传源图，stored objects=%d", stored)
+	}
+}
+
+func TestUpscaleImageCancelsRunpodOnContextTimeout(t *testing.T) {
+	var cancelCalls atomic.Int32
+	rp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-timeout", "status": "IN_QUEUE"})
+		case "/status/job-timeout":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-timeout", "status": "IN_PROGRESS"})
+		case "/cancel/job-timeout":
+			cancelCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-timeout", "status": "CANCELLED"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer rp.Close()
+	u := &ImageUpscaler{
+		cfg:   &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: time.Second},
+		store: newMemStore(), http: rp.Client(),
+		keyFn: func() string { return "upscale/test/timeout" }, pollInterval: 5 * time.Millisecond,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+
+	_, err := u.UpscaleImage(ctx, pngBytes(t, 32, 32), 128, 128)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("应保留 context deadline 错误，got %v", err)
+	}
+	if got := cancelCalls.Load(); got != 1 {
+		t.Fatalf("超时后应取消一次 RunPod 任务，calls=%d", got)
+	}
+}
+
+func TestUpscaleImageCancelsRunpodOnPollFailure(t *testing.T) {
+	var cancelCalls atomic.Int32
+	rp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-poll-failure", "status": "IN_QUEUE"})
+		case "/status/job-poll-failure":
+			http.Error(w, "status unavailable", http.StatusBadGateway)
+		case "/cancel/job-poll-failure":
+			cancelCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-poll-failure", "status": "CANCELLED"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer rp.Close()
+	u := &ImageUpscaler{
+		cfg:   &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: time.Second},
+		store: newMemStore(), http: rp.Client(),
+		keyFn: func() string { return "upscale/test/poll-failure" }, pollInterval: time.Millisecond,
+	}
+
+	if _, err := u.UpscaleImage(context.Background(), pngBytes(t, 32, 32), 128, 128); err == nil {
+		t.Fatal("轮询失败必须向上返回错误")
+	}
+	if got := cancelCalls.Load(); got != 1 {
+		t.Fatalf("轮询失败后应取消一次 RunPod 任务，calls=%d", got)
+	}
+}
+
+func TestUpscaleImageCancelFailurePreservesContextError(t *testing.T) {
+	var cancelCalls atomic.Int32
+	rp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-cancel-failure", "status": "IN_QUEUE"})
+		case "/status/job-cancel-failure":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-cancel-failure", "status": "IN_PROGRESS"})
+		case "/cancel/job-cancel-failure":
+			cancelCalls.Add(1)
+			http.Error(w, "cancel unavailable", http.StatusBadGateway)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer rp.Close()
+	u := &ImageUpscaler{
+		cfg:   &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: time.Second},
+		store: newMemStore(), http: rp.Client(),
+		keyFn: func() string { return "upscale/test/cancel-failure" }, pollInterval: 5 * time.Millisecond,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+
+	_, err := u.UpscaleImage(ctx, pngBytes(t, 32, 32), 128, 128)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("取消接口失败不得覆盖 context 错误，got %v", err)
+	}
+	if got := cancelCalls.Load(); got != 1 {
+		t.Fatalf("取消接口应只调用一次，calls=%d", got)
 	}
 }
 
@@ -117,7 +250,7 @@ func TestUpscaleImageDimensionMismatch(t *testing.T) {
 	}))
 	defer rp.Close()
 	u := &ImageUpscaler{
-		cfg: &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: 5 * time.Second},
+		cfg:   &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: 5 * time.Second},
 		store: store, http: rp.Client(),
 		keyFn: func() string { return "upscale/test/req2" }, pollInterval: 10 * time.Millisecond,
 	}
@@ -132,7 +265,7 @@ func TestUpscaleImageRunpodFailed(t *testing.T) {
 	}))
 	defer rp.Close()
 	u := &ImageUpscaler{
-		cfg: &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: 5 * time.Second},
+		cfg:   &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: 5 * time.Second},
 		store: newMemStore(), http: rp.Client(),
 		keyFn: func() string { return "upscale/test/req3" }, pollInterval: 10 * time.Millisecond,
 	}
@@ -164,7 +297,7 @@ func TestUpscaleImageMalformedRunpodResponse(t *testing.T) {
 	}))
 	defer rp.Close()
 	u := &ImageUpscaler{
-		cfg: &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: 5 * time.Second},
+		cfg:   &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: 5 * time.Second},
 		store: store, http: rp.Client(),
 		keyFn: func() string { return "upscale/test/req4" }, pollInterval: 10 * time.Millisecond,
 	}

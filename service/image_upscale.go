@@ -15,11 +15,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
-const upscalePresignTTL = 15 * time.Minute
+const (
+	upscalePresignTTL   = 15 * time.Minute
+	runpodCancelTimeout = 5 * time.Second
+)
 
 // ImageUpscaler 编排一次超分：源图 → 对象存储 → RunPod Serverless（worker 经
 // presigned URL 读写，零凭据）→ 取回结果并校验尺寸。所有失败向上抛错，由
@@ -52,8 +56,10 @@ func GetImageUpscaler() *ImageUpscaler {
 		}
 		imageUpscaler = &ImageUpscaler{
 			cfg: cfg, store: store,
-			http:         &http.Client{Timeout: 30 * time.Second},
-			keyFn:        func() string { return fmt.Sprintf("upscale/%s/%s", time.Now().UTC().Format("20060102"), uuid.NewString()) },
+			http: &http.Client{Timeout: 30 * time.Second},
+			keyFn: func() string {
+				return fmt.Sprintf("upscale/%s/%s", time.Now().UTC().Format("20060102"), uuid.NewString())
+			},
 			pollInterval: time.Second,
 		}
 	})
@@ -128,6 +134,10 @@ func releaseUpscaleSlot(sem chan struct{}) {
 }
 
 func (u *ImageUpscaler) UpscaleImage(ctx context.Context, pngData []byte, targetW, targetH int) ([]byte, error) {
+	if !dto.ImageResampleDimensionsAllowed(targetW, targetH) {
+		return nil, fmt.Errorf("image upscale target %dx%d exceeds max dimension %d", targetW, targetH, dto.ImageResampleMaxDimension)
+	}
+
 	sem := imageUpscaleSemaphore()
 	if err := acquireUpscaleSlot(ctx, sem); err != nil {
 		return nil, err
@@ -157,12 +167,27 @@ func (u *ImageUpscaler) UpscaleImage(ctx context.Context, pngData []byte, target
 	if err != nil {
 		return nil, err
 	}
+	cancelPending := jobID != ""
+	if cancelPending {
+		// 注册在并发令牌释放之后，LIFO 保证先尝试停止远端任务，再释放本地槽位。
+		defer func() {
+			if !cancelPending {
+				return
+			}
+			cancelCtx, cancel := context.WithTimeout(context.Background(), runpodCancelTimeout)
+			defer cancel()
+			if cancelErr := u.runpodCancel(cancelCtx, jobID); cancelErr != nil {
+				fmt.Printf("image_upscale: cancel RunPod job %s failed: %v\n", jobID, cancelErr)
+			}
+		}()
+	}
 	if jobID == "" || status == "" {
 		return nil, fmt.Errorf("runpod submit: malformed response (jobID=%q, status=%q)", jobID, status)
 	}
 	for status != "COMPLETED" {
 		switch status {
 		case "FAILED", "CANCELLED", "TIMED_OUT":
+			cancelPending = false
 			return nil, fmt.Errorf("runpod job %s: status=%s", jobID, status)
 		}
 		select {
@@ -177,6 +202,7 @@ func (u *ImageUpscaler) UpscaleImage(ctx context.Context, pngData []byte, target
 			return nil, fmt.Errorf("runpod status: malformed response (status='')")
 		}
 	}
+	cancelPending = false
 
 	out, err := u.store.GetObject(ctx, outKey)
 	if err != nil {
@@ -228,6 +254,24 @@ func (u *ImageUpscaler) runpodStatus(ctx context.Context, jobID string) (string,
 		return "", fmt.Errorf("runpod status: HTTP %d: %s", resp.StatusCode, truncateForLog(raw))
 	}
 	return gjson.GetBytes(raw, "status").String(), nil
+}
+
+func (u *ImageUpscaler) runpodCancel(ctx context.Context, jobID string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.cfg.Endpoint+"/cancel/"+jobID, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+u.cfg.APIKey)
+	resp, err := u.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("runpod cancel: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("runpod cancel: HTTP %d: %s", resp.StatusCode, truncateForLog(raw))
+	}
+	return nil
 }
 
 func truncateForLog(b []byte) string {

@@ -15,6 +15,10 @@ const (
 	ImageSizeTier1K = "1K"
 	ImageSizeTier2K = "2K"
 	ImageSizeTier4K = "4K"
+
+	// ImageResampleMaxDimension 是本地超分/尺寸规整允许的单边像素上限。
+	// 上游仍负责校验自身支持的尺寸；这里只约束会进入本地 worker 的任务。
+	ImageResampleMaxDimension = 4096
 )
 
 // DefaultImageSizeForModel returns the size applied later by image request
@@ -128,6 +132,12 @@ func parseImageSizeDimensions(size string) (int, int, bool) {
 		return 0, 0, false
 	}
 	return width, height, true
+}
+
+// ImageResampleDimensionsAllowed 判断精确目标尺寸能否进入本地重采样链路。
+func ImageResampleDimensionsAllowed(width, height int) bool {
+	return width > 0 && height > 0 &&
+		width <= ImageResampleMaxDimension && height <= ImageResampleMaxDimension
 }
 
 // ClassifyImageRoutingTier 是**选路**用的档位判定，按最长边。
@@ -491,7 +501,7 @@ func MapImageSizeForUpscale(requestSize string, fromTier string) (string, int, i
 		return down, tw, th, true
 	}
 	width, height, ok := parseImageSizeDimensions(trimmed)
-	if !ok {
+	if !ok || !ImageResampleDimensionsAllowed(width, height) {
 		return "", 0, 0, false
 	}
 	portrait := height > width

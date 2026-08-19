@@ -83,6 +83,28 @@ func TestImageUpscaleEligible(t *testing.T) {
 	}
 }
 
+func TestImageUpscaleEligibleTargetDimensionLimit(t *testing.T) {
+	cases := []struct {
+		name string
+		size json.RawMessage
+		want bool
+	}{
+		{"精确尺寸命中单边上限", raw(`"4096x4096"`), true},
+		{"宽超过单边上限", raw(`"4097x1024"`), false},
+		{"高超过单边上限", raw(`"1024x4097"`), false},
+		{"字面档位仍可超分", raw(`"4K"`), true},
+		{"auto 留给后续映射判定", raw(`"auto"`), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &ModelRequest{Model: "gpt-image-2", Size: tc.size}
+			if got := imageUpscaleEligible(eligCtx(), m, false); got != tc.want {
+				t.Fatalf("size=%s eligible=%v want %v", string(tc.size), got, tc.want)
+			}
+		})
+	}
+}
+
 // TestImageUpscaleEligibleEditsWithMask 验证 edits 路径对 mask 的处理。
 func TestImageUpscaleEligibleEditsWithMask(t *testing.T) {
 	cases := []struct {
