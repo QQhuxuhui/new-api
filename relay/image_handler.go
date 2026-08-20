@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,28 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/sjson"
 )
+
+// maxImageResponseBytes covers a 64 MiB decoded source image after base64
+// expansion plus the surrounding JSON, while bounding anomalous upstream data.
+const maxImageResponseBytes int64 = 96 << 20
+
+func readImageResponseBody(resp *http.Response) ([]byte, error) {
+	if resp == nil || resp.Body == nil {
+		return nil, errors.New("image response has no body")
+	}
+	defer resp.Body.Close()
+	if resp.ContentLength > maxImageResponseBytes {
+		return nil, fmt.Errorf("image response content length %d exceeds %d MiB cap", resp.ContentLength, maxImageResponseBytes>>20)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxImageResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxImageResponseBytes {
+		return nil, fmt.Errorf("image response exceeds %d MiB cap", maxImageResponseBytes>>20)
+	}
+	return body, nil
+}
 
 func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
@@ -147,8 +170,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	upscaleDegraded := false
 
 	if upscalePlan != nil && httpResp != nil && !info.IsStream {
-		upstreamBody, readErr := io.ReadAll(httpResp.Body)
-		_ = httpResp.Body.Close()
+		upstreamBody, readErr := readImageResponseBody(httpResp)
 		if readErr != nil {
 			return types.NewOpenAIError(readErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 		}
@@ -175,8 +197,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		// 上游实际出图尺寸不符则经同一条重采样链调整到请求尺寸（缩小纯 Lanczos，
 		// 放大走 ESRGAN）。尺寸一致时零额外调用；失败降级返回原图。
 		if tw, th, ok := resolveImageNormalizeTarget(c, info, imageReq.Size); ok {
-			upstreamBody, readErr := io.ReadAll(httpResp.Body)
-			_ = httpResp.Body.Close()
+			upstreamBody, readErr := readImageResponseBody(httpResp)
 			if readErr != nil {
 				return types.NewOpenAIError(readErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 			}

@@ -22,6 +22,7 @@ func TestImageUpscaleMaxConcurrencyEnv(t *testing.T) {
 		{"非数字回退默认", true, "abc", defaultImageUpscaleMaxConcurrency},
 		{"零回退默认", true, "0", defaultImageUpscaleMaxConcurrency},
 		{"负数回退默认", true, "-3", defaultImageUpscaleMaxConcurrency},
+		{"超大值钳制", true, "1000000", maxImageUpscaleMaxConcurrency},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

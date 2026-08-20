@@ -38,6 +38,12 @@ func (m *memStore) GetObject(_ context.Context, key string) ([]byte, error) {
 	}
 	return d, nil
 }
+func (m *memStore) DeleteObject(_ context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.data, key)
+	return nil
+}
 func (m *memStore) PresignGet(_ context.Context, key string, _ time.Duration) (string, error) {
 	return "https://fake/presigned-get/" + key, nil
 }
@@ -103,8 +109,11 @@ func TestUpscaleImageHappyPath(t *testing.T) {
 		gotInput["target_w"].(float64) != 128 || gotInput["target_h"].(float64) != 128 {
 		t.Fatalf("worker input 不完整: %+v", gotInput)
 	}
-	if _, err := store.GetObject(context.Background(), "upscale/test/req1/src.png"); err != nil {
-		t.Fatal("源图应已上传到存储")
+	store.mu.Lock()
+	remainingObjects := len(store.data)
+	store.mu.Unlock()
+	if remainingObjects != 0 {
+		t.Fatalf("临时源图和输出应在请求结束时清理，remaining=%d", remainingObjects)
 	}
 	if got := cancelCalls.Load(); got != 0 {
 		t.Fatalf("COMPLETED 任务不应取消，cancel calls=%d", got)
@@ -304,5 +313,21 @@ func TestUpscaleImageMalformedRunpodResponse(t *testing.T) {
 	// 应该立即报错，而不是轮询到超时
 	if _, err := u.UpscaleImage(context.Background(), pngBytes(t, 32, 32), 128, 128); err == nil {
 		t.Fatal("畸形 RunPod 响应必须立即报错")
+	}
+}
+
+func TestRunpodSubmitResponseIsBounded(t *testing.T) {
+	rp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"job-large","status":"COMPLETED"}`))
+		_, _ = w.Write(bytes.Repeat([]byte(" "), 2<<20))
+	}))
+	defer rp.Close()
+	u := &ImageUpscaler{
+		cfg:  &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: time.Second},
+		http: rp.Client(),
+	}
+
+	if _, _, err := u.runpodSubmit(context.Background(), map[string]any{}); err == nil {
+		t.Fatal("oversized RunPod response must be rejected")
 	}
 }

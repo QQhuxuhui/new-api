@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 type upscaleObjectStore interface {
 	PutObject(ctx context.Context, key string, data []byte, contentType string) error
 	GetObject(ctx context.Context, key string) ([]byte, error)
+	DeleteObject(ctx context.Context, key string) error
 	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
 	PresignPut(ctx context.Context, key string, contentType string, ttl time.Duration) (string, error)
 }
@@ -51,13 +53,38 @@ func (s *s3UpscaleStore) PutObject(ctx context.Context, key string, data []byte,
 	return err
 }
 
+// maxUpscaleObjectBytes 是从对象存储取回结果的字节上限。合法上限是 4096²
+// 高熵 PNG（compress_level=1 实测 ~44MB），128MB 留足余量；再大只可能是
+// 异常写入，不该无界读进内存。
+const maxUpscaleObjectBytes = 128 << 20
+
+// readAllLimited 读到上限即报错（区别于静默截断——截断的图会通过部分解码）。
+func readAllLimited(r io.Reader, max int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("object exceeds %dMB cap", max>>20)
+	}
+	return data, nil
+}
+
 func (s *s3UpscaleStore) GetObject(ctx context.Context, key string) ([]byte, error) {
 	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
 	if err != nil {
 		return nil, err
 	}
 	defer out.Body.Close()
-	return io.ReadAll(out.Body)
+	return readAllLimited(out.Body, maxUpscaleObjectBytes)
+}
+
+func (s *s3UpscaleStore) DeleteObject(ctx context.Context, key string) error {
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	return err
 }
 
 func (s *s3UpscaleStore) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
