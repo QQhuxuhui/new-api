@@ -117,7 +117,7 @@ func StreamScannerHandlerWithReason(c *gin.Context, resp *http.Response, info *r
 	streamingTimeout := resolveStreamTimeout(info)
 
 	var (
-		stopChan      = make(chan bool, 3)      // 增加缓冲区避免阻塞
+		stopChan      = make(chan bool, 3) // 增加缓冲区避免阻塞
 		scanner       = bufio.NewScanner(resp.Body)
 		ticker        = time.NewTicker(streamingTimeout)
 		pingTicker    *time.Ticker

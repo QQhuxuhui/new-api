@@ -108,6 +108,15 @@ type ChannelSettings struct {
 	// ImageQualityEnabled 声明渠道是否支持 high/4k/ultra 这组高质量图片请求。
 	// nil 与 true 都放行，只有显式 false 才在选路阶段排除，保证存量渠道兼容。
 	ImageQualityEnabled *bool `json:"image_quality_enabled,omitempty"`
+	// ImagesMask 声明渠道是否会真正应用 edits 请求携带的 mask（局部重绘）。
+	// nil 与 true 都放行，只有显式 false 才在选路阶段排除带 mask 的请求——
+	// 例如 web 逆向渠道对 mask 直接 400，让它接到 masked edits 只会白白失败。
+	ImagesMask *bool `json:"images_mask,omitempty"`
+	// ImagesTransparent 声明渠道是否会真正产出透明背景（background=transparent
+	// 时交付带 alpha 的 RGBA）。nil 与 true 都放行，显式 false 排除——例如
+	// adobe 逆向对该参数静默忽略，交付不透明图会让用户误以为产品损坏。
+	// 部署时需把已知忽略透明的渠道显式标 false。
+	ImagesTransparent *bool `json:"images_transparent,omitempty"`
 }
 
 type VertexKeyType string

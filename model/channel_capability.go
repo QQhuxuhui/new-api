@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 )
@@ -19,14 +20,22 @@ type ChannelSelectFilter struct {
 	ImageSizeTier string
 	// ImageHighQuality 表示 quality 为 high/4k/ultra，需要渠道独立声明支持。
 	ImageHighQuality bool
+	// RequiresMask 表示本次 edits 请求带 mask，需要渠道真正应用 mask
+	//（images_mask 显式 false 的渠道被排除，nil/true 放行）。
+	RequiresMask bool
+	// RequiresTransparent 表示本次请求 background=transparent，需要渠道真正
+	// 产出透明背景（images_transparent 显式 false 的渠道被排除，nil/true 放行）。
+	RequiresTransparent bool
 	// UpscaleEligible 本请求具备超分资格（context 注入），派生可达集仅在 true 时生效
 	UpscaleEligible bool
 
 	// 拒绝原因分开记录，避免把 quality 开关拒绝误报成 size 档位不支持。
-	rejected             bool
-	imageSizeRejected    bool
-	imageQualityRejected bool
-	imageSizeViaUpscale  int // 观测：经超分派生（而非原生白名单）通过的次数
+	rejected                 bool
+	imageSizeRejected        bool
+	imageQualityRejected     bool
+	imageMaskRejected        bool
+	imageTransparentRejected bool
+	imageSizeViaUpscale      int // 观测：经超分派生（而非原生白名单）通过的次数
 }
 
 // MarkRejected 由各条选路路径在真的排除掉渠道时调用。
@@ -69,6 +78,13 @@ func (f *ChannelSelectFilter) markImageSizeViaUpscale() {
 	}
 }
 
+func (f *ChannelSelectFilter) markImageMaskRejected() {
+	if f != nil {
+		f.rejected = true
+		f.imageMaskRejected = true
+	}
+}
+
 func (f *ChannelSelectFilter) ImageSizeRejected() bool {
 	return f != nil && f.imageSizeRejected
 }
@@ -77,10 +93,25 @@ func (f *ChannelSelectFilter) ImageQualityRejected() bool {
 	return f != nil && f.imageQualityRejected
 }
 
+func (f *ChannelSelectFilter) ImageMaskRejected() bool {
+	return f != nil && f.imageMaskRejected
+}
+
+func (f *ChannelSelectFilter) markImageTransparentRejected() {
+	if f != nil {
+		f.rejected = true
+		f.imageTransparentRejected = true
+	}
+}
+
+func (f *ChannelSelectFilter) ImageTransparentRejected() bool {
+	return f != nil && f.imageTransparentRejected
+}
+
 // Active 表示本次选路真的需要过滤。非图片请求恒为 false，
 // 用它把所有额外开销（DB 批量查询、逐渠道 setting 解析）挡在门外。
 func (f *ChannelSelectFilter) Active() bool {
-	return f != nil && (f.ImageSizeTier != "" || f.ImageHighQuality)
+	return f != nil && (f.ImageSizeTier != "" || f.ImageHighQuality || f.RequiresMask || f.RequiresTransparent)
 }
 
 // Describe 供无可用渠道时的错误文案与日志使用。
@@ -88,14 +119,20 @@ func (f *ChannelSelectFilter) Describe() string {
 	if !f.Active() {
 		return ""
 	}
-	switch {
-	case f.ImageSizeTier != "" && f.ImageHighQuality:
-		return fmt.Sprintf("图片档位 %s 与高质量图片能力", f.ImageSizeTier)
-	case f.ImageSizeTier != "":
-		return fmt.Sprintf("图片档位 %s", f.ImageSizeTier)
-	default:
-		return "高质量图片能力"
+	parts := make([]string, 0, 4)
+	if f.ImageSizeTier != "" {
+		parts = append(parts, fmt.Sprintf("图片档位 %s", f.ImageSizeTier))
 	}
+	if f.ImageHighQuality {
+		parts = append(parts, "高质量图片能力")
+	}
+	if f.RequiresMask {
+		parts = append(parts, "mask 局部重绘能力")
+	}
+	if f.RequiresTransparent {
+		parts = append(parts, "透明背景能力")
+	}
+	return strings.Join(parts, "与")
 }
 
 // channelSatisfiesFilter 判定单个渠道是否满足本次选路约束。
@@ -118,6 +155,18 @@ func channelSatisfiesFilter(channel *Channel, filter *ChannelSelectFilter) bool 
 	}
 	if filter.ImageHighQuality && setting.ImageQualityEnabled != nil && !*setting.ImageQualityEnabled {
 		filter.markImageQualityRejected()
+		satisfied = false
+	}
+	// mask 是渠道能力：声明不支持（images_mask=false）的渠道接到 masked edits
+	// 只会 400 或静默忽略 mask 出错图，选路阶段直接排除。nil/true 放行。
+	if filter.RequiresMask && setting.ImagesMask != nil && !*setting.ImagesMask {
+		filter.markImageMaskRejected()
+		satisfied = false
+	}
+	// 透明背景同理：声明不支持（images_transparent=false）的渠道会静默交付
+	// 不透明图，比报错更糟，选路阶段直接排除。nil/true 放行。
+	if filter.RequiresTransparent && setting.ImagesTransparent != nil && !*setting.ImagesTransparent {
+		filter.markImageTransparentRejected()
 		satisfied = false
 	}
 	return satisfied

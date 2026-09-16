@@ -815,8 +815,8 @@ func TestApplyCacheSimulationSessionPrefixReusesMostHistoryWithinFiveMinutes(t *
 			PromptTokens:    promptTokens,
 			StartTime:       at,
 			Request: &dto.ClaudeRequest{
-				Model:  "claude-3-7-sonnet-20250219",
-				System: strings.Repeat("s", 3000),
+				Model:    "claude-3-7-sonnet-20250219",
+				System:   strings.Repeat("s", 3000),
 				Messages: messages,
 			},
 			ChannelMeta: &relaycommon.ChannelMeta{

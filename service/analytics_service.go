@@ -1109,4 +1109,3 @@ func GetUserDailyConsumptionTrend(timeRange string, userIds []int, username stri
 	setCachedData(cacheKey, result, analyticsCacheTTLMedium)
 	return &result, nil
 }
-

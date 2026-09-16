@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,26 +24,48 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// maxImageResponseBytes covers a 64 MiB decoded source image after base64
-// expansion plus the surrounding JSON, while bounding anomalous upstream data.
-const maxImageResponseBytes int64 = 96 << 20
+// maxImageResponseBytes 是回程改写（超分/规整/转码）允许缓冲的上游响应上限
+// （与 service 改写层共用 service.MaxImageResponseBytes）。多图的合法响应也
+// 可能超过它。超限【不报错】：把已读前缀与剩余流拼回去原样透传、跳过改写
+// ——已付费的生成绝不能因体积变成 500。
+const maxImageResponseBytes = service.MaxImageResponseBytes
 
-func readImageResponseBody(resp *http.Response) ([]byte, error) {
+type readerWithCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// readImageResponseBody 读取上游响应体供改写。返回 tooLarge=true 表示超过上限，
+// 此时 resp.Body 已被还原为可完整读取的流（前缀+剩余），调用方应直接透传。
+func readImageResponseBody(resp *http.Response) ([]byte, bool, error) {
 	if resp == nil || resp.Body == nil {
-		return nil, errors.New("image response has no body")
+		return nil, false, errors.New("image response has no body")
 	}
-	defer resp.Body.Close()
 	if resp.ContentLength > maxImageResponseBytes {
-		return nil, fmt.Errorf("image response content length %d exceeds %d MiB cap", resp.ContentLength, maxImageResponseBytes>>20)
+		return nil, true, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxImageResponseBytes+1))
+	buf, err := io.ReadAll(io.LimitReader(resp.Body, maxImageResponseBytes+1))
 	if err != nil {
-		return nil, err
+		_ = resp.Body.Close()
+		return nil, false, err
 	}
-	if int64(len(body)) > maxImageResponseBytes {
-		return nil, fmt.Errorf("image response exceeds %d MiB cap", maxImageResponseBytes>>20)
+	if int64(len(buf)) > maxImageResponseBytes {
+		resp.Body = readerWithCloser{Reader: io.MultiReader(bytes.NewReader(buf), resp.Body), Closer: resp.Body}
+		return nil, true, nil
 	}
-	return body, nil
+	_ = resp.Body.Close()
+	return buf, false, nil
+}
+
+func expectedImageCount(n uint) int {
+	if n == 0 {
+		return 1
+	}
+	maxInt := uint64(^uint(0) >> 1)
+	if uint64(n) > maxInt {
+		return int(maxInt)
+	}
+	return int(n)
 }
 
 func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
@@ -80,6 +103,10 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		// request.Size 也保持原样，绝不会出现"降档发出、回程不放大"的少给。
 		if downgradeEditsRequestSize(c, info, upscalePlan) {
 			request.Size = upscalePlan.DowngradedSize
+			// generations 走结构体出站：同样强制上游出 png（最终编码由回程
+			// 转码按客户的 output_format 兑现），避免双重有损。
+			request.OutputFormat = json.RawMessage(`"png"`)
+			request.OutputCompression = nil
 		} else {
 			upscalePlan = nil
 		}
@@ -105,7 +132,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 				logger.LogWarn(c, "image_upscale: multipart passthrough, skip upscale")
 				upscalePlan = nil
 			} else if rewritten, err := sjson.SetBytes(body, "size", upscalePlan.DowngradedSize); err == nil {
-				body = rewritten
+				if forced, ferr := forceUpstreamPNGOutput(rewritten); ferr == nil {
+					body = forced
+				} else {
+					body = rewritten
+				}
 			} else {
 				logger.LogWarn(c, fmt.Sprintf("image_upscale: passthrough size rewrite failed, skip upscale: %v", err))
 				upscalePlan = nil
@@ -169,51 +200,66 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	// 落库日志据此写"超分降级"而非"超分"，避免对账时把 1K 图读成 4K。
 	upscaleDegraded := false
 
+	// 响应张数必须与请求一致（异常上游多回的条目不能换来额外的 worker 调用）。
+	expectedImages := expectedImageCount(request.N)
+
 	if upscalePlan != nil && httpResp != nil && !info.IsStream {
-		upstreamBody, readErr := readImageResponseBody(httpResp)
+		upstreamBody, tooLarge, readErr := readImageResponseBody(httpResp)
 		if readErr != nil {
 			return types.NewOpenAIError(readErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 		}
-		// c.Request.Context() 已取消时超分立即失败并走降级返回原图，属预期行为。
-		upscaleCtx, cancel := context.WithTimeout(c.Request.Context(), upscaler.Timeout())
-		newBody, upErr := service.RewriteImageResponseWithUpscale(
-			upscaleCtx, upstreamBody, upscalePlan.TargetW, upscalePlan.TargetH, upscaler.UpscaleImage)
-		cancel()
-		if upErr != nil {
-			// 降级：返回上游原图（降档尺寸）。sub2api 按实际像素计费 ⇒ 自动按低档收，
-			// 不会多收；绝不因超分失败吞掉一次已付费的生成。
-			logger.LogWarn(c, fmt.Sprintf("image_upscale_degraded: %v", upErr))
-			newBody = upstreamBody
+		if tooLarge {
+			// 体积超过改写上限：原样透传降档原图。sub2api 按实际像素计费 ⇒ 按低档收。
+			logger.LogWarn(c, fmt.Sprintf("image_upscale_degraded: response exceeds %d MiB rewrite cap, passthrough", maxImageResponseBytes>>20))
 			upscaleDegraded = true
 		} else {
-			logger.LogInfo(c, fmt.Sprintf("image_upscale_done: %s→%dx%d",
-				upscalePlan.FromTier, upscalePlan.TargetW, upscalePlan.TargetH))
+			// c.Request.Context() 已取消时超分立即失败并走降级返回原图，属预期行为。
+			upscaleCtx, cancel := context.WithTimeout(c.Request.Context(), upscaler.Timeout())
+			newBody, upErr := service.RewriteImageResponseWithUpscale(
+				upscaleCtx, upstreamBody, upscalePlan.TargetW, upscalePlan.TargetH, upscaler.UpscaleImage,
+				resolveImageOutputTranscode(c), expectedImages)
+			cancel()
+			if upErr != nil {
+				// 降级：返回上游原图（降档尺寸）。sub2api 按实际像素计费 ⇒ 自动按低档收，
+				// 不会多收；绝不因超分失败吞掉一次已付费的生成。出站已强制 png，
+				// 这里仍要兑现客户的 output_format——本地转码（原子），失败才落回 png。
+				logger.LogWarn(c, fmt.Sprintf("image_upscale_degraded: %v", upErr))
+				newBody = service.TranscodeImageResponseBody(c.Request.Context(), upstreamBody, resolveImageOutputTranscode(c), expectedImages)
+				upscaleDegraded = true
+			} else {
+				logger.LogInfo(c, fmt.Sprintf("image_upscale_done: %s→%dx%d",
+					upscalePlan.FromTier, upscalePlan.TargetW, upscalePlan.TargetH))
+			}
+			httpResp.Body = relaycommon.NewRewrittenImageResponseBody(upstreamBody, newBody)
+			httpResp.ContentLength = int64(len(newBody))
+			httpResp.Header.Del("Content-Length")
 		}
-		httpResp.Body = io.NopCloser(bytes.NewReader(newBody))
-		httpResp.ContentLength = int64(len(newBody))
-		httpResp.Header.Del("Content-Length")
 	} else if upscaler != nil && httpResp != nil && !info.IsStream {
 		// 尺寸规整：无超分 plan 时，若渠道开了 normalize 且用户请求精确 WxH，
 		// 上游实际出图尺寸不符则经同一条重采样链调整到请求尺寸（缩小纯 Lanczos，
 		// 放大走 ESRGAN）。尺寸一致时零额外调用；失败降级返回原图。
 		if tw, th, ok := resolveImageNormalizeTarget(c, info, imageReq.Size); ok {
-			upstreamBody, readErr := readImageResponseBody(httpResp)
+			upstreamBody, tooLarge, readErr := readImageResponseBody(httpResp)
 			if readErr != nil {
 				return types.NewOpenAIError(readErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 			}
-			normCtx, cancel := context.WithTimeout(c.Request.Context(), upscaler.Timeout())
-			newBody, changed, normErr := service.NormalizeImageResponseSize(
-				normCtx, upstreamBody, tw, th, upscaler.UpscaleImage)
-			cancel()
-			if normErr != nil {
-				logger.LogWarn(c, fmt.Sprintf("image_normalize_degraded: %v", normErr))
-				newBody = upstreamBody
-			} else if changed {
-				logger.LogInfo(c, fmt.Sprintf("image_normalize_done: →%dx%d", tw, th))
+			if tooLarge {
+				logger.LogWarn(c, fmt.Sprintf("image_normalize: response exceeds %d MiB rewrite cap, passthrough", maxImageResponseBytes>>20))
+			} else {
+				normCtx, cancel := context.WithTimeout(c.Request.Context(), upscaler.Timeout())
+				newBody, changed, normErr := service.NormalizeImageResponseSize(
+					normCtx, upstreamBody, tw, th, upscaler.UpscaleImage, resolveImageOutputTranscode(c), expectedImages)
+				cancel()
+				if normErr != nil {
+					logger.LogWarn(c, fmt.Sprintf("image_normalize_degraded: %v", normErr))
+					newBody = upstreamBody
+				} else if changed {
+					logger.LogInfo(c, fmt.Sprintf("image_normalize_done: →%dx%d", tw, th))
+				}
+				httpResp.Body = relaycommon.NewRewrittenImageResponseBody(upstreamBody, newBody)
+				httpResp.ContentLength = int64(len(newBody))
+				httpResp.Header.Del("Content-Length")
 			}
-			httpResp.Body = io.NopCloser(bytes.NewReader(newBody))
-			httpResp.ContentLength = int64(len(newBody))
-			httpResp.Header.Del("Content-Length")
 		}
 	}
 

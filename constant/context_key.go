@@ -71,19 +71,30 @@ const (
 
 	ContextKeyWarningChannelSkipped ContextKey = "warning_channel_skipped" // bool: 本请求曾有渠道仅因 warning 掷骰被跳过，优先级耗尽时值得关骰补扫
 
-	ContextKeyImageSizeTier    ContextKey = "image_size_tier"    // string: 本次图片请求的档位（1K/2K/4K），空=判不出档位不过滤；选路阶段据此排除不支持该档位的渠道
-	ContextKeyImageHighQuality ContextKey = "image_high_quality" // bool: quality 为 high/4k/ultra，需要渠道的独立高质量图片开关放行
+	ContextKeyImageSizeTier        ContextKey = "image_size_tier"        // string: 本次图片请求的档位（1K/2K/4K），空=判不出档位不过滤；选路阶段据此排除不支持该档位的渠道
+	ContextKeyImageHighQuality     ContextKey = "image_high_quality"     // bool: quality 为 high/4k/ultra，需要渠道的独立高质量图片开关放行
 	ContextKeyImageUpscaleEligible ContextKey = "image_upscale_eligible" // bool: 本请求形状具备超分资格（与 sub2api openAIImagesRequestSimulatable 对齐），选路可用派生档位、relay 可降档超分
 
 	// 超分降档改写的是【跨重试共享】的可变数据源（multipart 表单 map / KeyRequestBody
 	// 缓存体），而 controller 的重试回卷只回卷 Body 与 Content-Type，不认识这两处。
 	// 故首次降档前把原值存进以下两个键，ImageHelper 每次进入（含重试重进）先恢复，
 	// 保证换到无超分规则的渠道时上游收到的是原始尺寸。恢复后原值继续留存，供再次降档循环使用。
-	ContextKeyImageEditsOriginalBody     ContextKey = "image_edits_original_body"      // []byte: 首次降档前的 JSON 请求体原文
-	ContextKeyImageEditsOriginalFormSize ContextKey = "image_edits_original_form_size" // []string: 首次降档前 MultipartForm.Value["size"] 的原值；nil 切片 = 原本就没有该字段
+	ContextKeyImageEditsOriginalBody       ContextKey = "image_edits_original_body"        // []byte: 首次降档前的 JSON 请求体原文
+	ContextKeyImageEditsOriginalFormSize   ContextKey = "image_edits_original_form_size"   // []string: 首次降档前 MultipartForm.Value["size"] 的原值；nil 切片 = 原本就没有该字段
+	ContextKeyImageEditsOriginalFormOutput ContextKey = "image_edits_original_form_output" // map[string][]string: 首次降档前 output_format/output_compression 表单原值；nil 值 = 原本就没有该字段
 
-	ContextKeyImageTierRejected    ContextKey = "image_tier_rejected"    // bool: 本请求确实有渠道因档位被排除；无可用渠道时据此决定是否点名档位，避免把"渠道全挂"误报成白名单配置错误
-	ContextKeyImageQualityRejected ContextKey = "image_quality_rejected" // bool: 本请求确实有渠道因关闭高质量图片支持被排除
+	// 客户端请求的输出编码。超分/规整会把最终图重编码成 PNG，为了兑现客户的
+	// output_format（jpeg/webp），回程改写在最后一步按这两个键转码；去程降档时
+	// 出站请求统一强制 png，避免上游先有损编码一次、超分后再编码一次的双重损失。
+	ContextKeyImageClientOutputFormat      ContextKey = "image_client_output_format"      // string: 客户端请求的 output_format，仅在为 jpeg/webp 时设置
+	ContextKeyImageClientOutputCompression ContextKey = "image_client_output_compression" // int: 客户端请求的 output_compression（0-100），仅在合法时设置
+
+	ContextKeyImageTierRejected        ContextKey = "image_tier_rejected"        // bool: 本请求确实有渠道因档位被排除；无可用渠道时据此决定是否点名档位，避免把"渠道全挂"误报成白名单配置错误
+	ContextKeyImageQualityRejected     ContextKey = "image_quality_rejected"     // bool: 本请求确实有渠道因关闭高质量图片支持被排除
+	ContextKeyImageHasMask             ContextKey = "image_has_mask"             // bool: 本次 edits 请求带 mask；选路阶段据此排除声明不支持 mask 的渠道（images_mask=false）
+	ContextKeyImageMaskRejected        ContextKey = "image_mask_rejected"        // bool: 本请求确实有渠道因不支持 mask 被排除
+	ContextKeyImageTransparent         ContextKey = "image_transparent"          // bool: 本次请求 background=transparent；选路阶段据此排除声明不支持透明的渠道（images_transparent=false）
+	ContextKeyImageTransparentRejected ContextKey = "image_transparent_rejected" // bool: 本请求确实有渠道因不支持透明背景被排除
 
 	ContextKeyMidStreamTimeout ContextKey = "mid_stream_timeout" // bool: 流已输出部分内容后发生空闲超时；外层改记渠道失败，handler 跳过伪造的正常收尾
 

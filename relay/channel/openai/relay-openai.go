@@ -772,19 +772,31 @@ func preConsumeUsage(ctx *gin.Context, info *relaycommon.RelayInfo, usage *dto.R
 func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	var responseBody []byte
+	if rewritten, ok := resp.Body.(*relaycommon.RewrittenImageResponseBody); ok {
+		responseBody = rewritten.OriginalBody()
+	} else {
+		var err error
+		responseBody, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+		}
 	}
 
 	var usageResp dto.SimpleResponse
-	err = common.Unmarshal(responseBody, &usageResp)
+	err := common.Unmarshal(responseBody, &usageResp)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
-	// 写入新的 response body
-	service.IOCopyBytesGracefully(c, resp, responseBody)
+	// 写入新的 response body。改写图片响应复用原始 usage JSON，并直接流式
+	// 输出最终 body，避免再次 io.ReadAll 复制整份图片响应。
+	if rewritten, ok := resp.Body.(*relaycommon.RewrittenImageResponseBody); ok {
+		resp.ContentLength = rewritten.FinalLength()
+		service.IOCopyResponseBodyGracefully(c, resp)
+	} else {
+		service.IOCopyBytesGracefully(c, resp, responseBody)
+	}
 
 	// Once we've written to the client, we should not return errors anymore
 	// because the upstream has already consumed resources and returned content

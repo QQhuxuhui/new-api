@@ -36,7 +36,7 @@ func TestNoopNormalizeBypassesAllPools(t *testing.T) {
 		upscaleSlotWaiters.Store(0)
 	}()
 	body := imageBody(t, pngBytes(t, 96, 64), "96x64")
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 96, 64, upMustNotBeCalled(t))
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 96, 64, upMustNotBeCalled(t), nil, 1)
 	if err != nil || changed {
 		t.Fatalf("尺寸一致早退必须无视池状态: changed=%v err=%v", changed, err)
 	}
@@ -59,7 +59,7 @@ func TestLocalOverloadDegradesNotSpills(t *testing.T) {
 		localResampleWaiters.Store(0)
 	}()
 	body := imageBody(t, pngBytes(t, 96, 64), "96x64")
-	_, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t))
+	_, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t), nil, 1)
 	if changed || !errors.Is(err, ErrResampleOverloaded) {
 		t.Fatalf("本机过载应降级而非外溢远端: changed=%v err=%v", changed, err)
 	}
@@ -70,7 +70,7 @@ func TestLocalFastPathIgnoresWaiterCountWhenSlotFree(t *testing.T) {
 	localResampleWaiters.Store(resampleMaxWaiters)
 	defer localResampleWaiters.Store(0)
 	body := imageBody(t, pngBytes(t, 96, 64), "96x64")
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t))
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t), nil, 1)
 	if err != nil || !changed {
 		t.Fatalf("槽位空闲时快路径应直接进: changed=%v err=%v", changed, err)
 	}
@@ -195,6 +195,18 @@ func TestUpscaleRejectsTruncatedOutput(t *testing.T) {
 	}
 }
 
+func TestUpscaleRejectsOutputPayloadLargerThanTargetBudget(t *testing.T) {
+	var calls atomic.Int32
+	u, _ := upscalerWithStub(t, &calls, func() []byte {
+		valid := pngBytes(t, 128, 128)
+		return append(valid, bytes.Repeat([]byte{0}, 2<<20)...)
+	})
+	if _, err := u.UpscaleImage(context.Background(), pngBytes(t, 32, 32), 128, 128); err == nil ||
+		!strings.Contains(err.Error(), "payload") {
+		t.Fatalf("bloated worker output must be rejected by target-size budget: %v", err)
+	}
+}
+
 func TestUpscaleRejectsNonPngOutput(t *testing.T) {
 	var calls atomic.Int32
 	var jpg bytes.Buffer
@@ -234,7 +246,7 @@ func comStuffedJPEG(t *testing.T, comBytes int) []byte {
 func TestPreGateHeadScanBounded(t *testing.T) {
 	stuffed := comStuffedJPEG(t, 3<<20) // 3MB COM,远超 1MB 头部预算
 	body := imageBody(t, stuffed, "8x8")
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 4, 4, upMustNotBeCalled(t))
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 4, 4, upMustNotBeCalled(t), nil, 1)
 	if err != nil || changed {
 		t.Fatalf("头部超预算应按不适用原样返回: changed=%v err=%v", changed, err)
 	}
@@ -250,7 +262,7 @@ func TestPreGateLegitJPEGStillClassified(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := imageBody(t, jpg.Bytes(), "96x64")
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t))
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t), nil, 1)
 	if err != nil || !changed {
 		t.Fatalf("合法 JPEG 应正常规整: changed=%v err=%v", changed, err)
 	}
@@ -267,7 +279,7 @@ func TestPreGateRejectsGIFAsNotApplicable(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := imageBody(t, buf.Bytes(), "96x64")
-	_, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t))
+	_, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t), nil, 1)
 	if err != nil || changed {
 		t.Fatalf("GIF 应按不适用原样返回: changed=%v err=%v", changed, err)
 	}
@@ -280,7 +292,7 @@ func TestPreGateSkips16BitPNG(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := imageBody(t, buf.Bytes(), "96x64")
-	_, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t))
+	_, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t), nil, 1)
 	if err != nil || changed {
 		t.Fatalf("16-bit 源应按不适用原样返回: changed=%v err=%v", changed, err)
 	}
@@ -315,7 +327,7 @@ func TestReadAllLimited(t *testing.T) {
 func TestExtractFirstImageRejectsOversizedB64(t *testing.T) {
 	huge := strings.Repeat("A", maxSrcImageBytes/3*4+8)
 	body := []byte(`{"data":[{"b64_json":"` + huge + `"}]}`)
-	_, err := extractFirstImage(body)
+	_, err := extractImageAt(body, 0)
 	if err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("超大 b64 必须在解码前被拒: %v", err)
 	}

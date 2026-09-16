@@ -565,7 +565,7 @@ func CalculateChannelQuotaMetrics(timeRange string, channelID *int) (*dto.Channe
 		TotalQuotaUSD: totalQuotaUSD,
 		AvgQuota:      avgQuota,
 		// Don't truncate avgQuota to int - use direct float64 division to preserve precision
-		AvgQuotaUSD:   avgQuota / common.QuotaPerUnit,
+		AvgQuotaUSD: avgQuota / common.QuotaPerUnit,
 	}
 
 	// Build data quality metrics

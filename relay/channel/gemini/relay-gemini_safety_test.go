@@ -18,7 +18,7 @@ func categoryInSettings(settings []dto.GeminiChatSafetySettings, category string
 
 func TestCovertGemini2OpenAI_CivicIntegrityFiltering(t *testing.T) {
 	cases := []struct {
-		model              string
+		model               string
 		expectCivicAttached bool
 	}{
 		{"gemini-1.5-flash", true},

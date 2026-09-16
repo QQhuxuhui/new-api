@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 type ModelRequest struct {
@@ -170,10 +172,15 @@ func extractImageParamValue(raw json.RawMessage, allowRepeatedFormValues bool) s
 // 只有那条路径会解码实际像素计费，形状不满足时 sub2api 透传上游 usage（降档
 // 后的量）——此时若仍超分，客户拿高清图按低档扣费，漏账。因此两侧必须同步：
 // sub2api 放宽模拟资格可以随后放宽这里（方向安全）；反向收紧必须先收紧这里。
+//
+// mask 与 input_fidelity 已随 sub2api 侧先行放宽而放行：两者都是上游语义
+// 提示，不改变响应形状，sub2api 照常按解码像素计费（mask 还按输入图 patch
+// 公式计入 input tokens）。mask 的"渠道会不会真正应用"是渠道能力问题，由
+// images_mask 能力开关在选路阶段处理（见 imageRequestHasMask 与
+// ContextKeyImageHasMask），与超分资格解耦——降档只改输出 size，mask 匹配
+// 的是输入图尺寸，超分管线无需对 mask 做任何变换。
 func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValues bool) bool {
-	// 超分范围：generations 与 edits（含 /v1/edits 别名），但 edits 带 mask 时排除。
-	// sub2api 的 HasMask 拒模拟，所以超分亦需拒 mask，避免漏账。mask 在 multipart
-	// 表单里是文件字段，在 JSON body 里是字符串 URL 或对象。
+	// 超分范围：generations 与 edits（含 /v1/edits 别名）。
 	if c.Request == nil || c.Request.URL == nil {
 		return false
 	}
@@ -184,7 +191,7 @@ func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValu
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(m.Model)) {
-	case "gpt-image-2", "gpt-image-2-2026-04-21":
+	case "gpt-image-2", "gpt-image-2-2026-04-21", "gpt-image-2.5":
 	default:
 		return false
 	}
@@ -196,26 +203,70 @@ func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValu
 			return false
 		}
 	}
-	if len(m.PartialImages) > 0 || len(m.OutputCompression) > 0 || len(m.InputFidelity) > 0 {
+	if len(m.PartialImages) > 0 {
 		return false
 	}
-	if n := extractImageParamValue(m.N, allowRepeatedFormValues); n != "" && n != "1" {
+	// output_compression 只影响回程转码时的 jpeg 质量，不影响超分本身；
+	// 合法区间 0-100（官方口径），标量外/越界 fail closed。sub2api 计费门
+	// 同步放行同一区间，两侧白名单必须一致，否则漏账。
+	if len(m.OutputCompression) > 0 {
+		if !imageOutputCompressionEligible(m.OutputCompression, allowRepeatedFormValues) {
+			return false
+		}
+	}
+	// input_fidelity：sub2api 对 gpt-image-2 出现该字段即在解析阶段 400
+	// （"always processes image inputs at high fidelity"），可模拟门同样拒绝
+	// 任何显式取值。为保持锁步，出现即不合资格（JSON null 视同缺省）。
+	if len(m.InputFidelity) > 0 && !bytes.Equal(bytes.TrimSpace(m.InputFidelity), []byte("null")) {
 		return false
 	}
-	s := extractImageParamValue(m.Stream, allowRepeatedFormValues)
-	if s != "" && strings.ToLower(s) != "false" {
+	// n>1 时回程按原索引并行放大；同时在飞任务数由 IMAGE_UPSCALE_MAX_CONCURRENCY
+	// 控制，超分响应总大小仍由回程 96 MiB 上限保护。
+	if !imageParamEachValueEligible(m.N, allowRepeatedFormValues, imageUpscaleNAllowed) {
 		return false
 	}
-	b := extractImageParamValue(m.Background, allowRepeatedFormValues)
-	if b != "" && strings.ToLower(b) != "opaque" {
+	if !imageParamEachValueEligible(m.Stream, allowRepeatedFormValues, func(v string) bool {
+		v = strings.ToLower(strings.TrimSpace(v))
+		return v == "" || v == "false"
+	}) {
 		return false
 	}
-	f := extractImageParamValue(m.OutputFormat, allowRepeatedFormValues)
-	if f != "" && strings.ToLower(f) != "png" {
+	// 透明背景暂不进超分：生产 worker 的读图会丢弃 alpha（实测透明图进、
+	// 黑底图出），升上去的是废图。worker 改用保留 alpha 的读图并验证后，
+	// 把 transparent 加入放行集即可（sub2api 计费门已先行放行，方向安全）。
+	// 路由层面由 images_transparent 渠道能力保证透明请求只去真支持的渠道。
+	// auto 是官方默认值（模型自行决定背景）；逆向上游默认出不透明图，
+	// 语义上等价 opaque，放行以免默认行为被误伤出超分通道。
+	if !imageParamEachValueEligible(m.Background, allowRepeatedFormValues, func(v string) bool {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "", "opaque", "auto":
+			return true
+		}
+		return false
+	}) {
 		return false
 	}
-	rf := extractImageParamValue(m.ResponseFormat, allowRepeatedFormValues)
-	if rf != "" && strings.ToLower(rf) != "b64_json" {
+	// jpeg/webp 不影响超分能不能放大尺寸：去程统一强制上游出 png，回程在
+	// 超分改写的最后一步按客户要的格式转码（见 rewriteImageBody）。sub2api
+	// 计费门同步放行同一集合（官方 token 公式只看尺寸+品质，与格式无关）。
+	if !imageParamEachValueEligible(m.OutputFormat, allowRepeatedFormValues, func(v string) bool {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "", "png", "jpeg", "webp":
+			return true
+		}
+		return false
+	}) {
+		return false
+	}
+	if !imageParamEachValueEligible(m.ResponseFormat, allowRepeatedFormValues, func(v string) bool {
+		v = strings.ToLower(strings.TrimSpace(v))
+		return v == "" || v == "b64_json"
+	}) {
+		return false
+	}
+	// mask 的来源协议不影响资格：http(s) mask 由 sub2api 按"与输入图同尺寸"
+	// 的官方约束借输入图尺寸计费。只有出站转换识别不出的结构才拒（会 400）。
+	if !imageMaskSourceEligible(m) {
 		return false
 	}
 	// quality 白名单必须与 sub2api 的 normalizeOpenAIImageQuality
@@ -226,45 +277,243 @@ func imageUpscaleEligible(c *gin.Context, m *ModelRequest, allowRepeatedFormValu
 	// high/4k/ultra 都当真实流量识别，所以 quality:"4k"/"ultra"/"hd"/"standard"
 	// 这类取值确实会到达这里——放行它们就会"降档生成→超分到 4K→sub2api 按
 	// 上游 1K 的 token 量计费"，即漏账。故白名单外一律判不合资格。
-	switch strings.ToLower(strings.TrimSpace(extractImageParamValue(m.Quality, allowRepeatedFormValues))) {
-	case "", "auto", "low", "medium", "high":
-	default:
-		return false
-	}
-	// edits 带 mask 时 sub2api 不可模拟（HasMask）。multipart 表单里 mask 是文件字段。
-	if c.Request != nil && strings.Contains(c.ContentType(), "multipart") {
-		if _, _, err := c.Request.FormFile("mask"); err == nil {
-			return false
+	if !imageParamEachValueEligible(m.Quality, allowRepeatedFormValues, func(v string) bool {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "", "auto", "low", "medium", "high":
+			return true
 		}
-	}
-	// JSON body 的 mask 字段：键【存在即拒】，显式 null 与空串一并算带 mask。
-	//
-	// 口径来自 sub2api：`req.HasMask = gjson.GetBytes(body, "mask").Exists()`
-	// （backend/internal/service/openai_images.go）。gjson 的 Exists() 是
-	// `t.Type != Null || len(t.Raw) != 0`——显式 JSON null 的 Raw == "null"
-	// （4 字节）→ true；`""` 是 String 类型 → 也是 true。即 sub2api 对
-	// mask:null / mask:"" 一律拒绝模拟。这里若放行它们，就会出现"降档生成→
-	// 超分到 4K→sub2api 模拟门被 HasMask 关掉→按上游 1K 量计费"的漏账，
-	// 正是 spec §10 禁止的"new-api 比 sub2api 松"方向。
-	//
-	// Go 的 json.RawMessage 与 gjson.Exists() 在此精确等价：键缺失时 Mask 为
-	// nil（len==0），显式 null 会收到 4 字节 "null"（len>0）。
-	if len(m.Mask) > 0 {
 		return false
+	}) {
+		return false
+	}
+	// JSON 重复键分歧：encoding/json 取末值（本侧解析）而 gjson 取首值
+	// （sub2api 侧解析）。{"output_format":"gif","output_format":"png"} 会在
+	// 本侧读成 png 合资格、sub2api 读成 gif 不可模拟——降档超分后按小图
+	// usage 计费。故 JSON 体的首键取值必须同样通过白名单。
+	if !allowRepeatedFormValues {
+		if body, errBody := common.GetRequestBody(c); errBody == nil && len(body) > 0 {
+			if !imageJSONFirstValuesEligible(body) {
+				return false
+			}
+		}
 	}
 	return true
 }
 
-func noAvailableChannelMessage(group, modelName, tier string, tierRejected, qualityRejected bool) string {
-	switch {
-	case tier != "" && tierRejected && qualityRejected:
-		return fmt.Sprintf("分组 %s 下模型 %s 无可用渠道：部分候选渠道因不支持 %s 档位图片或高质量图片被排除，其余候选当前也不可用（请检查图片档位白名单、高质量图片开关及渠道状态）", group, modelName, tier)
-	case tier != "" && tierRejected:
-		return fmt.Sprintf("分组 %s 下模型 %s 无可用渠道：部分候选渠道因不支持 %s 档位图片被排除，其余候选当前也不可用（请检查图片档位白名单及渠道状态，或改用其它尺寸）", group, modelName, tier)
-	case qualityRejected:
-		return fmt.Sprintf("分组 %s 下模型 %s 无可用渠道：部分候选渠道因未开启高质量图片支持被排除，其余候选当前也不可用（请检查渠道的高质量图片开关及渠道状态）", group, modelName)
+// imageUpscaleNAllowed 只要求 n 是正整数。单请求不设置固定图片数上限；
+// 同时处理数量由 IMAGE_UPSCALE_MAX_CONCURRENCY 控制，响应总量由 96 MiB
+// 回程改写上限控制。
+func imageUpscaleNAllowed(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return true
 	}
-	return fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", group, modelName)
+	n, err := strconv.ParseUint(v, 10, 64)
+	return err == nil && n >= 1
+}
+
+// imageParamEachValueEligible 对一个标量图片参数应用白名单，全程 fail closed：
+// 缺省/JSON null 视为未指定放行；字符串/数字/布尔标量字符串化后判白名单；
+// 表单重复值要求【每个】取值都在白名单内——严于 sub2api 的末值生效，方向
+// 安全（首值/末值任一越界都判不合资格）；对象等标量无法表达的形状一律拒
+// （sub2api 侧会读成白名单外文本、模拟关闭，这里放行即漏账）。
+func imageParamEachValueEligible(raw json.RawMessage, allowRepeatedFormValues bool, allowed func(string) bool) bool {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return true
+	}
+	var values []string
+	if err := common.Unmarshal(raw, &values); err == nil {
+		if !allowRepeatedFormValues {
+			return false
+		}
+		for _, v := range values {
+			if !allowed(v) {
+				return false
+			}
+		}
+		return true
+	}
+	var scalarStr *string
+	if err := common.Unmarshal(raw, &scalarStr); err == nil {
+		return scalarStr == nil || allowed(*scalarStr)
+	}
+	var boolVal bool
+	if err := common.Unmarshal(raw, &boolVal); err == nil {
+		if boolVal {
+			return allowed("true")
+		}
+		return allowed("false")
+	}
+	var num float64
+	if err := common.Unmarshal(raw, &num); err == nil {
+		if num == float64(int64(num)) {
+			return allowed(fmt.Sprintf("%d", int64(num)))
+		}
+		return allowed(fmt.Sprintf("%v", num))
+	}
+	return false
+}
+
+// imageJSONFirstValuesEligible 按 gjson 的【首键】语义复查 JSON 体里的图片
+// 参数（sub2api 的解析口径），弥合与 encoding/json 末键语义的重复键分歧。
+// 多层白名单同 imageUpscaleEligible；任何一项首值越界即不合资格。
+func imageJSONFirstValuesEligible(body []byte) bool {
+	checks := []struct {
+		field   string
+		allowed func(string) bool
+	}{
+		{"n", imageUpscaleNAllowed},
+		{"stream", func(v string) bool {
+			v = strings.ToLower(strings.TrimSpace(v))
+			return v == "" || v == "false"
+		}},
+		{"background", func(v string) bool {
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "", "opaque", "auto":
+				return true
+			}
+			return false
+		}},
+		{"output_format", func(v string) bool {
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "", "png", "jpeg", "webp":
+				return true
+			}
+			return false
+		}},
+		{"response_format", func(v string) bool {
+			v = strings.ToLower(strings.TrimSpace(v))
+			return v == "" || v == "b64_json"
+		}},
+		{"quality", func(v string) bool {
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "", "auto", "low", "medium", "high":
+				return true
+			}
+			return false
+		}},
+	}
+	for _, chk := range checks {
+		res := gjson.GetBytes(body, chk.field)
+		if !res.Exists() || res.Type == gjson.Null {
+			continue
+		}
+		switch res.Type {
+		case gjson.String, gjson.Number, gjson.True, gjson.False:
+			if !chk.allowed(res.String()) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	if r := gjson.GetBytes(body, "input_fidelity"); r.Exists() && r.Type != gjson.Null {
+		return false
+	}
+	// mask 首键同样要过来源校验（首键 http、末键 data 时 sub2api 读到的是 http）。
+	if r := gjson.GetBytes(body, "mask"); r.Exists() && !imageMaskRawEligible(json.RawMessage(r.Raw)) {
+		return false
+	}
+	if r := gjson.GetBytes(body, "output_compression"); r.Exists() && r.Type != gjson.Null {
+		if r.Type != gjson.Number {
+			return false
+		}
+		n := r.Int()
+		if float64(n) != r.Num || n < 0 || n > 100 {
+			return false
+		}
+	}
+	return true
+}
+
+// imageMaskSourceEligible 判定 mask 形态是否可被计费侧识别。sub2api 按"mask
+// 与输入图同尺寸"的官方约束给无法本地解码的 http(s) mask 计费，因此来源协议
+// 不再影响资格；只有出站转换本身识别不出的结构（会 400）才 fail closed。
+// 复用出站转换的同一套来源提取，避免两套结构认知分叉。
+func imageMaskSourceEligible(m *ModelRequest) bool {
+	return imageMaskRawEligible(m.Mask)
+}
+
+func imageMaskRawEligible(raw json.RawMessage) bool {
+	if len(raw) == 0 || openaichannel.IsEmptyJSONValue(raw) {
+		return true
+	}
+	sources, err := openaichannel.ExtractImageSources(raw)
+	return err == nil && len(sources) > 0
+}
+
+// imageOutputCompressionEligible 判定 output_compression 是否是 0-100 的整数。
+// 与 imageInputFidelityEligible 同样对标量外形状 fail closed：sub2api 侧解析
+// 非数字直接 400，越界值不在参考测量覆盖内。JSON 数字与表单字符串都要能读。
+func imageOutputCompressionEligible(raw json.RawMessage, allowRepeatedFormValues bool) bool {
+	allowed := func(v string) bool {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		return err == nil && n >= 0 && n <= 100
+	}
+	if len(raw) == 0 {
+		return true
+	}
+	var num *int
+	if err := common.Unmarshal(raw, &num); err == nil {
+		return num == nil || (*num >= 0 && *num <= 100)
+	}
+	// 字符串形态只有表单来源才合法：JSON 字符串在 sub2api 侧是 400
+	// （"invalid output_compression field type"），这里同样不放行。
+	if allowRepeatedFormValues {
+		var scalar *string
+		if err := common.Unmarshal(raw, &scalar); err == nil {
+			return scalar == nil || allowed(*scalar)
+		}
+		var values []string
+		if err := common.Unmarshal(raw, &values); err == nil {
+			for _, v := range values {
+				if !allowed(v) {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func imageRequestHasMask(c *gin.Context, m *ModelRequest) bool {
+	// mask 仅对 edits 有意义。generations 的 multipart body 未经缓存，解析会
+	// 消费请求体，因此只在 edits 路径探测。
+	if c == nil || c.Request == nil || c.Request.URL == nil || !imageEditsRequestPath(c.Request.URL.Path) {
+		return false
+	}
+	if strings.Contains(c.ContentType(), "multipart") {
+		// FormFile 会打开返回的文件；这里只需要文件头，直接检查解析结果可避免
+		// 为落盘的大文件遗留一个等待 GC 才关闭的文件描述符。net/http 会在请求
+		// 结束时对 MultipartForm 调用 RemoveAll 清理临时文件。
+		if err := c.Request.ParseMultipartForm(32 << 20); err != nil || c.Request.MultipartForm == nil {
+			return false
+		}
+		return len(c.Request.MultipartForm.File["mask"]) > 0
+	}
+	return m != nil && openaichannel.JSONEditsMaskRequiresCapability(m.Mask)
+}
+
+func noAvailableChannelMessage(group, modelName, tier string, tierRejected, qualityRejected, maskRejected, transparentRejected bool) string {
+	reasons := make([]string, 0, 4)
+	if tier != "" && tierRejected {
+		reasons = append(reasons, fmt.Sprintf("不支持 %s 档位图片", tier))
+	}
+	if qualityRejected {
+		reasons = append(reasons, "未开启高质量图片支持")
+	}
+	if maskRejected {
+		reasons = append(reasons, "不支持 mask 局部重绘")
+	}
+	if transparentRejected {
+		reasons = append(reasons, "不支持透明背景")
+	}
+	if len(reasons) == 0 {
+		return fmt.Sprintf("分组 %s 下模型 %s 无可用渠道（所有优先级已尝试，可能全部暂停或配置错误）", group, modelName)
+	}
+	return fmt.Sprintf("分组 %s 下模型 %s 无可用渠道：部分候选渠道因%s被排除，其余候选当前也不可用（请检查对应能力开关及渠道状态）",
+		group, modelName, strings.Join(reasons, "、"))
 }
 
 func Distribute() func(c *gin.Context) {
@@ -897,7 +1146,9 @@ func Distribute() func(c *gin.Context) {
 							tier := common.GetContextKeyString(c, constant.ContextKeyImageSizeTier)
 							tierRejected := common.GetContextKeyBool(c, constant.ContextKeyImageTierRejected)
 							qualityRejected := common.GetContextKeyBool(c, constant.ContextKeyImageQualityRejected)
-							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, noAvailableChannelMessage(usingGroup, modelRequest.Model, tier, tierRejected, qualityRejected), string(types.ErrorCodeModelNotFound))
+							maskRejected := common.GetContextKeyBool(c, constant.ContextKeyImageMaskRejected)
+							transparentRejected := common.GetContextKeyBool(c, constant.ContextKeyImageTransparentRejected)
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, noAvailableChannelMessage(usingGroup, modelRequest.Model, tier, tierRejected, qualityRejected, maskRejected, transparentRejected), string(types.ErrorCodeModelNotFound))
 							return
 						}
 					}
@@ -1276,6 +1527,25 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		}
 		if imageUpscaleEligible(c, &modelRequest, allowRepeatedFormValues) {
 			common.SetContextKey(c, constant.ContextKeyImageUpscaleEligible, true)
+		}
+		if imageRequestHasMask(c, &modelRequest) {
+			common.SetContextKey(c, constant.ContextKeyImageHasMask, true)
+		}
+		if bg := extractImageParamValue(modelRequest.Background, allowRepeatedFormValues); strings.EqualFold(strings.TrimSpace(bg), "transparent") {
+			common.SetContextKey(c, constant.ContextKeyImageTransparent, true)
+		}
+		// 记录客户端要的输出编码：超分/规整重编码后按它转码回去。独立于超分
+		// 资格设置——规整路径（无超分 plan）同样会重编码，也需要兑现格式。
+		switch f := strings.ToLower(strings.TrimSpace(extractImageParamValue(modelRequest.OutputFormat, allowRepeatedFormValues))); f {
+		case "jpeg", "webp":
+			common.SetContextKey(c, constant.ContextKeyImageClientOutputFormat, f)
+		}
+		if len(modelRequest.OutputCompression) > 0 && imageOutputCompressionEligible(modelRequest.OutputCompression, allowRepeatedFormValues) {
+			if v := strings.TrimSpace(extractImageParamValue(modelRequest.OutputCompression, allowRepeatedFormValues)); v != "" {
+				if n, err := strconv.Atoi(v); err == nil {
+					common.SetContextKey(c, constant.ContextKeyImageClientOutputCompression, n)
+				}
+			}
 		}
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/audio") {

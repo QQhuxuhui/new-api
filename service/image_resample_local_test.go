@@ -43,7 +43,7 @@ func decodedDims(t *testing.T, body []byte) (int, int) {
 
 func TestNormalizeDownscaleGoesLocal(t *testing.T) {
 	body := imageBody(t, pngBytes(t, 96, 64), "96x64")
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t))
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t), nil, 1)
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestNormalizeMixedDirectionGoesRemote(t *testing.T) {
 		}
 		return remote, nil
 	}
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 128, up)
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 128, up, nil, 1)
 	if err != nil || !changed {
 		t.Fatalf("normalize: changed=%v err=%v", changed, err)
 	}
@@ -92,7 +92,7 @@ func TestNormalizeUpscaleStillGoesRemote(t *testing.T) {
 		called = true
 		return pngBytes(t, tw, th), nil
 	}
-	_, changed, err := NormalizeImageResponseSize(context.Background(), body, 64, 64, up)
+	_, changed, err := NormalizeImageResponseSize(context.Background(), body, 64, 64, up, nil, 1)
 	if err != nil || !changed {
 		t.Fatalf("normalize: changed=%v err=%v", changed, err)
 	}
@@ -116,7 +116,7 @@ func TestNormalizeLocalFailureFallsBackToRemote(t *testing.T) {
 		called = true
 		return remote, nil
 	}
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, up)
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, up, nil, 1)
 	if err != nil || !changed {
 		t.Fatalf("normalize: changed=%v err=%v", changed, err)
 	}
@@ -134,7 +134,7 @@ func TestNormalizeCancelledContextShortCircuits(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	body := imageBody(t, pngBytes(t, 96, 64), "96x64")
-	_, changed, err := NormalizeImageResponseSize(ctx, body, 48, 32, upMustNotBeCalled(t))
+	_, changed, err := NormalizeImageResponseSize(ctx, body, 48, 32, upMustNotBeCalled(t), nil, 1)
 	if err == nil || changed {
 		t.Fatalf("已取消的请求不应回退远端: changed=%v err=%v", changed, err)
 	}
@@ -147,7 +147,7 @@ func TestNormalizeCancelledContextShortCircuits(t *testing.T) {
 // 钉住与 worker 的 <= 判据,防止有人改成 < 造成静默外溢 RunPod。
 func TestNormalizeOneSideEqualDownscaleGoesLocal(t *testing.T) {
 	body := imageBody(t, pngBytes(t, 96, 64), "96x64")
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 96, 32, upMustNotBeCalled(t))
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 96, 32, upMustNotBeCalled(t), nil, 1)
 	if err != nil || !changed {
 		t.Fatalf("normalize: changed=%v err=%v", changed, err)
 	}
@@ -171,7 +171,7 @@ func TestNormalizeSemFullQueuesLocallyNotRemote(t *testing.T) {
 		}
 	}()
 	body := imageBody(t, pngBytes(t, 96, 64), "96x64")
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t))
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 48, 32, upMustNotBeCalled(t), nil, 1)
 	if err != nil || !changed {
 		t.Fatalf("满载+活ctx应排队本机完成: changed=%v err=%v", changed, err)
 	}
@@ -189,7 +189,7 @@ func TestNormalizeDoubleFailureCarriesLocalCause(t *testing.T) {
 	}
 	body := imageBody(t, truncated, "96x64")
 	_, _, err := NormalizeImageResponseSize(context.Background(), body, 48, 32,
-		fakeUp(nil, errors.New("remote boom")))
+		fakeUp(nil, errors.New("remote boom")), nil, 1)
 	if err == nil || !strings.Contains(err.Error(), "remote boom") || !strings.Contains(err.Error(), "local:") {
 		t.Fatalf("双失败错误链应带本机根因: %v", err)
 	}

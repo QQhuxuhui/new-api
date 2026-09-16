@@ -12,16 +12,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
 const (
-	upscalePresignTTL            = 15 * time.Minute
-	runpodCancelTimeout          = 5 * time.Second
-	upscaleCleanupTimeout        = 5 * time.Second
-	maxRunpodResponseBytes int64 = 1 << 20
+	upscalePresignTTL                 = 15 * time.Minute
+	runpodCancelTimeout               = 5 * time.Second
+	upscaleCleanupTimeout             = 5 * time.Second
+	upscaleCleanupWorkerCount         = 4
+	upscaleCleanupQueueCapacity       = 32
+	maxRunpodResponseBytes      int64 = 1 << 20
 )
 
 // ImageUpscaler 编排一次超分：源图 → 对象存储 → RunPod Serverless（worker 经
@@ -38,7 +42,16 @@ type ImageUpscaler struct {
 var (
 	imageUpscalerOnce sync.Once
 	imageUpscaler     *ImageUpscaler
+
+	upscaleCleanupOnce  sync.Once
+	upscaleCleanupQueue chan upscaleCleanupTask
 )
+
+type upscaleCleanupTask struct {
+	upscaler *ImageUpscaler
+	keys     []string
+	ready    <-chan struct{}
+}
 
 // GetImageUpscaler 单例；nil = 模块禁用（配置缺失或存储初始化失败）。
 func GetImageUpscaler() *ImageUpscaler {
@@ -50,7 +63,7 @@ func GetImageUpscaler() *ImageUpscaler {
 		store, err := newS3UpscaleStore(cfg)
 		if err != nil {
 			// 启动期打日志即可：超分是增强能力，存储配置错退回纯原生行为
-			fmt.Printf("image_upscale: storage init failed, module disabled: %v\n", err)
+			common.SysError(fmt.Sprintf("image_upscale: storage init failed, module disabled: %v", err))
 			return
 		}
 		imageUpscaler = &ImageUpscaler{
@@ -81,7 +94,7 @@ func (u *ImageUpscaler) Timeout() time.Duration {
 // 本机有图片大 body 并发放大触发 OOM 的前科，因此必须有硬上限。
 const (
 	defaultImageUpscaleMaxConcurrency = 4
-	maxImageUpscaleMaxConcurrency     = 32
+	maxImageUpscaleMaxConcurrency     = 200
 )
 
 // imageUpscaleMaxConcurrency 读 IMAGE_UPSCALE_MAX_CONCURRENCY；
@@ -183,15 +196,28 @@ func (u *ImageUpscaler) UpscaleImage(ctx context.Context, pngData []byte, target
 	if err := acquireUpscaleSlot(ctx, sem); err != nil {
 		return nil, err
 	}
-	defer releaseUpscaleSlot(sem)
 
 	prefix := u.keyFn()
 	srcKey, outKey := prefix+"/src.png", prefix+"/out.png"
+	cleanupUploadedObjects := false
+	defer func() {
+		if !cleanupUploadedObjects {
+			releaseUpscaleSlot(sem)
+			return
+		}
+		// 先完成有界队列准入，再释放超分槽，确保队列饱和时阻塞的请求数
+		// 仍受槽位硬上限约束。worker 等 ready 打开后才真正访问 S3，因此
+		// 删除操作本身始终发生在槽位释放之后。
+		ready := make(chan struct{})
+		u.enqueueCleanupObjects(ready, srcKey, outKey)
+		releaseUpscaleSlot(sem)
+		close(ready)
+	}()
 
 	if err := u.store.PutObject(ctx, srcKey, pngData, "image/png"); err != nil {
 		return nil, fmt.Errorf("put src: %w", err)
 	}
-	defer u.cleanupObjects(srcKey, outKey)
+	cleanupUploadedObjects = true
 	srcURL, err := u.store.PresignGet(ctx, srcKey, upscalePresignTTL)
 	if err != nil {
 		return nil, fmt.Errorf("presign src: %w", err)
@@ -219,7 +245,7 @@ func (u *ImageUpscaler) UpscaleImage(ctx context.Context, pngData []byte, target
 			cancelCtx, cancel := context.WithTimeout(context.Background(), runpodCancelTimeout)
 			defer cancel()
 			if cancelErr := u.runpodCancel(cancelCtx, jobID); cancelErr != nil {
-				fmt.Printf("image_upscale: cancel RunPod job %s failed: %v\n", jobID, cancelErr)
+				logger.LogWarn(ctx, fmt.Sprintf("image_upscale: cancel RunPod job %s failed: %v", jobID, cancelErr))
 			}
 		}()
 	}
@@ -246,9 +272,20 @@ func (u *ImageUpscaler) UpscaleImage(ctx context.Context, pngData []byte, target
 	}
 	cancelPending = false
 
-	out, err := u.store.GetObject(ctx, outKey)
+	payloadLimit := expectedPNGPayloadBytes(targetW, targetH)
+	var out []byte
+	if limitedStore, ok := u.store.(interface {
+		GetObjectLimited(context.Context, string, int64) ([]byte, error)
+	}); ok {
+		out, err = limitedStore.GetObjectLimited(ctx, outKey, payloadLimit)
+	} else {
+		out, err = u.store.GetObject(ctx, outKey)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("get out: %w", err)
+	}
+	if int64(len(out)) > payloadLimit {
+		return nil, fmt.Errorf("out payload %d exceeds target-size budget %d", len(out), payloadLimit)
 	}
 	// 输出校验的顺序是刻意的,不能颠倒:
 	//  1. DecodeConfig(只读头部)先验格式与声明尺寸==target——把后续全量解码的
@@ -354,12 +391,42 @@ func readRunpodResponse(resp *http.Response, operation string) ([]byte, error) {
 }
 
 func (u *ImageUpscaler) cleanupObjects(keys ...string) {
-	ctx, cancel := context.WithTimeout(context.Background(), upscaleCleanupTimeout)
-	defer cancel()
 	for _, key := range keys {
+		ctx, cancel := context.WithTimeout(context.Background(), upscaleCleanupTimeout)
 		if err := u.store.DeleteObject(ctx, key); err != nil {
-			fmt.Printf("image_upscale: delete temporary object %s failed: %v\n", key, err)
+			common.SysError(fmt.Sprintf("image_upscale: delete temporary object %s failed: %v", key, err))
 		}
+		cancel()
+	}
+}
+
+func imageUpscaleCleanupQueue() chan upscaleCleanupTask {
+	upscaleCleanupOnce.Do(func() {
+		upscaleCleanupQueue = make(chan upscaleCleanupTask, upscaleCleanupQueueCapacity)
+		for i := 0; i < upscaleCleanupWorkerCount; i++ {
+			go func() {
+				for task := range upscaleCleanupQueue {
+					if task.ready != nil {
+						<-task.ready
+					}
+					task.upscaler.cleanupObjects(task.keys...)
+				}
+			}()
+		}
+	})
+	return upscaleCleanupQueue
+}
+
+func (u *ImageUpscaler) enqueueCleanupObjects(ready <-chan struct{}, keys ...string) {
+	if u == nil || len(keys) == 0 {
+		return
+	}
+	// Copy before handing ownership to the background worker. A full queue
+	// deliberately applies backpressure rather than dropping cleanup work.
+	imageUpscaleCleanupQueue() <- upscaleCleanupTask{
+		upscaler: u,
+		keys:     append([]string(nil), keys...),
+		ready:    ready,
 	}
 }
 

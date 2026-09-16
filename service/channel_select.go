@@ -33,10 +33,12 @@ func channelSelectFilterFromContext(c *gin.Context) *model.ChannelSelectFilter {
 	// 注意：单测/无配置环境下 GetImageUpscaler() 恒为 nil，UpscaleEligible 因此恒 false，
 	// 即等价于未启用超分时的原有选路行为（AllowWithUpscale ≡ Allow），不影响既有断言。
 	upscaleEligible := common.GetContextKeyBool(c, constant.ContextKeyImageUpscaleEligible) && GetImageUpscaler() != nil
-	if tier == "" && !highQuality {
+	hasMask := common.GetContextKeyBool(c, constant.ContextKeyImageHasMask)
+	transparent := common.GetContextKeyBool(c, constant.ContextKeyImageTransparent)
+	if tier == "" && !highQuality && !hasMask && !transparent {
 		return nil
 	}
-	return &model.ChannelSelectFilter{ImageSizeTier: tier, ImageHighQuality: highQuality, UpscaleEligible: upscaleEligible}
+	return &model.ChannelSelectFilter{ImageSizeTier: tier, ImageHighQuality: highQuality, RequiresMask: hasMask, RequiresTransparent: transparent, UpscaleEligible: upscaleEligible}
 }
 
 // markImageCapabilityRejected 把本轮真实发生的图片能力拒绝原因带回 Context。
@@ -53,6 +55,12 @@ func markImageCapabilityRejected(c *gin.Context, filter *model.ChannelSelectFilt
 	}
 	if filter.ImageQualityRejected() {
 		common.SetContextKey(c, constant.ContextKeyImageQualityRejected, true)
+	}
+	if filter.ImageMaskRejected() {
+		common.SetContextKey(c, constant.ContextKeyImageMaskRejected, true)
+	}
+	if filter.ImageTransparentRejected() {
+		common.SetContextKey(c, constant.ContextKeyImageTransparentRejected, true)
 	}
 }
 

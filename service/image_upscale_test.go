@@ -21,6 +21,85 @@ type memStore struct {
 	data map[string][]byte
 }
 
+type blockingDeleteStore struct {
+	*memStore
+	deleteStarted chan struct{}
+	allowDelete   chan struct{}
+	startOnce     sync.Once
+}
+
+type trackingDeleteStore struct {
+	*memStore
+	current   atomic.Int32
+	maximum   atomic.Int32
+	started   chan struct{}
+	release   chan struct{}
+	completed chan struct{}
+}
+
+type cleanupContextStore struct {
+	*memStore
+	mu                    sync.Mutex
+	calls                 int
+	firstContext          context.Context
+	secondHasFreshContext bool
+}
+
+type notifyingGetStore struct {
+	*memStore
+	gotOutput chan struct{}
+	getOnce   sync.Once
+}
+
+func (s *notifyingGetStore) GetObject(ctx context.Context, key string) ([]byte, error) {
+	out, err := s.memStore.GetObject(ctx, key)
+	s.getOnce.Do(func() { close(s.gotOutput) })
+	return out, err
+}
+
+func (s *cleanupContextStore) DeleteObject(ctx context.Context, key string) error {
+	s.mu.Lock()
+	s.calls++
+	if s.calls == 1 {
+		s.firstContext = ctx
+	} else {
+		s.secondHasFreshContext = ctx != s.firstContext && ctx.Err() == nil
+	}
+	s.mu.Unlock()
+	return s.memStore.DeleteObject(ctx, key)
+}
+
+func (s *trackingDeleteStore) DeleteObject(ctx context.Context, key string) error {
+	current := s.current.Add(1)
+	for {
+		maximum := s.maximum.Load()
+		if current <= maximum || s.maximum.CompareAndSwap(maximum, current) {
+			break
+		}
+	}
+	s.started <- struct{}{}
+	defer func() {
+		s.current.Add(-1)
+		s.completed <- struct{}{}
+	}()
+	select {
+	case <-s.release:
+		return s.memStore.DeleteObject(ctx, key)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *blockingDeleteStore) DeleteObject(ctx context.Context, key string) error {
+	s.startOnce.Do(func() { close(s.deleteStarted) })
+	select {
+	case <-s.allowDelete:
+		return s.memStore.DeleteObject(ctx, key)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func newMemStore() *memStore { return &memStore{data: map[string][]byte{}} }
 
 func (m *memStore) PutObject(_ context.Context, key string, data []byte, _ string) error {
@@ -58,6 +137,23 @@ func pngBytes(t *testing.T, w, h int) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+func waitForMemStoreEmpty(t *testing.T, store *memStore) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		store.mu.Lock()
+		remaining := len(store.data)
+		store.mu.Unlock()
+		if remaining == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("temporary objects were not cleaned, remaining=%d", remaining)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func TestUpscaleImageHappyPath(t *testing.T) {
@@ -109,14 +205,227 @@ func TestUpscaleImageHappyPath(t *testing.T) {
 		gotInput["target_w"].(float64) != 128 || gotInput["target_h"].(float64) != 128 {
 		t.Fatalf("worker input 不完整: %+v", gotInput)
 	}
-	store.mu.Lock()
-	remainingObjects := len(store.data)
-	store.mu.Unlock()
-	if remainingObjects != 0 {
-		t.Fatalf("临时源图和输出应在请求结束时清理，remaining=%d", remainingObjects)
-	}
+	waitForMemStoreEmpty(t, store)
 	if got := cancelCalls.Load(); got != 0 {
 		t.Fatalf("COMPLETED 任务不应取消，cancel calls=%d", got)
+	}
+}
+
+func TestUpscaleImageReleasesSlotBeforeObjectCleanup(t *testing.T) {
+	t.Setenv("IMAGE_UPSCALE_MAX_CONCURRENCY", "1")
+	previousSem := imageUpscaleSema
+	previousSemInitialized := previousSem != nil
+	imageUpscaleSema = nil
+	imageUpscaleSemaOnce = sync.Once{}
+	t.Cleanup(func() {
+		imageUpscaleSema = previousSem
+		imageUpscaleSemaOnce = sync.Once{}
+		if previousSemInitialized {
+			imageUpscaleSemaOnce.Do(func() {})
+		}
+	})
+
+	store := &blockingDeleteStore{
+		memStore:      newMemStore(),
+		deleteStarted: make(chan struct{}),
+		allowDelete:   make(chan struct{}),
+	}
+	rp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode runpod request: %v", err)
+			return
+		}
+		input := req["input"].(map[string]any)
+		_ = store.PutObject(r.Context(), input["out_key"].(string), pngBytes(t, 128, 128), "image/png")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-cleanup", "status": "COMPLETED"})
+	}))
+	defer rp.Close()
+	u := &ImageUpscaler{
+		cfg:          &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: time.Second},
+		store:        store,
+		http:         rp.Client(),
+		keyFn:        func() string { return "upscale/test/cleanup-order" },
+		pollInterval: time.Millisecond,
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := u.UpscaleImage(context.Background(), pngBytes(t, 32, 32), 128, 128)
+		done <- err
+	}()
+	select {
+	case <-store.deleteStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("object cleanup did not start")
+	}
+	if occupied := len(imageUpscaleSemaphore()); occupied != 0 {
+		close(store.allowDelete)
+		<-done
+		t.Fatalf("upscale slot must be released before object cleanup, occupied=%d", occupied)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("UpscaleImage: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		close(store.allowDelete)
+		t.Fatal("UpscaleImage must not wait for object cleanup")
+	}
+	close(store.allowDelete)
+	waitForMemStoreEmpty(t, store.memStore)
+}
+
+func TestUpscaleCleanupPoolBoundsConcurrency(t *testing.T) {
+	tasks := upscaleCleanupWorkerCount + 3
+	store := &trackingDeleteStore{
+		memStore:  newMemStore(),
+		started:   make(chan struct{}, tasks),
+		release:   make(chan struct{}),
+		completed: make(chan struct{}, tasks),
+	}
+	u := &ImageUpscaler{store: store}
+	ready := make(chan struct{})
+	close(ready)
+	for i := 0; i < tasks; i++ {
+		u.enqueueCleanupObjects(ready, fmt.Sprintf("cleanup-%d", i))
+	}
+
+	for i := 0; i < upscaleCleanupWorkerCount; i++ {
+		select {
+		case <-store.started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("cleanup worker %d did not start", i+1)
+		}
+	}
+	select {
+	case <-store.started:
+		close(store.release)
+		t.Fatalf("cleanup concurrency exceeded worker count %d", upscaleCleanupWorkerCount)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(store.release)
+	for i := 0; i < tasks; i++ {
+		select {
+		case <-store.completed:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("cleanup task %d did not finish", i+1)
+		}
+	}
+	if maximum := store.maximum.Load(); maximum != upscaleCleanupWorkerCount {
+		t.Fatalf("maximum cleanup concurrency=%d, want %d", maximum, upscaleCleanupWorkerCount)
+	}
+}
+
+func TestUpscaleCleanupQueueSaturationKeepsSlotUntilAdmission(t *testing.T) {
+	t.Setenv("IMAGE_UPSCALE_MAX_CONCURRENCY", "1")
+	previousSem := imageUpscaleSema
+	previousSemInitialized := previousSem != nil
+	imageUpscaleSema = nil
+	imageUpscaleSemaOnce = sync.Once{}
+	t.Cleanup(func() {
+		imageUpscaleSema = previousSem
+		imageUpscaleSemaOnce = sync.Once{}
+		if previousSemInitialized {
+			imageUpscaleSemaOnce.Do(func() {})
+		}
+	})
+
+	blocker := &trackingDeleteStore{
+		memStore:  newMemStore(),
+		started:   make(chan struct{}, upscaleCleanupWorkerCount+upscaleCleanupQueueCapacity),
+		release:   make(chan struct{}),
+		completed: make(chan struct{}, upscaleCleanupWorkerCount+upscaleCleanupQueueCapacity),
+	}
+	var releaseOnce sync.Once
+	releaseBlocker := func() { releaseOnce.Do(func() { close(blocker.release) }) }
+	defer releaseBlocker()
+	blockerUpscaler := &ImageUpscaler{store: blocker}
+	ready := make(chan struct{})
+	close(ready)
+	for i := 0; i < upscaleCleanupWorkerCount; i++ {
+		blockerUpscaler.enqueueCleanupObjects(ready, fmt.Sprintf("active-%d", i))
+	}
+	for i := 0; i < upscaleCleanupWorkerCount; i++ {
+		select {
+		case <-blocker.started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("blocking cleanup worker %d did not start", i+1)
+		}
+	}
+	for i := 0; i < upscaleCleanupQueueCapacity; i++ {
+		blockerUpscaler.enqueueCleanupObjects(ready, fmt.Sprintf("queued-%d", i))
+	}
+
+	store := &notifyingGetStore{memStore: newMemStore(), gotOutput: make(chan struct{})}
+	rp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode runpod request: %v", err)
+			return
+		}
+		input := req["input"].(map[string]any)
+		_ = store.PutObject(r.Context(), input["out_key"].(string), pngBytes(t, 128, 128), "image/png")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-saturated-cleanup", "status": "COMPLETED"})
+	}))
+	defer rp.Close()
+	u := &ImageUpscaler{
+		cfg:          &ImageUpscaleConfig{Endpoint: rp.URL, APIKey: "k", Timeout: time.Second},
+		store:        store,
+		http:         rp.Client(),
+		keyFn:        func() string { return "upscale/test/saturated-cleanup" },
+		pollInterval: time.Millisecond,
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := u.UpscaleImage(context.Background(), pngBytes(t, 32, 32), 128, 128)
+		done <- err
+	}()
+	select {
+	case <-store.gotOutput:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upscale did not fetch worker output")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("request returned before saturated cleanup admission: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if occupied := len(imageUpscaleSemaphore()); occupied != 1 {
+		t.Fatalf("slot must stay occupied while cleanup admission is blocked, occupied=%d", occupied)
+	}
+
+	releaseBlocker()
+	if err := <-done; err != nil {
+		t.Fatalf("UpscaleImage: %v", err)
+	}
+	if occupied := len(imageUpscaleSemaphore()); occupied != 0 {
+		t.Fatalf("slot must be released after cleanup admission, occupied=%d", occupied)
+	}
+	for i := 0; i < upscaleCleanupWorkerCount+upscaleCleanupQueueCapacity; i++ {
+		select {
+		case <-blocker.completed:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("blocking cleanup task %d did not finish", i+1)
+		}
+	}
+	waitForMemStoreEmpty(t, store.memStore)
+}
+
+func TestCleanupObjectsUsesIndependentDeadlinePerKey(t *testing.T) {
+	store := &cleanupContextStore{memStore: newMemStore()}
+	u := &ImageUpscaler{store: store}
+	u.cleanupObjects("src.png", "out.png")
+	store.mu.Lock()
+	calls := store.calls
+	secondHasFreshContext := store.secondHasFreshContext
+	store.mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("DeleteObject calls=%d, want 2", calls)
+	}
+	if !secondHasFreshContext {
+		t.Fatal("second object cleanup must start with a fresh context")
 	}
 }
 

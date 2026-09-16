@@ -79,3 +79,25 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 		logger.LogError(c, fmt.Sprintf("failed to copy response body: %s", err.Error()))
 	}
 }
+
+// IOCopyResponseBodyGracefully copies an already prepared response stream to
+// the client without materializing it into another byte slice.
+func IOCopyResponseBodyGracefully(c *gin.Context, src *http.Response) {
+	if c == nil || c.Writer == nil || src == nil || src.Body == nil {
+		return
+	}
+	for k, v := range src.Header {
+		if !ShouldCopyUpstreamHeader(c, k, v) || len(v) == 0 {
+			continue
+		}
+		c.Writer.Header().Set(k, v[0])
+	}
+	if src.ContentLength >= 0 {
+		c.Writer.Header().Set("Content-Length", fmt.Sprintf("%d", src.ContentLength))
+	}
+	c.Writer.WriteHeader(src.StatusCode)
+	c.Set(string(constant.ContextKeyPayloadWritten), true)
+	if _, err := io.Copy(c.Writer, src.Body); err != nil {
+		logger.LogError(c, fmt.Sprintf("failed to copy response body: %s", err.Error()))
+	}
+}

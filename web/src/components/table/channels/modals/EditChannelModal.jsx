@@ -265,6 +265,9 @@ const EditChannelModal = (props) => {
     image_size_normalize: false,
     // 高质量图片能力：默认开启，关闭时才写入显式 false
     image_quality_enabled: true,
+    // mask 局部重绘 / 透明背景 渠道能力：默认开启，关闭时才写入显式 false
+    images_mask: true,
+    images_transparent: true,
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -692,6 +695,8 @@ const EditChannelModal = (props) => {
           }
           data.image_quality_enabled =
             parsedSettings.image_quality_enabled !== false;
+          data.images_mask = parsedSettings.images_mask !== false;
+          data.images_transparent = parsedSettings.images_transparent !== false;
           // 注意 0 是合法值（永不超时），不能用 || 兜底
           data.stream_timeout_seconds =
             parsedSettings.stream_timeout_seconds === undefined ||
@@ -723,6 +728,8 @@ const EditChannelModal = (props) => {
           data.image_upscale_to = '';
           data.image_size_normalize = false;
           data.image_quality_enabled = true;
+          data.images_mask = true;
+          data.images_transparent = true;
         }
       } else {
         originalChannelSettingRef.current = null;
@@ -747,6 +754,8 @@ const EditChannelModal = (props) => {
         data.image_upscale_to = '';
         data.image_size_normalize = false;
         data.image_quality_enabled = true;
+        data.images_mask = true;
+        data.images_transparent = true;
       }
 
       if (data.settings) {
@@ -1600,6 +1609,12 @@ const EditChannelModal = (props) => {
       localInputs.image_quality_enabled === false
         ? { image_quality_enabled: false }
         : {};
+    const imagesMaskSetting =
+      localInputs.images_mask === false ? { images_mask: false } : {};
+    const imagesTransparentSetting =
+      localInputs.images_transparent === false
+        ? { images_transparent: false }
+        : {};
 
     // 表单只重建自己认识的 key，原始 setting 里的其它 key（后台/SQL 写入的
     // 自定义配置）必须原样带回，否则管理员改个渠道名就把它们抹了。
@@ -1621,6 +1636,8 @@ const EditChannelModal = (props) => {
       'stream_timeout_seconds',
       'image_sizes',
       'image_quality_enabled',
+      'images_mask',
+      'images_transparent',
     ];
     const preservedChannelSettings = {};
     const originalChannelSetting = originalChannelSettingRef.current;
@@ -1653,6 +1670,8 @@ const EditChannelModal = (props) => {
       ...streamTimeoutSetting,
       ...imageSizesSetting,
       ...imageQualitySetting,
+      ...imagesMaskSetting,
+      ...imagesTransparentSetting,
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1751,6 +1770,8 @@ const EditChannelModal = (props) => {
     delete localInputs.image_size_tiers;
     // 清理高质量图片开关的临时字段
     delete localInputs.image_quality_enabled;
+    delete localInputs.images_mask;
+    delete localInputs.images_transparent;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -4055,7 +4076,7 @@ const EditChannelModal = (props) => {
                             )
                           }
                           extraText={t(
-                            '把上游原生生成的图放大到更高档位返回：自动从已勾选的最高原生档位放大到所选目标（例如勾选 1K/2K 并选“超分到 4K”，则按 2K 生成、放大为用户请求的精确 4K 尺寸）。清空 = 关闭。需要服务端已启用图片超分模块；仅对 /v1/images/generations 的 gpt-image-2 生效。',
+                            '把上游原生生成的图放大到更高档位返回：自动从已勾选的最高原生档位放大到所选目标（例如勾选 1K/2K 并选“超分到 4K”，则按 2K 生成、放大为用户请求的精确 4K 尺寸）。清空 = 关闭。需要服务端已启用图片超分模块；对 /v1/images/generations、/v1/images/edits 和 /v1/edits 的 gpt-image-2 生效。',
                           )}
                         />
                       );
@@ -4088,6 +4109,30 @@ const EditChannelModal = (props) => {
                       }
                       extraText={t(
                         '独立控制 quality=high/4k/ultra 的图片请求是否可路由到本渠道，不影响由 size 参数计算的 1K/2K/4K 图片档位。关闭后，这类请求会在选择渠道时跳过本渠道。',
+                      )}
+                    />
+                    <Form.Switch
+                      field='images_mask'
+                      label={t('支持 mask 局部重绘')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('images_mask', value)
+                      }
+                      extraText={t(
+                        '声明本渠道能真正应用图片编辑请求携带的 mask（局部重绘）。关闭后，带 mask 的编辑请求在选择渠道时会跳过本渠道，不消耗重试次数。适用于对 mask 报错或静默忽略的上游。',
+                      )}
+                    />
+                    <Form.Switch
+                      field='images_transparent'
+                      label={t('支持透明背景')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('images_transparent', value)
+                      }
+                      extraText={t(
+                        '声明本渠道能真正产出透明背景（background=transparent 时交付带 alpha 通道的图）。关闭后，透明背景请求在选择渠道时会跳过本渠道。适用于静默忽略该参数、交付不透明图的上游。',
                       )}
                     />
 

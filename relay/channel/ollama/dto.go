@@ -6,12 +6,12 @@ import (
 
 // OllamaModelInfo represents a model's metadata from Ollama API
 type OllamaModelInfo struct {
-	Name       string                 `json:"name"`
-	Model      string                 `json:"model"`
-	ModifiedAt string                 `json:"modified_at"`
-	Size       int64                  `json:"size"`
-	Digest     string                 `json:"digest"`
-	Details    OllamaModelDetails     `json:"details"`
+	Name       string             `json:"name"`
+	Model      string             `json:"model"`
+	ModifiedAt string             `json:"modified_at"`
+	Size       int64              `json:"size"`
+	Digest     string             `json:"digest"`
+	Details    OllamaModelDetails `json:"details"`
 }
 
 // OllamaModelDetails contains detailed information about a model

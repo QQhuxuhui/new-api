@@ -5,6 +5,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -53,4 +54,20 @@ func resolveImageNormalizeTarget(c *gin.Context, info *relaycommon.RelayInfo, re
 		return 0, 0, false
 	}
 	return w, h, true
+}
+
+// resolveImageOutputTranscode 读取 distributor 记下的客户端输出编码要求。
+// 客户端要 png/未指定时返回 nil（重采样产物本就是 png，无需转码）。
+func resolveImageOutputTranscode(c *gin.Context) *service.ImageOutputTranscode {
+	format := common.GetContextKeyString(c, constant.ContextKeyImageClientOutputFormat)
+	if format != "jpeg" && format != "webp" {
+		return nil
+	}
+	quality := -1
+	if v, ok := common.GetContextKey(c, constant.ContextKeyImageClientOutputCompression); ok {
+		if n, isInt := v.(int); isInt && n >= 0 && n <= 100 {
+			quality = n
+		}
+	}
+	return &service.ImageOutputTranscode{Format: format, Quality: quality}
 }

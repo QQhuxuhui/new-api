@@ -57,7 +57,12 @@ func downgradeEditsRequestSize(c *gin.Context, info *relaycommon.RelayInfo, plan
 			c.Request.MultipartForm.Value = make(map[string][]string, 1)
 		}
 		saveEditsOriginalFormSize(c)
+		saveEditsOriginalFormOutput(c)
 		c.Request.MultipartForm.Value["size"] = []string{plan.DowngradedSize}
+		// 超分会把最终图重编码成 PNG，上游先按 jpeg 有损编码毫无意义还叠加
+		// 损失：出站统一要 png，客户的 output_format 由回程转码兑现。
+		c.Request.MultipartForm.Value["output_format"] = []string{"png"}
+		delete(c.Request.MultipartForm.Value, "output_compression")
 		return true
 	}
 
@@ -66,7 +71,10 @@ func downgradeEditsRequestSize(c *gin.Context, info *relaycommon.RelayInfo, plan
 		logger.LogWarn(c, fmt.Sprintf("image_upscale: edits json body read failed, skip upscale: %v", err))
 		return false
 	}
-	rewritten, err := sjson.SetBytes(body, "size", plan.DowngradedSize)
+	rewritten, err := forceUpstreamPNGOutput(body)
+	if err == nil {
+		rewritten, err = sjson.SetBytes(rewritten, "size", plan.DowngradedSize)
+	}
 	if err != nil {
 		logger.LogWarn(c, fmt.Sprintf("image_upscale: edits json size rewrite failed, skip upscale: %v", err))
 		return false
@@ -74,6 +82,17 @@ func downgradeEditsRequestSize(c *gin.Context, info *relaycommon.RelayInfo, plan
 	saveEditsOriginalBody(c, body)
 	c.Set(common.KeyRequestBody, rewritten)
 	return true
+}
+
+// forceUpstreamPNGOutput 把出站 JSON 体的 output_format 强制成 png 并去掉
+// output_compression：超分/规整链路的最终重编码在本服务完成，让上游先做一次
+// 有损编码只会叠加画质损失。仅在确有降档改写时调用（原体已由调用方保存）。
+func forceUpstreamPNGOutput(body []byte) ([]byte, error) {
+	rewritten, err := sjson.SetBytes(body, "output_format", "png")
+	if err != nil {
+		return nil, err
+	}
+	return sjson.DeleteBytes(rewritten, "output_compression")
 }
 
 // saveEditsOriginalFormSize 在首次降档前记下 MultipartForm.Value["size"] 的原值。
@@ -89,6 +108,24 @@ func saveEditsOriginalFormSize(c *gin.Context) {
 		return
 	}
 	common.SetContextKey(c, constant.ContextKeyImageEditsOriginalFormSize, append([]string(nil), orig...))
+}
+
+// saveEditsOriginalFormOutput 在首次降档前记下 output_format/output_compression
+// 表单原值。语义与 saveEditsOriginalFormSize 一致：nil 值 = 原本没有该字段，
+// 恢复阶段据此删除；只记第一次。
+func saveEditsOriginalFormOutput(c *gin.Context) {
+	if _, saved := common.GetContextKey(c, constant.ContextKeyImageEditsOriginalFormOutput); saved {
+		return
+	}
+	orig := make(map[string][]string, 2)
+	for _, field := range []string{"output_format", "output_compression"} {
+		if v, exists := c.Request.MultipartForm.Value[field]; exists {
+			orig[field] = append([]string(nil), v...)
+		} else {
+			orig[field] = nil
+		}
+	}
+	common.SetContextKey(c, constant.ContextKeyImageEditsOriginalFormOutput, orig)
 }
 
 // saveEditsOriginalBody 在首次降档前记下 KeyRequestBody 缓存体原文（拷贝一份，
@@ -118,16 +155,27 @@ func restoreEditsRequestSize(c *gin.Context) {
 			c.Set(common.KeyRequestBody, append([]byte(nil), body...))
 		}
 	}
+	if c.Request == nil || c.Request.MultipartForm == nil || c.Request.MultipartForm.Value == nil {
+		return
+	}
 	if v, ok := common.GetContextKey(c, constant.ContextKeyImageEditsOriginalFormSize); ok {
-		if c.Request == nil || c.Request.MultipartForm == nil || c.Request.MultipartForm.Value == nil {
-			return
-		}
 		orig, isSlice := v.([]string)
 		if !isSlice || orig == nil {
 			// 原本没有 size 字段：删掉降档时补进去的那个，别留一个凭空的值。
 			delete(c.Request.MultipartForm.Value, "size")
-			return
+		} else {
+			c.Request.MultipartForm.Value["size"] = append([]string(nil), orig...)
 		}
-		c.Request.MultipartForm.Value["size"] = append([]string(nil), orig...)
+	}
+	if v, ok := common.GetContextKey(c, constant.ContextKeyImageEditsOriginalFormOutput); ok {
+		if orig, isMap := v.(map[string][]string); isMap {
+			for field, vals := range orig {
+				if vals == nil {
+					delete(c.Request.MultipartForm.Value, field)
+				} else {
+					c.Request.MultipartForm.Value[field] = append([]string(nil), vals...)
+				}
+			}
+		}
 	}
 }

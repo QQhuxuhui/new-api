@@ -235,6 +235,28 @@ func buildMultipartValues(t *testing.T, fields [][2]string) (string, string) {
 	return writer.FormDataContentType(), buf.String()
 }
 
+func buildMultipartWithFile(t *testing.T, fields map[string]string, fileField, filename string, data []byte) (string, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write field %s: %v", key, err)
+		}
+	}
+	part, err := writer.CreateFormFile(fileField, filename)
+	if err != nil {
+		t.Fatalf("create file field %s: %v", fileField, err)
+	}
+	if _, err := part.Write(data); err != nil {
+		t.Fatalf("write file field %s: %v", fileField, err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+	return writer.FormDataContentType(), buf.String()
+}
+
 func TestGetModelRequest_DuplicateImageFieldsUseFirstValue(t *testing.T) {
 	contentType, body := buildMultipartValues(t, [][2]string{
 		{"model", "gpt-image-2"},
@@ -310,23 +332,69 @@ func TestGetModelRequest_MultipartEditsAliasCapturesModelAndSize(t *testing.T) {
 	}
 }
 
-func TestGetModelRequest_MultipartEditsTextMaskDisablesUpscale(t *testing.T) {
+// mask 不再影响超分资格（sub2api 模拟门已放行 HasMask），改为置位
+// ContextKeyImageHasMask，由选路阶段的 images_mask 渠道能力过滤承接。
+func TestGetModelRequest_MultipartEditsFileMaskKeepsUpscaleAndFlagsMask(t *testing.T) {
 	for _, path := range []string{"/v1/images/edits", "/v1/edits"} {
 		t.Run(path, func(t *testing.T) {
-			contentType, body := buildMultipart(t, map[string]string{
+			contentType, body := buildMultipartWithFile(t, map[string]string{
 				"model": "gpt-image-2",
 				"size":  "3840x2160",
-				"mask":  "data:image/png;base64,AAAA",
-			})
+			}, "mask", "mask.png", []byte("mask"))
 			c, _ := newTestContext("POST", path, contentType, body)
 
 			if _, _, err := getModelRequest(c); err != nil {
 				t.Fatalf("getModelRequest: %v", err)
 			}
-			if common.GetContextKeyBool(c, constant.ContextKeyImageUpscaleEligible) {
-				t.Fatal("multipart edits with a text mask must not be eligible for upscale")
+			if !common.GetContextKeyBool(c, constant.ContextKeyImageUpscaleEligible) {
+				t.Fatal("multipart edits with a mask must stay eligible for upscale")
+			}
+			if !common.GetContextKeyBool(c, constant.ContextKeyImageHasMask) {
+				t.Fatal("multipart edits with a mask must set ContextKeyImageHasMask")
 			}
 		})
+	}
+}
+
+func TestGetModelRequest_MultipartEditsTextMaskDoesNotFlagMask(t *testing.T) {
+	contentType, body := buildMultipart(t, map[string]string{
+		"model": "gpt-image-2",
+		"size":  "3840x2160",
+		"mask":  "data:image/png;base64,AAAA",
+	})
+	c, _ := newTestContext("POST", "/v1/images/edits", contentType, body)
+	if _, _, err := getModelRequest(c); err != nil {
+		t.Fatalf("getModelRequest: %v", err)
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyImageHasMask) {
+		t.Fatal("multipart text mask is not forwarded as a mask file and must not require mask capability")
+	}
+}
+
+// background=transparent 置位 ContextKeyImageTransparent，供选路阶段用
+// images_transparent 渠道能力过滤；同时因超分资格暂拒 transparent 而不置
+// ContextKeyImageUpscaleEligible。
+func TestGetModelRequest_TransparentBackgroundFlagsTransparent(t *testing.T) {
+	c, _ := newTestContext("POST", "/v1/images/generations", "application/json",
+		`{"model":"gpt-image-2","prompt":"a sticker","size":"1024x1024","background":"transparent"}`)
+	if _, _, err := getModelRequest(c); err != nil {
+		t.Fatalf("getModelRequest: %v", err)
+	}
+	if !common.GetContextKeyBool(c, constant.ContextKeyImageTransparent) {
+		t.Fatal("background=transparent must set ContextKeyImageTransparent")
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyImageUpscaleEligible) {
+		t.Fatal("transparent must not be eligible for upscale (worker drops alpha)")
+	}
+
+	// opaque/absent must not flag transparent.
+	c2, _ := newTestContext("POST", "/v1/images/generations", "application/json",
+		`{"model":"gpt-image-2","prompt":"x","size":"1024x1024","background":"opaque"}`)
+	if _, _, err := getModelRequest(c2); err != nil {
+		t.Fatalf("getModelRequest: %v", err)
+	}
+	if common.GetContextKeyBool(c2, constant.ContextKeyImageTransparent) {
+		t.Fatal("background=opaque must not set ContextKeyImageTransparent")
 	}
 }
 
@@ -414,10 +482,10 @@ func TestImageSizeFromRawJSON(t *testing.T) {
 }
 
 func TestNoAvailableChannelMessageExplainsMixedRejectionReasons(t *testing.T) {
-	message := noAvailableChannelMessage("default", "gpt-image-2", "4K", true, true)
+	message := noAvailableChannelMessage("default", "gpt-image-2", "4K", true, true, false, false)
 	for _, fragment := range []string{
 		"分组 default 下模型 gpt-image-2 无可用渠道",
-		"部分候选渠道因不支持 4K 档位图片或高质量图片被排除",
+		"部分候选渠道因不支持 4K 档位图片、未开启高质量图片支持被排除",
 		"其余候选当前也不可用",
 	} {
 		if !strings.Contains(message, fragment) {
@@ -430,15 +498,33 @@ func TestNoAvailableChannelMessageExplainsMixedRejectionReasons(t *testing.T) {
 }
 
 func TestNoAvailableChannelMessageKeepsGenericReasonWithoutTierRejection(t *testing.T) {
-	message := noAvailableChannelMessage("default", "gpt-image-2", "4K", false, false)
+	message := noAvailableChannelMessage("default", "gpt-image-2", "4K", false, false, false, false)
 	if !strings.Contains(message, "所有优先级已尝试，可能全部暂停或配置错误") {
 		t.Fatalf("unexpected generic message: %q", message)
 	}
 }
 
 func TestNoAvailableChannelMessageExplainsQualityOnlyRejection(t *testing.T) {
-	message := noAvailableChannelMessage("default", "gpt-image-2", "", false, true)
+	message := noAvailableChannelMessage("default", "gpt-image-2", "", false, true, false, false)
 	if !strings.Contains(message, "部分候选渠道因未开启高质量图片支持被排除") {
 		t.Fatalf("unexpected quality rejection message: %q", message)
+	}
+}
+
+func TestNoAvailableChannelMessageExplainsMaskRejection(t *testing.T) {
+	message := noAvailableChannelMessage("default", "gpt-image-2", "", false, false, true, false)
+	if !strings.Contains(message, "部分候选渠道因不支持 mask 局部重绘被排除") {
+		t.Fatalf("unexpected mask rejection message: %q", message)
+	}
+	mixed := noAvailableChannelMessage("default", "gpt-image-2", "2K", true, false, true, false)
+	if !strings.Contains(mixed, "不支持 2K 档位图片、不支持 mask 局部重绘") {
+		t.Fatalf("unexpected mixed mask message: %q", mixed)
+	}
+}
+
+func TestNoAvailableChannelMessageExplainsTransparentRejection(t *testing.T) {
+	message := noAvailableChannelMessage("default", "gpt-image-2", "", false, false, false, true)
+	if !strings.Contains(message, "部分候选渠道因不支持透明背景被排除") {
+		t.Fatalf("unexpected transparent rejection message: %q", message)
 	}
 }

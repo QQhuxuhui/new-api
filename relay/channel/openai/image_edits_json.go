@@ -178,6 +178,19 @@ func collectJSONImageSources(raw map[string]json.RawMessage) ([]string, error) {
 	return nil, nil
 }
 
+// ExtractImageSources 是 extractImageSources 的导出入口，供选路阶段的超分
+// 资格校验复用【同一套】来源识别逻辑（数组/嵌套对象/url·data·file 等别名），
+// 避免资格判定与实际转发各认一套结构而被绕过。
+func ExtractImageSources(value json.RawMessage) ([]string, error) {
+	return extractImageSources(value, 0)
+}
+
+// IsEmptyJSONValue 导出空值判定（null/""/[]/{}），与出站转换的"mask 非空才
+// 解析"口径一致。
+func IsEmptyJSONValue(value json.RawMessage) bool {
+	return isEmptyJSONValue(value)
+}
+
 // extractImageSources 递归抽取图片来源字符串。
 // 空值（null/""/[]/{}）跳过；非空但无法识别的数组元素直接报错，
 // 静默丢弃会让实际提交的图片数量不符合用户预期。
@@ -244,6 +257,34 @@ func extractImageSources(value json.RawMessage, depth int) ([]string, error) {
 		// 数字/布尔，不是图片：返回空，由上层报错
 		return nil, nil
 	}
+}
+
+// JSONEditsMaskRequiresCapability reports whether a JSON edits mask has the
+// single-image shape that writeEditsFormFromJSON will turn into a mask file.
+// Empty values and structurally invalid masks are either ignored or rejected as
+// client input, so they must not filter channels before conversion runs.
+func JSONEditsMaskRequiresCapability(value json.RawMessage) bool {
+	if isEmptyJSONValue(value) {
+		return false
+	}
+	masks, err := extractImageSources(value, 0)
+	return err == nil && len(masks) == 1
+}
+
+// JSONEditsMaskHasHTTPSource reports whether the same mask shapes accepted by
+// writeEditsFormFromJSON contain an HTTP(S) source.
+func JSONEditsMaskHasHTTPSource(value json.RawMessage) bool {
+	masks, err := extractImageSources(value, 0)
+	if err != nil {
+		return false
+	}
+	for _, mask := range masks {
+		source := strings.ToLower(strings.TrimSpace(mask))
+		if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+			return true
+		}
+	}
+	return false
 }
 
 func isEmptyJSONValue(value json.RawMessage) bool {

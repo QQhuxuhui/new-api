@@ -462,6 +462,68 @@ func TestChannelSatisfiesFilter_QualityCapabilityIsIndependentFromSize(t *testin
 	}
 }
 
+// masked edits 只能去真正会应用 mask 的渠道：images_mask=false 显式排除，
+// nil/true 放行（存量渠道兼容）。拒绝原因单独记录，不与档位/质量混淆。
+func TestChannelSatisfiesFilter_MaskCapability(t *testing.T) {
+	maskOffSetting := `{"images_mask":false}`
+	maskOnSetting := `{"images_mask":true}`
+	maskOff := &Channel{Setting: &maskOffSetting}
+	maskOn := &Channel{Setting: &maskOnSetting}
+	legacy := &Channel{}
+
+	maskOnly := &ChannelSelectFilter{RequiresMask: true}
+	if !maskOnly.Active() {
+		t.Fatal("RequiresMask alone must activate the filter")
+	}
+	if channelSatisfiesFilter(maskOff, maskOnly) {
+		t.Fatal("channel with images_mask=false must reject masked request")
+	}
+	if !maskOnly.ImageMaskRejected() || maskOnly.ImageSizeRejected() || maskOnly.ImageQualityRejected() {
+		t.Fatalf("mask rejection flags are wrong: %+v", maskOnly)
+	}
+	if !channelSatisfiesFilter(maskOn, &ChannelSelectFilter{RequiresMask: true}) {
+		t.Fatal("channel with images_mask=true should accept masked request")
+	}
+	if !channelSatisfiesFilter(legacy, &ChannelSelectFilter{RequiresMask: true}) {
+		t.Fatal("legacy channel without images_mask must fail open")
+	}
+	// 无 mask 的请求不受 images_mask=false 影响。
+	if !channelSatisfiesFilter(maskOff, &ChannelSelectFilter{ImageSizeTier: "1K"}) {
+		t.Fatal("unmasked request must not be rejected by images_mask=false")
+	}
+}
+
+// background=transparent only routes to channels that actually emit alpha:
+// images_transparent=false is excluded, nil/true fail open.
+func TestChannelSatisfiesFilter_TransparentCapability(t *testing.T) {
+	offSetting := `{"images_transparent":false}`
+	onSetting := `{"images_transparent":true}`
+	off := &Channel{Setting: &offSetting}
+	on := &Channel{Setting: &onSetting}
+	legacy := &Channel{}
+
+	only := &ChannelSelectFilter{RequiresTransparent: true}
+	if !only.Active() {
+		t.Fatal("RequiresTransparent alone must activate the filter")
+	}
+	if channelSatisfiesFilter(off, only) {
+		t.Fatal("channel with images_transparent=false must reject transparent request")
+	}
+	if !only.ImageTransparentRejected() || only.ImageMaskRejected() || only.ImageSizeRejected() {
+		t.Fatalf("transparent rejection flags are wrong: %+v", only)
+	}
+	if !channelSatisfiesFilter(on, &ChannelSelectFilter{RequiresTransparent: true}) {
+		t.Fatal("channel with images_transparent=true should accept transparent request")
+	}
+	if !channelSatisfiesFilter(legacy, &ChannelSelectFilter{RequiresTransparent: true}) {
+		t.Fatal("legacy channel without images_transparent must fail open")
+	}
+	// An opaque request is unaffected by images_transparent=false.
+	if !channelSatisfiesFilter(off, &ChannelSelectFilter{ImageSizeTier: "1K"}) {
+		t.Fatal("opaque request must not be rejected by images_transparent=false")
+	}
+}
+
 func TestChannelSelectFilter_RejectedInDatabaseMode(t *testing.T) {
 	_, unrestricted := setupCapabilityDBTest(t)
 

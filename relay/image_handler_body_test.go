@@ -27,34 +27,39 @@ func (r *fixedLengthReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func TestReadImageResponseBodyRejectsContentLengthBeforeRead(t *testing.T) {
+// 声明长度超限：一个字节都不读，直接标记透传（不再是错误——已付费的生成不能变 500）。
+func TestReadImageResponseBodyPassesThroughOversizeContentLengthBeforeRead(t *testing.T) {
 	r := &fixedLengthReader{remaining: 1}
 	resp := &http.Response{Body: io.NopCloser(r), ContentLength: maxImageResponseBytes + 1}
-	if _, err := readImageResponseBody(resp); err == nil {
-		t.Fatal("oversized content length must be rejected")
+	got, tooLarge, err := readImageResponseBody(resp)
+	if err != nil || !tooLarge || got != nil {
+		t.Fatalf("oversized content length must passthrough: tooLarge=%v err=%v len=%d", tooLarge, err, len(got))
 	}
 	if r.reads != 0 {
 		t.Fatalf("oversized content length should not read the body, reads=%d", r.reads)
 	}
 }
 
+// 未知长度超限：读到上限即停，已读前缀拼回流，后续可完整读出全部字节。
 func TestReadImageResponseBodyIsBounded(t *testing.T) {
-	resp := &http.Response{Body: io.NopCloser(&fixedLengthReader{remaining: maxImageResponseBytes + 1}), ContentLength: -1}
-	got, err := readImageResponseBody(resp)
-	if err == nil {
-		t.Fatal("oversized image response must be rejected")
+	total := maxImageResponseBytes + 1
+	resp := &http.Response{Body: io.NopCloser(&fixedLengthReader{remaining: total}), ContentLength: -1}
+	got, tooLarge, err := readImageResponseBody(resp)
+	if err != nil || !tooLarge || got != nil {
+		t.Fatalf("oversized image response must passthrough: tooLarge=%v err=%v len=%d", tooLarge, err, len(got))
 	}
-	if got != nil {
-		t.Fatalf("oversized image response must not be returned, got %d bytes", len(got))
+	n, err := io.Copy(io.Discard, resp.Body)
+	if err != nil || n != total {
+		t.Fatalf("restored body must replay all bytes: n=%d want %d err=%v", n, total, err)
 	}
 }
 
 func TestReadImageResponseBodyReadsWithinLimit(t *testing.T) {
 	want := bytes.Repeat([]byte("x"), 32)
 	resp := &http.Response{Body: io.NopCloser(bytes.NewReader(want)), ContentLength: int64(len(want))}
-	got, err := readImageResponseBody(resp)
-	if err != nil {
-		t.Fatalf("bounded response: %v", err)
+	got, tooLarge, err := readImageResponseBody(resp)
+	if err != nil || tooLarge {
+		t.Fatalf("bounded response: tooLarge=%v err=%v", tooLarge, err)
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("bounded response mismatch: got %d bytes", len(got))

@@ -350,3 +350,80 @@ func TestRestoreEditsRequestSizePassThroughNoop(t *testing.T) {
 		t.Fatalf("passthrough 下 restore 不应改动缓存体: %s", cached)
 	}
 }
+
+// 降档同时改写 output_format/output_compression：出站必须是 png（回程转码
+// 兑现客户格式），且跨渠道重试后必须恢复客户原值——否则重试到无超分规则
+// 的渠道时上游收到被篡改的编码要求。
+func TestDowngradeForcesUpstreamPNGAndRestores(t *testing.T) {
+	c := newMultipartEditsCtx(t, "2880x2880")
+	c.Request.MultipartForm.Value["output_format"] = []string{"jpeg"}
+	c.Request.MultipartForm.Value["output_compression"] = []string{"80"}
+	if !downgradeEditsRequestSize(c, editsInfo(relayconstant.RelayModeImagesEdits), editsPlan()) {
+		t.Fatal("multipart edits 改写应成功")
+	}
+	if got := c.Request.MultipartForm.Value["output_format"]; len(got) != 1 || got[0] != "png" {
+		t.Fatalf("出站 output_format 未强制 png: %v", got)
+	}
+	if _, exists := c.Request.MultipartForm.Value["output_compression"]; exists {
+		t.Fatal("出站 output_compression 应被移除")
+	}
+	// 跨渠道重试：恢复后必须是客户原值
+	restoreEditsRequestSize(c)
+	if got := c.Request.MultipartForm.Value["output_format"]; len(got) != 1 || got[0] != "jpeg" {
+		t.Fatalf("重试恢复后 output_format 应回到 jpeg: %v", got)
+	}
+	if got := c.Request.MultipartForm.Value["output_compression"]; len(got) != 1 || got[0] != "80" {
+		t.Fatalf("重试恢复后 output_compression 应回到 80: %v", got)
+	}
+	if got := c.Request.MultipartForm.Value["size"]; len(got) != 1 || got[0] != "2880x2880" {
+		t.Fatalf("重试恢复后 size 应回到原值: %v", got)
+	}
+}
+
+// 客户原本没传 output_format/output_compression：降档补入 png 后，重试恢复
+// 必须把补入的字段删干净，不能凭空给上游留一个 png 值。
+func TestDowngradeRestoreRemovesAddedOutputFields(t *testing.T) {
+	c := newMultipartEditsCtx(t, "2880x2880")
+	delete(c.Request.MultipartForm.Value, "output_format")
+	delete(c.Request.MultipartForm.Value, "output_compression")
+	if !downgradeEditsRequestSize(c, editsInfo(relayconstant.RelayModeImagesEdits), editsPlan()) {
+		t.Fatal("multipart edits 改写应成功")
+	}
+	if got := c.Request.MultipartForm.Value["output_format"]; len(got) != 1 || got[0] != "png" {
+		t.Fatalf("出站应补入 png: %v", got)
+	}
+	restoreEditsRequestSize(c)
+	if _, exists := c.Request.MultipartForm.Value["output_format"]; exists {
+		t.Fatal("恢复后补入的 output_format 应被删除")
+	}
+}
+
+// JSON edits：降档体强制 png + 删 output_compression；恢复体回到客户原文。
+func TestDowngradeEditsJSONForcesPNGAndRestores(t *testing.T) {
+	orig := `{"model":"gpt-image-2","prompt":"hi","size":"2880x2880","output_format":"jpeg","output_compression":80,"image":"data:image/png;base64,AAAA"}`
+	c := newJSONEditsCtx(orig)
+	if !downgradeEditsRequestSize(c, editsInfo(relayconstant.RelayModeImagesEdits), editsPlan()) {
+		t.Fatal("JSON edits 改写应成功")
+	}
+	body, err := common.GetRequestBody(c)
+	if err != nil {
+		t.Fatalf("read cached body: %v", err)
+	}
+	if got := gjson.GetBytes(body, "output_format").String(); got != "png" {
+		t.Fatalf("出站 output_format=%q 应为 png", got)
+	}
+	if gjson.GetBytes(body, "output_compression").Exists() {
+		t.Fatal("出站 output_compression 应被删除")
+	}
+	restoreEditsRequestSize(c)
+	restored, err := common.GetRequestBody(c)
+	if err != nil {
+		t.Fatalf("read restored body: %v", err)
+	}
+	if got := gjson.GetBytes(restored, "output_format").String(); got != "jpeg" {
+		t.Fatalf("恢复后 output_format=%q 应为 jpeg", got)
+	}
+	if got := gjson.GetBytes(restored, "output_compression").Int(); got != 80 {
+		t.Fatalf("恢复后 output_compression=%d 应为 80", got)
+	}
+}

@@ -65,18 +65,22 @@ func readAllLimited(r io.Reader, max int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(data)) > max {
-		return nil, fmt.Errorf("object exceeds %dMB cap", max>>20)
+		return nil, fmt.Errorf("object exceeds %d byte cap", max)
 	}
 	return data, nil
 }
 
 func (s *s3UpscaleStore) GetObject(ctx context.Context, key string) ([]byte, error) {
+	return s.GetObjectLimited(ctx, key, maxUpscaleObjectBytes)
+}
+
+func (s *s3UpscaleStore) GetObjectLimited(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
 	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
 	if err != nil {
 		return nil, err
 	}
 	defer out.Body.Close()
-	return readAllLimited(out.Body, maxUpscaleObjectBytes)
+	return readAllLimited(out.Body, maxBytes)
 }
 
 func (s *s3UpscaleStore) DeleteObject(ctx context.Context, key string) error {

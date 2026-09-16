@@ -20,7 +20,7 @@ func TestRewriteImageResponseWithUpscale(t *testing.T) {
 	body := []byte(`{"created":1,"size":"32x32","data":[{"b64_json":"` +
 		base64.StdEncoding.EncodeToString(src) + `","size":"32x32"}],"usage":{"total_tokens":10}}`)
 
-	out, err := RewriteImageResponseWithUpscale(context.Background(), body, 128, 128, fakeUp(big, nil))
+	out, err := RewriteImageResponseWithUpscale(context.Background(), body, 128, 128, fakeUp(big, nil), nil, 1)
 	if err != nil {
 		t.Fatalf("rewrite: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestRewriteImageResponseWithUpscale(t *testing.T) {
 func TestRewriteNoSizeFieldsStaysAbsent(t *testing.T) {
 	src := pngBytes(t, 32, 32)
 	body := []byte(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(src) + `"}]}`)
-	out, err := RewriteImageResponseWithUpscale(context.Background(), body, 128, 128, fakeUp(pngBytes(t, 128, 128), nil))
+	out, err := RewriteImageResponseWithUpscale(context.Background(), body, 128, 128, fakeUp(pngBytes(t, 128, 128), nil), nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,13 +55,13 @@ func TestRewriteNoSizeFieldsStaysAbsent(t *testing.T) {
 func TestRewriteFailurePropagates(t *testing.T) {
 	src := pngBytes(t, 32, 32)
 	body := []byte(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(src) + `"}]}`)
-	if _, err := RewriteImageResponseWithUpscale(context.Background(), body, 128, 128, fakeUp(nil, errors.New("gpu down"))); err == nil {
+	if _, err := RewriteImageResponseWithUpscale(context.Background(), body, 128, 128, fakeUp(nil, errors.New("gpu down")), nil, 1); err == nil {
 		t.Fatal("超分失败必须报错（由调用方降级）")
 	}
-	if _, err := RewriteImageResponseWithUpscale(context.Background(), []byte(`{"data":[]}`), 128, 128, fakeUp(nil, nil)); err == nil {
+	if _, err := RewriteImageResponseWithUpscale(context.Background(), []byte(`{"data":[]}`), 128, 128, fakeUp(nil, nil), nil, 1); err == nil {
 		t.Fatal("空 data 必须报错")
 	}
-	if _, err := RewriteImageResponseWithUpscale(context.Background(), []byte(`{"data":[{"url":"http://x"}]}`), 128, 128, fakeUp(nil, nil)); err == nil {
+	if _, err := RewriteImageResponseWithUpscale(context.Background(), []byte(`{"data":[{"url":"http://x"}]}`), 128, 128, fakeUp(nil, nil), nil, 1); err == nil {
 		t.Fatal("无 b64_json（url 响应）必须报错——资格谓词已排除该形状，走到这说明上游违约")
 	}
 }
@@ -71,7 +71,7 @@ func TestNormalizeImageResponseSize(t *testing.T) {
 	body := []byte(`{"size":"1024x1024","data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(src) + `"}]}`)
 
 	// 尺寸不一致 → 走重采样并改写
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 1024, 1024, fakeUp(pngBytes(t, 1024, 1024), nil))
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, 1024, 1024, fakeUp(pngBytes(t, 1024, 1024), nil), nil, 1)
 	if err != nil || !changed {
 		t.Fatalf("mismatch 应触发规整: changed=%v err=%v", changed, err)
 	}
@@ -81,7 +81,7 @@ func TestNormalizeImageResponseSize(t *testing.T) {
 
 	// 尺寸一致 → 原样返回不动
 	match := []byte(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(pngBytes(t, 1024, 1024)) + `"}]}`)
-	out2, changed2, err := NormalizeImageResponseSize(context.Background(), match, 1024, 1024, fakeUp(nil, errors.New("不应被调用")))
+	out2, changed2, err := NormalizeImageResponseSize(context.Background(), match, 1024, 1024, fakeUp(nil, errors.New("不应被调用")), nil, 1)
 	if err != nil || changed2 {
 		t.Fatalf("一致时应 no-op: changed=%v err=%v", changed2, err)
 	}
@@ -91,7 +91,7 @@ func TestNormalizeImageResponseSize(t *testing.T) {
 
 	// 解码失败 → 报错（调用方降级）
 	bad := []byte(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString([]byte("not-an-image")) + `"}]}`)
-	if _, _, err := NormalizeImageResponseSize(context.Background(), bad, 1024, 1024, fakeUp(nil, nil)); err == nil {
+	if _, _, err := NormalizeImageResponseSize(context.Background(), bad, 1024, 1024, fakeUp(nil, nil), nil, 1); err == nil {
 		t.Fatal("非图片字节必须报错")
 	}
 }
@@ -126,7 +126,7 @@ func TestNormalizeImageResponseSizeDimensionCap(t *testing.T) {
 				called = true
 				return nil, errors.New("worker 不该被调用")
 			}
-			out, changed, err := NormalizeImageResponseSize(context.Background(), body, tc.targetW, tc.targetH, up)
+			out, changed, err := NormalizeImageResponseSize(context.Background(), body, tc.targetW, tc.targetH, up, nil, 1)
 			if err != nil {
 				t.Fatalf("超上限属'不适用'而非'失败'，不应报错: %v", err)
 			}
@@ -149,7 +149,7 @@ func TestNormalizeImageResponseSizeAtCapStillNormalizes(t *testing.T) {
 	src := pngBytes(t, cap, cap)
 	body := []byte(`{"size":"1x1","data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(src) + `"}]}`)
 	want := pngBytes(t, cap, 1024)
-	out, changed, err := NormalizeImageResponseSize(context.Background(), body, cap, 1024, fakeUp(want, nil))
+	out, changed, err := NormalizeImageResponseSize(context.Background(), body, cap, 1024, fakeUp(want, nil), nil, 1)
 	if err != nil {
 		t.Fatalf("恰好等于上限应正常规整: %v", err)
 	}
