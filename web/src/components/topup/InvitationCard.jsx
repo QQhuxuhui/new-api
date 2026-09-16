@@ -224,7 +224,7 @@ const InvitationCard = ({
           />
         </Card>
 
-        {/* 一级分销返佣 — 冷却中 / 本月新增 */}
+        {/* 一级分销返佣 — 审核中 / 本月新增 */}
         {affSummary && (
           <Card
             className='!rounded-xl w-full'
@@ -235,14 +235,14 @@ const InvitationCard = ({
                 <div className='flex items-center justify-center mb-1'>
                   <Clock size={14} className='mr-1' />
                   <Text type='tertiary' className='text-xs'>
-                    {t('冷却中')}
+                    {t('审核中')}
                   </Text>
                 </div>
                 <div className='text-lg font-bold'>
                   ${(affSummary.pending_amount_usd || 0).toFixed(4)}
                 </div>
                 <div className='text-xs text-gray-400 mt-1'>
-                  {t('支付后 {{n}} 天到账', { n: affSummary.cooldown_days })}
+                  {t('管理员审核通过后到账')}
                 </div>
               </div>
               <div className='text-center'>
@@ -288,9 +288,7 @@ const InvitationCard = ({
             <div className='flex items-start gap-2'>
               <Badge dot type='success' />
               <Text type='tertiary' className='text-sm'>
-                {t('支付后 {{n}} 天到账,然后可划转到余额自由消费', {
-                  n: affSummary?.cooldown_days ?? 7,
-                })}
+                {t('好友支付后经管理员审核到账,然后可划转到余额自由消费')}
               </Text>
             </div>
           </div>

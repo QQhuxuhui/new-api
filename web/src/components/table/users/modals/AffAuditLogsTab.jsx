@@ -16,18 +16,24 @@ import { useTranslation } from 'react-i18next';
 import { API } from '../../../../helpers/api';
 
 const STATUS_TAGS = {
-  pending: { color: 'blue', label: 'pending' },
-  settled: { color: 'green', label: 'settled' },
-  rejected: { color: 'red', label: 'rejected' },
-  refunded: { color: 'orange', label: 'refunded' },
-  offline_paid: { color: 'purple', label: 'offline_paid' },
-  legacy: { color: 'grey', label: 'legacy' },
+  pending: { color: 'blue', label: '待审核' },
+  settled: { color: 'green', label: '已通过' },
+  rejected: { color: 'red', label: '已拒绝' },
+  refunded: { color: 'orange', label: '已退款' },
+  offline_paid: { color: 'purple', label: '线下已付' },
+  legacy: { color: 'grey', label: '历史归档' },
 };
 
 const REJECT_REASON_LABEL = {
+  admin: '管理员拒绝',
   same_ip: '同 IP',
   same_payment_account: '同支付账号',
   inviter_frozen: '邀请人已冻结',
+};
+
+const RISK_LABEL = {
+  same_ip: '同 IP',
+  same_payment_account: '同支付账号',
 };
 
 const AffAuditLogsTab = ({ visible, inviterId }) => {
@@ -68,14 +74,14 @@ const AffAuditLogsTab = ({ visible, inviterId }) => {
     // eslint-disable-next-line
   }, [visible, inviterId, statusFilter, page, pageSize]);
 
-  const handleSettleSingle = async (logId) => {
+  const handleApprove = async (logId) => {
     try {
-      const res = await API.post(`/api/user/manage/aff-audit-logs/${logId}/settle`);
+      const res = await API.post(`/api/user/manage/aff-audit-logs/${logId}/approve`);
       if (res?.data?.success) {
-        Toast.success(t('已结算'));
+        Toast.success(t('已通过并入账'));
         reload();
       } else {
-        Toast.error(res?.data?.message || t('结算失败'));
+        Toast.error(res?.data?.message || t('操作失败'));
       }
     } catch (e) {
       Toast.error(e.response?.data?.message || e.message);
@@ -136,7 +142,12 @@ const AffAuditLogsTab = ({ visible, inviterId }) => {
         const tag = STATUS_TAGS[s] || { color: 'grey', label: s };
         return (
           <Space spacing={4}>
-            <Tag color={tag.color}>{tag.label}</Tag>
+            <Tag color={tag.color}>{t(tag.label)}</Tag>
+            {r.risk_flag && (
+              <Tag color='orange' size='small'>
+                {RISK_LABEL[r.risk_flag] || r.risk_flag}
+              </Tag>
+            )}
             {s === 'rejected' && r.reject_reason && (
               <span style={{ fontSize: 11, color: '#888' }}>
                 {REJECT_REASON_LABEL[r.reject_reason] || r.reject_reason}
@@ -152,8 +163,8 @@ const AffAuditLogsTab = ({ visible, inviterId }) => {
       },
     },
     {
-      title: t('解锁时间'),
-      dataIndex: 'eligible_at',
+      title: t('充值时间'),
+      dataIndex: 'created_at',
       width: 150,
       render: (v) => (v ? new Date(v).toLocaleString() : '-'),
     },
@@ -163,8 +174,8 @@ const AffAuditLogsTab = ({ visible, inviterId }) => {
       fixed: 'right',
       render: (_, r) =>
         r.status === 'pending' ? (
-          <Button size='small' onClick={() => handleSettleSingle(r.id)}>
-            {t('立即结算')}
+          <Button size='small' onClick={() => handleApprove(r.id)}>
+            {t('通过')}
           </Button>
         ) : null,
     },
@@ -176,10 +187,10 @@ const AffAuditLogsTab = ({ visible, inviterId }) => {
         <Card>
           <Space spacing='loose' wrap>
             <span>{t('邀请人数')}: <strong>{summary.invitee_count}</strong></span>
-            <span>{t('待结算 USD')}: <strong>${summary.pending_total_usd?.toFixed(4)}</strong></span>
-            <span>{t('已结算 USD')}: <strong>${summary.settled_total_usd?.toFixed(4)}</strong></span>
+            <span>{t('待审核 USD')}: <strong>${summary.pending_total_usd?.toFixed(4)}</strong></span>
+            <span>{t('已通过 USD')}: <strong>${summary.settled_total_usd?.toFixed(4)}</strong></span>
             <span>{t('线下已返现 CNY')}: <strong>¥{summary.offline_paid_total_cny?.toFixed(2)}</strong></span>
-            <span>{t('反作弊拒绝')}: <strong>{summary.rejected_count}</strong></span>
+            <span>{t('已拒绝')}: <strong>{summary.rejected_count}</strong></span>
             <span>{t('退款')}: <strong>{summary.refunded_count}</strong></span>
           </Space>
         </Card>
@@ -197,12 +208,12 @@ const AffAuditLogsTab = ({ visible, inviterId }) => {
             style={{ width: 160 }}
             optionList={[
               { label: t('全部'), value: '' },
-              { label: 'pending', value: 'pending' },
-              { label: 'settled', value: 'settled' },
-              { label: 'rejected', value: 'rejected' },
-              { label: 'refunded', value: 'refunded' },
-              { label: 'offline_paid', value: 'offline_paid' },
-              { label: 'legacy', value: 'legacy' },
+              { label: t('待审核'), value: 'pending' },
+              { label: t('已通过'), value: 'settled' },
+              { label: t('已拒绝'), value: 'rejected' },
+              { label: t('已退款'), value: 'refunded' },
+              { label: t('线下已付'), value: 'offline_paid' },
+              { label: t('历史归档'), value: 'legacy' },
             ]}
           />
           <Button

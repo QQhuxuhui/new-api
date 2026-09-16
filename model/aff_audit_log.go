@@ -2,8 +2,12 @@ package model
 
 // AffAuditLog 是一级分销返佣的审计 log,每一笔下级真实支付对应一行。
 //
-// 状态机:pending → settled / rejected / refunded / offline_paid
-// 详见 openspec/changes/add-affiliate-reward-system/。
+// 状态机:pending(待审核) → settled(管理员通过,已入账) / rejected(管理员拒绝或邀请人冻结)
+//
+//	/ refunded / offline_paid
+//
+// 返现不再自动结算:每一笔都要管理员在"返现审核"页人工通过后才入账。
+// 反作弊命中(同 IP / 同支付账号)只写入 risk_flag 作为审核提示,不再自动拒绝。
 type AffAuditLog struct {
 	Id int `json:"id" gorm:"primaryKey;autoIncrement"`
 
@@ -25,10 +29,17 @@ type AffAuditLog struct {
 	// 状态机
 	Status       string `json:"status"        gorm:"type:varchar(16);not null;default:'pending';index:idx_aff_inviter_status_eligible,priority:2"`
 	RejectReason string `json:"reject_reason" gorm:"type:varchar(32);default:''"`
-	EligibleAt   int64  `json:"eligible_at"   gorm:"index:idx_aff_inviter_status_eligible,priority:3"`
-	CreatedAt    int64  `json:"created_at"    gorm:"autoCreateTime:milli;index"`
+	// RiskFlag 是写入时反作弊命中的提示(same_ip / same_payment_account),仅供管理员审核参考,不影响状态。
+	RiskFlag   string `json:"risk_flag"   gorm:"type:varchar(32);default:''"`
+	EligibleAt int64  `json:"eligible_at" gorm:"index:idx_aff_inviter_status_eligible,priority:3"`
+	CreatedAt  int64  `json:"created_at"  gorm:"autoCreateTime:milli;index"`
 
-	// 结算结果
+	// 管理员审核记录(通过或拒绝时写入)
+	ReviewedAt      int64  `json:"reviewed_at"`
+	ReviewedAdminId int    `json:"reviewed_admin_id" gorm:"index;default:0"`
+	ReviewNote      string `json:"review_note"       gorm:"type:varchar(200)"`
+
+	// 结算结果(管理员通过后写入)
 	SettledAt      int64 `json:"settled_at"`
 	SettlePayoutId int   `json:"settle_payout_id" gorm:"index;default:0"`
 
@@ -63,11 +74,15 @@ const (
 	AffAuditSourcePlanOrder  = "plan_order"
 )
 
-// 拒绝原因枚举(命中即落 status='rejected')
+// 拒绝原因 / 风险提示枚举
+//   - same_ip / same_payment_account:写入时反作弊命中,现在只落 risk_flag(历史数据中也可能出现在 reject_reason)
+//   - inviter_frozen:邀请人被管理员冻结,写入时直接 rejected
+//   - admin:管理员在审核页手动拒绝
 const (
 	AffAuditRejectSameIp             = "same_ip"
 	AffAuditRejectSamePaymentAccount = "same_payment_account"
 	AffAuditRejectInviterFrozen      = "inviter_frozen"
+	AffAuditRejectAdmin              = "admin"
 )
 
 // 币种枚举

@@ -55,6 +55,7 @@ import OrderConfirm from './pages/OrderConfirm';
 import MyOrders from './pages/MyOrders';
 import AdminOrders from './pages/AdminOrders';
 import AffMonthlyReport from './pages/AffMonthlyReport';
+import AffReview from './pages/AffReview';
 import FailoverRules from './pages/FailoverRules';
 import ErrorCapture from './pages/ErrorCapture';
 
@@ -187,6 +188,14 @@ function App() {
           element={
             <AdminRoute>
               <AdminOrders />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/admin/aff-review'
+          element={
+            <AdminRoute>
+              <AffReview />
             </AdminRoute>
           }
         />

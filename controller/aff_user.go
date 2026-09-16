@@ -26,9 +26,9 @@ var affServerTimeZone = func() *time.Location {
 // 返回 9 个聚合字段,**不暴露任何下级身份/订单信息**:
 //   - aff_count, aff_quota, aff_history_quota:基础数据
 //   - aff_quota_usd:= aff_quota / QuotaPerUnit (人类可读)
-//   - pending_amount_usd:冷却中的返佣总额 USD
+//   - pending_amount_usd:待管理员审核的返佣总额 USD
 //   - this_month_earned_usd:本月已结算 USD(server timezone Asia/Shanghai)
-//   - reward_percent / cooldown_days:当前配置(透明告知用户)
+//   - reward_percent:当前配置(透明告知用户)
 //   - aff_status: "normal" / "frozen"
 //
 // 详见 spec Requirement: User-Facing Aggregated Summary API。
@@ -81,7 +81,6 @@ func GetMyAffSummary(c *gin.Context) {
 		"pending_amount_usd":    pendingTotal.Total,
 		"this_month_earned_usd": thisMonth.Total,
 		"reward_percent":        common.InviterRewardDefaultPercent,
-		"cooldown_days":         common.InviterRewardCooldownDays,
 		"aff_status":            affStatusStr,
 	})
 }

@@ -10,11 +10,11 @@ import (
 // StartAffCronTasks 启动一级分销返佣相关后台任务:
 //   - 每日清理 30 天之前的 user_login_ip_logs
 //   - 每日归档已结算 1 年以上的 audit log
-//   - 每小时跑一次 audit log 自动结算(EnableAffAutoSettle 控制)
 //
-// 注意:这些任务只能在 master 节点运行(IsMasterNode=true),否则多实例并发会导致:
-//   - 归档任务重复移动同一行数据
-//   - 自动结算虽然有事务内 FOR UPDATE 保护(不会重复加余额),但仍会浪费 DB 连接竞争锁
+// 返现不再自动结算:每笔 pending 都由管理员在"返现审核"页人工通过后入账(见 aff_settle.go)。
+//
+// 注意:这些任务只能在 master 节点运行(IsMasterNode=true),否则多实例并发会导致
+// 归档任务重复移动同一行数据。
 func StartAffCronTasks() {
 	if !common.IsMasterNode {
 		common.SysLog("affiliate background tasks: skipped on non-master node")
@@ -58,29 +58,6 @@ func StartAffCronTasks() {
 			}
 			if archived > 0 {
 				common.SysLog("archive old settled aff_audit_logs: archived " + itoa(int(archived)) + " rows")
-			}
-		}
-		runOnce()
-		for range ticker.C {
-			runOnce()
-		}
-	}()
-
-	// 每小时跑一次自动结算(灰度第 1 周可用 EnableAffAutoSettle=false 关停)
-	go func() {
-		// 启动后等 5 分钟再首次执行,避免启动期 DB 未完全 ready
-		time.Sleep(5 * time.Minute)
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-
-		runOnce := func() {
-			settled, err := RunAffSettle()
-			if err != nil {
-				common.SysLog("aff settle cron failed: " + err.Error())
-				return
-			}
-			if settled > 0 {
-				common.SysLog("aff settle cron: settled " + itoa(settled) + " logs")
 			}
 		}
 		runOnce()

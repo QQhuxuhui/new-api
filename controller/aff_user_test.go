@@ -22,7 +22,6 @@ func setupAffUserSummaryDB(t *testing.T) {
 	common.RedisEnabled = false
 	common.QuotaPerUnit = 500000
 	common.InviterRewardDefaultPercent = 10
-	common.InviterRewardCooldownDays = 7
 
 	dsn := fmt.Sprintf("file:aff_user_summary_test_%d?mode=memory&cache=shared", time.Now().UnixNano())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
@@ -93,7 +92,6 @@ func TestGetMyAffSummary_BasicFields(t *testing.T) {
 	mustEqual("aff_history_quota", float64(500000))
 	mustEqual("aff_quota_usd", 0.2) // 100000 / 500000 = 0.2
 	mustEqual("reward_percent", 10.0)
-	mustEqual("cooldown_days", float64(7))
 	mustEqual("aff_status", "normal")
 
 	// 必须没有下级身份信息泄漏

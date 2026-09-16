@@ -40,6 +40,7 @@ const routerMap = {
   redemption: '/console/redemption',
   plan: '/console/plan',
   'plan-orders': '/console/admin/plan-orders',
+  'aff-review': '/console/admin/aff-review',
   'aff-monthly-report': '/console/admin/aff-monthly-report',
   plans: '/plans',
   topup: '/console/topup',
@@ -204,6 +205,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('订单管理'),
         itemKey: 'plan-orders',
         to: '/console/admin/plan-orders',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('返现审核'),
+        itemKey: 'aff-review',
+        to: '/console/admin/aff-review',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

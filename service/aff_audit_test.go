@@ -18,7 +18,6 @@ func setupAffAuditServiceTestDB(t *testing.T) {
 	t.Helper()
 	common.RedisEnabled = false
 	common.InviterRewardDefaultPercent = 10
-	common.InviterRewardCooldownDays = 7
 	operation_setting.Price = 7.0 // 测试用稳定汇率
 
 	dsn := fmt.Sprintf("file:aff_audit_service_test_%d?mode=memory&cache=shared", time.Now().UnixNano())
@@ -120,9 +119,11 @@ func TestCreateAffAuditLogIfEligible_HappyPathPending(t *testing.T) {
 	if log.RewardUsd != 1.0 {
 		t.Fatalf("reward_usd: want 1.0 (10%% of 10), got %v", log.RewardUsd)
 	}
-	expectedEligibleAt := paidAt + int64(7*24*60*60*1000)
-	if log.EligibleAt != expectedEligibleAt {
-		t.Fatalf("eligible_at: want %d, got %d", expectedEligibleAt, log.EligibleAt)
+	if log.EligibleAt != paidAt {
+		t.Fatalf("eligible_at: want paid_at %d (no cooldown), got %d", paidAt, log.EligibleAt)
+	}
+	if log.RiskFlag != "" {
+		t.Fatalf("risk_flag should be empty for clean pair, got %q", log.RiskFlag)
 	}
 }
 
@@ -205,7 +206,8 @@ func TestCreateAffAuditLogIfEligible_FrozenInviterRejected(t *testing.T) {
 	}
 }
 
-func TestCreateAffAuditLogIfEligible_SameIpRejected(t *testing.T) {
+// 同 IP 不再自动拒绝:仍进入待审核,但带 risk_flag 供管理员参考。
+func TestCreateAffAuditLogIfEligible_SameIpPendingWithRiskFlag(t *testing.T) {
 	setupAffAuditServiceTestDB(t)
 	inviter, invitee := makeInviterAndInvitee(t, false)
 	now := time.Now().UnixMilli()
@@ -218,16 +220,19 @@ func TestCreateAffAuditLogIfEligible_SameIpRejected(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	if !created {
-		t.Fatal("rejected logs should still be created")
+		t.Fatal("flagged logs should still be created")
 	}
 	var log model.AffAuditLog
 	model.DB.First(&log)
-	if log.RejectReason != model.AffAuditRejectSameIp {
-		t.Fatalf("reject_reason: %q (status=%q)", log.RejectReason, log.Status)
+	if log.Status != model.AffAuditStatusPending {
+		t.Fatalf("status: want pending (admin decides), got %q", log.Status)
+	}
+	if log.RiskFlag != model.AffAuditRejectSameIp || log.RejectReason != "" {
+		t.Fatalf("risk_flag=%q reject_reason=%q", log.RiskFlag, log.RejectReason)
 	}
 }
 
-func TestCreateAffAuditLogIfEligible_SamePaymentAccountRejected(t *testing.T) {
+func TestCreateAffAuditLogIfEligible_SamePaymentAccountPendingWithRiskFlag(t *testing.T) {
 	setupAffAuditServiceTestDB(t)
 	inviter, invitee := makeInviterAndInvitee(t, false)
 	model.UpsertUserPaymentAccount(inviter.Id, model.PaymentAccountProviderStripe, "cus_X")
@@ -238,12 +243,15 @@ func TestCreateAffAuditLogIfEligible_SamePaymentAccountRejected(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	if !created {
-		t.Fatal("rejected logs should still be created")
+		t.Fatal("flagged logs should still be created")
 	}
 	var log model.AffAuditLog
 	model.DB.First(&log)
-	if log.RejectReason != model.AffAuditRejectSamePaymentAccount {
-		t.Fatalf("reject_reason: %q (status=%q)", log.RejectReason, log.Status)
+	if log.Status != model.AffAuditStatusPending {
+		t.Fatalf("status: want pending (admin decides), got %q", log.Status)
+	}
+	if log.RiskFlag != model.AffAuditRejectSamePaymentAccount || log.RejectReason != "" {
+		t.Fatalf("risk_flag=%q reject_reason=%q", log.RiskFlag, log.RejectReason)
 	}
 }
 

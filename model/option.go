@@ -128,8 +128,6 @@ func InitOptionMap() {
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["InviterRewardDefaultPercent"] = strconv.FormatFloat(common.InviterRewardDefaultPercent, 'f', -1, 64)
-	common.OptionMap["InviterRewardCooldownDays"] = strconv.Itoa(common.InviterRewardCooldownDays)
-	common.OptionMap["EnableAffAutoSettle"] = strconv.FormatBool(common.EnableAffAutoSettle)
 	common.OptionMap["InviterRewardCutoffMs"] = strconv.FormatInt(common.InviterRewardCutoffMs, 10)
 
 	// OSS 凭证 + 海报弹窗(详见 add-poster-popup-system change)
@@ -256,10 +254,6 @@ func UpdateOption(key string, value string) error {
 	case "InviterRewardDefaultPercent":
 		if v, err := strconv.ParseFloat(value, 64); err != nil || v < 0 || v > 100 {
 			return errors.New("InviterRewardDefaultPercent 必须为 0-100 之间的数字")
-		}
-	case "InviterRewardCooldownDays":
-		if v, err := strconv.Atoi(value); err != nil || v < 1 || v > 365 {
-			return errors.New("InviterRewardCooldownDays 必须为 1-365 之间的整数")
 		}
 	case "InviterRewardCutoffMs":
 		if v, err := strconv.ParseInt(value, 10, 64); err != nil || v < 0 {
@@ -538,14 +532,6 @@ func updateOptionMap(key string, value string) (err error) {
 	case "InviterRewardDefaultPercent":
 		if v, err := strconv.ParseFloat(value, 64); err == nil {
 			common.InviterRewardDefaultPercent = v
-		}
-	case "InviterRewardCooldownDays":
-		if v, err := strconv.Atoi(value); err == nil && v > 0 {
-			common.InviterRewardCooldownDays = v
-		}
-	case "EnableAffAutoSettle":
-		if v, err := strconv.ParseBool(value); err == nil {
-			common.EnableAffAutoSettle = v
 		}
 	case "InviterRewardCutoffMs":
 		if v, err := strconv.ParseInt(value, 10, 64); err == nil && v >= 0 {

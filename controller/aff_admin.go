@@ -85,8 +85,12 @@ func GetInviterAuditLogs(c *gin.Context) {
 			"reward_usd":              l.RewardUsd,
 			"status":                  l.Status,
 			"reject_reason":           l.RejectReason,
+			"risk_flag":               l.RiskFlag,
 			"eligible_at":             l.EligibleAt,
 			"created_at":              l.CreatedAt,
+			"reviewed_at":             l.ReviewedAt,
+			"reviewed_admin_id":       l.ReviewedAdminId,
+			"review_note":             l.ReviewNote,
 			"settled_at":              l.SettledAt,
 			"offline_paid_at":         l.OfflinePaidAt,
 			"offline_paid_amount_cny": l.OfflinePaidAmountCny,
@@ -287,22 +291,176 @@ func MarkAuditLogsOfflinePaid(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"marked": len(req.LogIds)})
 }
 
-// SettleAuditLogManually POST /api/user/manage/aff-audit-logs/:log_id/settle
+// GetAffReviewList GET /api/user/manage/aff-review?status=pending&page=1&page_size=20
 //
-// 救回卡住的单条 audit log,用于 cron 漏扫情况。严格要求 status='pending'。
-func SettleAuditLogManually(c *gin.Context) {
-	logIdStr := c.Param("log_id")
-	logId, err := strconv.Atoi(logIdStr)
-	if err != nil || logId <= 0 {
-		common.ApiErrorMsg(c, "无效的 log_id")
+// "返现审核"页的全站列表:按状态筛选(默认 pending),附带邀请人 / 被邀请人用户名、
+// 风险提示、审核人。同时返回当前待审核总数与待审核返现总额,供页面顶部展示。
+func GetAffReviewList(c *gin.Context) {
+	status := c.DefaultQuery("status", model.AffAuditStatusPending)
+	pageInfo := parsePage(c)
+
+	q := model.DB.Model(&model.AffAuditLog{})
+	if status != "" && status != "all" {
+		q = q.Where("status = ?", status)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var logs []model.AffAuditLog
+	order := "id DESC"
+	if status == model.AffAuditStatusPending {
+		order = "id ASC" // 待审核按先来后到
+	}
+	if err := q.Order(order).
+		Limit(pageInfo.GetPageSize()).
+		Offset(pageInfo.GetStartIdx()).
+		Find(&logs).Error; err != nil {
+		common.ApiError(c, err)
 		return
 	}
 
-	if err := service.SettleSingleAuditLog(logId); err != nil {
+	// 批量查用户名(邀请人 + 被邀请人 + 审核人,支持软删)
+	idSet := map[int]struct{}{}
+	for _, l := range logs {
+		idSet[l.InviterUserId] = struct{}{}
+		idSet[l.InviteeUserId] = struct{}{}
+		if l.ReviewedAdminId > 0 {
+			idSet[l.ReviewedAdminId] = struct{}{}
+		}
+	}
+	ids := make([]int, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	type uRow struct {
+		Id       int
+		Username string
+	}
+	var users []uRow
+	if len(ids) > 0 {
+		model.DB.Model(&model.User{}).Unscoped().Where("id IN ?", ids).Find(&users)
+	}
+	nameOf := func(id int) string {
+		for _, u := range users {
+			if u.Id == id {
+				return u.Username
+			}
+		}
+		if id == 0 {
+			return ""
+		}
+		return fmt.Sprintf("[deleted user #%d]", id)
+	}
+
+	items := make([]gin.H, 0, len(logs))
+	for _, l := range logs {
+		items = append(items, gin.H{
+			"id":                l.Id,
+			"inviter_user_id":   l.InviterUserId,
+			"inviter_username":  nameOf(l.InviterUserId),
+			"invitee_user_id":   l.InviteeUserId,
+			"invitee_username":  nameOf(l.InviteeUserId),
+			"source_type":       l.SourceType,
+			"source_id":         l.SourceId,
+			"amount_native":     l.AmountNative,
+			"currency":          l.Currency,
+			"amount_usd":        l.AmountUsd,
+			"reward_usd":        l.RewardUsd,
+			"status":            l.Status,
+			"reject_reason":     l.RejectReason,
+			"risk_flag":         l.RiskFlag,
+			"created_at":        l.CreatedAt,
+			"reviewed_at":       l.ReviewedAt,
+			"reviewed_admin_id": l.ReviewedAdminId,
+			"reviewer_username": nameOf(l.ReviewedAdminId),
+			"review_note":       l.ReviewNote,
+			"settled_at":        l.SettledAt,
+		})
+	}
+
+	var pendingStat struct {
+		Count int64
+		Total float64
+	}
+	model.DB.Model(&model.AffAuditLog{}).
+		Where("status = ?", model.AffAuditStatusPending).
+		Select("COUNT(*) AS count, COALESCE(SUM(reward_usd), 0) AS total").
+		Scan(&pendingStat)
+
+	common.ApiSuccess(c, gin.H{
+		"items":              items,
+		"pending_count":      pendingStat.Count,
+		"pending_reward_usd": pendingStat.Total,
+		"pagination": gin.H{
+			"page":      pageInfo.Page,
+			"page_size": pageInfo.PageSize,
+			"total":     total,
+		},
+	})
+}
+
+// ApproveAuditLogHandler POST /api/user/manage/aff-audit-logs/:log_id/approve
+//
+// 管理员通过一条返现记录,立即入账到邀请人 AffQuota。
+// 允许 pending 与 rejected(改判)两种起始状态。
+func ApproveAuditLogHandler(c *gin.Context) {
+	logId, ok := parseLogIdParam(c)
+	if !ok {
+		return
+	}
+	adminId := c.GetInt("id")
+	if err := service.ApproveAuditLog(logId, adminId); err != nil {
 		c.JSON(422, gin.H{"success": false, "message": err.Error()})
 		return
 	}
-	common.ApiSuccess(c, gin.H{"settled": logId})
+	var log model.AffAuditLog
+	if model.DB.First(&log, logId).Error == nil {
+		model.RecordLog(log.InviterUserId, model.LogTypeManage,
+			fmt.Sprintf("管理员 #%d 审核通过返现记录 #%d,入账 $%.4f(下级 #%d,%s #%d)",
+				adminId, log.Id, log.RewardUsd, log.InviteeUserId, log.SourceType, log.SourceId))
+	}
+	common.ApiSuccess(c, gin.H{"approved": logId})
+}
+
+type rejectAuditLogRequest struct {
+	Note string `json:"note"`
+}
+
+// RejectAuditLogHandler POST /api/user/manage/aff-audit-logs/:log_id/reject
+//
+// 管理员拒绝一条待审核的返现记录(不入账)。body 可带 {note} 说明原因。
+func RejectAuditLogHandler(c *gin.Context) {
+	logId, ok := parseLogIdParam(c)
+	if !ok {
+		return
+	}
+	var req rejectAuditLogRequest
+	if c.Request.Body != nil {
+		_ = json.NewDecoder(c.Request.Body).Decode(&req)
+	}
+	adminId := c.GetInt("id")
+	if err := service.RejectAuditLog(logId, adminId, req.Note); err != nil {
+		c.JSON(422, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	var log model.AffAuditLog
+	if model.DB.First(&log, logId).Error == nil {
+		model.RecordLog(log.InviterUserId, model.LogTypeManage,
+			fmt.Sprintf("管理员 #%d 拒绝返现记录 #%d($%.4f,下级 #%d),说明: %s",
+				adminId, log.Id, log.RewardUsd, log.InviteeUserId, req.Note))
+	}
+	common.ApiSuccess(c, gin.H{"rejected": logId})
+}
+
+func parseLogIdParam(c *gin.Context) (int, bool) {
+	logId, err := strconv.Atoi(c.Param("log_id"))
+	if err != nil || logId <= 0 {
+		common.ApiErrorMsg(c, "无效的 log_id")
+		return 0, false
+	}
+	return logId, true
 }
 
 // GetMonthlyReconciliationReport GET /api/user/manage/aff-monthly-report?year=&month=

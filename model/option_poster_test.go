@@ -247,23 +247,6 @@ func TestUpdateOption_InviterRewardDefaultPercent_RejectsOutOfRange(t *testing.T
 	}
 }
 
-func TestUpdateOption_InviterRewardCooldownDays_RejectsOutOfRange(t *testing.T) {
-	setupOptionMapWithDB(t)
-	defer cleanupOption(t, "InviterRewardCooldownDays")
-	defer func() { common.InviterRewardCooldownDays = 7 }()
-
-	for _, v := range []string{"0", "-1", "366", "abc", ""} {
-		if err := UpdateOption("InviterRewardCooldownDays", v); err == nil {
-			t.Errorf("value=%q should be rejected", v)
-		}
-	}
-	for _, v := range []string{"1", "7", "365"} {
-		if err := UpdateOption("InviterRewardCooldownDays", v); err != nil {
-			t.Errorf("value=%q should be accepted: %v", v, err)
-		}
-	}
-}
-
 func TestUpdateOption_InviterRewardCutoffMs_RejectsNegative(t *testing.T) {
 	setupOptionMapWithDB(t)
 	defer cleanupOption(t, "InviterRewardCutoffMs")

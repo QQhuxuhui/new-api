@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Card,
   Form,
   Button,
   Banner,
@@ -14,15 +13,7 @@ import { showError, showSuccess } from '../../../helpers';
 
 const { Title, Text } = Typography;
 
-const AFF_KEYS = [
-  'InviterRewardDefaultPercent', // float 0-100
-  'InviterRewardCooldownDays', // int >= 1
-  'EnableAffAutoSettle', // bool
-];
-
 // InviterRewardCutoffMs 是只读展示(写入路径在"月度报表 → 历史 pending 一键归档")
-const READ_ONLY_KEYS = ['InviterRewardCutoffMs'];
-
 const formatCutoffMs = (ms) => {
   const n = Number(ms || 0);
   if (!n || n <= 0) return '未启用';
@@ -41,8 +32,6 @@ const SettingsAffiliateReward = () => {
   const [loading, setLoading] = useState(false);
   const [config, setConfig] = useState({
     InviterRewardDefaultPercent: 10,
-    InviterRewardCooldownDays: 7,
-    EnableAffAutoSettle: true,
   });
   const [cutoffMs, setCutoffMs] = useState(0);
   const formApiRef = useRef(null);
@@ -63,12 +52,6 @@ const SettingsAffiliateReward = () => {
           // 但会被 || 当成 falsy 还原成 10,刷新后保存又把 0 覆盖回 10。
           const n = parseFloat(item.value);
           if (Number.isFinite(n)) next[item.key] = n;
-        } else if (item.key === 'InviterRewardCooldownDays') {
-          // 服务端约束 1-365,这里只要 parse 成功且为正整数就用,不用 || 兜底
-          const n = parseInt(item.value, 10);
-          if (Number.isFinite(n) && n > 0) next[item.key] = n;
-        } else if (item.key === 'EnableAffAutoSettle') {
-          next[item.key] = item.value === 'true' || item.value === true;
         } else if (item.key === 'InviterRewardCutoffMs') {
           const n = parseInt(item.value, 10);
           setCutoffMs(Number.isFinite(n) && n >= 0 ? n : 0);
@@ -88,30 +71,18 @@ const SettingsAffiliateReward = () => {
     // eslint-disable-next-line
   }, []);
 
-  const updateOne = (key, value) =>
-    API.put('/api/option/', { key, value });
-
   const handleSubmit = async (values) => {
-    // 校验
     const pct = Number(values.InviterRewardDefaultPercent);
     if (!(pct >= 0 && pct <= 100)) {
       showError(t('返佣比例必须在 0-100 之间'));
       return;
     }
-    const cooldown = Number(values.InviterRewardCooldownDays);
-    if (!(cooldown >= 1 && cooldown <= 365)) {
-      showError(t('冷却天数必须在 1-365 之间'));
-      return;
-    }
-
     setLoading(true);
     try {
-      await updateOne('InviterRewardDefaultPercent', String(pct));
-      await updateOne('InviterRewardCooldownDays', String(cooldown));
-      await updateOne(
-        'EnableAffAutoSettle',
-        String(!!values.EnableAffAutoSettle),
-      );
+      await API.put('/api/option/', {
+        key: 'InviterRewardDefaultPercent',
+        value: String(pct),
+      });
       showSuccess(t('分销返佣配置已保存'));
       await loadConfig();
     } catch (e) {
@@ -127,7 +98,7 @@ const SettingsAffiliateReward = () => {
         <Title heading={5}>{t('一级分销返佣')}</Title>
         <Text type='tertiary' style={{ fontSize: 13 }}>
           {t(
-            '一级分销返佣系统:被邀请人通过支付完成充值后,经冷却期自动结算返佣到邀请人 AffQuota(站内额度,不可提现)。',
+            '被邀请人完成充值后生成一条待审核返现;管理员在"返现审核"页通过后,返佣才会到邀请人 AffQuota(站内额度,不可提现)。不会自动返现。',
           )}
         </Text>
       </div>
@@ -136,7 +107,7 @@ const SettingsAffiliateReward = () => {
         fullMode={false}
         type='info'
         description={t(
-          '提示:返佣比例与冷却天数仅对修改后**新写入**的 audit log 生效;已存在的 pending 记录使用其写入时冻结的比例和到期时间结算。',
+          '提示:返佣比例仅对修改后新产生的返现记录生效;已存在的待审核记录按其生成时冻结的比例入账。',
         )}
         closeIcon={null}
         style={{ marginBottom: 12 }}
@@ -153,30 +124,8 @@ const SettingsAffiliateReward = () => {
           min={0}
           max={100}
           step={0.5}
-          extraText={t(
-            '0-100 范围内的小数。新自动结算与现有 admin 手动 payout 共享此变量。',
-          )}
+          extraText={t('0-100 范围内的小数。设为 0 即暂停产生新的返现记录金额。')}
           style={{ width: '100%' }}
-        />
-
-        <Form.InputNumber
-          field='InviterRewardCooldownDays'
-          label={t('冷却天数')}
-          min={1}
-          max={365}
-          step={1}
-          extraText={t(
-            '充值成功后多少天进入自动结算池。默认 7 天,作为安全垫覆盖大多数退款窗口。',
-          )}
-          style={{ width: '100%' }}
-        />
-
-        <Form.Switch
-          field='EnableAffAutoSettle'
-          label={t('启用自动结算')}
-          extraText={t(
-            '总开关。关闭时所有 audit log 仍正常写入,但 cron 不结算到 AffQuota。出问题可一键关停。',
-          )}
         />
 
         {/* 只读字段:历史截断点 */}

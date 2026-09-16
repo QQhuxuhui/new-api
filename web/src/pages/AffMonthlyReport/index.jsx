@@ -26,6 +26,7 @@ const STATUS_COLOR = {
 };
 
 const REJECT_LABEL = {
+  admin: '管理员拒绝',
   same_ip: '同 IP',
   same_payment_account: '同支付账号',
   inviter_frozen: '邀请人已冻结',
@@ -166,7 +167,7 @@ const AffMonthlyReport = () => {
             />
           </Card>
 
-          <Card title={t('反作弊拒绝明细')} loading={loading}>
+          <Card title={t('拒绝明细')} loading={loading}>
             <Table
               size='small'
               dataSource={data.total_rejected_count_by_reason || []}
@@ -211,7 +212,7 @@ const AffMonthlyReport = () => {
       >
         <Text type='warning' style={{ display: 'block', marginBottom: 12 }}>
           {t(
-            '此操作会把所有 created_at 早于截断时间的 status="pending" log 改为 legacy。legacy 不会被自动结算 cron 处理,但仍会显示在审计列表里。操作不可逆,请谨慎。'
+            '此操作会把所有 created_at 早于截断时间的 status="pending" log 改为 legacy。legacy 不会出现在返现审核的待审核列表里,但仍会显示在审计列表里。操作不可逆,请谨慎。'
           )}
         </Text>
         <Form

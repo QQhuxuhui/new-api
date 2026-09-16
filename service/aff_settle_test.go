@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -18,8 +19,6 @@ func setupAffSettleTestDB(t *testing.T) {
 	common.RedisEnabled = false
 	common.QuotaPerUnit = 500000 // $1 = 500000 tokens
 	common.InviterRewardDefaultPercent = 10
-	common.InviterRewardCooldownDays = 7
-	common.EnableAffAutoSettle = true
 
 	dsn := fmt.Sprintf("file:aff_settle_test_%d?mode=memory&cache=shared", time.Now().UnixNano())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
@@ -51,7 +50,7 @@ func makeUser(t *testing.T, name string) *model.User {
 	return u
 }
 
-func seedPendingLog(t *testing.T, inviter, invitee *model.User, sourceId int, rewardUsd float64, eligibleAt int64) *model.AffAuditLog {
+func seedLog(t *testing.T, inviter, invitee *model.User, sourceId int, rewardUsd float64, status string) *model.AffAuditLog {
 	t.Helper()
 	log := &model.AffAuditLog{
 		InviterUserId: inviter.Id,
@@ -61,210 +60,168 @@ func seedPendingLog(t *testing.T, inviter, invitee *model.User, sourceId int, re
 		AmountUsd:     rewardUsd * 10, // 10% reward
 		RewardUsd:     rewardUsd,
 		Currency:      model.AffAuditCurrencyUsd,
-		Status:        model.AffAuditStatusPending,
-		EligibleAt:    eligibleAt,
+		Status:        status,
+		EligibleAt:    time.Now().UnixMilli(),
 	}
 	if err := model.DB.Create(log).Error; err != nil {
-		t.Fatalf("seed pending log: %v", err)
+		t.Fatalf("seed log: %v", err)
 	}
 	return log
 }
 
-func TestRunAffSettle_EmptyPoolNoOp(t *testing.T) {
-	setupAffSettleTestDB(t)
-	settled, err := RunAffSettle()
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if settled != 0 {
-		t.Fatalf("want 0, got %d", settled)
-	}
-}
-
-func TestRunAffSettle_SingleInviterBatchSettles(t *testing.T) {
+func TestApproveAuditLog_PendingCreditsAndRecordsReviewer(t *testing.T) {
 	setupAffSettleTestDB(t)
 	inviter := makeUser(t, "inv")
 	invitee := makeUser(t, "ee")
-	now := time.Now().UnixMilli()
+	log := seedLog(t, inviter, invitee, 99, 0.5, model.AffAuditStatusPending)
 
-	seedPendingLog(t, inviter, invitee, 1, 1.0, now-1000)
-	seedPendingLog(t, inviter, invitee, 2, 2.5, now-1000)
-
-	settled, err := RunAffSettle()
-	if err != nil {
-		t.Fatalf("run: %v", err)
+	if err := ApproveAuditLog(log.Id, 42); err != nil {
+		t.Fatalf("approve: %v", err)
 	}
-	if settled != 2 {
-		t.Fatalf("want 2 settled, got %d", settled)
-	}
-
-	// AffQuota = (1.0 + 2.5) * 500000 = 1750000
 	var u model.User
 	model.DB.First(&u, inviter.Id)
-	if u.AffQuota != 1750000 {
-		t.Fatalf("aff_quota: want 1750000, got %d", u.AffQuota)
+	if u.AffQuota != 250000 || u.AffHistoryQuota != 250000 {
+		t.Fatalf("aff_quota/history: want 250000 (0.5 * 500000), got %d/%d", u.AffQuota, u.AffHistoryQuota)
 	}
-	if u.AffHistoryQuota != 1750000 {
-		t.Fatalf("aff_history_quota: want 1750000, got %d", u.AffHistoryQuota)
+	var l model.AffAuditLog
+	model.DB.First(&l, log.Id)
+	if l.Status != model.AffAuditStatusSettled || l.SettledAt == 0 || l.ReviewedAt == 0 || l.ReviewedAdminId != 42 {
+		t.Fatalf("log after approve: %+v", l)
 	}
-
-	// 一个 payout 行,settle_mode='auto'
 	var payouts []model.InviterRewardPayout
 	model.DB.Where("inviter_user_id = ?", inviter.Id).Find(&payouts)
 	if len(payouts) != 1 {
 		t.Fatalf("want 1 payout, got %d", len(payouts))
 	}
-	if payouts[0].SettleMode != model.InviterRewardPayoutSettleModeAuto {
-		t.Fatalf("settle_mode: %q", payouts[0].SettleMode)
+	if payouts[0].SettleMode != model.InviterRewardPayoutSettleModeReview || payouts[0].OperatorAdminId != 42 {
+		t.Fatalf("payout: mode=%q admin=%d", payouts[0].SettleMode, payouts[0].OperatorAdminId)
 	}
-
-	// logs 状态 = settled
-	var logs []model.AffAuditLog
-	model.DB.Where("inviter_user_id = ?", inviter.Id).Find(&logs)
-	for _, l := range logs {
-		if l.Status != model.AffAuditStatusSettled {
-			t.Errorf("log %d status: %q", l.Id, l.Status)
-		}
-		if l.SettlePayoutId != payouts[0].Id {
-			t.Errorf("log %d settle_payout_id: %d", l.Id, l.SettlePayoutId)
-		}
-		if l.SettledAt == 0 {
-			t.Errorf("log %d settled_at not set", l.Id)
-		}
+	if l.SettlePayoutId != payouts[0].Id {
+		t.Fatalf("settle_payout_id: %d want %d", l.SettlePayoutId, payouts[0].Id)
 	}
 }
 
-func TestRunAffSettle_MultiInviterIndependentBatches(t *testing.T) {
-	setupAffSettleTestDB(t)
-	a := makeUser(t, "A")
-	b := makeUser(t, "B")
-	c := makeUser(t, "C")
-	now := time.Now().UnixMilli()
-
-	seedPendingLog(t, a, c, 1, 1.0, now-1000)
-	seedPendingLog(t, b, c, 2, 2.0, now-1000)
-
-	settled, _ := RunAffSettle()
-	if settled != 2 {
-		t.Fatalf("want 2, got %d", settled)
-	}
-
-	var ua, ub model.User
-	model.DB.First(&ua, a.Id)
-	model.DB.First(&ub, b.Id)
-	if ua.AffQuota != 500000 {
-		t.Errorf("A aff_quota: %d", ua.AffQuota)
-	}
-	if ub.AffQuota != 1000000 {
-		t.Errorf("B aff_quota: %d", ub.AffQuota)
-	}
-
-	// 应该有 2 个独立 payout
-	var payouts []model.InviterRewardPayout
-	model.DB.Find(&payouts)
-	if len(payouts) != 2 {
-		t.Errorf("want 2 payouts, got %d", len(payouts))
-	}
-}
-
-func TestRunAffSettle_DoesNotSettleNonPending(t *testing.T) {
+// 管理员改判:之前被拒绝(含历史上反作弊自动拒绝)的记录可以直接通过并入账。
+func TestApproveAuditLog_RejectedCanBeOverturned(t *testing.T) {
 	setupAffSettleTestDB(t)
 	inviter := makeUser(t, "inv")
 	invitee := makeUser(t, "ee")
-	now := time.Now().UnixMilli()
+	log := seedLog(t, inviter, invitee, 1, 2.0, model.AffAuditStatusRejected)
+	model.DB.Model(log).Update("reject_reason", model.AffAuditRejectSameIp)
 
-	// rejected / refunded / offline_paid / settled — 都不应被处理
+	if err := ApproveAuditLog(log.Id, 1); err != nil {
+		t.Fatalf("approve rejected: %v", err)
+	}
+	var u model.User
+	model.DB.First(&u, inviter.Id)
+	if u.AffQuota != 1000000 {
+		t.Fatalf("aff_quota: want 1000000, got %d", u.AffQuota)
+	}
+	var l model.AffAuditLog
+	model.DB.First(&l, log.Id)
+	if l.Status != model.AffAuditStatusSettled || l.RejectReason != "" {
+		t.Fatalf("log after overturn: status=%q reject_reason=%q", l.Status, l.RejectReason)
+	}
+}
+
+// 已入账 / 已退款 / 线下已付 / legacy 都不能再通过,防止重复加余额。
+func TestApproveAuditLog_TerminalStatusesRefused(t *testing.T) {
+	setupAffSettleTestDB(t)
+	inviter := makeUser(t, "inv")
+	invitee := makeUser(t, "ee")
 	for i, status := range []string{
-		model.AffAuditStatusRejected,
+		model.AffAuditStatusSettled,
 		model.AffAuditStatusRefunded,
 		model.AffAuditStatusOfflinePaid,
-		model.AffAuditStatusSettled,
+		model.AffAuditStatusLegacy,
 	} {
-		log := &model.AffAuditLog{
-			InviterUserId: inviter.Id, InviteeUserId: invitee.Id,
-			SourceType: model.AffAuditSourceTopUp, SourceId: 100 + i,
-			RewardUsd: 1.0, Status: status, EligibleAt: now - 1000,
+		log := seedLog(t, inviter, invitee, 100+i, 1.0, status)
+		err := ApproveAuditLog(log.Id, 1)
+		if !errors.Is(err, ErrAffAuditLogNotPending) {
+			t.Errorf("status %s: want ErrAffAuditLogNotPending, got %v", status, err)
 		}
-		model.DB.Create(log)
-	}
-
-	settled, _ := RunAffSettle()
-	if settled != 0 {
-		t.Fatalf("want 0 (no pending), got %d", settled)
 	}
 	var u model.User
 	model.DB.First(&u, inviter.Id)
 	if u.AffQuota != 0 {
 		t.Fatalf("aff_quota should remain 0, got %d", u.AffQuota)
 	}
-}
-
-func TestRunAffSettle_DoesNotSettleNotYetEligible(t *testing.T) {
-	setupAffSettleTestDB(t)
-	inviter := makeUser(t, "inv")
-	invitee := makeUser(t, "ee")
-	now := time.Now().UnixMilli()
-	day := int64(24 * 60 * 60 * 1000)
-
-	seedPendingLog(t, inviter, invitee, 1, 1.0, now+5*day) // 5 days away
-
-	settled, _ := RunAffSettle()
-	if settled != 0 {
-		t.Fatalf("want 0 (not eligible yet), got %d", settled)
+	if err := ApproveAuditLog(999999, 1); !errors.Is(err, ErrAffAuditLogNotFound) {
+		t.Fatalf("missing log: want ErrAffAuditLogNotFound, got %v", err)
 	}
 }
 
-func TestRunAffSettle_KillSwitchExitsImmediately(t *testing.T) {
+// 两次通过同一条:第二次必须报错且不重复加余额。
+func TestApproveAuditLog_DoubleApproveIsIdempotentOnBalance(t *testing.T) {
 	setupAffSettleTestDB(t)
 	inviter := makeUser(t, "inv")
 	invitee := makeUser(t, "ee")
-	seedPendingLog(t, inviter, invitee, 1, 1.0, time.Now().UnixMilli()-1000)
+	log := seedLog(t, inviter, invitee, 1, 1.0, model.AffAuditStatusPending)
 
-	common.EnableAffAutoSettle = false
-	defer func() { common.EnableAffAutoSettle = true }()
-
-	settled, err := RunAffSettle()
-	if err != nil {
-		t.Fatalf("kill-switch should exit cleanly: %v", err)
+	if err := ApproveAuditLog(log.Id, 1); err != nil {
+		t.Fatalf("first approve: %v", err)
 	}
-	if settled != 0 {
-		t.Fatalf("want 0, got %d", settled)
-	}
-}
-
-func TestSettleSingleAuditLog_PendingSettles(t *testing.T) {
-	setupAffSettleTestDB(t)
-	inviter := makeUser(t, "inv")
-	invitee := makeUser(t, "ee")
-	log := seedPendingLog(t, inviter, invitee, 99, 0.5, time.Now().UnixMilli()-1000)
-
-	if err := SettleSingleAuditLog(log.Id); err != nil {
-		t.Fatalf("settle: %v", err)
+	if err := ApproveAuditLog(log.Id, 1); err == nil {
+		t.Fatal("second approve must fail")
 	}
 	var u model.User
 	model.DB.First(&u, inviter.Id)
-	if u.AffQuota != 250000 {
-		t.Fatalf("aff_quota: want 250000 (0.5 * 500000), got %d", u.AffQuota)
+	if u.AffQuota != 500000 {
+		t.Fatalf("aff_quota: want 500000 (credited once), got %d", u.AffQuota)
 	}
-	var l model.AffAuditLog
-	model.DB.First(&l, log.Id)
-	if l.Status != model.AffAuditStatusSettled {
-		t.Fatalf("status: %q", l.Status)
+	var payouts int64
+	model.DB.Model(&model.InviterRewardPayout{}).Where("inviter_user_id = ?", inviter.Id).Count(&payouts)
+	if payouts != 1 {
+		t.Fatalf("want 1 payout, got %d", payouts)
 	}
 }
 
-// 模拟"事务外预扫到的 candidateLogs 已被另一实例 settle"的场景:
+func TestRejectAuditLog_PendingOnly(t *testing.T) {
+	setupAffSettleTestDB(t)
+	inviter := makeUser(t, "inv")
+	invitee := makeUser(t, "ee")
+	log := seedLog(t, inviter, invitee, 1, 1.0, model.AffAuditStatusPending)
+
+	if err := RejectAuditLog(log.Id, 9, "同一台电脑登录"); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	var l model.AffAuditLog
+	model.DB.First(&l, log.Id)
+	if l.Status != model.AffAuditStatusRejected || l.RejectReason != model.AffAuditRejectAdmin ||
+		l.ReviewedAdminId != 9 || l.ReviewNote != "同一台电脑登录" || l.ReviewedAt == 0 {
+		t.Fatalf("log after reject: %+v", l)
+	}
+	var u model.User
+	model.DB.First(&u, inviter.Id)
+	if u.AffQuota != 0 {
+		t.Fatalf("reject must not credit, got %d", u.AffQuota)
+	}
+
+	// 再拒一次 / 拒绝已入账的:都报错
+	if err := RejectAuditLog(log.Id, 9, ""); !errors.Is(err, ErrAffAuditLogNotPending) {
+		t.Fatalf("double reject: want ErrAffAuditLogNotPending, got %v", err)
+	}
+	settled := seedLog(t, inviter, invitee, 2, 1.0, model.AffAuditStatusSettled)
+	if err := RejectAuditLog(settled.Id, 9, ""); !errors.Is(err, ErrAffAuditLogNotPending) {
+		t.Fatalf("reject settled: want ErrAffAuditLogNotPending, got %v", err)
+	}
+	if err := RejectAuditLog(999999, 9, ""); !errors.Is(err, ErrAffAuditLogNotFound) {
+		t.Fatalf("reject missing: want ErrAffAuditLogNotFound, got %v", err)
+	}
+}
+
+// 模拟"事务外预扫到的 candidateLogs 已被另一管理员处理"的场景:
 // settleInviterBatch 应该在事务内 FOR UPDATE 后看到 0 个 pending,
 // 直接 no-op,**不能**重复加 AffQuota / 不能创建 payout 行。
-func TestSettleInviterBatch_AlreadySettledByOtherInstanceNoOp(t *testing.T) {
+func TestSettleInviterBatch_AlreadySettledByOtherAdminNoOp(t *testing.T) {
 	setupAffSettleTestDB(t)
 	inviter := makeUser(t, "inv")
 	invitee := makeUser(t, "ee")
 	now := time.Now().UnixMilli()
 
-	log := seedPendingLog(t, inviter, invitee, 1, 1.0, now-1000)
+	log := seedLog(t, inviter, invitee, 1, 1.0, model.AffAuditStatusPending)
 
-	// 模拟另一个实例已把这行更新成 settled
+	// 模拟另一个管理员已把这行更新成 settled
 	if err := model.DB.Model(&model.AffAuditLog{}).
 		Where("id = ?", log.Id).
 		Updates(map[string]interface{}{"status": model.AffAuditStatusSettled, "settled_at": now}).Error; err != nil {
@@ -272,16 +229,14 @@ func TestSettleInviterBatch_AlreadySettledByOtherInstanceNoOp(t *testing.T) {
 	}
 
 	// 用过时的 candidateLogs(里面 log.Status 仍写着 pending,因为是事务外取到的快照)
-	staleCandidate := []model.AffAuditLog{*log} // 注意 status 还是 pending(快照)
-	settled, err := settleInviterBatchExportedForTest(t, inviter.Id, staleCandidate)
+	settled, err := settleInviterBatch(inviter.Id, 1, []model.AffAuditLog{*log})
 	if err != nil {
 		t.Fatalf("settleInviterBatch: %v", err)
 	}
 	if settled != 0 {
-		t.Fatalf("want 0 settled (already taken by another instance), got %d", settled)
+		t.Fatalf("want 0 settled (already taken by another admin), got %d", settled)
 	}
 
-	// 关键断言:AffQuota 没有被加,payout 没有被创建
 	var u model.User
 	model.DB.First(&u, inviter.Id)
 	if u.AffQuota != 0 {
@@ -291,24 +246,5 @@ func TestSettleInviterBatch_AlreadySettledByOtherInstanceNoOp(t *testing.T) {
 	model.DB.Model(&model.InviterRewardPayout{}).Where("inviter_user_id = ?", inviter.Id).Count(&payouts)
 	if payouts != 0 {
 		t.Errorf("payout row MUST NOT be created when nothing was actually settled; got %d", payouts)
-	}
-}
-
-// settleInviterBatchExportedForTest 是为白盒测试暴露的 wrapper(避免改动小写函数签名)。
-func settleInviterBatchExportedForTest(t *testing.T, inviterId int, logs []model.AffAuditLog) (int, error) {
-	t.Helper()
-	return settleInviterBatch(inviterId, logs)
-}
-
-func TestSettleSingleAuditLog_NonPendingRejected(t *testing.T) {
-	setupAffSettleTestDB(t)
-	inviter := makeUser(t, "inv")
-	invitee := makeUser(t, "ee")
-	log := seedPendingLog(t, inviter, invitee, 99, 0.5, time.Now().UnixMilli()-1000)
-	model.DB.Model(log).Update("status", model.AffAuditStatusRejected)
-
-	err := SettleSingleAuditLog(log.Id)
-	if err == nil {
-		t.Fatal("expected error for non-pending log")
 	}
 }

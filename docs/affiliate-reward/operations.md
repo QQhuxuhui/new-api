@@ -8,11 +8,12 @@
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `InviterRewardDefaultPercent` | 10.0 | 一级分销返佣比例(%);新自动结算与旧 admin 手动 payout 共享此变量 |
-| `InviterRewardCooldownDays` | 7 | 充值成功后多少天进入自动结算池(冷却期) |
-| `EnableAffAutoSettle` | true | **总开关** — false 时所有 audit log 仍写入,但 cron 不结算 |
+| `InviterRewardDefaultPercent` | 10.0 | 一级分销返佣比例(%);返现审核入账与旧 admin 手动 payout 共享此变量 |
 | `InviterRewardCutoffMs` | 0 | 历史截断点(ms 时间戳),仅作记录用;实际迁移由 admin 主动调用 mark-legacy 接口触发。0 = 未启用 |
-| `QuotaPerUnit` | 500000 | 现有变量;1 USD = 多少 token。结算时 reward_usd × QuotaPerUnit → AffQuota |
+| `QuotaPerUnit` | 500000 | 现有变量;1 USD = 多少 token。入账时 reward_usd × QuotaPerUnit → AffQuota |
+
+> 2026-09-16 起**取消自动返现**:`InviterRewardCooldownDays` / `EnableAffAutoSettle` 已删除,
+> 每一笔返现都要管理员在后台"返现审核"页(`/console/admin/aff-review`)人工通过后才入账。
 
 ## 数据库表
 
@@ -22,7 +23,7 @@
 | `aff_audit_logs_archive` | 已结算 1 年以上的归档表(无索引,只追加) |
 | `user_login_ip_logs` | 用户登录 IP 历史(同 IP 反作弊数据源,30 天后清理) |
 | `user_payment_accounts` | 用户支付账号绑定记录(同支付账号反作弊数据源) |
-| `inviter_reward_payouts` | **现有表**,新增 `settle_mode` 字段(`'manual'` / `'auto'`) |
+| `inviter_reward_payouts` | **现有表**,`settle_mode` 字段:`'manual'`(线下台账)/ `'auto'`(历史自动结算)/ `'review'`(审核通过入账) |
 | `users` | **现有表**,新增 `aff_status` 字段(0=正常,1=分销冻结) |
 
 ## 状态机
@@ -30,82 +31,58 @@
 ```
 [支付成功 + invitee.inviter_id != 0]
      ↓
-   [反作弊预检]──命中──> rejected (终态)
-     ↓ 通过
-   pending (eligible_at = paid_at + cooldown)
+   [邀请人 aff_status=1 冻结?]──是──> rejected (reject_reason=inviter_frozen)
+     ↓ 否
+   [同 IP / 同支付账号?]──命中──> 仅写 risk_flag,不拦截
+     ↓
+   pending (待审核;审核页按先来后到展示)
      │
-     ├─[cron 扫描,冷却期已过]──> settled (AffQuota += reward_usd × QuotaPerUnit)
+     ├─[管理员"通过"]──> settled (AffQuota += reward_usd × QuotaPerUnit;记录 reviewed_admin_id)
+     ├─[管理员"拒绝"]──> rejected (reject_reason=admin,可填 review_note;可在"已拒绝"里改为通过)
      ├─[退款 hook,v1 不接入]──> refunded
      ├─[管理员标记]──> offline_paid (记录 offline_paid_amount_cny)
-     └─[管理员一键归档,cutoff 之前]──> legacy (列表展示,不参与结算)
+     └─[管理员一键归档,cutoff 之前]──> legacy (列表展示,不参与审核)
 ```
+
+"通过"允许从 `pending` 或 `rejected` 出发(改判),其余终态一律拒绝,防止重复入账。
+并发安全:入账事务内 `FOR UPDATE` 只锁 `status='pending'` 的行,两个管理员同时点通过只会入账一次。
 
 ## 后台任务
 
-`service/aff_cron.go::StartAffCronTasks` 启动三个 goroutine:
+`service/aff_cron.go::StartAffCronTasks` 启动两个 goroutine(自动结算已移除):
 
 | 任务 | 频率 | 行为 |
 |---|---|---|
 | IP 日志清理 | 每 24h | 删除 `user_login_ip_logs` 中 30 天之前的行 |
 | 归档 | 每 24h(错峰 1h) | 把 `status='settled'` 且 `settled_at < now()-365d` 移到 archive 表 |
-| 自动结算 | 每 1h(启动延迟 5min) | 扫 `pending && eligible_at<=now()` → 结算到 `AffQuota` |
 
 ## 反作弊规则
 
 | 规则 | 数据源 | 命中处理 |
 |---|---|---|
-| `same_ip` | `user_login_ip_logs`,inviter 与 invitee 24h 内共享 IP | log 落 `rejected` |
-| `same_payment_account` | `user_payment_accounts`,共享 (provider, account_id) | log 落 `rejected` |
-| `inviter_frozen` | `users.aff_status = 1` (admin 手动) | log 落 `rejected` |
+| `same_ip` | `user_login_ip_logs`,inviter 与 invitee 24h 内共享 IP | 写 `risk_flag`,审核页显示橙色提示,由管理员决定 |
+| `same_payment_account` | `user_payment_accounts`,共享 (provider, account_id) | 写 `risk_flag`,同上 |
+| `inviter_frozen` | `users.aff_status = 1` (admin 手动) | log 直接落 `rejected` |
 
-注:`rejected` 即终态,系统不提供改回 `pending` 的路径。误伤场景由管理员通过"线下返现"流程补偿。
+注:历史上被 `same_ip` / `same_payment_account` 自动拒绝的记录仍是 `rejected`,可在审核页"已拒绝"里改为通过。
 
-## 灰度上线步骤
+## 日常审核操作
 
-### 第 1 周 — 仅观察
+后台侧边栏「返现审核」(`/console/admin/aff-review`):
 
-1. 部署完整代码,DB AutoMigrate 三张新表
-2. 设置 `EnableAffAutoSettle = false`(初始默认 true,需手动改)
-   - 通过 `option` 表或环境变量(参考项目其他配置项接入方式)
-3. 系统正常写入 audit log,但 cron 不结算
-4. 抽样核对 audit log 数据正确性:
-   - SourceType / SourceId 与 top_ups / topup_orders / plan_orders 对得上
-   - amount_native / amount_usd / price_ratio_used 换算正确
-   - reject_reason 命中率合理(预热期内同 IP 漏检率高,正常)
+1. 默认停在「待审核」,按先来后到排序;顶部显示待审核笔数与合计金额
+2. 每行展示充值时间、邀请人、充值用户、充值金额、返现金额、风险提示(同 IP / 同支付账号)
+3. 「通过」:确认后立即入账到邀请人 AffQuota,并在邀请人的管理日志里留痕
+4. 「拒绝」:可填写原因(仅管理员可见);拒绝后可在「已拒绝」里改为通过
+5. 「已通过」里可查看审核人与入账时间
 
-### 第 2 周 — 开启自动结算
+用户端「邀请奖励」卡片里对应显示为「审核中 $X · 管理员审核通过后到账」。
 
-```sql
--- 检查 pending 池金额合理后再开
-SELECT status, COUNT(*), SUM(reward_usd) FROM aff_audit_logs GROUP BY status;
-```
+## 排查要点
 
-确认无异常后:
-
-1. `EnableAffAutoSettle = true`
-2. cron 在下一小时跑(可在 admin 调"立即结算单条" API 提前测试一两条)
-3. 监控 `aff_settle cron: settled X logs` 日志
-
-## 监控指标(建议告警)
-
-| 指标 | 阈值 | 含义 |
-|---|---|---|
-| `aff_settle_cron_last_success_at` | > 2h | cron 卡死 / DB 故障 |
-| `aff_audit_logs_created_per_hour` | < 平均值 30% | 支付 hook 失效 |
-| `rejected_count / total_count` | 持续 24h > 50% | 反作弊配置错误 / 真实羊毛攻击 |
-| `aff_settle_total_usd_per_day` | 突变 > 历史均值 3 倍 | 羊毛攻击 / cron 重复发放 |
-| `aff_offline_paid_count_per_day` | > 10 | admin 操作异常 / 被攻击 |
-
-具体接入方式遵循项目现有日志与监控约定(项目当前以 `common.SysLog` 为主,可结合外部 log 收集器配合告警)。
-
-## 紧急关停步骤
-
-发现自动结算异常(如 cron 重复发放、reward 计算错误):
-
-1. **立即**:`EnableAffAutoSettle = false`
-2. 查 audit log:`SELECT * FROM aff_audit_logs WHERE status='settled' AND settled_at > <时间>` 找受影响范围
-3. 查 payout:`SELECT * FROM inviter_reward_payouts WHERE settle_mode='auto' AND created_at > <时间>`
-4. **不要**直接 UPDATE `aff_quota`(可能让用户余额变负数);先停止结算,待数据修复后重新跑 cron
+- 用户反馈"没返现":先在「返现审核」的三个视图里搜该邀请人;若都没有,查 `aff_audit_logs` 是否有该充值的 `(source_type, source_id)` 行,没有则是支付 hook 未触发或被邀请人 `inviter_id=0`
+- 怀疑重复入账:`SELECT * FROM inviter_reward_payouts WHERE settle_mode='review' AND inviter_user_id=<id> ORDER BY id DESC`,每条 audit log 只能对应一个 `settle_payout_id`
+- **不要**直接 UPDATE `aff_quota`(可能让用户余额变负数)
 
 ## 退款处理(v1 仅 hook,无接入)
 
@@ -132,10 +109,12 @@ SELECT status, COUNT(*), SUM(reward_usd) FROM aff_audit_logs GROUP BY status;
 - `GET /api/user/aff/summary` — 9 字段聚合,**不含**下级身份信息
 
 ### 管理员(admin)
+- `GET /api/user/manage/aff-review?status=pending|settled|rejected&page=&page_size=` — 返现审核全站列表(含待审核笔数 / 金额)
+- `POST /api/user/manage/aff-audit-logs/:log_id/approve` — 通过并入账(pending / rejected 均可)
+- `POST /api/user/manage/aff-audit-logs/:log_id/reject` — 拒绝,body `{note}`(仅 pending)
 - `GET /api/user/manage/:id/aff-audit-logs?status=...&page=...` — 某邀请人的全部 audit logs(含 legacy 过滤选项)
 - `GET /api/user/manage/:id/aff-summary` — 某邀请人完整汇总
 - `POST /api/user/manage/:id/aff-audit-logs/mark-offline-paid` — 批量标记
-- `POST /api/user/manage/aff-audit-logs/:log_id/settle` — 单条手动结算
 - `POST /api/user/manage/aff-audit-logs/mark-legacy` — body `{cutoff_ms}`,**全平台**一次性把 cutoff 之前的 pending 归档为 legacy
 - `GET /api/user/manage/aff-monthly-report?year=&month=` — 月度对账
 - `PUT /api/user/` (现有 UpdateUser) — 通过 `aff_status` 字段冻结/解冻分销资格

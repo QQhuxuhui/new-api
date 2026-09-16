@@ -17,9 +17,12 @@ import (
 //
 // 行为:
 //   - invitee 无邀请人(InviterId=0)→ 不写入,返回 (false, nil)
-//   - 反作弊命中(同 IP / 同支付账号 / 邀请人冻结)→ 写入 status='rejected'
-//   - 通过 → 写入 status='pending',eligible_at = paidAtMs + cooldown
+//   - 邀请人被冻结(aff_status=1)→ 写入 status='rejected',reject_reason='inviter_frozen'
+//   - 同 IP / 同支付账号命中 → 仍写入 status='pending',但带 risk_flag 供管理员审核时参考
+//   - 其余 → 写入 status='pending'
 //   - (source_type, source_id) 唯一索引冲突 → silent skip,返回 (false, nil)
+//
+// 返现不自动入账:所有 pending 都要管理员在"返现审核"页通过后才结算到 AffQuota。
 //
 // 返佣基数:`creditUsd`(= 用户充值后实际兑换到账的美金额度),由调用方按
 // 支付路径计算后传入(top_ups / topup_orders / plan_orders 各路径口径不同)。
@@ -32,7 +35,7 @@ import (
 //   - amountNative:原币支付金额(USD 或 CNY,仅记录用)
 //   - currency:model.AffAuditCurrencyUsd / AffAuditCurrencyCny
 //   - creditUsd:用户实际到账的 USD 额度(返佣计算基数)
-//   - paidAtMs:支付完成时间戳(毫秒),用于计算 eligible_at
+//   - paidAtMs:支付完成时间戳(毫秒),记录到 eligible_at(仅作展示,不再有冷却期)
 //
 // 返回 (created, err);created=true 表示插入了一行(无论 pending / rejected)。
 func CreateAffAuditLogIfEligible(inviteeUserId int, sourceType string, sourceId int, amountNative float64, currency string, creditUsd float64, paidAtMs int64) (bool, error) {
@@ -81,27 +84,24 @@ func CreateAffAuditLogIfEligible(inviteeUserId int, sourceType string, sourceId 
 	}
 	rewardUsd := creditUsd * common.InviterRewardDefaultPercent / 100
 
-	// 3. 反作弊预检
+	// 3. 反作弊预检:冻结直接拒绝;同 IP / 同支付账号只打风险提示,交给管理员判断
+	status := model.AffAuditStatusPending
 	rejectReason := ""
+	riskFlag := ""
 	if inviter.AffStatus == 1 {
+		status = model.AffAuditStatusRejected
 		rejectReason = model.AffAuditRejectInviterFrozen
 	} else if shared, err := model.UsersShareLoginIpRecently(inviter.Id, invitee.Id, 24); err != nil {
 		return false, err
 	} else if shared {
-		rejectReason = model.AffAuditRejectSameIp
+		riskFlag = model.AffAuditRejectSameIp
 	} else if shared, err := model.UsersSharePaymentAccount(inviter.Id, invitee.Id); err != nil {
 		return false, err
 	} else if shared {
-		rejectReason = model.AffAuditRejectSamePaymentAccount
+		riskFlag = model.AffAuditRejectSamePaymentAccount
 	}
 
 	// 4. 构造并插入 audit log
-	status := model.AffAuditStatusPending
-	if rejectReason != "" {
-		status = model.AffAuditStatusRejected
-	}
-	cooldownMs := int64(common.InviterRewardCooldownDays) * 24 * 60 * 60 * 1000
-
 	row := &model.AffAuditLog{
 		InviterUserId:  inviter.Id,
 		InviteeUserId:  invitee.Id,
@@ -114,7 +114,8 @@ func CreateAffAuditLogIfEligible(inviteeUserId int, sourceType string, sourceId 
 		RewardUsd:      rewardUsd,
 		Status:         status,
 		RejectReason:   rejectReason,
-		EligibleAt:     paidAtMs + cooldownMs,
+		RiskFlag:       riskFlag,
+		EligibleAt:     paidAtMs,
 	}
 
 	err := model.DB.Create(row).Error

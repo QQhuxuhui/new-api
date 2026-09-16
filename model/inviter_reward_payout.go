@@ -14,9 +14,10 @@ import (
 // 每个 payout 覆盖一组已完成的充值行（top_ups / plan_orders / topup_orders），
 // 通过各表的 inviter_reward_payout_id 字段关联。
 //
-// SettleMode 区分两条结算来源:
-//   - 'manual'(默认):管理员通过 CreateInviterRewardPayoutHandler 手动批量发放
-//   - 'auto':新一级分销 cron 自动结算批次(每 inviter 每次扫描一行)
+// SettleMode 区分结算来源:
+//   - 'manual'(默认):管理员通过 CreateInviterRewardPayoutHandler 手动批量发放(线下台账)
+//   - 'auto':历史上 cron 自动结算产生的批次(自动结算已下线,仅保留历史数据)
+//   - 'review':管理员在"返现审核"页通过一条 audit log 后产生的批次
 type InviterRewardPayout struct {
 	Id               int     `json:"id" gorm:"primaryKey;autoIncrement"`
 	InviterUserId    int     `json:"inviter_user_id" gorm:"index;not null"`
@@ -33,6 +34,7 @@ type InviterRewardPayout struct {
 const (
 	InviterRewardPayoutSettleModeManual = "manual"
 	InviterRewardPayoutSettleModeAuto   = "auto"
+	InviterRewardPayoutSettleModeReview = "review"
 )
 
 // InviteeRechargeSummary 是 GET invitee-recharges 接口的汇总块。

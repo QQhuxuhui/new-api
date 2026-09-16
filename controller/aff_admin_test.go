@@ -23,8 +23,6 @@ func setupAffAdminTestDB(t *testing.T) {
 	common.RedisEnabled = false
 	common.QuotaPerUnit = 500000
 	common.InviterRewardDefaultPercent = 10
-	common.InviterRewardCooldownDays = 7
-	common.EnableAffAutoSettle = true
 
 	dsn := fmt.Sprintf("file:aff_admin_test_%d?mode=memory&cache=shared", time.Now().UnixNano())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
@@ -54,7 +52,9 @@ func newAdminRouter(adminId int) *gin.Engine {
 	r.GET("/api/user/manage/:id/aff-audit-logs", GetInviterAuditLogs)
 	r.GET("/api/user/manage/:id/aff-summary", GetInviterAffSummaryAdmin)
 	r.POST("/api/user/manage/:id/aff-audit-logs/mark-offline-paid", MarkAuditLogsOfflinePaid)
-	r.POST("/api/user/manage/aff-audit-logs/:log_id/settle", SettleAuditLogManually)
+	r.GET("/api/user/manage/aff-review", GetAffReviewList)
+	r.POST("/api/user/manage/aff-audit-logs/:log_id/approve", ApproveAuditLogHandler)
+	r.POST("/api/user/manage/aff-audit-logs/:log_id/reject", RejectAuditLogHandler)
 	r.GET("/api/user/manage/aff-monthly-report", GetMonthlyReconciliationReport)
 	r.POST("/api/user/manage/aff-audit-logs/mark-legacy", MarkLegacyBeforeCutoff)
 	return r
@@ -111,7 +111,7 @@ func TestGetInviterAffSummaryAdmin_AggregatesAllStatuses(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		model.DB.Create(&model.User{
 			Username: fmt.Sprintf("ee%d", i), Password: "x",
-			AffCode: fmt.Sprintf("ee%d-%d", i, time.Now().UnixNano()),
+			AffCode:   fmt.Sprintf("ee%d-%d", i, time.Now().UnixNano()),
 			InviterId: inv.Id,
 		})
 	}
@@ -266,24 +266,31 @@ func TestMarkAuditLogsOfflinePaid_NonPendingRollsBack(t *testing.T) {
 	}
 }
 
-func TestSettleAuditLogManually_PendingSettles(t *testing.T) {
-	setupAffAdminTestDB(t)
-	inv := &model.User{Username: "inv", Password: "x", AffCode: "INV"}
+func seedReviewLog(t *testing.T, status string, sourceId int, rewardUsd float64) (*model.User, *model.AffAuditLog) {
+	t.Helper()
+	nano := time.Now().UnixNano()
+	inv := &model.User{Username: fmt.Sprintf("inv%d", nano), Password: "x", AffCode: fmt.Sprintf("INV%d", nano)}
 	model.DB.Create(inv)
-	ee := &model.User{Username: "ee", Password: "x", AffCode: "EE", InviterId: inv.Id}
+	ee := &model.User{Username: fmt.Sprintf("ee%d", nano), Password: "x", AffCode: fmt.Sprintf("EE%d", nano), InviterId: inv.Id}
 	model.DB.Create(ee)
 	log := &model.AffAuditLog{
 		InviterUserId: inv.Id, InviteeUserId: ee.Id,
-		SourceType: model.AffAuditSourceTopUp, SourceId: 1,
-		Status: model.AffAuditStatusPending, RewardUsd: 0.4,
-		EligibleAt: time.Now().UnixMilli() - 1000,
+		SourceType: model.AffAuditSourceTopUp, SourceId: sourceId,
+		Status: status, RewardUsd: rewardUsd, AmountUsd: rewardUsd * 10,
+		RiskFlag: model.AffAuditRejectSameIp,
 	}
 	model.DB.Create(log)
+	return inv, log
+}
+
+func TestApproveAuditLogHandler_PendingSettlesAndLogs(t *testing.T) {
+	setupAffAdminTestDB(t)
+	inv, log := seedReviewLog(t, model.AffAuditStatusPending, 1, 0.4)
 
 	r := newAdminRouter(1)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST",
-		fmt.Sprintf("/api/user/manage/aff-audit-logs/%d/settle", log.Id), nil)
+		fmt.Sprintf("/api/user/manage/aff-audit-logs/%d/approve", log.Id), nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -293,6 +300,107 @@ func TestSettleAuditLogManually_PendingSettles(t *testing.T) {
 	model.DB.First(&u, inv.Id)
 	if u.AffQuota != 200000 {
 		t.Errorf("aff_quota: want 200000 (0.4 * 500000), got %d", u.AffQuota)
+	}
+	var l model.AffAuditLog
+	model.DB.First(&l, log.Id)
+	if l.Status != model.AffAuditStatusSettled || l.ReviewedAdminId != 1 {
+		t.Errorf("log after approve: status=%q reviewed_admin_id=%d", l.Status, l.ReviewedAdminId)
+	}
+	var n int64
+	model.DB.Model(&model.Log{}).Where("user_id = ? AND type = ?", inv.Id, model.LogTypeManage).Count(&n)
+	if n != 1 {
+		t.Errorf("want 1 manage log on inviter, got %d", n)
+	}
+}
+
+func TestApproveAuditLogHandler_SettledReturns422(t *testing.T) {
+	setupAffAdminTestDB(t)
+	inv, log := seedReviewLog(t, model.AffAuditStatusSettled, 1, 0.4)
+
+	r := newAdminRouter(1)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("/api/user/manage/aff-audit-logs/%d/approve", log.Id), nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != 422 {
+		t.Fatalf("status: want 422, got %d body=%s", w.Code, w.Body.String())
+	}
+	var u model.User
+	model.DB.First(&u, inv.Id)
+	if u.AffQuota != 0 {
+		t.Errorf("aff_quota must stay 0 on double approve, got %d", u.AffQuota)
+	}
+}
+
+func TestRejectAuditLogHandler_PendingRejectedWithNote(t *testing.T) {
+	setupAffAdminTestDB(t)
+	inv, log := seedReviewLog(t, model.AffAuditStatusPending, 1, 0.4)
+
+	r := newAdminRouter(7)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("/api/user/manage/aff-audit-logs/%d/reject", log.Id),
+		bytes.NewBufferString(`{"note":"同一台电脑"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
+	}
+	var l model.AffAuditLog
+	model.DB.First(&l, log.Id)
+	if l.Status != model.AffAuditStatusRejected || l.RejectReason != model.AffAuditRejectAdmin ||
+		l.ReviewNote != "同一台电脑" || l.ReviewedAdminId != 7 {
+		t.Errorf("log after reject: %+v", l)
+	}
+	var u model.User
+	model.DB.First(&u, inv.Id)
+	if u.AffQuota != 0 {
+		t.Errorf("reject must not credit, got %d", u.AffQuota)
+	}
+}
+
+func TestGetAffReviewList_DefaultsToPendingWithNamesAndStats(t *testing.T) {
+	setupAffAdminTestDB(t)
+	invA, logA := seedReviewLog(t, model.AffAuditStatusPending, 1, 1.5)
+	seedReviewLog(t, model.AffAuditStatusSettled, 2, 9.0)
+	seedReviewLog(t, model.AffAuditStatusPending, 3, 0.5)
+
+	r := newAdminRouter(1)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/user/manage/aff-review", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Items            []map[string]any `json:"items"`
+			PendingCount     int64            `json:"pending_count"`
+			PendingRewardUsd float64          `json:"pending_reward_usd"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Data.Items) != 2 {
+		t.Fatalf("want 2 pending items, got %d", len(resp.Data.Items))
+	}
+	if resp.Data.PendingCount != 2 || resp.Data.PendingRewardUsd != 2.0 {
+		t.Errorf("stats: count=%d total=%v", resp.Data.PendingCount, resp.Data.PendingRewardUsd)
+	}
+	// pending 按先来后到(id ASC)
+	first := resp.Data.Items[0]
+	if int(first["id"].(float64)) != logA.Id {
+		t.Errorf("first pending should be oldest (#%d), got %v", logA.Id, first["id"])
+	}
+	if first["inviter_username"] != invA.Username {
+		t.Errorf("inviter_username: %v", first["inviter_username"])
+	}
+	if first["risk_flag"] != model.AffAuditRejectSameIp {
+		t.Errorf("risk_flag: %v", first["risk_flag"])
 	}
 }
 
