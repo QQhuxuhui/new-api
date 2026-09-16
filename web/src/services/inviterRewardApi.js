@@ -64,19 +64,21 @@ export const InviterRewardAPI = {
   },
 
   /**
-   * Create a new payout batch (mark current pending recharges as rewarded).
+   * Issue the reward for one invitee recharge (manual per-recharge payout).
    * @param {number} inviterId
-   * @param {{payout_amount_usd: number, note?: string}} body
+   * @param {{source_type: string, record_id: number, reward_usd?: number}} body
    */
-  async createPayout(inviterId, body) {
+  async issueReward(inviterId, body) {
     try {
-      const res = await API.post(`${BASE}/${inviterId}/inviter-reward-payouts`, body, {
-        skipErrorHandler: true,
-      });
+      const res = await API.post(
+        `${BASE}/${inviterId}/invitee-recharges/issue`,
+        body,
+        { skipErrorHandler: true },
+      );
       if (res.data.success) return res.data.data;
-      throw new Error(res.data.message || 'Failed to create payout');
+      throw new Error(res.data.message || 'Failed to issue reward');
     } catch (err) {
-      showError(getApiErrorMessage(err, 'Failed to create payout'));
+      showError(getApiErrorMessage(err, 'Failed to issue reward'));
       throw err;
     }
   },

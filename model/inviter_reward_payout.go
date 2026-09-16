@@ -43,6 +43,8 @@ type InviteeRechargeSummary struct {
 	RechargeTotalUsd float64 `json:"recharge_total_usd"`
 	PayoutTotalUsd   float64 `json:"payout_total_usd"`
 	PendingTotalUsd  float64 `json:"pending_total_usd"`
+	// PendingRewardUsd 是该邀请人名下 status='pending'(待发放)返现记录的 reward_usd 合计
+	PendingRewardUsd float64 `json:"pending_reward_usd"`
 }
 
 func GetInviteeRechargeSummary(inviterUserId int) (*InviteeRechargeSummary, error) {
@@ -87,6 +89,16 @@ func GetInviteeRechargeSummary(inviterUserId int) (*InviteeRechargeSummary, erro
 		return nil, err
 	}
 	s.PayoutTotalUsd = row.Total
+
+	// pending_reward_usd: 待发放返现合计(aff_audit_logs.status='pending')
+	row = sumRow{}
+	if err := DB.Model(&AffAuditLog{}).
+		Where("inviter_user_id = ? AND status = ?", inviterUserId, AffAuditStatusPending).
+		Select("COALESCE(SUM(reward_usd), 0) AS total").
+		Scan(&row).Error; err != nil {
+		return nil, err
+	}
+	s.PendingRewardUsd = row.Total
 
 	return s, nil
 }
@@ -154,6 +166,11 @@ type InviteeRechargeItem struct {
 	OrderNo         string  `json:"order_no"`
 	PaidAtMs        int64   `json:"paid_at_ms"` // unified milliseconds
 	PayoutId        int     `json:"payout_id"`
+	// 关联的返现记录(aff_audit_logs,按 source_type + source_id 匹配);没有则 AffLogId=0、AffStatus=""
+	AffLogId  int     `json:"aff_log_id"`
+	AffStatus string  `json:"aff_status"`
+	RewardUsd float64 `json:"reward_usd"`
+	RiskFlag  string  `json:"risk_flag"`
 }
 
 func GetInviteeRechargeItems(inviterUserId int, p *common.PageInfo) ([]*InviteeRechargeItem, int64, error) {
@@ -186,7 +203,12 @@ func GetInviteeRechargeItems(inviterUserId int, p *common.PageInfo) ([]*InviteeR
 	// UNION ALL the three sources, normalize timestamps to ms.
 	// top_ups.complete_time is in seconds; plan_orders/topup_orders paid_at is in ms.
 	const unionSQL = `
-SELECT * FROM (
+SELECT feed.*,
+       COALESCE(a.id, 0)          AS aff_log_id,
+       COALESCE(a.status, '')     AS aff_status,
+       COALESCE(a.reward_usd, 0)  AS reward_usd,
+       COALESCE(a.risk_flag, '')  AS risk_flag
+FROM (
 	SELECT 'topup' AS source_type,
 	       top_ups.id AS record_id,
 	       top_ups.user_id AS invitee_user_id,
@@ -231,7 +253,8 @@ SELECT * FROM (
 	JOIN users u ON u.id = topup_orders.user_id
 	WHERE u.inviter_id = ? AND topup_orders.status = ?
 ) AS feed
-ORDER BY paid_at_ms DESC, record_id DESC
+LEFT JOIN aff_audit_logs a ON a.source_type = feed.source_type AND a.source_id = feed.record_id
+ORDER BY feed.paid_at_ms DESC, feed.record_id DESC
 LIMIT ? OFFSET ?`
 
 	var items []*InviteeRechargeItem

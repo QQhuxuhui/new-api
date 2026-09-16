@@ -35,7 +35,7 @@ func setupInviterRewardCtlTestDB(t *testing.T) {
 	model.DB = db
 	model.LOG_DB = db
 	common.RedisEnabled = false
-	if err := db.AutoMigrate(&model.User{}, &model.TopUp{}, &model.InviterRewardPayout{}, &model.Log{}, &model.PlanOrder{}, &model.TopupOrder{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.TopUp{}, &model.InviterRewardPayout{}, &model.Log{}, &model.PlanOrder{}, &model.TopupOrder{}, &model.AffAuditLog{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 }
@@ -51,7 +51,7 @@ func newRouterWithAdmin() *gin.Engine {
 	})
 	r.GET("/api/user/manage/:id/invitee-recharges", GetInviteeRecharges)
 	r.GET("/api/user/manage/:id/inviter-reward-payouts", GetInviterRewardPayouts)
-	r.POST("/api/user/manage/:id/inviter-reward-payouts", CreateInviterRewardPayoutHandler)
+	r.POST("/api/user/manage/:id/invitee-recharges/issue", IssueInviteeRechargeRewardHandler)
 	return r
 }
 
@@ -156,80 +156,142 @@ func TestGetInviterRewardPayouts_History(t *testing.T) {
 	}
 }
 
-func TestCreateInviterRewardPayoutHandler_Happy(t *testing.T) {
-	setupInviterRewardCtlTestDB(t)
-	inviterId := seedTwoInviteesWithTopups(t)
-	r := newRouterWithAdmin()
-
-	body := `{"payout_amount_usd": 6.20, "note": "first batch"}`
+func postIssue(t *testing.T, r *gin.Engine, inviterId int, body string) (*httptest.ResponseRecorder, apiEnvelope) {
+	t.Helper()
 	req, _ := http.NewRequest("POST",
-		fmt.Sprintf("/api/user/manage/%d/inviter-reward-payouts", inviterId),
+		fmt.Sprintf("/api/user/manage/%d/invitee-recharges/issue", inviterId),
 		bytesReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
+	var env apiEnvelope
+	json.Unmarshal(w.Body.Bytes(), &env)
+	return w, env
+}
+
+// 无返现记录的历史充值:按管理员填写金额补录并入账,明细行随即显示 settled + reward。
+func TestIssueInviteeRechargeReward_NoLogCreatesAndSettles(t *testing.T) {
+	setupInviterRewardCtlTestDB(t)
+	common.QuotaPerUnit = 500000
+	inviterId := seedTwoInviteesWithTopups(t)
+	var tu model.TopUp
+	model.DB.Where("status = ?", common.TopUpStatusSuccess).Order("id").First(&tu)
+	r := newRouterWithAdmin()
+
+	w, env := postIssue(t, r, inviterId, fmt.Sprintf(`{"source_type":"topup","record_id":%d,"reward_usd":2.5}`, tu.Id))
+	if w.Code != http.StatusOK || !env.Success {
 		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
 	}
-	var env apiEnvelope
-	json.Unmarshal(w.Body.Bytes(), &env)
-	if !env.Success {
-		t.Fatalf("success=false: %s", env.Message)
+	if env.Data["reward_usd"].(float64) != 2.5 {
+		t.Fatalf("reward_usd: %v", env.Data["reward_usd"])
 	}
-	if env.Data["payout_amount_usd"].(float64) != 6.20 {
-		t.Fatalf("payout_amount mismatch: %v", env.Data["payout_amount_usd"])
+	var u model.User
+	model.DB.First(&u, inviterId)
+	if u.AffQuota != 1250000 {
+		t.Fatalf("aff_quota: want 1250000, got %d", u.AffQuota)
 	}
-	if env.Data["recharge_total_usd"].(float64) != 62 {
-		t.Fatalf("recharge_total want 62, got %v", env.Data["recharge_total_usd"])
+	var log model.AffAuditLog
+	if err := model.DB.Where("source_type = ? AND source_id = ?", "topup", tu.Id).First(&log).Error; err != nil {
+		t.Fatalf("audit log not created: %v", err)
 	}
-	if env.Data["topup_count"].(float64) != 4 {
-		t.Fatalf("topup_count want 4, got %v", env.Data["topup_count"])
+	if log.Status != model.AffAuditStatusSettled || log.ReviewedAdminId != 1 || log.AmountUsd != tu.Money {
+		t.Fatalf("log: %+v", log)
+	}
+
+	// 明细列表能看到该行的 reward / 状态
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/api/user/manage/%d/invitee-recharges", inviterId), nil)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req)
+	var env2 apiEnvelope
+	json.Unmarshal(w2.Body.Bytes(), &env2)
+	found := false
+	for _, it := range env2.Data["items"].([]interface{}) {
+		m := it.(map[string]interface{})
+		if int(m["record_id"].(float64)) == tu.Id && m["source_type"] == "topup" {
+			found = true
+			if m["aff_status"] != "settled" || m["reward_usd"].(float64) != 2.5 {
+				t.Fatalf("row: %v", m)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("issued row not in feed")
+	}
+
+	// 再发一次:已入账,422 且不重复加余额
+	w3, _ := postIssue(t, r, inviterId, fmt.Sprintf(`{"source_type":"topup","record_id":%d,"reward_usd":2.5}`, tu.Id))
+	if w3.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("double issue: want 422, got %d body=%s", w3.Code, w3.Body.String())
+	}
+	model.DB.First(&u, inviterId)
+	if u.AffQuota != 1250000 {
+		t.Fatalf("aff_quota changed on double issue: %d", u.AffQuota)
 	}
 }
 
-func TestCreateInviterRewardPayoutHandler_NoPending(t *testing.T) {
+// 无记录且未填金额:按当前比例 × 充值金额。
+func TestIssueInviteeRechargeReward_DefaultsToPercent(t *testing.T) {
 	setupInviterRewardCtlTestDB(t)
-	inviter := &model.User{Username: "lonely", Password: "x", AffCode: fmt.Sprintf("aff-lonely-%d", time.Now().UnixNano())}
-	model.DB.Create(inviter)
+	common.QuotaPerUnit = 500000
+	common.InviterRewardDefaultPercent = 10
+	inviterId := seedTwoInviteesWithTopups(t)
+	var tu model.TopUp
+	model.DB.Where("status = ? AND money = ?", common.TopUpStatusSuccess, 20.0).First(&tu)
 	r := newRouterWithAdmin()
-	body := `{"payout_amount_usd": 1, "note": ""}`
-	req, _ := http.NewRequest("POST",
-		fmt.Sprintf("/api/user/manage/%d/inviter-reward-payouts", inviter.Id),
-		bytesReader(body))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status want 422, got %d body=%s", w.Code, w.Body.String())
-	}
-	var env apiEnvelope
-	json.Unmarshal(w.Body.Bytes(), &env)
-	if env.Success {
-		t.Fatalf("expected failure, got success")
-	}
-	if env.Message != "暂无待激励充值" {
-		t.Fatalf("message want '暂无待激励充值', got %q", env.Message)
+
+	w, env := postIssue(t, r, inviterId, fmt.Sprintf(`{"source_type":"topup","record_id":%d}`, tu.Id))
+	if w.Code != http.StatusOK || env.Data["reward_usd"].(float64) != 2.0 {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
 	}
 }
 
-func TestCreateInviterRewardPayoutHandler_BadAmount(t *testing.T) {
+// 已有 pending 记录:按记录里冻结的金额入账,忽略请求里的 reward_usd。
+func TestIssueInviteeRechargeReward_ExistingPendingUsesFrozenReward(t *testing.T) {
+	setupInviterRewardCtlTestDB(t)
+	common.QuotaPerUnit = 500000
+	inviterId := seedTwoInviteesWithTopups(t)
+	var tu model.TopUp
+	model.DB.Where("status = ?", common.TopUpStatusSuccess).Order("id").First(&tu)
+	model.DB.Create(&model.AffAuditLog{
+		InviterUserId: inviterId, InviteeUserId: tu.UserId,
+		SourceType: "topup", SourceId: tu.Id, Currency: "USD",
+		AmountUsd: tu.Money, RewardUsd: 0.7, Status: model.AffAuditStatusPending,
+	})
+	r := newRouterWithAdmin()
+
+	w, env := postIssue(t, r, inviterId, fmt.Sprintf(`{"source_type":"topup","record_id":%d,"reward_usd":99}`, tu.Id))
+	if w.Code != http.StatusOK || env.Data["reward_usd"].(float64) != 0.7 {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+	}
+	var u model.User
+	model.DB.First(&u, inviterId)
+	if u.AffQuota != 350000 {
+		t.Fatalf("aff_quota: want 350000, got %d", u.AffQuota)
+	}
+}
+
+// 充值不属于该邀请人的下级 / 不存在:422,不入账。
+func TestIssueInviteeRechargeReward_WrongInviterOrMissing(t *testing.T) {
 	setupInviterRewardCtlTestDB(t)
 	inviterId := seedTwoInviteesWithTopups(t)
+	other := &model.User{Username: "other", Password: "x", AffCode: fmt.Sprintf("aff-o-%d", time.Now().UnixNano())}
+	model.DB.Create(other)
+	var tu model.TopUp
+	model.DB.Where("status = ?", common.TopUpStatusSuccess).Order("id").First(&tu)
 	r := newRouterWithAdmin()
-	body := `{"payout_amount_usd": 0}`
-	req, _ := http.NewRequest("POST",
-		fmt.Sprintf("/api/user/manage/%d/inviter-reward-payouts", inviterId),
-		bytesReader(body))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status want 422, got %d body=%s", w.Code, w.Body.String())
+
+	w, env := postIssue(t, r, other.Id, fmt.Sprintf(`{"source_type":"topup","record_id":%d,"reward_usd":1}`, tu.Id))
+	if w.Code != http.StatusUnprocessableEntity || env.Message != "该充值的用户不是此邀请人的下级" {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
 	}
-	var env apiEnvelope
-	json.Unmarshal(w.Body.Bytes(), &env)
-	if env.Success {
-		t.Fatalf("expected failure")
+	w, env = postIssue(t, r, inviterId, `{"source_type":"topup","record_id":999999,"reward_usd":1}`)
+	if w.Code != http.StatusUnprocessableEntity || env.Message != "充值记录不存在或未支付成功" {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
 	}
-	if env.Message != "奖励金额必须大于 0" {
-		t.Fatalf("got %q", env.Message)
+	var u model.User
+	model.DB.First(&u, inviterId)
+	if u.AffQuota != 0 {
+		t.Fatalf("aff_quota should stay 0, got %d", u.AffQuota)
 	}
 }
 

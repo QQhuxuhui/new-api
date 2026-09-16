@@ -27,7 +27,7 @@ func setupInviterRewardTestDB(t *testing.T) {
 	}
 	DB = db
 	LOG_DB = db
-	if err := db.AutoMigrate(&User{}, &TopUp{}, &InviterRewardPayout{}, &Log{}, &PlanOrder{}, &TopupOrder{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &TopUp{}, &InviterRewardPayout{}, &Log{}, &PlanOrder{}, &TopupOrder{}, &AffAuditLog{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 }

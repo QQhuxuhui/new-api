@@ -2,11 +2,13 @@ package controller
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -90,51 +92,38 @@ func GetInviterRewardPayouts(c *gin.Context) {
 	})
 }
 
-type createInviterRewardPayoutRequest struct {
-	PayoutAmountUsd float64 `json:"payout_amount_usd"`
-	Note            string  `json:"note"`
+type issueRechargeRewardRequest struct {
+	SourceType string  `json:"source_type"`
+	RecordId   int     `json:"record_id"`
+	RewardUsd  float64 `json:"reward_usd"`
 }
 
-func apiUnprocessableEntityMsg(c *gin.Context, msg string) {
-	c.JSON(http.StatusUnprocessableEntity, gin.H{
-		"success": false,
-		"message": msg,
-	})
-}
-
-// POST /api/user/manage/:id/inviter-reward-payouts
-func CreateInviterRewardPayoutHandler(c *gin.Context) {
+// POST /api/user/manage/:id/invitee-recharges/issue
+//
+// 对单笔下级充值手动发放激励。已有返现记录的按记录金额入账;没有记录的按 reward_usd 补录并入账
+// (reward_usd<=0 时按当前比例 × 充值金额)。
+func IssueInviteeRechargeRewardHandler(c *gin.Context) {
 	inviterId, ok := parseInviterIdParam(c)
 	if !ok {
 		return
 	}
-	var req createInviterRewardPayoutRequest
+	var req issueRechargeRewardRequest
 	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
 		common.ApiErrorMsg(c, "无效的参数")
 		return
 	}
-	operatorId := c.GetInt("id")
-
-	payout, topupCount, err := model.CreateInviterRewardPayout(
-		inviterId,
-		req.PayoutAmountUsd,
-		req.Note,
-		common.InviterRewardDefaultPercent,
-		operatorId,
-	)
-	if err != nil {
-		apiUnprocessableEntityMsg(c, err.Error())
+	if req.SourceType == "" || req.RecordId <= 0 {
+		common.ApiErrorMsg(c, "source_type / record_id 不能为空")
 		return
 	}
-	common.ApiSuccess(c, gin.H{
-		"id":                 payout.Id,
-		"inviter_user_id":    payout.InviterUserId,
-		"recharge_total_usd": payout.RechargeTotalUsd,
-		"payout_amount_usd":  payout.PayoutAmountUsd,
-		"default_pct_used":   payout.DefaultPctUsed,
-		"note":               payout.Note,
-		"operator_admin_id":  payout.OperatorAdminId,
-		"created_at":         payout.CreatedAt,
-		"topup_count":        topupCount,
-	})
+	adminId := c.GetInt("id")
+	reward, err := service.IssueRewardForRecharge(inviterId, adminId, req.SourceType, req.RecordId, req.RewardUsd)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	model.RecordLog(inviterId, model.LogTypeManage,
+		fmt.Sprintf("管理员 #%d 对下级充值 %s #%d 手动发放激励 $%.4f",
+			adminId, req.SourceType, req.RecordId, reward))
+	common.ApiSuccess(c, gin.H{"reward_usd": reward})
 }

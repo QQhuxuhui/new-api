@@ -157,7 +157,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.POST("/manage/inviter", controller.SetUserInviter)
 				adminRoute.GET("/manage/:id/invitee-recharges", controller.GetInviteeRecharges)
 				adminRoute.GET("/manage/:id/inviter-reward-payouts", controller.GetInviterRewardPayouts)
-				adminRoute.POST("/manage/:id/inviter-reward-payouts", controller.CreateInviterRewardPayoutHandler)
+				adminRoute.POST("/manage/:id/invitee-recharges/issue", controller.IssueInviteeRechargeRewardHandler)
 				adminRoute.GET("/manage/:id/aff-audit-logs", controller.GetInviterAuditLogs)
 				adminRoute.GET("/manage/:id/aff-summary", controller.GetInviterAffSummaryAdmin)
 				adminRoute.POST("/manage/:id/aff-audit-logs/mark-offline-paid", controller.MarkAuditLogsOfflinePaid)
