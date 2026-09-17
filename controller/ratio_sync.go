@@ -226,6 +226,20 @@ func FetchUpstreamRatios(c *gin.Context) {
 					ch <- upstreamResult{Name: uniqueName, Data: type1Data}
 					return
 				}
+				// type1 变体：上游只给出 tiered_expr 计费表达式（如 basellm 官方倍率预设），换算回倍率
+				if exprs, ok := type1Data[billingExprField].(map[string]any); ok && len(exprs) > 0 {
+					converted, skipped := convertBillingExprData(exprs)
+					if len(skipped) > 0 {
+						logger.LogWarn(c.Request.Context(), fmt.Sprintf("billing_expr from %s: %d model(s) skipped (non-linear or unsupported): %s",
+							chItem.Name, len(skipped), strings.Join(skipped, ", ")))
+					}
+					if len(converted) > 0 {
+						ch <- upstreamResult{Name: uniqueName, Data: converted}
+						return
+					}
+					ch <- upstreamResult{Name: uniqueName, Err: "上游仅提供计费表达式，且没有可换算为倍率的模型"}
+					return
+				}
 			}
 
 			// 如果不是 type1，则尝试按 type2 (/api/pricing) 解析
