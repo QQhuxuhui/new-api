@@ -169,6 +169,9 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	}
 
 	quota := calculateAudioQuota(quotaInfo)
+	if tieredOk, tieredQuota, _ := TryTieredSettle(ctx, relayInfo, TieredUsageFromRealtime(usage)); tieredOk {
+		quota = tieredQuota
+	}
 
 	if userQuota < quota {
 		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(quota))
@@ -234,6 +237,10 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	}
 
 	quota := calculateAudioQuota(quotaInfo)
+	tieredOk, tieredQuota, tieredResult := TryTieredSettle(ctx, relayInfo, TieredUsageFromRealtime(usage))
+	if tieredOk {
+		quota = tieredQuota
+	}
 
 	totalTokens := usage.TotalTokens
 	var logContent string
@@ -245,7 +252,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	}
 
 	// record all the consume log even if quota is 0
-	if totalTokens == 0 {
+	if totalTokens == 0 && !IsFixedPriceTieredSettlement(relayInfo, tieredResult) {
 		// in this case, must be some error happened
 		// we cannot just return, because we may have to return the pre-consumed quota
 		quota = 0
@@ -266,6 +273,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	}
 	other := GenerateWssOtherInfo(ctx, relayInfo, usage, modelRatio, groupRatio,
 		completionRatio.InexactFloat64(), audioRatio.InexactFloat64(), audioCompletionRatio.InexactFloat64(), modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
+	InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     usage.InputTokens,
@@ -318,7 +326,8 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 	if relayInfo.ChannelType == constant.ChannelTypeOpenRouter {
 		promptTokens -= cacheTokens
 		isUsingCustomSettings := relayInfo.PriceData.UsePrice || hasCustomModelRatio(modelName, relayInfo.PriceData.ModelRatio)
-		if cacheCreationTokens == 0 && relayInfo.PriceData.CacheCreationRatio != 1 && usage.Cost != 0 && !isUsingCustomSettings {
+		// 阶梯计费没有倍率，无法用 cost 反推缓存写入量
+		if cacheCreationTokens == 0 && relayInfo.PriceData.CacheCreationRatio != 1 && usage.Cost != 0 && !isUsingCustomSettings && !IsTieredBilling(relayInfo) {
 			maybeCacheCreationTokens := CalcOpenRouterCacheCreateTokens(*usage, relayInfo.PriceData)
 			if maybeCacheCreationTokens >= 0 && promptTokens >= maybeCacheCreationTokens {
 				cacheCreationTokens = maybeCacheCreationTokens
@@ -348,7 +357,17 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 	}
 
 	calculateQuota := 0.0
-	if !relayInfo.PriceData.UsePrice {
+	// 阶梯计费：此处 promptTokens 已是 Anthropic 口径（不含缓存读写）
+	tieredOk, tieredQuota, tieredResult := TryTieredSettle(ctx, relayInfo, TieredUsage{
+		Prompt:          promptTokens,
+		Completion:      completionTokens,
+		CacheRead:       cacheTokens,
+		CacheCreation:   cacheCreationTokens,
+		CacheCreation1h: cacheCreationTokens1h,
+	})
+	if tieredOk {
+		calculateQuota = float64(tieredQuota)
+	} else if !relayInfo.PriceData.UsePrice {
 		calculateQuota = float64(promptTokens)
 		calculateQuota += float64(cacheTokens) * cacheRatio
 		calculateQuota += float64(cacheCreationTokens5m) * cacheCreationRatio5m
@@ -375,7 +394,7 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 
 	var logContent string
 	// record all the consume log even if quota is 0
-	if totalTokens == 0 {
+	if totalTokens == 0 && !IsFixedPriceTieredSettlement(relayInfo, tieredResult) {
 		// in this case, must be some error happened
 		// we cannot just return, because we may have to return the pre-consumed quota
 		quota = 0
@@ -442,6 +461,7 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		cacheCreationTokens5m, cacheCreationRatio5m,
 		cacheCreationTokens1h, cacheCreationRatio1h,
 		modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
+	InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     promptTokens,
@@ -528,6 +548,10 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 
 	quota := calculateAudioQuota(quotaInfo)
+	tieredOk, tieredQuota, tieredResult := TryTieredSettle(ctx, relayInfo, TieredUsageFromDTO(usage))
+	if tieredOk {
+		quota = tieredQuota
+	}
 
 	totalTokens := usage.TotalTokens
 	var logContent string
@@ -539,7 +563,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 
 	// record all the consume log even if quota is 0
-	if totalTokens == 0 {
+	if totalTokens == 0 && !IsFixedPriceTieredSettlement(relayInfo, tieredResult) {
 		// in this case, must be some error happened
 		// we cannot just return, because we may have to return the pre-consumed quota
 		quota = 0
@@ -606,6 +630,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 	other := GenerateAudioOtherInfo(ctx, relayInfo, usage, modelRatio, groupRatio,
 		completionRatio.InexactFloat64(), audioRatio.InexactFloat64(), audioCompletionRatio.InexactFloat64(), modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
+	InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     usage.PromptTokens,

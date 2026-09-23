@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -34,12 +35,27 @@ func GetOptions(c *gin.Context) {
 		if strings.HasSuffix(k, "Token") || strings.HasSuffix(k, "Secret") || strings.HasSuffix(k, "Key") {
 			continue
 		}
+		if k == billing_setting.BillingModeOptionKey || k == billing_setting.BillingExprOptionKey {
+			continue
+		}
 		options = append(options, &model.Option{
 			Key:   k,
 			Value: common.Interface2String(v),
 		})
 	}
 	common.OptionMapRWMutex.Unlock()
+	// 阶梯计费返回实际生效的配置，包含未落库的内置表达式（如 gpt-6-astra）
+	for key, values := range map[string]map[string]string{
+		billing_setting.BillingModeOptionKey: billing_setting.GetBillingModeCopy(),
+		billing_setting.BillingExprOptionKey: billing_setting.GetBillingExprCopy(),
+	} {
+		encoded, err := common.Marshal(values)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+		options = append(options, &model.Option{Key: key, Value: string(encoded)})
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -129,6 +145,24 @@ func UpdateOption(c *gin.Context) {
 				"success": false,
 				"message": "无法启用 Telegram OAuth，请先填入 Telegram Bot Token！",
 			})
+			return
+		}
+	case billing_setting.BillingModeOptionKey:
+		modes := make(map[string]string)
+		if err = common.UnmarshalJsonStr(option.Value.(string), &modes); err == nil {
+			err = billing_setting.ValidateBillingModeMap(modes)
+		}
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "计费模式配置无效: " + err.Error()})
+			return
+		}
+	case billing_setting.BillingExprOptionKey:
+		expressions := make(map[string]string)
+		if err = common.UnmarshalJsonStr(option.Value.(string), &expressions); err == nil {
+			err = billing_setting.ValidateBillingExprMap(expressions)
+		}
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "计费表达式配置无效: " + err.Error()})
 			return
 		}
 	case "GroupRatio":

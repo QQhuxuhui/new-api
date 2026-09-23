@@ -54,3 +54,26 @@ export const encodeToBase64 = (value) => {
 
   return window.btoa(toBinaryString(input));
 };
+
+// UTF-8 安全的 base64 解码，失败时返回空字符串
+export const decodeFromBase64 = (value) => {
+  if (typeof value !== 'string' || value === '') return '';
+  try {
+    const binary =
+      typeof window !== 'undefined' && typeof window.atob === 'function'
+        ? window.atob(value)
+        : globalThis.atob(value);
+    if (typeof TextDecoder !== 'undefined') {
+      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+    return decodeURIComponent(
+      Array.from(
+        binary,
+        (c) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'),
+      ).join(''),
+    );
+  } catch (e) {
+    return '';
+  }
+};

@@ -529,6 +529,14 @@ func GetModelRatio(name string) (float64, bool, string) {
 	return ratio, true, name
 }
 
+// HasConfiguredModelRatio 只判断倍率表中是否存在该模型，不计入自用模式的兜底倍率。
+func HasConfiguredModelRatio(name string) bool {
+	modelRatioMapMutex.RLock()
+	defer modelRatioMapMutex.RUnlock()
+	_, ok := modelRatioMap[FormatMatchingModelName(name)]
+	return ok
+}
+
 func DefaultModelRatio2JSONString() string {
 	jsonBytes, err := common.Marshal(defaultModelRatio)
 	if err != nil {

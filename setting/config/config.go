@@ -242,7 +242,15 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 					continue
 				}
 			}
-		case reflect.Map, reflect.Slice, reflect.Struct:
+		case reflect.Map:
+			// json.Unmarshal 会合并进已有 map（保留新 JSON 中缺失的旧键），
+			// 这里分配新 map 整体替换，保证删除的键能被清掉。
+			fresh := reflect.New(field.Type())
+			if err := json.Unmarshal([]byte(strValue), fresh.Interface()); err != nil {
+				continue
+			}
+			field.Set(fresh.Elem())
+		case reflect.Slice, reflect.Struct:
 			// 复杂类型使用JSON反序列化
 			err := json.Unmarshal([]byte(strValue), field.Addr().Interface())
 			if err != nil {

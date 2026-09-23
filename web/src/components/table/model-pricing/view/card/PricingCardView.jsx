@@ -39,6 +39,8 @@ import {
   calculateModelPrice,
   formatPriceInfo,
   getLobeHubIcon,
+  isTieredBillingMode,
+  renderTieredBillingTag,
 } from '../../../../../helpers';
 import PricingCardSkeleton from './PricingCardSkeleton';
 import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoadingTime';
@@ -151,14 +153,16 @@ const PricingCardView = ({
   };
 
   // 渲染标签
-  const renderTags = (record) => {
+  const renderTags = (record, priceData) => {
     // 计费类型标签（左边）
     let billingTag = (
       <Tag key='billing' shape='circle' color='white' size='small'>
         -
       </Tag>
     );
-    if (record.quota_type === 1) {
+    if (isTieredBillingMode(record.billing_mode)) {
+      billingTag = renderTieredBillingTag(priceData, t);
+    } else if (record.quota_type === 1) {
       billingTag = (
         <Tag key='billing' shape='circle' color='teal' size='small'>
           {t('按次计费')}
@@ -239,6 +243,7 @@ const PricingCardView = ({
           const modelKey = getModelKey(model);
           const isSelected = selectedRowKeys.includes(modelKey);
 
+          const isTiered = isTieredBillingMode(model.billing_mode);
           const priceData = calculateModelPrice({
             record: model,
             selectedGroup,
@@ -309,7 +314,7 @@ const PricingCardView = ({
                 {/* 底部区域 */}
                 <div className='mt-auto'>
                   {/* 标签区域 */}
-                  {renderTags(model)}
+                  {renderTags(model, priceData)}
 
                   {/* 倍率信息（可选） */}
                   {showRatio && (
@@ -335,12 +340,16 @@ const PricingCardView = ({
                       <div className='grid grid-cols-3 gap-2 text-xs text-gray-600'>
                         <div>
                           {t('模型')}:{' '}
-                          {model.quota_type === 0 ? model.model_ratio : t('无')}
+                          {model.quota_type === 0 && !isTiered
+                            ? model.model_ratio
+                            : t('无')}
                         </div>
                         <div>
                           {t('补全')}:{' '}
-                          {model.quota_type === 0
-                            ? parseFloat(model.completion_ratio.toFixed(3))
+                          {model.quota_type === 0 && !isTiered
+                            ? parseFloat(
+                                Number(model.completion_ratio || 0).toFixed(3),
+                              )
                             : t('无')}
                         </div>
                         <div>

@@ -382,7 +382,10 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	info.PromptTokens = usage.PromptTokens
 
 	quota := 0
-	if !priceData.UsePrice {
+	tieredOk, tieredQuota, tieredResult := service.TryTieredSettle(c, info, service.TieredUsageFromDTO(usage))
+	if tieredOk {
+		quota = tieredQuota
+	} else if !priceData.UsePrice {
 		quota = usage.PromptTokens + int(math.Round(float64(usage.CompletionTokens)*priceData.CompletionRatio))
 		quota = int(math.Round(float64(quota) * priceData.ModelRatio))
 		if priceData.ModelRatio != 0 && quota <= 0 {
@@ -396,6 +399,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	consumedTime := float64(milliseconds) / 1000.0
 	other := service.GenerateTextOtherInfo(c, info, priceData.ModelRatio, priceData.GroupRatioInfo.GroupRatio, priceData.CompletionRatio,
 		usage.PromptTokensDetails.CachedTokens, priceData.CacheRatio, priceData.ModelPrice, priceData.GroupRatioInfo.GroupSpecialRatio)
+	service.InjectTieredBillingInfo(other, info, tieredResult)
 	model.RecordConsumeLog(c, 1, model.RecordConsumeLogParams{
 		ChannelId:        channel.Id,
 		PromptTokens:     usage.PromptTokens,

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { Toast, Pagination } from '@douyinfe/semi-ui';
+import { Toast, Pagination, Tag, Tooltip } from '@douyinfe/semi-ui';
 import { toastConstants } from '../constants';
 import { toast } from 'react-toastify';
 import {
@@ -26,6 +26,12 @@ import {
 } from '../constants/playground.constants';
 import { TABLE_COMPACT_MODES_KEY } from '../constants';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
+import {
+  BILLING_EXPR_VAR_LABELS,
+  BILLING_EXPR_VARS,
+  isTieredBillingMode,
+  parseBillingExpr,
+} from './billingExpr';
 
 // HTMLToastContent moved to components/common/HTMLToastContent.jsx
 export function isAdmin() {
@@ -624,43 +630,82 @@ export const calculateModelPrice = ({
     }
   }
 
-  // 2. 根据计费类型计算价格
+  const unitDivisor = tokenUnit === 'K' ? 1000 : 1;
+  const unitLabel = tokenUnit === 'K' ? 'K' : 'M';
+
+  let symbol = '$';
+  if (currency === 'CNY') {
+    symbol = '¥';
+  } else if (currency === 'CUSTOM') {
+    try {
+      const statusStr = localStorage.getItem('status');
+      if (statusStr) {
+        const s = JSON.parse(statusStr);
+        symbol = s?.custom_currency_symbol || '¤';
+      } else {
+        symbol = '¤';
+      }
+    } catch (e) {
+      symbol = '¤';
+    }
+  }
+
+  // 将 USD / 1M tokens 价格格式化为当前货币与 token 单位
+  const formatTokenPrice = (usdPerMillion) => {
+    const rawDisplay = displayPrice(usdPerMillion);
+    const num = parseFloat(rawDisplay.replace(/[^0-9.]/g, '')) / unitDivisor;
+    return `${symbol}${num.toFixed(precision)}`;
+  };
+
+  // 2. 阶梯计费：表达式系数已是 USD / 1M tokens，仅叠加分组倍率
+  if (isTieredBillingMode(record.billing_mode)) {
+    const parsed = parseBillingExpr(record.billing_expr);
+    const tiers = parsed
+      ? parsed.tiers.map((tier) => ({
+          name: tier.name,
+          condition: tier.condition,
+          linear: tier.linear,
+          raw: tier.raw,
+          fixedPrice:
+            tier.fixed !== null
+              ? displayPrice(tier.fixed * usedGroupRatio)
+              : null,
+          prices: BILLING_EXPR_VARS.filter(
+            (v) => tier.coefficients[v] !== undefined,
+          ).map((v) => ({
+            key: v,
+            price: formatTokenPrice(tier.coefficients[v] * usedGroupRatio),
+          })),
+        }))
+      : null;
+    const first = tiers?.[0];
+    const firstPrice = (key) =>
+      first?.prices.find((item) => item.key === key)?.price ?? '-';
+    const firstIsPerToken = !!first && first.fixedPrice === null;
+    return {
+      isTiered: true,
+      tiers,
+      billingExpr: record.billing_expr || '',
+      inputPrice: firstPrice('p'),
+      completionPrice: firstPrice('c'),
+      price: first?.fixedPrice ?? '-',
+      unitLabel,
+      isPerToken: firstIsPerToken,
+      usedGroup,
+      usedGroupRatio,
+    };
+  }
+
+  // 3. 根据计费类型计算价格
   if (record.quota_type === 0) {
     // 按量计费
     const inputRatioPriceUSD = record.model_ratio * 2 * usedGroupRatio;
     const completionRatioPriceUSD =
       record.model_ratio * record.completion_ratio * 2 * usedGroupRatio;
 
-    const unitDivisor = tokenUnit === 'K' ? 1000 : 1;
-    const unitLabel = tokenUnit === 'K' ? 'K' : 'M';
-
-    const rawDisplayInput = displayPrice(inputRatioPriceUSD);
-    const rawDisplayCompletion = displayPrice(completionRatioPriceUSD);
-
-    const numInput =
-      parseFloat(rawDisplayInput.replace(/[^0-9.]/g, '')) / unitDivisor;
-    const numCompletion =
-      parseFloat(rawDisplayCompletion.replace(/[^0-9.]/g, '')) / unitDivisor;
-
-    let symbol = '$';
-    if (currency === 'CNY') {
-      symbol = '¥';
-    } else if (currency === 'CUSTOM') {
-      try {
-        const statusStr = localStorage.getItem('status');
-        if (statusStr) {
-          const s = JSON.parse(statusStr);
-          symbol = s?.custom_currency_symbol || '¤';
-        } else {
-          symbol = '¤';
-        }
-      } catch (e) {
-        symbol = '¤';
-      }
-    }
     return {
-      inputPrice: `${symbol}${numInput.toFixed(precision)}`,
-      completionPrice: `${symbol}${numCompletion.toFixed(precision)}`,
+      inputPrice: formatTokenPrice(inputRatioPriceUSD),
+      completionPrice: formatTokenPrice(completionRatioPriceUSD),
       unitLabel,
       isPerToken: true,
       usedGroup,
@@ -690,8 +735,101 @@ export const calculateModelPrice = ({
   };
 };
 
+// 阶梯计费档位条件文本：最后一个无条件档位显示为「其他情况」
+export const getTierConditionText = (tier, total, t) => {
+  if (tier?.condition) return tier.condition;
+  return total > 1 ? t('其他情况') : '';
+};
+
+// 阶梯计费全部档位明细（用于 Tooltip 与详情），解析失败时展示原始表达式
+export const renderTieredPriceDetail = (priceData, t) => {
+  if (!Array.isArray(priceData?.tiers) || priceData.tiers.length === 0) {
+    return (
+      <div>
+        <div>{t('无法解析计费表达式，原始表达式：')}</div>
+        <code style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          {priceData?.billingExpr || '-'}
+        </code>
+      </div>
+    );
+  }
+  const total = priceData.tiers.length;
+  return (
+    <div className='space-y-2'>
+      {priceData.tiers.map((tier, idx) => {
+        const cond = getTierConditionText(tier, total, t);
+        return (
+          <div key={`${tier.name}-${idx}`}>
+            <div className='font-medium'>
+              {tier.name || t('默认档位')}
+              {cond && <span style={{ opacity: 0.75 }}> ({cond})</span>}
+            </div>
+            {tier.fixedPrice !== null ? (
+              <div>
+                {t('按次计费')} {tier.fixedPrice} / {t('次')}
+              </div>
+            ) : tier.prices.length > 0 ? (
+              tier.prices.map((item) => (
+                <div key={item.key}>
+                  {t(BILLING_EXPR_VAR_LABELS[item.key])} {item.price} / 1
+                  {priceData.unitLabel} tokens
+                </div>
+              ))
+            ) : (
+              <code style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {tier.raw}
+              </code>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// 阶梯计费标记，悬停展示全部档位
+export const renderTieredBillingTag = (priceData, t, size = 'small') => (
+  <Tooltip content={renderTieredPriceDetail(priceData, t)}>
+    <Tag color='orange' shape='circle' size={size}>
+      {t('阶梯计费')}
+    </Tag>
+  </Tooltip>
+);
+
 // 格式化价格信息（用于卡片视图）
 export const formatPriceInfo = (priceData, t) => {
+  if (priceData.isTiered) {
+    const first = priceData.tiers?.[0];
+    return (
+      <Tooltip content={renderTieredPriceDetail(priceData, t)}>
+        <span
+          className='flex items-center gap-3'
+          style={{ color: 'var(--semi-color-text-1)' }}
+        >
+          {!first ? (
+            <span>{t('阶梯计费')}</span>
+          ) : priceData.isPerToken ? (
+            <>
+              <span>
+                {t('输入')} {priceData.inputPrice}/{priceData.unitLabel}
+              </span>
+              <span>
+                {t('输出')} {priceData.completionPrice}/{priceData.unitLabel}
+              </span>
+            </>
+          ) : (
+            <span>
+              {t('模型价格')} {priceData.price}
+            </span>
+          )}
+          {first && priceData.tiers.length > 1 && (
+            <span style={{ color: 'var(--semi-color-text-2)' }}>{t('起')}</span>
+          )}
+        </span>
+      </Tooltip>
+    );
+  }
+
   if (priceData.isPerToken) {
     return (
       <>

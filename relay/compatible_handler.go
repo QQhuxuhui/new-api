@@ -397,7 +397,11 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 
 	var audioInputQuota decimal.Decimal
 	var audioInputPrice float64
-	if !relayInfo.PriceData.UsePrice {
+	tieredOk, tieredQuota, tieredResult := service.TryTieredSettle(ctx, relayInfo, service.TieredUsageFromDTO(usage))
+	if tieredOk {
+		// 阶梯计费：表达式已包含缓存 / 图片 / 音频等子项定价，分组与渠道倍率也已计入
+		quotaCalculateDecimal = decimal.NewFromInt(int64(tieredQuota))
+	} else if !relayInfo.PriceData.UsePrice {
 		var imageTokensWithRatio decimal.Decimal
 		if !dImageTokens.IsZero() {
 			imageTokensWithRatio = dImageTokens.Mul(dImageRatio)
@@ -488,7 +492,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	var logContent string
 
 	// record all the consume log even if quota is 0
-	if totalTokens == 0 {
+	if totalTokens == 0 && !service.IsFixedPriceTieredSettlement(relayInfo, tieredResult) {
 		// in this case, must be some error happened
 		// we cannot just return, because we may have to return the pre-consumed quota
 		quota = 0
@@ -628,6 +632,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		other["gemini_4k"] = true
 		other["gemini_4k_count"] = gemini4kCount
 	}
+	service.InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     logPromptTokens,

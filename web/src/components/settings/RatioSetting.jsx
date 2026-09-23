@@ -26,6 +26,7 @@ import ModelRatioSettings from '../../pages/Setting/Ratio/ModelRatioSettings';
 import ModelSettingsVisualEditor from '../../pages/Setting/Ratio/ModelSettingsVisualEditor';
 import ModelRatioNotSetEditor from '../../pages/Setting/Ratio/ModelRationNotSetEditor';
 import UpstreamRatioSync from '../../pages/Setting/Ratio/UpstreamRatioSync';
+import TieredBillingSettings from '../../pages/Setting/Ratio/TieredBillingSettings';
 
 import { API, showError, toBoolean } from '../../helpers';
 
@@ -48,6 +49,8 @@ const RatioSetting = () => {
     ExposeRatioEnabled: false,
     UserUsableGroups: '',
     'group_ratio_setting.group_special_usable_group': '',
+    'billing_setting.billing_mode': '',
+    'billing_setting.billing_expr': '',
   });
 
   const [loading, setLoading] = useState(false);
@@ -106,6 +109,9 @@ const RatioSetting = () => {
           </Tabs.TabPane>
           <Tabs.TabPane tab={t('可视化倍率设置')} itemKey='visual'>
             <ModelSettingsVisualEditor options={inputs} refresh={onRefresh} />
+          </Tabs.TabPane>
+          <Tabs.TabPane tab={t('阶梯计费')} itemKey='tiered_billing'>
+            <TieredBillingSettings options={inputs} refresh={onRefresh} />
           </Tabs.TabPane>
           <Tabs.TabPane tab={t('未设置倍率模型')} itemKey='unset_models'>
             <ModelRatioNotSetEditor options={inputs} refresh={onRefresh} />

@@ -20,7 +20,11 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Card, Avatar, Typography, Table, Tag } from '@douyinfe/semi-ui';
 import { IconCoinMoneyStroked } from '@douyinfe/semi-icons';
-import { calculateModelPrice } from '../../../../../helpers';
+import {
+  calculateModelPrice,
+  isTieredBillingMode,
+  renderTieredPriceDetail,
+} from '../../../../../helpers';
 
 const { Text } = Typography;
 
@@ -39,6 +43,7 @@ const ModelPricingTable = ({
     ? modelData.enable_groups
     : [];
   const autoChain = autoGroups.filter((g) => modelEnableGroups.includes(g));
+  const isTiered = isTieredBillingMode(modelData?.billing_mode);
   const renderGroupPriceTable = () => {
     // 仅展示模型可用的分组：模型 enable_groups 与用户可用分组的交集
 
@@ -68,8 +73,10 @@ const ModelPricingTable = ({
         key: group,
         group: group,
         ratio: groupRatioValue,
-        billingType:
-          modelData?.quota_type === 0
+        priceData,
+        billingType: isTiered
+          ? t('阶梯计费')
+          : modelData?.quota_type === 0
             ? t('按量计费')
             : modelData?.quota_type === 1
               ? t('按次计费')
@@ -118,6 +125,7 @@ const ModelPricingTable = ({
         let color = 'white';
         if (text === t('按量计费')) color = 'violet';
         else if (text === t('按次计费')) color = 'teal';
+        else if (text === t('阶梯计费')) color = 'orange';
         return (
           <Tag color={color} size='small' shape='circle'>
             {text || '-'}
@@ -127,7 +135,16 @@ const ModelPricingTable = ({
     });
 
     // 根据计费类型添加价格列
-    if (modelData?.quota_type === 0) {
+    if (isTiered) {
+      // 阶梯计费：列出全部档位及其单价
+      columns.push({
+        title: t('价格'),
+        dataIndex: 'priceData',
+        render: (priceData) => (
+          <div className='text-xs'>{renderTieredPriceDetail(priceData, t)}</div>
+        ),
+      });
+    } else if (modelData?.quota_type === 0) {
       // 按量计费
       columns.push(
         {

@@ -181,6 +181,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/", controller.GetOptions)
 			optionRoute.PUT("/", controller.UpdateOption)
 			optionRoute.POST("/rest_model_ratio", controller.ResetModelRatio)
+			optionRoute.POST("/billing_expr/preview", controller.PreviewBillingExpr)
 			optionRoute.POST("/migrate_console_setting", controller.MigrateConsoleSetting) // 用于迁移检测的旧键，下个版本会删除
 			optionRoute.POST("/poster/upload", middleware.UploadRateLimit(), controller.UploadPoster)
 		}

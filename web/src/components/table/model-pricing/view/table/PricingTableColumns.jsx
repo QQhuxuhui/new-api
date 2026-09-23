@@ -25,6 +25,9 @@ import {
   stringToColor,
   calculateModelPrice,
   getLobeHubIcon,
+  isTieredBillingMode,
+  renderTieredBillingTag,
+  renderTieredPriceDetail,
 } from '../../../../../helpers';
 import {
   renderLimitedItems,
@@ -157,6 +160,9 @@ export const getPricingTableColumns = ({
     title: t('计费类型'),
     dataIndex: 'quota_type',
     render: (text, record, index) => {
+      if (isTieredBillingMode(record.billing_mode)) {
+        return renderTieredBillingTag(getPriceData(record), t, 'default');
+      }
       return renderQuotaType(parseInt(text), t);
     },
     sorter: (a, b) => a.quota_type - b.quota_type,
@@ -205,17 +211,21 @@ export const getPricingTableColumns = ({
     ),
     dataIndex: 'model_ratio',
     render: (text, record, index) => {
-      const completionRatio = parseFloat(record.completion_ratio.toFixed(3));
+      const completionRatio = parseFloat(
+        Number(record.completion_ratio || 0).toFixed(3),
+      );
       const priceData = getPriceData(record);
+      // 阶梯计费不使用模型/补全倍率
+      const useRatio =
+        record.quota_type === 0 && !isTieredBillingMode(record.billing_mode);
 
       return (
         <div className='space-y-1'>
           <div className='text-gray-700'>
-            {t('模型倍率')}：{record.quota_type === 0 ? text : t('无')}
+            {t('模型倍率')}：{useRatio ? text : t('无')}
           </div>
           <div className='text-gray-700'>
-            {t('补全倍率')}：
-            {record.quota_type === 0 ? completionRatio : t('无')}
+            {t('补全倍率')}：{useRatio ? completionRatio : t('无')}
           </div>
           <div className='text-gray-700'>
             {t('分组倍率')}：{priceData?.usedGroupRatio ?? '-'}
@@ -231,6 +241,41 @@ export const getPricingTableColumns = ({
     ...(isMobile ? {} : { fixed: 'right' }),
     render: (text, record, index) => {
       const priceData = getPriceData(record);
+
+      if (priceData.isTiered) {
+        const tiers = priceData.tiers;
+        const first = tiers?.[0];
+        return (
+          <Tooltip content={renderTieredPriceDetail(priceData, t)}>
+            <div className='space-y-1'>
+              {!first ? (
+                <div className='text-gray-700'>{t('阶梯计费')}</div>
+              ) : priceData.isPerToken ? (
+                <>
+                  <div className='text-gray-700'>
+                    {t('输入')} {priceData.inputPrice} / 1{priceData.unitLabel}{' '}
+                    tokens
+                  </div>
+                  <div className='text-gray-700'>
+                    {t('输出')} {priceData.completionPrice} / 1
+                    {priceData.unitLabel} tokens
+                  </div>
+                </>
+              ) : (
+                <div className='text-gray-700'>
+                  {t('模型价格')}：{priceData.price}
+                </div>
+              )}
+              {tiers && tiers.length > 1 && (
+                <div className='text-xs text-gray-500'>
+                  {t('起')} ·{' '}
+                  {t('共 {{count}} 个档位', { count: tiers.length })}
+                </div>
+              )}
+            </div>
+          </Tooltip>
+        );
+      }
 
       if (priceData.isPerToken) {
         return (

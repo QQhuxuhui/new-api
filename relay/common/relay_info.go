@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 
@@ -120,6 +121,10 @@ type RelayInfo struct {
 	ForcePreConsume       bool
 	IsClaudeBetaQuery     bool // /v1/messages?beta=true
 	ConvertedViaResponses bool // 标识请求经过了 chat→responses 转换
+
+	// 阶梯（表达式）计费：预扣时冻结的表达式与请求输入，结算时按实际用量重算
+	TieredBillingSnapshot *billingexpr.BillingSnapshot
+	BillingRequestInput   *billingexpr.RequestInput
 
 	// Plan-related fields
 	UserPlanId    int    // User's current plan assignment ID for quota tracking

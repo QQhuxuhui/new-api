@@ -36,6 +36,9 @@ import {
   renderAudioModelPrice,
   renderClaudeModelPrice,
   renderModelPrice,
+  renderTieredLogContent,
+  renderTieredModelPrice,
+  isTieredLog,
 } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
@@ -451,40 +454,42 @@ export const useLogsData = () => {
       if (logs[i].type === 2) {
         expandDataLocal.push({
           key: t('日志详情'),
-          value: other?.claude
-            ? renderClaudeLogContent(
-                other?.model_ratio,
-                other.completion_ratio,
-                other.model_price,
-                other.group_ratio,
-                other?.user_group_ratio,
-                other.cache_ratio || 1.0,
-                other.cache_creation_ratio || 1.0,
-                other.cache_creation_tokens_5m || 0,
-                other.cache_creation_ratio_5m ||
-                  other.cache_creation_ratio ||
+          value: isTieredLog(other)
+            ? renderTieredLogContent(other)
+            : other?.claude
+              ? renderClaudeLogContent(
+                  other?.model_ratio,
+                  other.completion_ratio,
+                  other.model_price,
+                  other.group_ratio,
+                  other?.user_group_ratio,
+                  other.cache_ratio || 1.0,
+                  other.cache_creation_ratio || 1.0,
+                  other.cache_creation_tokens_5m || 0,
+                  other.cache_creation_ratio_5m ||
+                    other.cache_creation_ratio ||
+                    1.0,
+                  other.cache_creation_tokens_1h || 0,
+                  other.cache_creation_ratio_1h ||
+                    other.cache_creation_ratio ||
+                    1.0,
+                )
+              : renderLogContent(
+                  other?.model_ratio,
+                  other.completion_ratio,
+                  other.model_price,
+                  other.group_ratio,
+                  other?.user_group_ratio,
+                  other.cache_ratio || 1.0,
+                  other.cache_creation_tokens || 0,
+                  other.cache_creation_ratio || 1.0,
+                  false,
                   1.0,
-                other.cache_creation_tokens_1h || 0,
-                other.cache_creation_ratio_1h ||
-                  other.cache_creation_ratio ||
-                  1.0,
-              )
-            : renderLogContent(
-                other?.model_ratio,
-                other.completion_ratio,
-                other.model_price,
-                other.group_ratio,
-                other?.user_group_ratio,
-                other.cache_ratio || 1.0,
-                other.cache_creation_tokens || 0,
-                other.cache_creation_ratio || 1.0,
-                false,
-                1.0,
-                other.web_search || false,
-                other.web_search_call_count || 0,
-                other.file_search || false,
-                other.file_search_call_count || 0,
-              ),
+                  other.web_search || false,
+                  other.web_search_call_count || 0,
+                  other.file_search || false,
+                  other.file_search_call_count || 0,
+                ),
         });
         if (logs[i]?.content) {
           expandDataLocal.push({
@@ -509,7 +514,9 @@ export const useLogsData = () => {
           });
         }
         let content = '';
-        if (other?.ws || other?.audio) {
+        if (isTieredLog(other)) {
+          content = renderTieredModelPrice(other, logs[i].quota);
+        } else if (other?.ws || other?.audio) {
           content = renderAudioModelPrice(
             other?.text_input,
             other?.text_output,

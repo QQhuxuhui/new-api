@@ -20,6 +20,14 @@ For commercial licensing, please contact support@quantumnous.com
 import i18next from 'i18next';
 import { Modal, Tag, Typography, Avatar } from '@douyinfe/semi-ui';
 import { calculateNonCachedPromptTokens } from './log';
+import { decodeFromBase64 } from './base64';
+import {
+  BILLING_EXPR_VAR_LABELS,
+  BILLING_EXPR_VARS,
+  findBillingTier,
+  isTieredBillingMode,
+  parseBillingExpr,
+} from './billingExpr';
 import { copy, showSuccess } from './utils';
 import {
   calculateClaudeEffectiveInputTokens,
@@ -1512,6 +1520,165 @@ export function renderModelPrice(
       </>
     );
   }
+}
+
+// -------------------------------
+// 阶梯计费（billing_mode = tiered_expr）日志展示
+
+export const isTieredLog = (other) => isTieredBillingMode(other?.billing_mode);
+
+// 解码日志中的表达式并定位命中档位
+function getTieredLogTier(other) {
+  const expr = decodeFromBase64(other?.expr_b64);
+  const parsed = parseBillingExpr(expr);
+  const tier = findBillingTier(parsed, other?.matched_tier);
+  return { expr, parsed, tier };
+}
+
+// 阶梯计费简要信息：阶梯计费、命中档位、预估档位、兜底说明、分组倍率
+export function renderTieredLogContent(other, separator = '，') {
+  const { ratio, label: ratioLabel } = getEffectiveRatio(
+    other?.group_ratio,
+    other?.user_group_ratio,
+  );
+  const parts = [
+    i18next.t('阶梯计费'),
+    i18next.t('命中档位 {{tier}}', { tier: other?.matched_tier || '-' }),
+    other?.estimated_tier && other.estimated_tier !== other?.matched_tier
+      ? i18next.t('预估档位 {{tier}}', { tier: other.estimated_tier })
+      : null,
+    other?.tiered_fallback
+      ? i18next.t('表达式计算失败，已按预扣费额度扣费')
+      : null,
+    i18next.t('{{ratioType}} {{ratio}}', { ratioType: ratioLabel, ratio }),
+  ].filter(Boolean);
+  return parts.join(separator);
+}
+
+// 阶梯计费计费过程：命中档位单价、计费 tokens、分组倍率与实际扣费
+export function renderTieredModelPrice(other, quota) {
+  const { ratio: groupRatio, label: ratioLabel } = getEffectiveRatio(
+    other?.group_ratio,
+    other?.user_group_ratio,
+  );
+  const { symbol, rate } = getCurrencyConfig();
+  const fmt = (usd) => `${symbol}${(usd * rate).toFixed(6)}`;
+  const { expr, parsed, tier } = getTieredLogTier(other);
+  const tokens =
+    other?.billing_tokens && typeof other.billing_tokens === 'object'
+      ? other.billing_tokens
+      : null;
+  const condition = tier
+    ? tier.condition || (parsed?.tiers.length > 1 ? i18next.t('其他情况') : '')
+    : '';
+
+  let fixedPrice = null;
+  if (typeof other?.fixed_price === 'number') {
+    fixedPrice = other.fixed_price;
+  } else if (other?.billing_unit === 'request' && tier?.fixed != null) {
+    fixedPrice = tier.fixed;
+  }
+  const coefVars = tier
+    ? BILLING_EXPR_VARS.filter((v) => tier.coefficients[v] !== undefined)
+    : [];
+
+  // 按命中档位单价复算（仅线性档位），实际扣费以日志额度为准
+  let formula = null;
+  if (!other?.tiered_fallback) {
+    if (fixedPrice !== null) {
+      formula = `${fmt(fixedPrice)} * ${ratioLabel} ${groupRatio} = ${fmt(
+        fixedPrice * groupRatio,
+      )}`;
+    } else if (tier?.linear && tokens && coefVars.length > 0) {
+      let sum = tier.constant || 0;
+      const segments = coefVars.map((v) => {
+        const count = Number(tokens[v]) || 0;
+        sum += count * tier.coefficients[v];
+        return `${i18next.t(BILLING_EXPR_VAR_LABELS[v])} ${count} tokens * ${fmt(
+          tier.coefficients[v],
+        )}`;
+      });
+      formula = `(${segments.join(' + ')}) / 1M tokens * ${ratioLabel} ${groupRatio} = ${fmt(
+        (sum / 1000000) * groupRatio,
+      )}`;
+    }
+  }
+
+  const tokenParts = tokens
+    ? [
+        ...BILLING_EXPR_VARS.filter(
+          (v) =>
+            tokens[v] !== undefined &&
+            (v === 'p' || v === 'c' || Number(tokens[v]) > 0),
+        ).map((v) => `${i18next.t(BILLING_EXPR_VAR_LABELS[v])} ${tokens[v]}`),
+        tokens.len !== undefined
+          ? `${i18next.t('上下文长度')} ${tokens.len}`
+          : null,
+      ].filter(Boolean)
+    : [];
+
+  return (
+    <article>
+      <p>
+        {i18next.t('阶梯计费')}，
+        {i18next.t('命中档位：{{tier}}', { tier: other?.matched_tier || '-' })}
+        {condition ? ` (${condition})` : ''}
+      </p>
+      {other?.estimated_tier &&
+        other.estimated_tier !== other?.matched_tier && (
+          <p>
+            {i18next.t(
+              '预估档位 {{tier}} 与实际命中档位不同，已按实际档位结算',
+              { tier: other.estimated_tier },
+            )}
+          </p>
+        )}
+      {other?.tiered_fallback && (
+        <p>{i18next.t('表达式计算失败，已按预扣费额度扣费')}</p>
+      )}
+      {fixedPrice !== null ? (
+        <p>
+          {i18next.t('按次价格：{{price}} / 次', { price: fmt(fixedPrice) })}
+        </p>
+      ) : coefVars.length > 0 ? (
+        coefVars.map((v) => (
+          <p key={v}>
+            {i18next.t('{{label}}价格：{{price}} / 1M tokens', {
+              label: i18next.t(BILLING_EXPR_VAR_LABELS[v]),
+              price: fmt(tier.coefficients[v]),
+            })}
+          </p>
+        ))
+      ) : expr ? (
+        <p>
+          {i18next.t('计费表达式：')}
+          <code style={{ wordBreak: 'break-all' }}>{expr}</code>
+        </p>
+      ) : null}
+      {tokenParts.length > 0 && (
+        <p>
+          {i18next.t('计费 Tokens：')}
+          {tokenParts.join('，')}
+        </p>
+      )}
+      {formula ? (
+        <p>{formula}</p>
+      ) : (
+        <p>
+          {i18next.t('{{ratioType}} {{ratio}}', {
+            ratioType: ratioLabel,
+            ratio: groupRatio,
+          })}
+        </p>
+      )}
+      <p>
+        {i18next.t('实际扣费：{{quota}}', {
+          quota: renderQuota(quota || 0, 6),
+        })}
+      </p>
+      <p>{i18next.t('仅供参考，以实际扣费为准')}</p>
+    </article>
+  );
 }
 
 export function renderLogContent(

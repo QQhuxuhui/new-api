@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 )
@@ -27,6 +28,9 @@ type Pricing struct {
 	CompletionRatio        float64                 `json:"completion_ratio"`
 	EnableGroup            []string                `json:"enable_groups"`
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
+	// 阶梯计费：billing_mode=tiered_expr 时价格以 billing_expr 为准
+	BillingMode string `json:"billing_mode,omitempty"`
+	BillingExpr string `json:"billing_expr,omitempty"`
 }
 
 type PricingVendor struct {
@@ -290,6 +294,13 @@ func updatePricing() {
 			pricing.ModelRatio = modelRatio
 			pricing.CompletionRatio = ratio_setting.GetCompletionRatio(model)
 			pricing.QuotaType = 0
+		}
+		if billing_setting.IsTieredBilling(model) {
+			expr, _ := billing_setting.GetBillingExpr(model)
+			pricing.BillingMode = billing_setting.BillingModeTieredExpr
+			pricing.BillingExpr = expr
+			pricing.QuotaType = 0
+			pricing.ModelPrice = 0
 		}
 		pricingMap = append(pricingMap, pricing)
 	}

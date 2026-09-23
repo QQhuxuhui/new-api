@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -44,7 +46,135 @@ func valuesEqual(a, b interface{}) bool {
 	return a == b
 }
 
-var ratioTypes = []string{"model_ratio", "completion_ratio", "cache_ratio", "model_price"}
+// pricingSyncFields 是参与同步对比的字段；billing_mode / billing_expr 为阶梯计费字段
+var pricingSyncFields = []string{
+	"model_ratio",
+	"completion_ratio",
+	"cache_ratio",
+	"model_price",
+	billing_setting.BillingModeField,
+	billing_setting.BillingExprField,
+}
+
+var numericPricingSyncFields = map[string]bool{
+	"model_ratio":      true,
+	"completion_ratio": true,
+	"cache_ratio":      true,
+	"model_price":      true,
+}
+
+func valueMap(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	case map[string]float64:
+		out := make(map[string]any, len(typed))
+		for k, v := range typed {
+			out[k] = v
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]any, len(typed))
+		for k, v := range typed {
+			out[k] = v
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func asFloat64(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case json.Number:
+		parsed, err := typed.Float64()
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func normalizeSyncValue(field string, value any) any {
+	if numericPricingSyncFields[field] {
+		if parsed, ok := asFloat64(value); ok {
+			return parsed
+		}
+	}
+	return value
+}
+
+// effectivePricingSyncData 按计费引擎的优先级归一化（移植自上游）：
+// 阶梯计费生效的模型只保留 billing_mode / billing_expr，未生效的表达式与被覆盖的倍率不参与对比。
+func effectivePricingSyncData(data map[string]any) map[string]any {
+	result := make(map[string]any, len(pricingSyncFields))
+	names := make(map[string]struct{})
+	for _, field := range pricingSyncFields {
+		entries := make(map[string]any)
+		for name, raw := range valueMap(data[field]) {
+			value := normalizeSyncValue(field, raw)
+			if numericPricingSyncFields[field] {
+				number, ok := value.(float64)
+				if !ok || math.IsNaN(number) || math.IsInf(number, 0) || number < 0 {
+					continue
+				}
+			} else if _, ok := value.(string); !ok {
+				continue
+			}
+			entries[name] = value
+			names[name] = struct{}{}
+		}
+		result[field] = entries
+	}
+	modes := valueMap(result[billing_setting.BillingModeField])
+	expressions := valueMap(result[billing_setting.BillingExprField])
+	for name := range names {
+		expression, _ := expressions[name].(string)
+		// 只给出 billing_expr、未声明 billing_mode 的上游（部分静态预设）视为阶梯计费；
+		// 显式声明为 ratio 的才表示表达式未生效
+		if _, declared := modes[name]; !declared && strings.TrimSpace(expression) != "" {
+			modes[name] = billing_setting.BillingModeTieredExpr
+		}
+		if modes[name] == billing_setting.BillingModeTieredExpr {
+			if strings.TrimSpace(expression) == "" {
+				for _, field := range pricingSyncFields {
+					delete(valueMap(result[field]), name)
+				}
+				continue
+			}
+			expressions[name] = strings.TrimSpace(expression)
+			for field := range numericPricingSyncFields {
+				delete(valueMap(result[field]), name)
+			}
+			continue
+		}
+		delete(expressions, name)
+		modes[name] = billing_setting.BillingModeRatio
+		_, fixed := valueMap(result["model_price"])[name]
+		_, token := valueMap(result["model_ratio"])[name]
+		if !fixed && !token {
+			for _, field := range pricingSyncFields {
+				delete(valueMap(result[field]), name)
+			}
+			continue
+		}
+		if fixed {
+			for field := range numericPricingSyncFields {
+				if field != "model_price" {
+					delete(valueMap(result[field]), name)
+				}
+			}
+		}
+	}
+	return result
+}
 
 type upstreamResult struct {
 	Name string         `json:"name"`
@@ -216,7 +346,7 @@ func FetchUpstreamRatios(c *gin.Context) {
 			if err := json.Unmarshal(body.Data, &type1Data); err == nil {
 				// 如果包含至少一个 ratioTypes 字段，则认为是 type1
 				isType1 := false
-				for _, rt := range ratioTypes {
+				for _, rt := range pricingSyncFields {
 					if _, ok := type1Data[rt]; ok {
 						isType1 = true
 						break
@@ -224,20 +354,6 @@ func FetchUpstreamRatios(c *gin.Context) {
 				}
 				if isType1 {
 					ch <- upstreamResult{Name: uniqueName, Data: type1Data}
-					return
-				}
-				// type1 变体：上游只给出 tiered_expr 计费表达式（如 basellm 官方倍率预设），换算回倍率
-				if exprs, ok := type1Data[billingExprField].(map[string]any); ok && len(exprs) > 0 {
-					converted, skipped := convertBillingExprData(exprs)
-					if len(skipped) > 0 {
-						logger.LogWarn(c.Request.Context(), fmt.Sprintf("billing_expr from %s: %d model(s) skipped (non-linear or unsupported): %s",
-							chItem.Name, len(skipped), strings.Join(skipped, ", ")))
-					}
-					if len(converted) > 0 {
-						ch <- upstreamResult{Name: uniqueName, Data: converted}
-						return
-					}
-					ch <- upstreamResult{Name: uniqueName, Err: "上游仅提供计费表达式，且没有可换算为倍率的模型"}
 					return
 				}
 			}
@@ -249,6 +365,8 @@ func FetchUpstreamRatios(c *gin.Context) {
 				ModelRatio      float64 `json:"model_ratio"`
 				ModelPrice      float64 `json:"model_price"`
 				CompletionRatio float64 `json:"completion_ratio"`
+				BillingMode     string  `json:"billing_mode"`
+				BillingExpr     string  `json:"billing_expr"`
 			}
 			if err := json.Unmarshal(body.Data, &pricingItems); err != nil {
 				logger.LogWarn(c.Request.Context(), "unrecognized data format from "+chItem.Name+": "+err.Error())
@@ -259,8 +377,17 @@ func FetchUpstreamRatios(c *gin.Context) {
 			modelRatioMap := make(map[string]float64)
 			completionRatioMap := make(map[string]float64)
 			modelPriceMap := make(map[string]float64)
+			billingModeMap := make(map[string]any)
+			billingExprMap := make(map[string]any)
 
 			for _, item := range pricingItems {
+				if item.ModelName == "" {
+					continue
+				}
+				if item.BillingMode == billing_setting.BillingModeTieredExpr && strings.TrimSpace(item.BillingExpr) != "" {
+					billingModeMap[item.ModelName] = billing_setting.BillingModeTieredExpr
+					billingExprMap[item.ModelName] = item.BillingExpr
+				}
 				if item.QuotaType == 1 {
 					modelPriceMap[item.ModelName] = item.ModelPrice
 				} else {
@@ -295,6 +422,10 @@ func FetchUpstreamRatios(c *gin.Context) {
 				}
 				converted["model_price"] = priceAny
 			}
+			if len(billingModeMap) > 0 {
+				converted[billing_setting.BillingModeField] = billingModeMap
+				converted[billing_setting.BillingExprField] = billingExprMap
+			}
 
 			ch <- upstreamResult{Name: uniqueName, Data: converted}
 		}(chn)
@@ -303,7 +434,7 @@ func FetchUpstreamRatios(c *gin.Context) {
 	wg.Wait()
 	close(ch)
 
-	localData := ratio_setting.GetExposedData()
+	localData := billing_setting.GetPricingSyncData(ratio_setting.GetExposedData())
 
 	var testResults []dto.TestResult
 	var successfulChannels []struct {
@@ -346,25 +477,29 @@ func buildDifferences(localData map[string]any, successfulChannels []struct {
 	data map[string]any
 }) map[string]map[string]dto.DifferenceItem {
 	differences := make(map[string]map[string]dto.DifferenceItem)
+	localData = effectivePricingSyncData(localData)
+	normalizedChannels := make([]struct {
+		name string
+		data map[string]any
+	}, 0, len(successfulChannels))
+	for _, channel := range successfulChannels {
+		channel.data = effectivePricingSyncData(channel.data)
+		normalizedChannels = append(normalizedChannels, channel)
+	}
+	successfulChannels = normalizedChannels
 
 	allModels := make(map[string]struct{})
 
-	for _, ratioType := range ratioTypes {
-		if localRatioAny, ok := localData[ratioType]; ok {
-			if localRatio, ok := localRatioAny.(map[string]float64); ok {
-				for modelName := range localRatio {
-					allModels[modelName] = struct{}{}
-				}
-			}
+	for _, field := range pricingSyncFields {
+		for modelName := range valueMap(localData[field]) {
+			allModels[modelName] = struct{}{}
 		}
 	}
 
 	for _, channel := range successfulChannels {
-		for _, ratioType := range ratioTypes {
-			if upstreamRatio, ok := channel.data[ratioType].(map[string]any); ok {
-				for modelName := range upstreamRatio {
-					allModels[modelName] = struct{}{}
-				}
+		for _, field := range pricingSyncFields {
+			for modelName := range valueMap(channel.data[field]) {
+				allModels[modelName] = struct{}{}
 			}
 		}
 	}
@@ -375,27 +510,20 @@ func buildDifferences(localData map[string]any, successfulChannels []struct {
 	for _, channel := range successfulChannels {
 		confidenceMap[channel.name] = make(map[string]bool)
 
-		modelRatios, hasModelRatio := channel.data["model_ratio"].(map[string]any)
-		completionRatios, hasCompletionRatio := channel.data["completion_ratio"].(map[string]any)
+		modelRatios := valueMap(channel.data["model_ratio"])
+		completionRatios := valueMap(channel.data["completion_ratio"])
 
-		if hasModelRatio && hasCompletionRatio {
+		if len(modelRatios) > 0 && len(completionRatios) > 0 {
 			// 遍历所有模型，检查是否满足不可信条件
 			for modelName := range allModels {
 				// 默认为可信
 				confidenceMap[channel.name][modelName] = true
 
 				// 检查是否满足不可信条件：model_ratio为37.5且completion_ratio为1
-				if modelRatioVal, ok := modelRatios[modelName]; ok {
-					if completionRatioVal, ok := completionRatios[modelName]; ok {
-						// 转换为float64进行比较
-						if modelRatioFloat, ok := modelRatioVal.(float64); ok {
-							if completionRatioFloat, ok := completionRatioVal.(float64); ok {
-								if modelRatioFloat == 37.5 && completionRatioFloat == 1.0 {
-									confidenceMap[channel.name][modelName] = false
-								}
-							}
-						}
-					}
+				modelRatioFloat, modelRatioOK := asFloat64(modelRatios[modelName])
+				completionRatioFloat, completionRatioOK := asFloat64(completionRatios[modelName])
+				if modelRatioOK && completionRatioOK && nearlyEqual(modelRatioFloat, 37.5) && nearlyEqual(completionRatioFloat, 1.0) {
+					confidenceMap[channel.name][modelName] = false
 				}
 			}
 		} else {
@@ -407,14 +535,12 @@ func buildDifferences(localData map[string]any, successfulChannels []struct {
 	}
 
 	for modelName := range allModels {
-		for _, ratioType := range ratioTypes {
+		// 归一化后阶梯计费模型不再带倍率字段、倍率模型不再带表达式，
+		// 因此两种计费方式互相切换时各字段都能如实显示差异
+		for _, ratioType := range pricingSyncFields {
 			var localValue interface{} = nil
-			if localRatioAny, ok := localData[ratioType]; ok {
-				if localRatio, ok := localRatioAny.(map[string]float64); ok {
-					if val, exists := localRatio[modelName]; exists {
-						localValue = val
-					}
-				}
+			if val, exists := valueMap(localData[ratioType])[modelName]; exists {
+				localValue = val
 			}
 
 			upstreamValues := make(map[string]interface{})
@@ -425,16 +551,14 @@ func buildDifferences(localData map[string]any, successfulChannels []struct {
 			for _, channel := range successfulChannels {
 				var upstreamValue interface{} = nil
 
-				if upstreamRatio, ok := channel.data[ratioType].(map[string]any); ok {
-					if val, exists := upstreamRatio[modelName]; exists {
-						upstreamValue = val
-						hasUpstreamValue = true
+				if val, exists := valueMap(channel.data[ratioType])[modelName]; exists {
+					upstreamValue = val
+					hasUpstreamValue = true
 
-						if localValue != nil && !valuesEqual(localValue, val) {
-							hasDifference = true
-						} else if valuesEqual(localValue, val) {
-							upstreamValue = "same"
-						}
+					if localValue != nil && !valuesEqual(localValue, val) {
+						hasDifference = true
+					} else if valuesEqual(localValue, val) {
+						upstreamValue = "same"
 					}
 				}
 				if upstreamValue == nil && localValue == nil {

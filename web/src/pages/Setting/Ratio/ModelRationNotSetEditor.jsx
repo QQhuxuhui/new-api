@@ -85,14 +85,18 @@ export default function ModelRatioNotSetEditor(props) {
       const modelPrice = JSON.parse(props.options.ModelPrice || '{}');
       const modelRatio = JSON.parse(props.options.ModelRatio || '{}');
       const completionRatio = JSON.parse(props.options.CompletionRatio || '{}');
+      const billingMode = JSON.parse(
+        props.options['billing_setting.billing_mode'] || '{}',
+      );
 
-      // 找出所有未设置价格和倍率的模型
+      // 找出所有未设置价格和倍率的模型（阶梯计费的模型视为已定价）
       const unsetModels = enabledModels.filter((modelName) => {
         const hasPrice = modelPrice[modelName] !== undefined;
         const hasRatio = modelRatio[modelName] !== undefined;
+        const hasTiered = billingMode[modelName] === 'tiered_expr';
 
         // 如果模型没有价格或者没有倍率设置，则显示
-        return !hasPrice && !hasRatio;
+        return !hasPrice && !hasRatio && !hasTiered;
       });
 
       // 创建模型数据

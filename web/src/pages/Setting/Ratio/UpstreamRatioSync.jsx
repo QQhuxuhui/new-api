@@ -29,6 +29,7 @@ import {
   Tooltip,
   Select,
   Modal,
+  Typography,
 } from '@douyinfe/semi-ui';
 import { IconSearch } from '@douyinfe/semi-icons';
 import {
@@ -86,6 +87,27 @@ function ConflictConfirmModal({ t, visible, items, onOk, onCancel }) {
       />
     </Modal>
   );
+}
+
+const BILLING_MODE_KEY = 'billing_setting.billing_mode';
+const BILLING_EXPR_KEY = 'billing_setting.billing_expr';
+const TIERED_EXPR = 'tiered_expr';
+
+// 计费类别：阶梯表达式 / 固定价格 / 倍率，三者互斥
+function getBillingCategory(ratioType, value) {
+  if (ratioType === 'billing_expr') return 'expr';
+  if (ratioType === 'billing_mode') {
+    return value === TIERED_EXPR ? 'expr' : 'ratio';
+  }
+  return ratioType === 'model_price' ? 'price' : 'ratio';
+}
+
+function parseOptionMap(raw) {
+  try {
+    return JSON.parse(raw || '{}') || {};
+  } catch (e) {
+    return {};
+  }
 }
 
 export default function UpstreamRatioSync(props) {
@@ -238,24 +260,35 @@ export default function UpstreamRatioSync(props) {
     }
   };
 
-  function getBillingCategory(ratioType) {
-    return ratioType === 'model_price' ? 'price' : 'ratio';
-  }
-
   const selectValue = useCallback(
     (model, ratioType, value) => {
-      const category = getBillingCategory(ratioType);
+      const category = getBillingCategory(ratioType, value);
 
       setResolutions((prev) => {
         const newModelRes = { ...(prev[model] || {}) };
 
         Object.keys(newModelRes).forEach((rt) => {
-          if (getBillingCategory(rt) !== category) {
+          if (getBillingCategory(rt, newModelRes[rt]) !== category) {
             delete newModelRes[rt];
           }
         });
 
         newModelRes[ratioType] = value;
+
+        // 阶梯计费需要计费模式与表达式成对写入
+        if (ratioType === 'billing_expr') {
+          newModelRes.billing_mode = TIERED_EXPR;
+        } else if (
+          ratioType === 'billing_mode' &&
+          value === TIERED_EXPR &&
+          newModelRes.billing_expr === undefined
+        ) {
+          const exprUpstreams = differences[model]?.billing_expr?.upstreams;
+          const expr = Object.values(exprUpstreams || {}).find(
+            (v) => v !== null && v !== undefined && v !== 'same',
+          );
+          if (expr !== undefined) newModelRes.billing_expr = expr;
+        }
 
         return {
           ...prev,
@@ -263,7 +296,7 @@ export default function UpstreamRatioSync(props) {
         };
       });
     },
-    [setResolutions],
+    [setResolutions, differences],
   );
 
   const applySync = async () => {
@@ -272,11 +305,14 @@ export default function UpstreamRatioSync(props) {
       CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
       CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
       ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
+      BillingMode: parseOptionMap(props.options[BILLING_MODE_KEY]),
+      BillingExpr: parseOptionMap(props.options[BILLING_EXPR_KEY]),
     };
 
     const conflicts = [];
 
     const getLocalBillingCategory = (model) => {
+      if (currentRatios.BillingMode[model] === TIERED_EXPR) return 'expr';
       if (currentRatios.ModelPrice[model] !== undefined) return 'price';
       if (
         currentRatios.ModelRatio[model] !== undefined ||
@@ -298,16 +334,25 @@ export default function UpstreamRatioSync(props) {
 
     Object.entries(resolutions).forEach(([model, ratios]) => {
       const localCat = getLocalBillingCategory(model);
-      const newCat = 'model_price' in ratios ? 'price' : 'ratio';
+      const newCat =
+        ratios.billing_expr !== undefined || ratios.billing_mode === TIERED_EXPR
+          ? 'expr'
+          : 'model_price' in ratios
+            ? 'price'
+            : 'ratio';
 
       if (localCat && localCat !== newCat) {
         const currentDesc =
-          localCat === 'price'
-            ? `${t('固定价格')} : ${currentRatios.ModelPrice[model]}`
-            : `${t('模型倍率')} : ${currentRatios.ModelRatio[model] ?? '-'}\n${t('补全倍率')} : ${currentRatios.CompletionRatio[model] ?? '-'}`;
+          localCat === 'expr'
+            ? `${t('阶梯计费')} : ${currentRatios.BillingExpr[model] ?? '-'}`
+            : localCat === 'price'
+              ? `${t('固定价格')} : ${currentRatios.ModelPrice[model]}`
+              : `${t('模型倍率')} : ${currentRatios.ModelRatio[model] ?? '-'}\n${t('补全倍率')} : ${currentRatios.CompletionRatio[model] ?? '-'}`;
 
         let newDesc = '';
-        if (newCat === 'price') {
+        if (newCat === 'expr') {
+          newDesc = `${t('阶梯计费')} : ${ratios.billing_expr ?? currentRatios.BillingExpr[model] ?? '-'}`;
+        } else if (newCat === 'price') {
           newDesc = `${t('固定价格')} : ${ratios['model_price']}`;
         } else {
           const newModelRatio = ratios['model_ratio'] ?? '-';
@@ -346,11 +391,17 @@ export default function UpstreamRatioSync(props) {
         CacheRatio: { ...currentRatios.CacheRatio },
         ModelPrice: { ...currentRatios.ModelPrice },
       };
+      const billingMode = { ...currentRatios.BillingMode };
+      const billingExpr = { ...currentRatios.BillingExpr };
+      let billingTouched = false;
 
       Object.entries(resolutions).forEach(([model, ratios]) => {
         const selectedTypes = Object.keys(ratios);
-        const hasPrice = selectedTypes.includes('model_price');
-        const hasRatio = selectedTypes.some((rt) => rt !== 'model_price');
+        const numericTypes = selectedTypes.filter(
+          (rt) => rt !== 'billing_mode' && rt !== 'billing_expr',
+        );
+        const hasPrice = numericTypes.includes('model_price');
+        const hasRatio = numericTypes.some((rt) => rt !== 'model_price');
 
         if (hasPrice) {
           delete finalRatios.ModelRatio[model];
@@ -361,25 +412,52 @@ export default function UpstreamRatioSync(props) {
           delete finalRatios.ModelPrice[model];
         }
 
-        Object.entries(ratios).forEach(([ratioType, value]) => {
+        numericTypes.forEach((ratioType) => {
           const optionKey = ratioType
             .split('_')
             .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
             .join('');
-          finalRatios[optionKey][model] = parseFloat(value);
+          finalRatios[optionKey][model] = parseFloat(ratios[ratioType]);
         });
+
+        // 阶梯计费字段写入 billing_setting；选了倍率 / 固定价格则显式切回倍率计费
+        if (ratios.billing_expr !== undefined) {
+          billingExpr[model] = ratios.billing_expr;
+          billingTouched = true;
+        }
+        if (ratios.billing_mode !== undefined) {
+          billingMode[model] = ratios.billing_mode;
+          billingTouched = true;
+        } else if (
+          numericTypes.length > 0 &&
+          billingMode[model] === TIERED_EXPR
+        ) {
+          billingMode[model] = 'ratio';
+          billingTouched = true;
+        }
       });
+
+      const updates = Object.entries(finalRatios);
+      if (billingTouched) {
+        // 先写表达式再写模式，避免出现没有表达式的阶梯模式
+        updates.push([BILLING_EXPR_KEY, billingExpr]);
+        updates.push([BILLING_MODE_KEY, billingMode]);
+      }
 
       setLoading(true);
       try {
-        const updates = Object.entries(finalRatios).map(([key, value]) =>
-          API.put('/api/option/', {
+        const results = [];
+        for (const [key, value] of updates) {
+          const res = await API.put('/api/option/', {
             key,
             value: JSON.stringify(value, null, 2),
-          }),
-        );
-
-        const results = await Promise.all(updates);
+          });
+          results.push(res);
+          if (!res?.data?.success) {
+            showError(res?.data?.message || t('部分保存失败'));
+            return;
+          }
+        }
 
         if (results.every((res) => res.data.success)) {
           showSuccess(t('同步成功'));
@@ -479,12 +557,35 @@ export default function UpstreamRatioSync(props) {
               </Select.Option>
               <Select.Option value='cache_ratio'>{t('缓存倍率')}</Select.Option>
               <Select.Option value='model_price'>{t('固定价格')}</Select.Option>
+              <Select.Option value='billing_mode'>
+                {t('计费模式')}
+              </Select.Option>
+              <Select.Option value='billing_expr'>
+                {t('计费表达式')}
+              </Select.Option>
             </Select>
           </div>
         </div>
       </div>
     </div>
   );
+
+  const renderSyncValue = (ratioType, value) => {
+    if (ratioType === 'billing_mode') {
+      return value === TIERED_EXPR ? t('阶梯计费') : t('倍率计费');
+    }
+    if (ratioType === 'billing_expr') {
+      return (
+        <Typography.Text
+          ellipsis={{ showTooltip: { opts: { style: { maxWidth: 560 } } } }}
+          style={{ fontFamily: 'monospace', maxWidth: 260 }}
+        >
+          {value}
+        </Typography.Text>
+      );
+    }
+    return value;
+  };
 
   const renderDifferenceTable = () => {
     const dataSource = useMemo(() => {
@@ -576,6 +677,8 @@ export default function UpstreamRatioSync(props) {
             completion_ratio: t('补全倍率'),
             cache_ratio: t('缓存倍率'),
             model_price: t('固定价格'),
+            billing_mode: t('计费模式'),
+            billing_expr: t('计费表达式'),
           };
           const baseTag = (
             <Tag color={stringToColor(text)} shape='circle'>
@@ -647,14 +750,21 @@ export default function UpstreamRatioSync(props) {
       {
         title: t('当前值'),
         dataIndex: 'current',
-        render: (text) => (
-          <Tag
-            color={text !== null && text !== undefined ? 'blue' : 'default'}
-            shape='circle'
-          >
-            {text !== null && text !== undefined ? text : t('未设置')}
-          </Tag>
-        ),
+        render: (text, record) =>
+          text !== null &&
+          text !== undefined &&
+          record.ratioType === 'billing_expr' ? (
+            renderSyncValue(record.ratioType, text)
+          ) : (
+            <Tag
+              color={text !== null && text !== undefined ? 'blue' : 'default'}
+              shape='circle'
+            >
+              {text !== null && text !== undefined
+                ? renderSyncValue(record.ratioType, text)
+                : t('未设置')}
+            </Tag>
+          ),
       },
       ...upstreamNames.map((upName) => {
         const channelStats = (() => {
@@ -774,7 +884,7 @@ export default function UpstreamRatioSync(props) {
                     }
                   }}
                 >
-                  {upstreamVal}
+                  {renderSyncValue(record.ratioType, upstreamVal)}
                 </Checkbox>
                 {!isConfident && (
                   <Tooltip
