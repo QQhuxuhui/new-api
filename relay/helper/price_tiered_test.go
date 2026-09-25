@@ -84,3 +84,19 @@ func TestBillingSettingMapReplaceDropsRemovedModels(t *testing.T) {
 	withBillingSetting(t, `{"a":"tiered_expr"}`, `{}`)
 	assert.Equal(t, billing_setting.BillingModeRatio, billing_setting.GetBillingMode("b"))
 }
+
+// 渠道测试构造的请求设置了 JSON Content-Type，但定价时 Body 仍为 nil，不能 panic
+func TestModelPriceHelperTieredNilBody(t *testing.T) {
+	withBillingSetting(t, `{"gpt-6-sol":"tiered_expr"}`, `{"gpt-6-sol":"tier(\"base\", p * 2 + c * 10)"}`)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = &http.Request{Method: http.MethodPost, Header: make(http.Header)}
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	info := &relaycommon.RelayInfo{OriginModelName: "gpt-6-sol", UsingGroup: "default"}
+	require.NotPanics(t, func() {
+		_, err := ModelPriceHelper(ctx, info, 0, &types.TokenCountMeta{})
+		require.NoError(t, err)
+	})
+	require.NotNil(t, info.TieredBillingSnapshot)
+	assert.Empty(t, info.BillingRequestInput.Body)
+}

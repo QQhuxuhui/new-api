@@ -108,7 +108,10 @@ func buildBillingExprRequestInput(c *gin.Context) billingexpr.RequestInput {
 	}
 	input.Headers = flattenHeaders(c.Request.Header)
 	contentType := strings.ToLower(strings.TrimSpace(c.Request.Header.Get("Content-Type")))
-	if strings.HasPrefix(contentType, "application/json") {
+	// 渠道测试等内部构造的请求在定价时还没有请求体（Body 为 nil），直接读取会 panic
+	_, cached := c.Get(common.KeyRequestBody)
+	hasBody := cached || (c.Request.Body != nil && c.Request.Body != http.NoBody)
+	if hasBody && strings.HasPrefix(contentType, "application/json") {
 		if body, err := common.GetRequestBody(c); err == nil && len(body) > 0 {
 			input.Body = append([]byte(nil), body...)
 		}
