@@ -811,6 +811,28 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
+
+// relayTimeoutBody releases the request timer/context when body consumption ends.
+// Successful streams stop the timer at headers; error responses retain it through EOF.
+type relayTimeoutBody struct {
+	io.ReadCloser
+	cleanup func()
+	once    sync.Once
+}
+
+func (b *relayTimeoutBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil {
+		b.once.Do(b.cleanup)
+	}
+	return n, err
+}
+
+func (b *relayTimeoutBody) Close() error {
+	b.once.Do(b.cleanup)
+	return b.ReadCloser.Close()
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	var client *http.Client
 	var err error
@@ -861,8 +883,10 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 
 	// 渠道配置了 stream_timeout_seconds 时，流式请求改由该空闲超时控制，
-	// 不再受全局 RELAY_TIMEOUT（http.Client 总时长）截断；RELAY_TIMEOUT 仍用于限制等待响应头。
-	var stopHeaderTimer func() bool
+	// 成功流不再受全局 RELAY_TIMEOUT 总时长截断。非 200 响应走普通错误体读取，
+	// 没有流式空闲超时，因此保留 RELAY_TIMEOUT 覆盖响应头及错误体读取。
+	var relayTimer *time.Timer
+	var cancelRelay context.CancelFunc
 	if info.IsStream && info.ChannelMeta != nil && info.ChannelSetting.StreamTimeoutSeconds != nil && client.Timeout > 0 {
 		headerTimeout := client.Timeout
 		streamClient := *client
@@ -870,12 +894,24 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		client = &streamClient
 		ctx, cancelHeaderWait := context.WithCancel(req.Context())
 		req = req.WithContext(ctx)
-		stopHeaderTimer = time.AfterFunc(headerTimeout, cancelHeaderWait).Stop
+		cancelRelay = cancelHeaderWait
+		relayTimer = time.AfterFunc(headerTimeout, cancelRelay)
 	}
 
 	resp, err := client.Do(req)
-	if stopHeaderTimer != nil {
-		stopHeaderTimer()
+	if relayTimer != nil {
+		cleanup := func() {
+			relayTimer.Stop()
+			cancelRelay()
+		}
+		if err != nil || resp == nil {
+			cleanup()
+		} else {
+			if resp.StatusCode == http.StatusOK {
+				relayTimer.Stop()
+			}
+			resp.Body = &relayTimeoutBody{ReadCloser: resp.Body, cleanup: cleanup}
+		}
 	}
 	if err != nil {
 		// 区分"客户端断开导致 context 取消"和"上游真正故障"：

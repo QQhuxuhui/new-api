@@ -211,3 +211,112 @@ func TestDoRequest_ChannelStreamTimeoutKeepsRelayTimeoutForHeaders(t *testing.T)
 		t.Fatalf("expected header wait bounded by relay timeout, took %v", elapsed)
 	}
 }
+
+func TestDoRequest_ChannelStreamTimeoutKeepsRelayTimeoutForErrorBody(t *testing.T) {
+	originalRelayTimeout := common.RelayTimeout
+	common.RelayTimeout = 1
+	service.InitHttpClient()
+	t.Cleanup(func() {
+		common.RelayTimeout = originalRelayTimeout
+		service.InitHttpClient()
+	})
+
+	for _, tc := range []struct {
+		name          string
+		status        int
+		streamTimeout int
+	}{
+		{"rate_limit_with_idle_timeout", http.StatusTooManyRequests, 1},
+		{"server_error_with_unlimited_stream", http.StatusServiceUnavailable, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			defer upstream.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			c := newStreamTimeoutTestContext()
+			c.Request = c.Request.WithContext(ctx)
+			info := &relaycommon.RelayInfo{IsStream: true, ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelSetting: dto.ChannelSettings{StreamTimeoutSeconds: &tc.streamTimeout},
+			}}
+			req, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader("{}"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := DoRequest(c, req, info)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			done := make(chan *types.NewAPIError, 1)
+			go func() { done <- service.RelayErrorHandler(ctx, resp, false) }()
+			select {
+			case apiErr := <-done:
+				if apiErr == nil || apiErr.StatusCode != tc.status {
+					t.Fatalf("expected upstream status %d, got %v", tc.status, apiErr)
+				}
+				if ctx.Err() != nil {
+					t.Fatal("upstream timeout canceled downstream context")
+				}
+			case <-time.After(3 * time.Second):
+				cancel()
+				<-done
+				t.Fatal("error body read exceeded RELAY_TIMEOUT")
+			}
+		})
+	}
+}
+
+func TestDoRequest_StreamResponseReleasesContext(t *testing.T) {
+	originalRelayTimeout := common.RelayTimeout
+	common.RelayTimeout = 60
+	service.InitHttpClient()
+	t.Cleanup(func() {
+		common.RelayTimeout = originalRelayTimeout
+		service.InitHttpClient()
+	})
+	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
+		for _, readAll := range []bool{true, false} {
+			func() {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(status)
+					_, _ = w.Write([]byte("response"))
+				}))
+				defer upstream.Close()
+				streamTimeout := 1
+				info := &relaycommon.RelayInfo{IsStream: true, ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelSetting: dto.ChannelSettings{StreamTimeoutSeconds: &streamTimeout},
+				}}
+				c := newStreamTimeoutTestContext()
+				req, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader("{}"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				resp, err := DoRequest(c, req, info)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				if readAll {
+					body, err := io.ReadAll(resp.Body)
+					if err != nil || string(body) != "response" {
+						t.Fatalf("body=%q err=%v", body, err)
+					}
+				} else if err := resp.Body.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if resp.Request.Context().Err() == nil {
+					t.Errorf("status=%d readAll=%v: upstream context retained after body completion", status, readAll)
+				}
+				if c.Request.Context().Err() != nil {
+					t.Fatal("body completion canceled downstream context")
+				}
+			}()
+		}
+	}
+}
