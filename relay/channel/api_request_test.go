@@ -3,8 +3,10 @@ package channel
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,5 +121,93 @@ func TestDoRequest_AlreadyCanceledContext_ReturnsSkipRetryError(t *testing.T) {
 	}
 	if !types.IsSkipRetryError(apiErr) {
 		t.Fatal("expected skipRetry error, but IsSkipRetryError returned false")
+	}
+}
+
+func newStreamTimeoutTestContext() *gin.Context {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", nil)
+	return c
+}
+
+func TestDoRequest_ChannelStreamTimeoutBypassesRelayTimeoutForBody(t *testing.T) {
+	originalRelayTimeout := common.RelayTimeout
+	common.RelayTimeout = 1
+	service.InitHttpClient()
+	t.Cleanup(func() {
+		common.RelayTimeout = originalRelayTimeout
+		service.InitHttpClient()
+	})
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for i := 0; i < 4; i++ {
+			_, _ = w.Write([]byte("data: x\n\n"))
+			w.(http.Flusher).Flush()
+			time.Sleep(500 * time.Millisecond)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	streamTimeout := 0
+	info := &relaycommon.RelayInfo{
+		IsStream: true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{StreamTimeoutSeconds: &streamTimeout},
+		},
+	}
+	upstreamReq, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	resp, err := DoRequest(newStreamTimeoutTestContext(), upstreamReq, info)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("stream body cut after relay timeout: %v", err)
+	}
+}
+
+func TestDoRequest_ChannelStreamTimeoutKeepsRelayTimeoutForHeaders(t *testing.T) {
+	originalRelayTimeout := common.RelayTimeout
+	common.RelayTimeout = 1
+	service.InitHttpClient()
+	t.Cleanup(func() {
+		common.RelayTimeout = originalRelayTimeout
+		service.InitHttpClient()
+	})
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	streamTimeout := 0
+	info := &relaycommon.RelayInfo{
+		IsStream: true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{StreamTimeoutSeconds: &streamTimeout},
+		},
+	}
+	upstreamReq, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	start := time.Now()
+	_, err = DoRequest(newStreamTimeoutTestContext(), upstreamReq, info)
+	if err == nil {
+		t.Fatalf("expected header wait timeout, got nil")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("expected header wait bounded by relay timeout, took %v", elapsed)
 	}
 }

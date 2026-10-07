@@ -860,7 +860,23 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	// 渠道配置了 stream_timeout_seconds 时，流式请求改由该空闲超时控制，
+	// 不再受全局 RELAY_TIMEOUT（http.Client 总时长）截断；RELAY_TIMEOUT 仍用于限制等待响应头。
+	var stopHeaderTimer func() bool
+	if info.IsStream && info.ChannelMeta != nil && info.ChannelSetting.StreamTimeoutSeconds != nil && client.Timeout > 0 {
+		headerTimeout := client.Timeout
+		streamClient := *client
+		streamClient.Timeout = 0
+		client = &streamClient
+		ctx, cancelHeaderWait := context.WithCancel(req.Context())
+		req = req.WithContext(ctx)
+		stopHeaderTimer = time.AfterFunc(headerTimeout, cancelHeaderWait).Stop
+	}
+
 	resp, err := client.Do(req)
+	if stopHeaderTimer != nil {
+		stopHeaderTimer()
+	}
 	if err != nil {
 		// 区分"客户端断开导致 context 取消"和"上游真正故障"：
 		// 如果下游 context 已取消，说明是客户端断开（超时/主动取消），
