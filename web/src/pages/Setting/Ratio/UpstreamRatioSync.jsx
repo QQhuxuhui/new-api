@@ -299,15 +299,19 @@ export default function UpstreamRatioSync(props) {
     [setResolutions, differences],
   );
 
+  // 以当前生效配置为基底构造写回数据。阶梯计费的 billing_mode / billing_expr
+  // 会被整表写回，基底缺了它们就会把未参与同步的模型配置一并清空。
+  const buildCurrentRatios = () => ({
+    ModelRatio: JSON.parse(props.options.ModelRatio || '{}'),
+    CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
+    CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
+    ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
+    BillingMode: parseOptionMap(props.options[BILLING_MODE_KEY]),
+    BillingExpr: parseOptionMap(props.options[BILLING_EXPR_KEY]),
+  });
+
   const applySync = async () => {
-    const currentRatios = {
-      ModelRatio: JSON.parse(props.options.ModelRatio || '{}'),
-      CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
-      CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
-      ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
-      BillingMode: parseOptionMap(props.options[BILLING_MODE_KEY]),
-      BillingExpr: parseOptionMap(props.options[BILLING_EXPR_KEY]),
-    };
+    const currentRatios = buildCurrentRatios();
 
     const conflicts = [];
 
@@ -391,8 +395,15 @@ export default function UpstreamRatioSync(props) {
         CacheRatio: { ...currentRatios.CacheRatio },
         ModelPrice: { ...currentRatios.ModelPrice },
       };
-      const billingMode = { ...currentRatios.BillingMode };
-      const billingExpr = { ...currentRatios.BillingExpr };
+      // 兜底：基底缺少阶梯计费字段时从当前 options 补齐，避免整表覆盖成空
+      const billingMode = {
+        ...(currentRatios.BillingMode ||
+          parseOptionMap(props.options[BILLING_MODE_KEY])),
+      };
+      const billingExpr = {
+        ...(currentRatios.BillingExpr ||
+          parseOptionMap(props.options[BILLING_EXPR_KEY])),
+      };
       let billingTouched = false;
 
       Object.entries(resolutions).forEach(([model, ratios]) => {
@@ -964,13 +975,7 @@ export default function UpstreamRatioSync(props) {
         items={conflictItems}
         onOk={async () => {
           setConfirmVisible(false);
-          const curRatios = {
-            ModelRatio: JSON.parse(props.options.ModelRatio || '{}'),
-            CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
-            CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
-            ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
-          };
-          await performSync(curRatios);
+          await performSync(buildCurrentRatios());
         }}
         onCancel={() => setConfirmVisible(false)}
       />
