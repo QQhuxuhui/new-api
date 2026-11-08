@@ -31,3 +31,22 @@ export async function savePolicyConfig(options: Record<string, string>) {
   )
   return requireServerSuccess(response.data).data
 }
+
+export type ErrorRuleTestResult = {
+  rules: { id: string; name: string; enabled: boolean; matched: boolean }[]
+  matched_rule_id: string
+  error_type: '' | 'server' | 'client'
+  return_immediately: boolean
+  retry_count: number
+}
+export async function testErrorRules(input: {
+  rules: string
+  status_code: number
+  message: string
+}) {
+  const response = await api.post<Response<ErrorRuleTestResult>>(
+    '/api/option/request_policy/error_rules/test',
+    input
+  )
+  return requireServerSuccess(response.data).data
+}

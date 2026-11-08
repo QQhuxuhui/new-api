@@ -33,6 +33,7 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { ChannelAffinitySection } from '../general/channel-affinity'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import { getPolicyConfig, type PolicyConfig } from './api'
+import { ErrorRulesSection } from './error-rules'
 import { policyLabel } from './policy-label'
 import { RetrySection } from './retry-section'
 import {
@@ -92,7 +93,10 @@ function RoutingPolicyEditor(props: { config: PolicyConfig }) {
     const delta = Object.fromEntries(
       Object.entries(next).filter(([key, value]) => {
         const previous = props.config.options[key]
-        if (key === 'channel_affinity_setting.rules') {
+        if (
+          key === 'channel_affinity_setting.rules' ||
+          key === 'ChannelErrorRules'
+        ) {
           return (
             JSON.stringify(JSON.parse(value)) !==
             JSON.stringify(JSON.parse(previous || '[]'))
@@ -146,6 +150,19 @@ function RoutingPolicyEditor(props: { config: PolicyConfig }) {
             )}
           />
           <RetrySection />
+          <FormField
+            control={form.control}
+            name='ChannelErrorRules'
+            render={({ field }) => (
+              <FormItem>
+                <ErrorRulesSection
+                  rulesJson={field.value}
+                  onRulesChange={field.onChange}
+                />
+                <FormMessage />
+              </FormItem>
+            )}
+          />
           {mutation.isError ? (
             <p role='alert' className='text-destructive text-sm'>
               {mutation.error.message}
