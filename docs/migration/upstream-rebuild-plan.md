@@ -34,44 +34,74 @@
 
 ## 2. 定价
 
-- **k** = 在售、非试用套餐的最低单价（¥/USD）= `min(plans.price ÷ (plans.default_quota ÷ 500000))`。全局单一值，迁移前从老库实算并经人工确认。
-- 新分组倍率 = 老分组倍率 × k（所有分组统一乘）。
-- 充值：`Price = 1`（¥1 = $1）；清空 `TopupGroupRatio`、`AmountDiscount`；余额按 ¥ 显示，`USDExchangeRate = 1`。
+- **k** = 在售、非试用套餐的最低单价（¥/USD）= `min(plans.price ÷ (plans.default_quota ÷ 500000))`。全局单一值，迁移前从老库实算并经人工确认。候选集为空、`default_quota ≤ 0`、算出 k ≤ 0 或 k ≥ 1 时脚本报错退出。k 以十进制定点数（保留 6 位）参与计算，不用浮点。
+- 新分组倍率 = 老分组倍率 × k（所有分组统一乘），**`GroupGroupRatio` 特殊倍率同样 × k**（next `relay/helper/price.go` 优先取 GroupGroupRatio，漏乘会让对应用户购买力变化）。
+- 模型价格：**按老站实际生效值固化**，不是只复制 options 行。老站部分价格来自代码内置（dev `setting/billing_setting/builtin_billing.go` 的内置表达式、`model_ratio.go` 里硬编码且优先于配置的补全倍率，如 gpt-4o 系列），next 同名模型的内置值已不同。做法：用 dev 代码加载老库配置，对全部在用模型导出生效的计费模式、表达式、模型倍率/固定价、补全/缓存/缓存创建/图片/音频倍率，在新站逐个显式写入；导入后检查没有模型仍落在 next 默认价格上。
+- 渠道倍率（D12 放弃）：演练时列出所有 `ratio ≠ 1` 或 `model_ratio` 非空的启用渠道；对这些渠道承载的模型，要么拆成独立分组把渠道倍率折进分组倍率，要么接受价格变化——逐项报给用户确认。
+- 充值：`Price = 1`（¥1 = $1）；清空 `TopupGroupRatio`、`AmountDiscount`；余额按 ¥ 显示，`USDExchangeRate = 1`。各支付方式定价独立：Stripe 用 `StripeUnitPrice`（默认 8），Creem 用商品自带 Price/Quota，USDT 有自己的汇率。上线只开启逐项核对过的支付方式，每种用真实小额支付验证 ¥1 → 500000 quota，其余保持停用。
 
-**性质**：用户可用 token 量不变；因 k 为最低单价，任何用户换算后余额的人民币价值 ≤ 其实付金额，平台不新增负债。
+**性质**：在"模型价格原样、分组倍率与 GroupGroupRatio 都 × k、渠道倍率已折算"的前提下，同一用户同一请求在新站的扣费 = 老站扣费 × k，余额也 × k，所以可用 token 量不变。演练对**每个在用模型**分别覆盖纯输入、输出、缓存读写及适用的计费分支（阶梯、图片、按次），用新旧两套代码计算扣费并比较；只允许整数舍入差，其余偏离 k 的情况阻断上线，逐项报给用户。
+注意：这**不**保证每个用户的余额人民币价值 ≤ 实付——赠送、管理员发放、兑换码、返佣、历史低价订单、限期套餐转永久余额都会突破这个上界；演练报告单独统计这几类额度的总量，供评估负债。
 
 ## 3. 数据迁移
 
-新库独立部署，一次性脚本迁移。`QuotaPerUnit` 两边均为 500000，单位不变。
+新库**和新 Redis（独立实例或独立逻辑库）**独立部署，一次性脚本迁移。两边用户/令牌缓存键格式相同（`user:<id>`、`token:<HMAC>`），且 next `model/token_cache.go` 修复缓存时保留已有的 RemainQuota，共用 Redis 会让令牌额度停在换算前的数值。每次演练重导和最终导入后，先停新站实例、清空新 Redis，再启动；验收要通过真实请求核对运行时读到的余额、令牌额度和分组，不只比对数据库。`QuotaPerUnit` 两边均为 500000，单位不变。
 
 | 对象 | 处理 |
 |---|---|
 | users | 全量，ID 不变（含密码哈希、邮箱、第三方绑定、角色、`aff_code`、`inviter_id`）。`quota` 按下式重算；`aff_quota × k` |
-| tokens | 原样（key 值、过期、模型限制）；`remain_quota × k`；分组映射到新扁平分组 |
-| channels | 迁上游通用字段；第一阶段已移植的二开设置随之映射，其余丢弃 |
-| redemptions（未使用） | 码值不变；余额码面额 × k；套餐码（`plan_id>0`）转余额码，面额 = 套餐额度 × k |
-| logs / 订单 / 套餐表 | 不迁；老库只读保留 ≥ 6 个月 |
+| 返佣反作弊数据 | 随邀请返现（D14）一起迁：`users.aff_status`（next 无此字段，移植时补）、`user_payment_accounts` 全量、反作弊窗口内的 `user_login_ip_logs`；演练覆盖已冻结邀请人、历史共享支付账号的审核结果 |
+| 容错规则 | `channel_disable_rules` 逐条导出，映射到移植后的规则表（保留启用状态、优先级、匹配方式、客户端错误处理、重试次数与间隔）；用同一组状态码和错误文本比对新旧规则的匹配结果和重试次数 |
+| 认证关联表 | `two_fas`、`two_fa_backup_codes`、`passkey_credentials` 原样迁移（保留启用状态与备用码使用状态）；next 的 Passkey 新增 RPID 字段，按新站域名填充，`api.sparkcode.top` 不变则 Passkey 可继续用。演练覆盖 密码+TOTP、备用码、Passkey 登录 |
+| 分组 | 演练前生成完整映射表：把老分组树（含继承倍率、父组选路到子组）展开成扁平分组；对每个 `users.group`、令牌分组（含空组、父组）给出新组名、`auto_groups` 顺序、是否 `cross_group_retry`。脚本按模型比对每个迁移令牌新旧可达渠道集合，不丢失、不扩大 |
+| 套餐分组权限 | 老站持有套餐的用户按套餐快照 `plan_channel_groups` 选路（dev `model/user_plan.go` GetChannelGroups、`service/channel_select.go` 优先 plan_groups），可能拥有用户组之外的分组。映射输入必须包含每个用户有效套餐的分组快照：套餐取消后，把这些分组并入该用户新站的可用分组。next 的授权粒度是 `users.group`：`service/group.go` FilterUserTokenAutoGroups 先按用户组的可选分组过滤令牌 `auto_groups`，再按 `MaxTokenAutoGroups`（默认 5）截断。因此做法是：按「原用户组 + 套餐分组集合」的组合生成**独立用户组**，为它配置 `GroupSpecialUsableGroup`、`GroupGroupRatio`（× k）和令牌 `auto_groups`，并把 `MaxTokenAutoGroups` 设为不小于最长映射；不给原用户组整体增权。按模型核对新旧可达渠道集合一致——既不丢付费用户的模型，也不让同组其他用户获得；用户新建、修改令牌后的权限也纳入验收 |
+| tokens | 原样（key 值、过期、模型限制）；`remain_quota × k`（无限额度令牌不变）；分组按上表映射 |
+| channels | 迁上游通用字段，第一阶段已移植的二开设置随之映射，其余丢弃。**通过 next 的渠道创建逻辑导入（会调用 `AddAbilities`），或导入后重建 `abilities` 表**；导出"各分组 × 各模型的可用渠道数"，并对每个分组发一次真实请求验收 |
+| 系统配置 | 迁：模型倍率/价格/补全倍率/阶梯计费、分组倍率（× k）、GroupGroupRatio（× k）、用户可选分组、站点基础配置。重设：支付相关（§2 充值）、Turnstile、OAuth 回调地址。丢弃：dev 独有 option 键 |
+| redemptions（未使用） | 码值、`status`、`expired_time`、`deleted_at` 原样；面额统一 = **该码自身的 `redemptions.quota` × k**（套餐码 `plan_id>0` 也用自身 quota，不读套餐模板），转为余额码；关联套餐已删除/禁用的码单列核对 |
+| logs / 订单 / 套餐表 / tasks | 不迁；老库只读保留 ≥ 6 个月（老任务结果查询由只读老库承接，客诉时人工查） |
 
-**新余额**：
+**新余额**（快照时刻 T，统一 UTC+8）：
 
 ```
-new_quota = ( users.quota
-            + Σ user_plans.quota   -- status=1，含当前与排队未开始；排除 refunded
+new_quota = round_half_up( ( users.quota
+            + Σ 有效套餐 user_plans.quota
             + 当日 user_daily_pools.(total_quota - used_quota)
-            ) × k
+            ) × k )
 ```
 
-- 封禁 / 暂停（`paused_at>0`）用户：照常换算，账号保持封禁。
-- 不换算：status 5/6（没收/撤销）的套餐；`plan_name='legacy'` 的历史迁移套餐（当初复制钱包余额生成、钱包未扣，计入会重复）——演练时先报数量与金额。
+有效套餐：`status=1` 且 `refund_status≠'refunded'`，并满足下面其一：
+- 已开始：`started_at>0` 且 `expires_at=0 或 expires_at>T`；
+- 排队未开始：`started_at=0`（不看 expires_at，它只是预估值）；
+- 暂停（封禁导致）：`paused_at>0`，不判过期。
 
-**在途事项硬校验**（任一存在则脚本报错退出）：`plan_orders` / `topup_orders` 中 status 为 pending 或 paid 的订单；`refund_status='refund_requested'`；待审 / 未结算的 `aff_audit_logs`；`user_asset_snapshots` 中 `restored_at=0` 的行。
+迁移前先跑一次老站的过期处理（`ProcessPlanExpiry`），再按上述谓词取数；被排除的套餐（已过期、status 5/6、legacy）连同额度输出到报告。
+
+- 封禁用户：照常换算，账号保持封禁。
+- 不换算：status 5/6（没收/撤销）的套餐；`plan_name='legacy'` 的历史迁移套餐（当初复制钱包余额生成、钱包未扣，计入会重复）——演练时先报数量与金额。
+- 数值：中间值用 int64/定点十进制；结果超过新库 `users.quota`（int）上限、或任何余额为负时报错退出，不截断。
+
+**在途事项硬校验**（任一存在则脚本报错退出）：
+- `plan_orders` 中 status 为 pending 或 paid（paid = 已付未发货）。
+- `topup_orders` 中 status 为 pending（**paid 是已到账终态，不算在途**）；对 paid 订单抽查入账一致性。
+- `top_ups`（Stripe/Creem/易支付等老路径）中 status 为 pending。
+- `user_plans.refund_status='refund_requested'`。
+- 待审 / 未结算的 `aff_audit_logs`。
+- `user_asset_snapshots` 是封禁没收的申诉备份，`restored_at=0` 只表示未恢复，**不算在途**；导出清单存档，对应没收资产按 D20 不换算。仅当存在正在处理中的申诉恢复时人工清零。
+- `tasks` 中未完成的任务，或 `billing_status` 仍为待结算的任务；未处理的 `task_billing_compensations`。
 
 ## 4. 切换流程
 
-1. T-3 天：关闭套餐购买、退款申请入口，公告"余额数字 × k、单价同比下调、可用量不变"。
-2. 处理完全部在途订单 / 退款 / 返佣。
-3. **演练**（至少一次，生产库快照）：输出对账报告——k 实际值、迁移前后 Σ余额 × k 是否一致、抽查 20 个用户、legacy 套餐条数与额度、脚本耗时。人工确认后定切换时间。
-4. 停服窗口：老站停写 → 跑脚本 → 对账 → `api.sparkcode.top` 反代切到新容器。
+1. T-3 天：关闭**所有**付款入口（套餐购买、钱包充值、USDT、Stripe/Creem/易支付）和退款申请；公告"余额数字 × k、单价同比下调、可用量不变"。
+2. 处理完全部在途订单 / 退款 / 返佣；在支付网关侧关单并做最终对账。
+3. **演练**（至少一次，生产库快照）：输出对账报告——k 实际值；**逐用户、逐令牌、逐兑换码**的预期值与导入值全量比对及舍入差额；扣费比抽样（§2 性质）；各分组可用渠道数；legacy / 过期 / 赠送类额度统计；脚本耗时。验证脚本失败后可整体重跑（目标库清空重导，或事务导入）。人工确认后定切换时间。
+4. 停服窗口：
+   1. 反代停止接入新的 API 请求和任务提交，同时冻结所有控制台写接口（注册、兑换码兑换 `/user/topup`、返佣转余额 `/aff_transfer`、令牌增改、管理员调额等），只保留排空结算所需路径；冻结持续到切流完成；
+   2. 等存量流式连接结束、异步任务完成并结算、批量写入落库；
+   3. 停老站后台任务，取最终快照；
+   4. 跑脚本 → 对账 → 新站先以隔离状态做验收请求（只用测试账号）→ `api.sparkcode.top` 反代切到新容器。
 5. 老站转内网只读。
 
-**回滚**：把反代切回老容器。仅在新站尚未产生新的充值时可行。
+**迟到款项**：切换后才到的老订单支付成功回调，由只读老库识别订单、在新站人工入账（或原路退款），每笔登记。
+
+**回滚**：只在新站开放真实流量之前可直接回滚——第 4.4 步隔离验收（仅测试账号）失败时，把反代切回老容器、老站解冻即可。一旦开放真实流量，新站产生的消费、兑换、返佣、账号/Key 修改都不在老库里，**不再回切**，出问题在新站前向修复。
