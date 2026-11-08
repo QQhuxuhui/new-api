@@ -738,14 +738,31 @@ export type ChannelHealthResponse = {
   items: ChannelHealth[]
 }
 
+/** The server rejects health lookups for more IDs than this in one request. */
+export const CHANNEL_HEALTH_BATCH_SIZE = 500
+
+/** Looks up channel health in batches the server accepts and merges them. */
 export async function getChannelsHealth(
   ids: number[]
 ): Promise<ChannelHealthResponse> {
-  const response = await api.get<{
-    success: boolean
-    data: ChannelHealthResponse
-  }>('/api/channel/health', { params: { ids: ids.join(',') } })
-  return requireServerSuccess(response.data).data
+  const unique = [...new Set(ids)]
+  const batches: number[][] = []
+  for (let i = 0; i < unique.length; i += CHANNEL_HEALTH_BATCH_SIZE) {
+    batches.push(unique.slice(i, i + CHANNEL_HEALTH_BATCH_SIZE))
+  }
+  const responses = await Promise.all(
+    batches.map(async (batch) => {
+      const response = await api.get<{
+        success: boolean
+        data: ChannelHealthResponse
+      }>('/api/channel/health', { params: { ids: batch.join(',') } })
+      return requireServerSuccess(response.data).data
+    })
+  )
+  return {
+    available: responses.every((response) => response.available),
+    items: responses.flatMap((response) => response.items),
+  }
 }
 
 export async function resetChannelHealth(id: number): Promise<void> {

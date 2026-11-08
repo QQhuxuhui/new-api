@@ -24,7 +24,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 
-import type { ChannelHealth } from '../../api'
+import { getChannelsHealth, type ChannelHealth } from '../../api'
 import { ChannelHealthCell } from '../channel-health-cell'
 import { ChannelHealthContext } from '../channel-health-context'
 
@@ -109,5 +109,31 @@ describe('ChannelHealthCell', () => {
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/api/channel/7/health/reset')
     )
+  })
+
+  it('splits health lookups into batches the server accepts', async () => {
+    const get = vi.spyOn(api, 'get').mockImplementation(
+      async (_url, config) => {
+        const ids = String(
+          (config as { params: { ids: string } }).params.ids
+        ).split(',')
+        return {
+          data: {
+            success: true,
+            data: {
+              available: true,
+              items: ids.map((id) => health({ channel_id: Number(id) })),
+            },
+          },
+        }
+      }
+    )
+    const ids = Array.from({ length: 501 }, (_, index) => index + 1)
+
+    const result = await getChannelsHealth([...ids, 1])
+
+    expect(get).toHaveBeenCalledTimes(2)
+    expect(result.available).toBe(true)
+    expect(result.items).toHaveLength(501)
   })
 })
