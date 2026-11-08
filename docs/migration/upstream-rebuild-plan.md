@@ -34,7 +34,7 @@
 
 ## 2. 定价
 
-- **k** = 在售、非试用套餐的最低单价（¥/USD）= `min(plans.price ÷ (plans.default_quota ÷ 500000))`。全局单一值，迁移前从老库实算并经人工确认。候选集为空、`default_quota ≤ 0`、算出 k ≤ 0 或 k ≥ 1 时脚本报错退出。k 以十进制定点数（保留 6 位）参与计算，不用浮点。
+- **k** = 公开套餐与充值档位中的最低单价（¥/USD），**排除定制/企业套餐**（如“月卡-定制-100刀” 0.133、“千面科技” 0.32）。公开套餐单价 = `plans.price ÷ (plans.default_quota ÷ 500000)`，充值档位单价 = `Price × AmountDiscount`。2026-11-08 生产实测：旗舰版 0.4995、充值满 2000 档 0.5，**k = 0.5**（迁移前重算并经人工确认）。候选集为空、算出 k ≤ 0 或 k ≥ 1 时脚本报错退出。k 以十进制定点数参与计算，不用浮点。
 - 新分组倍率 = 老分组倍率 × k（所有分组统一乘），**`GroupGroupRatio` 特殊倍率同样 × k**（next `relay/helper/price.go` 优先取 GroupGroupRatio，漏乘会让对应用户购买力变化）。
 - 模型价格：**按老站实际生效值固化**，不是只复制 options 行。老站部分价格来自代码内置（dev `setting/billing_setting/builtin_billing.go` 的内置表达式、`model_ratio.go` 里硬编码且优先于配置的补全倍率，如 gpt-4o 系列），next 同名模型的内置值已不同。做法：用 dev 代码加载老库配置，对全部在用模型导出生效的计费模式、表达式、模型倍率/固定价、补全/缓存/缓存创建/图片/音频倍率，在新站逐个显式写入；导入后检查没有模型仍落在 next 默认价格上。
 - 渠道倍率（D12 放弃）：演练时列出所有 `ratio ≠ 1` 或 `model_ratio` 非空的启用渠道；对这些渠道承载的模型，要么拆成独立分组把渠道倍率折进分组倍率，要么接受价格变化——逐项报给用户确认。
@@ -54,7 +54,7 @@
 | 容错规则 | `channel_disable_rules` 逐条导出，映射到移植后的规则表（保留启用状态、优先级、匹配方式、客户端错误处理、重试次数与间隔）；用同一组状态码和错误文本比对新旧规则的匹配结果和重试次数 |
 | 认证关联表 | `two_fas`、`two_fa_backup_codes`、`passkey_credentials` 原样迁移（保留启用状态与备用码使用状态）；next 的 Passkey 新增 RPID 字段，按新站域名填充，`api.sparkcode.top` 不变则 Passkey 可继续用。演练覆盖 密码+TOTP、备用码、Passkey 登录 |
 | 分组 | 演练前生成完整映射表：把老分组树（含继承倍率、父组选路到子组）展开成扁平分组；对每个 `users.group`、令牌分组（含空组、父组）给出新组名、`auto_groups` 顺序、是否 `cross_group_retry`。脚本按模型比对每个迁移令牌新旧可达渠道集合，不丢失、不扩大 |
-| 套餐分组权限 | 老站持有套餐的用户按套餐快照 `plan_channel_groups` 选路（dev `model/user_plan.go` GetChannelGroups、`service/channel_select.go` 优先 plan_groups），可能拥有用户组之外的分组。映射输入必须包含每个用户有效套餐的分组快照：套餐取消后，把这些分组并入该用户新站的可用分组。next 的授权粒度是 `users.group`：`service/group.go` FilterUserTokenAutoGroups 先按用户组的可选分组过滤令牌 `auto_groups`，再按 `MaxTokenAutoGroups`（默认 5）截断。因此做法是：按「原用户组 + 套餐分组集合」的组合生成**独立用户组**，为它配置 `GroupSpecialUsableGroup`、`GroupGroupRatio`（× k）和令牌 `auto_groups`，并把 `MaxTokenAutoGroups` 设为不小于最长映射；不给原用户组整体增权。按模型核对新旧可达渠道集合一致——既不丢付费用户的模型，也不让同组其他用户获得；用户新建、修改令牌后的权限也纳入验收 |
+| 套餐专属分组 | 只能通过套餐访问、不在 `UserUsableGroups` 里的分组（实测：`cc逆向1`、`gemini-t3`、`claude-福利`、`glm`）**新站下线**；这些分组上的令牌**不迁移**（实测 cc逆向1 ×16、gemini-t3 ×12，其余两个分组无令牌）。新站不再有套餐分组权限，不生成独立用户组；持有套餐的用户都在 `default` 组，套餐取消后与普通用户权限一致 |
 | tokens | 原样（key 值、过期、模型限制）；`remain_quota × k`（无限额度令牌不变）；分组按上表映射 |
 | channels | 迁上游通用字段，第一阶段已移植的二开设置随之映射，其余丢弃。**通过 next 的渠道创建逻辑导入（会调用 `AddAbilities`），或导入后重建 `abilities` 表**；导出"各分组 × 各模型的可用渠道数"，并对每个分组发一次真实请求验收 |
 | 系统配置 | 迁：模型倍率/价格/补全倍率/阶梯计费、分组倍率（× k）、GroupGroupRatio（× k）、用户可选分组、站点基础配置。重设：支付相关（§2 充值）、Turnstile、OAuth 回调地址。丢弃：dev 独有 option 键 |
@@ -78,17 +78,19 @@ new_quota = round_half_up( ( users.quota
 迁移前先跑一次老站的过期处理（`ProcessPlanExpiry`），再按上述谓词取数；被排除的套餐（已过期、status 5/6、legacy）连同额度输出到报告。
 
 - 封禁用户：照常换算，账号保持封禁。
-- 不换算：status 5/6（没收/撤销）的套餐；`plan_name='legacy'` 的历史迁移套餐（当初复制钱包余额生成、钱包未扣，计入会重复）——演练时先报数量与金额。
+- 管理员账号（role=100）与站长自用账号（id=4，role=1）：不换算，新站余额直接设为 ¥10,000（10000 × 500000 quota）。
+- 负余额：清零后再换算（实测 234 人，合计 -$94.34）。
+- 不换算：status 5/6（没收/撤销）的套餐；`plan_name='legacy'` 的历史迁移套餐（当初复制钱包余额生成、钱包未扣，计入会重复）——演练时先报数量与金额。另：“千面科技（gemini）”企业套餐不换算（客户已迁走）。
 - 数值：中间值用 int64/定点十进制；结果超过新库 `users.quota`（int）上限、或任何余额为负时报错退出，不截断。
 
 **在途事项硬校验**（任一存在则脚本报错退出）：
 - `plan_orders` 中 status 为 pending 或 paid（paid = 已付未发货）。
 - `topup_orders` 中 status 为 pending（**paid 是已到账终态，不算在途**）；对 paid 订单抽查入账一致性。
-- `top_ups`（Stripe/Creem/易支付等老路径）中 status 为 pending。
+- `top_ups`（Stripe/Creem/易支付等老路径）中创建不足 24 小时的 pending；更早的 pending 视为放弃支付（实测 229 条，最早 2025-12），不阻断，但在支付网关侧对账确认未成功付款。
 - `user_plans.refund_status='refund_requested'`。
 - 待审 / 未结算的 `aff_audit_logs`。
 - `user_asset_snapshots` 是封禁没收的申诉备份，`restored_at=0` 只表示未恢复，**不算在途**；导出清单存档，对应没收资产按 D20 不换算。仅当存在正在处理中的申诉恢复时人工清零。
-- `tasks` 中未完成的任务，或 `billing_status` 仍为待结算的任务；未处理的 `task_billing_compensations`。
+- `tasks` 中 `billing_status` 为待结算的任务；未处理的 `task_billing_compensations`。`billing_status` 为空的是结算 outbox 上线前的历史行（实测 10 条，均为 2026-07-20），不检查。
 
 ## 4. 切换流程
 
