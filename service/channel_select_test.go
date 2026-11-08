@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
@@ -284,6 +286,67 @@ func TestShouldRecordChannelHealthFailure(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			assert.Equal(t, test.want, ShouldRecordChannelHealthFailure(test.err))
+		})
+	}
+}
+
+func TestChannelHealthStaleFailureCannotResuspendAfterReset(t *testing.T) {
+	server := useChannelHealthRedis(t)
+	const id = 950003
+	suspended := fmt.Sprintf(model.ChannelHealthSuspendedKey, id)
+	for range 3 {
+		RecordChannelFailure(id, http.StatusServiceUnavailable, "upstream unavailable")
+	}
+	require.False(t, server.Exists(suspended), "two high-failure-rate periods so far")
+
+	// A reset lands between the earlier failures and the next one; the next
+	// failure starts a new consecutive count instead of reusing the old one.
+	require.NoError(t, ResetChannelHealth(id))
+	RecordChannelFailure(id, http.StatusServiceUnavailable, "upstream unavailable")
+	assert.False(t, server.Exists(suspended))
+	got, err := server.Get(fmt.Sprintf(keyFailures, id))
+	require.NoError(t, err)
+	assert.Equal(t, "1", got)
+}
+
+func TestChannelHealthOutcomeJudgesStreamEnd(t *testing.T) {
+	stream := func(reason relaycommon.StreamEndReason) *relaycommon.StreamStatus {
+		status := relaycommon.NewStreamStatus()
+		status.SetEndReason(reason, nil)
+		return status
+	}
+	for _, test := range []struct {
+		name         string
+		stream       *relaycommon.StreamStatus
+		wantSuccess  bool
+		wantFailures bool
+	}{
+		{name: "non-stream success", wantSuccess: true},
+		{name: "stream finished normally", stream: stream(relaycommon.StreamEndReasonDone), wantSuccess: true},
+		{name: "upstream stream timeout", stream: stream(relaycommon.StreamEndReasonTimeout), wantFailures: true},
+		{name: "upstream read error", stream: stream(relaycommon.StreamEndReasonScannerErr), wantFailures: true},
+		{name: "client went away", stream: stream(relaycommon.StreamEndReasonClientGone)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := useChannelHealthRedis(t)
+			const id = 950004
+			bucket := currentHealthBucket()
+			totalKey := fmt.Sprintf(keyBucketTotal, id, bucket)
+			failureKey := fmt.Sprintf(keyBucketFailures, id, bucket)
+			successKey := fmt.Sprintf(keyTotalSuccesses, id)
+
+			RecordChannelHealthOutcome(id, nil, test.stream)
+
+			if !test.wantSuccess && !test.wantFailures {
+				// Nothing is scheduled for a client disconnect.
+				assert.False(t, server.Exists(totalKey))
+				return
+			}
+			require.Eventually(t, func() bool { return server.Exists(totalKey) }, time.Second, 5*time.Millisecond)
+			assert.Equal(t, test.wantFailures, server.Exists(failureKey))
+			if test.wantSuccess {
+				require.Eventually(t, func() bool { return server.Exists(successKey) }, time.Second, 5*time.Millisecond)
+			}
 		})
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -203,11 +204,24 @@ func RecordChannelSuccess(channelID int) {
 	}
 }
 
-var failureCounterScript = redis.NewScript(`
+// failureTransitionScript applies one high-failure-rate failure atomically:
+// it flags warning, counts the consecutive failure and, at the threshold (or
+// when ARGV[5] forces it), writes the suspension in the same step. A success or
+// reset that runs before it therefore starts the count from zero, and one that
+// runs after it clears the result; neither can be undone by a stale failure.
+// KEYS: failures, last_failure, total_failures, warning, suspended, suspension_count
+// ARGV: now, warning TTL seconds, suspension seconds, threshold, force (0/1)
+// Returns {consecutive failures, suspension number or 0}.
+var failureTransitionScript = redis.NewScript(`
+redis.call('SET', KEYS[4], 1, 'EX', ARGV[2])
 local failures = redis.call('INCR', KEYS[1])
 redis.call('SET', KEYS[2], ARGV[1])
 redis.call('INCR', KEYS[3])
-return failures
+if ARGV[5] == '1' or failures >= tonumber(ARGV[4]) then
+  redis.call('SET', KEYS[5], 1, 'EX', ARGV[3])
+  return {failures, redis.call('INCR', KEYS[6])}
+end
+return {failures, 0}
 `)
 
 // RecordChannelFailure records a failure and moves the channel to warning or
@@ -227,39 +241,37 @@ func RecordChannelFailure(channelID int, statusCode int, message string) {
 	if model.IsChannelAlwaysHealthy(channelID) {
 		return
 	}
-	if shouldSuspendImmediately(statusCode, message) {
-		suspendChannel(ctx, channelID, "immediate")
-		return
-	}
+	force := shouldSuspendImmediately(statusCode, message)
 	stats := windowStats(ctx, []int{channelID})[channelID]
-	if !isHighFailureRate(stats[0], stats[1]) {
+	if !force && !isHighFailureRate(stats[0], stats[1]) {
 		return
 	}
-	if err := common.RDB.Set(ctx, fmt.Sprintf(model.ChannelHealthWarningKey, channelID), 1, time.Duration(common.WarningTTLSeconds)*time.Second).Err(); err != nil {
-		common.SysLog(common.LogText("channel #%d health warning flag failed: %v", channelID, err))
+	forceArg := "0"
+	if force {
+		forceArg = "1"
 	}
-	failures, err := failureCounterScript.Run(ctx, common.RDB,
-		[]string{fmt.Sprintf(keyFailures, channelID), fmt.Sprintf(keyLastFailure, channelID), fmt.Sprintf(keyTotalFailures, channelID)},
-		time.Now().Unix()).Int()
-	if err != nil {
-		common.SysLog(common.LogText("channel #%d health failure counter failed: %v", channelID, err))
+	result, err := failureTransitionScript.Run(ctx, common.RDB,
+		[]string{
+			fmt.Sprintf(keyFailures, channelID),
+			fmt.Sprintf(keyLastFailure, channelID),
+			fmt.Sprintf(keyTotalFailures, channelID),
+			fmt.Sprintf(model.ChannelHealthWarningKey, channelID),
+			fmt.Sprintf(model.ChannelHealthSuspendedKey, channelID),
+			fmt.Sprintf(keySuspensionCount, channelID),
+		},
+		time.Now().Unix(), common.WarningTTLSeconds, int(FixedSuspensionDuration.Seconds()), SuspensionThreshold, forceArg,
+	).Int64Slice()
+	if err != nil || len(result) != 2 {
+		common.SysLog(common.LogText("channel #%d health failure transition failed: %v", channelID, err))
 		return
 	}
-	if failures >= SuspensionThreshold {
-		suspendChannel(ctx, channelID, fmt.Sprintf("window %d/%d failed", stats[1], stats[0]))
+	if result[1] > 0 {
+		reason := fmt.Sprintf("window %d/%d failed, %d consecutive", stats[1], stats[0], result[0])
+		if force {
+			reason = "channel fault: " + common.LocalLogPreview(message)
+		}
+		common.SysLog(common.LogText("channel #%d suspended for %v (suspension #%d, %s)", channelID, FixedSuspensionDuration, result[1], reason))
 	}
-}
-
-func suspendChannel(ctx context.Context, channelID int, reason string) {
-	count, err := common.RDB.Incr(ctx, fmt.Sprintf(keySuspensionCount, channelID)).Result()
-	if err != nil {
-		common.SysLog(common.LogText("channel #%d suspension count failed: %v", channelID, err))
-	}
-	if err := common.RDB.Set(ctx, fmt.Sprintf(model.ChannelHealthSuspendedKey, channelID), "1", FixedSuspensionDuration).Err(); err != nil {
-		common.SysLog(common.LogText("channel #%d suspension failed: %v", channelID, err))
-		return
-	}
-	common.SysLog(common.LogText("channel #%d suspended for %v (suspension #%d, %s)", channelID, FixedSuspensionDuration, count, reason))
 }
 
 // GetBatchChannelHealth returns the health state of each channel.
@@ -335,15 +347,25 @@ func ResetChannelHealth(channelID int) error {
 		fmt.Sprintf(model.ChannelHealthSuspendedKey, channelID)).Err()
 }
 
-// RecordChannelHealthOutcome records one relay attempt in the background. A
-// nil error is a success; other errors count only when they implicate the
-// channel.
-func RecordChannelHealthOutcome(channelID int, err *types.NewAPIError) {
+// RecordChannelHealthOutcome records one relay attempt in the background.
+// Errors count only when they implicate the channel. A nil error is a success
+// only when the stream (if any) ended normally; a stream cut by an upstream
+// timeout or read error counts as a failure, and one ended by the client is
+// not recorded.
+func RecordChannelHealthOutcome(channelID int, err *types.NewAPIError, stream *relaycommon.StreamStatus) {
 	if common.RDB == nil || channelID <= 0 {
 		return
 	}
 	if err == nil {
-		gopool.Go(func() { RecordChannelSuccess(channelID) })
+		outcome := stream.OutcomeSnapshot()
+		switch {
+		case stream == nil || stream.IsNormalEnd() && !outcome.HasErrors && (outcome.Response == "" || outcome.Response == relaycommon.ResponseOutcomeCompleted):
+			gopool.Go(func() { RecordChannelSuccess(channelID) })
+		case outcome.EndReason == relaycommon.StreamEndReasonClientGone || outcome.EndReason == relaycommon.StreamEndReasonPingFail:
+		default:
+			message := "stream ended abnormally: " + stream.Summary()
+			gopool.Go(func() { RecordChannelFailure(channelID, 0, message) })
+		}
 		return
 	}
 	if !ShouldRecordChannelHealthFailure(err) {
