@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -310,22 +311,32 @@ func TestChannelHealthStaleFailureCannotResuspendAfterReset(t *testing.T) {
 }
 
 func TestChannelHealthOutcomeJudgesStreamEnd(t *testing.T) {
-	stream := func(reason relaycommon.StreamEndReason) *relaycommon.StreamStatus {
+	stream := func(reason relaycommon.StreamEndReason, expectsTerminal bool, mark func(*relaycommon.StreamStatus)) *relaycommon.RelayInfo {
 		status := relaycommon.NewStreamStatus()
+		if expectsTerminal {
+			status.RequireTerminal()
+		}
+		if mark != nil {
+			mark(status)
+		}
 		status.SetEndReason(reason, nil)
-		return status
+		return &relaycommon.RelayInfo{StreamStatus: status}
 	}
+	completed := func(s *relaycommon.StreamStatus) { s.MarkCompleted() }
 	for _, test := range []struct {
 		name         string
-		stream       *relaycommon.StreamStatus
+		info         *relaycommon.RelayInfo
 		wantSuccess  bool
 		wantFailures bool
 	}{
-		{name: "non-stream success", wantSuccess: true},
-		{name: "stream finished normally", stream: stream(relaycommon.StreamEndReasonDone), wantSuccess: true},
-		{name: "upstream stream timeout", stream: stream(relaycommon.StreamEndReasonTimeout), wantFailures: true},
-		{name: "upstream read error", stream: stream(relaycommon.StreamEndReasonScannerErr), wantFailures: true},
-		{name: "client went away", stream: stream(relaycommon.StreamEndReasonClientGone)},
+		{name: "task submission without a stream", wantSuccess: true},
+		{name: "stream finished with its terminal", info: stream(relaycommon.StreamEndReasonEOF, true, completed), wantSuccess: true},
+		{name: "output limit reached", info: stream(relaycommon.StreamEndReasonEOF, true, func(s *relaycommon.StreamStatus) { s.MarkIncomplete("max_output_tokens") }), wantSuccess: true},
+		{name: "upstream stream timeout", info: stream(relaycommon.StreamEndReasonTimeout, false, nil), wantFailures: true},
+		{name: "upstream read error", info: stream(relaycommon.StreamEndReasonScannerErr, false, nil), wantFailures: true},
+		{name: "EOF before the protocol terminal", info: stream(relaycommon.StreamEndReasonEOF, true, nil), wantFailures: true},
+		{name: "content filtered", info: stream(relaycommon.StreamEndReasonEOF, true, func(s *relaycommon.StreamStatus) { s.MarkIncomplete("content_filter") })},
+		{name: "client went away", info: stream(relaycommon.StreamEndReasonClientGone, true, nil)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := useChannelHealthRedis(t)
@@ -335,10 +346,10 @@ func TestChannelHealthOutcomeJudgesStreamEnd(t *testing.T) {
 			failureKey := fmt.Sprintf(keyBucketFailures, id, bucket)
 			successKey := fmt.Sprintf(keyTotalSuccesses, id)
 
-			RecordChannelHealthOutcome(id, nil, test.stream)
+			RecordChannelHealthOutcome(context.Background(), id, nil, test.info)
 
 			if !test.wantSuccess && !test.wantFailures {
-				// Nothing is scheduled for a client disconnect.
+				// Nothing is scheduled for ignored outcomes.
 				assert.False(t, server.Exists(totalKey))
 				return
 			}

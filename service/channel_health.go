@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -348,22 +349,26 @@ func ResetChannelHealth(channelID int) error {
 }
 
 // RecordChannelHealthOutcome records one relay attempt in the background.
-// Errors count only when they implicate the channel. A nil error is a success
-// only when the stream (if any) ended normally; a stream cut by an upstream
-// timeout or read error counts as a failure, and one ended by the client is
-// not recorded.
-func RecordChannelHealthOutcome(channelID int, err *types.NewAPIError, stream *relaycommon.StreamStatus) {
+// Errors count only when they implicate the channel. When the handler returned
+// no error, the performance-metrics outcome of the response decides: a stream
+// cut by the upstream or missing its protocol terminal counts as a failure, a
+// response stopped by its output limit as a success, and client cancellation
+// or content filtering is not recorded. info is nil for task submissions,
+// which have no stream.
+func RecordChannelHealthOutcome(ctx context.Context, channelID int, err *types.NewAPIError, info *relaycommon.RelayInfo) {
 	if common.RDB == nil || channelID <= 0 {
 		return
 	}
 	if err == nil {
-		outcome := stream.OutcomeSnapshot()
-		switch {
-		case stream == nil || stream.IsNormalEnd() && !outcome.HasErrors && (outcome.Response == "" || outcome.Response == relaycommon.ResponseOutcomeCompleted):
+		outcome := perfmetrics.OutcomeSuccess
+		if info != nil {
+			outcome = perfmetrics.ClassifyRelayOutcome(ctx, info, nil)
+		}
+		switch outcome {
+		case perfmetrics.OutcomeSuccess:
 			gopool.Go(func() { RecordChannelSuccess(channelID) })
-		case outcome.EndReason == relaycommon.StreamEndReasonClientGone || outcome.EndReason == relaycommon.StreamEndReasonPingFail:
-		default:
-			message := "stream ended abnormally: " + stream.Summary()
+		case perfmetrics.OutcomeFailure:
+			message := "stream ended abnormally: " + info.StreamStatus.Summary()
 			gopool.Go(func() { RecordChannelFailure(channelID, 0, message) })
 		}
 		return
