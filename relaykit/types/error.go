@@ -96,6 +96,36 @@ type NewAPIError struct {
 	errorCode      ErrorCode
 	StatusCode     int
 	Metadata       json.RawMessage
+	// ruleMatchInput keeps the upstream error text plus its raw body so
+	// channel error rules still match when Err holds a shortened message.
+	ruleMatchInput string
+}
+
+// ruleMatchInputMaxBytes bounds the retained raw body; keyword rules only need
+// the leading part of oversized bodies.
+const ruleMatchInputMaxBytes = 8 << 10
+
+// SetRuleMatchInput records the text that channel error rules match against.
+func (e *NewAPIError) SetRuleMatchInput(input string) {
+	if e == nil {
+		return
+	}
+	if len(input) > ruleMatchInputMaxBytes {
+		input = input[:ruleMatchInputMaxBytes]
+	}
+	e.ruleMatchInput = input
+}
+
+// RuleMatchInput returns the text channel error rules match against: the
+// recorded upstream text when present, otherwise the error message.
+func (e *NewAPIError) RuleMatchInput() string {
+	if e == nil {
+		return ""
+	}
+	if e.ruleMatchInput != "" {
+		return e.ruleMatchInput
+	}
+	return e.Error()
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.

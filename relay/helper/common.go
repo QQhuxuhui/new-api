@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -24,9 +25,13 @@ type streamKeepAliveWriter struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 	pingContext *gin.Context
+	// businessStarted is set by the first business write; pings use the
+	// wrapped writer directly and never set it.
+	businessStarted atomic.Bool
 }
 
 func (writer *streamKeepAliveWriter) stop() {
+	writer.businessStarted.Store(true)
 	writer.cancel()
 	<-writer.done
 }
@@ -132,6 +137,19 @@ func (writer *streamKeepAliveWriter) keepAlive(ctx context.Context, interval tim
 			}
 		}
 	}
+}
+
+// ResponseBusinessStarted reports whether response payload has been written to
+// the client. Keep-alive pings do not count, so a request that only received
+// pings can still be replayed.
+func ResponseBusinessStarted(c *gin.Context) bool {
+	if c == nil || c.Writer == nil {
+		return false
+	}
+	if writer, ok := c.Writer.(*streamKeepAliveWriter); ok {
+		return writer.businessStarted.Load()
+	}
+	return c.Writer.Written()
 }
 
 func FlushWriter(c *gin.Context) (err error) {

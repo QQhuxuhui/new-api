@@ -94,6 +94,11 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 	CloseResponseBodyGracefully(resp)
 	var errResponse dto.GeneralErrorResponse
 	responseBodyText := string(responseBody)
+	defer func() {
+		if newApiErr != nil && responseBodyText != "" {
+			newApiErr.SetRuleMatchInput(newApiErr.Error() + "\n" + responseBodyText)
+		}
+	}()
 	responseBodyPreview := common.LocalLogPreview(responseBodyText)
 	buildErrWithBody := func(message string) error {
 		if message == "" {

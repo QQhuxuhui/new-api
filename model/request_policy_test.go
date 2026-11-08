@@ -120,3 +120,32 @@ func TestRequestPolicyDatabaseMatrix(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildRequestPolicyValidatesChannelErrorRules(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		rules   string
+		wantErr bool
+	}{
+		{name: "defaults", rules: operation_setting.DefaultChannelErrorRulesToString()},
+		{name: "empty list", rules: "[]"},
+		{name: "valid keyword rule with same-channel retry", rules: `[{"id":"r1","name":"retry","keywords":["upstream error"],"match_type":"KEYWORD_ONLY","enabled":true,"error_type":"client","retry_count":1,"retry_interval_ms":3000}]`},
+		{name: "AND without keywords", rules: `[{"id":"r1","name":"x","status_codes":[400],"match_type":"AND","error_type":"server"}]`, wantErr: true},
+		{name: "unknown match type", rules: `[{"id":"r1","name":"x","keywords":["a"],"match_type":"ANY","error_type":"server"}]`, wantErr: true},
+		{name: "unknown error type", rules: `[{"id":"r1","name":"x","keywords":["a"],"match_type":"KEYWORD_ONLY","error_type":"user"}]`, wantErr: true},
+		{name: "status code out of range", rules: `[{"id":"r1","name":"x","status_codes":[600],"match_type":"STATUS_ONLY","error_type":"server"}]`, wantErr: true},
+		{name: "retry count above cap", rules: `[{"id":"r1","name":"x","keywords":["a"],"match_type":"KEYWORD_ONLY","error_type":"server","retry_count":11}]`, wantErr: true},
+		{name: "retry interval above cap", rules: `[{"id":"r1","name":"x","keywords":["a"],"match_type":"KEYWORD_ONLY","error_type":"server","retry_count":1,"retry_interval_ms":30001}]`, wantErr: true},
+		{name: "duplicate id", rules: `[{"id":"r1","name":"x","keywords":["a"],"match_type":"KEYWORD_ONLY","error_type":"server"},{"id":"r1","name":"y","keywords":["b"],"match_type":"KEYWORD_ONLY","error_type":"server"}]`, wantErr: true},
+		{name: "malformed JSON", rules: `[{`, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := BuildRequestPolicy(map[string]string{"ChannelErrorRules": test.rules})
+			if test.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}

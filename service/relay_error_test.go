@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
@@ -277,4 +278,90 @@ func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {
 	other := model.NewLogOther()
 	AppendRelayLogAdminInfo(untouched, nil, other)
 	assert.NotContains(t, other.Snapshot()["admin_info"], "request_policy", "requests without decisions do not carry an empty record")
+}
+
+func useChannelErrorRules(t *testing.T, rules string) {
+	t.Helper()
+	require.NoError(t, operation_setting.ChannelErrorRulesFromString(rules))
+	t.Cleanup(func() {
+		require.NoError(t, operation_setting.ChannelErrorRulesFromString(operation_setting.DefaultChannelErrorRulesToString()))
+	})
+}
+
+func TestDecideRelayRetryAppliesChannelErrorRules(t *testing.T) {
+	useChannelErrorRules(t, `[
+		{"id":"immediate","name":"prompt too long","keywords":["prompt is too long"],"match_type":"KEYWORD_ONLY","enabled":true,"priority":90,"error_type":"client","return_immediately":true},
+		{"id":"client","name":"invalid argument","status_codes":[429],"keywords":["invalid argument"],"match_type":"AND","enabled":true,"priority":80,"error_type":"client"},
+		{"id":"server","name":"key not valid","status_codes":[400],"keywords":["API key not valid"],"match_type":"AND","enabled":true,"priority":70,"error_type":"server"},
+		{"id":"disabled","name":"disabled","status_codes":[400],"match_type":"STATUS_ONLY","enabled":false,"priority":100,"error_type":"server"}
+	]`)
+	bodyOnly := types.NewOpenAIError(errors.New("bad response status code 400"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest)
+	bodyOnly.SetRuleMatchInput("bad response status code 400\n{\"error\":\"API key not valid. Please pass a valid API key.\"}")
+	for _, test := range []struct {
+		name       string
+		err        *types.NewAPIError
+		retryTimes int
+		want       PolicyDecision
+	}{
+		{
+			name:       "server rule retries a 400 the status policy skips",
+			err:        types.NewOpenAIError(errors.New("API key not valid"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest),
+			retryTimes: 1,
+			want:       PolicyDecision{Action: "retry", Reason: "server_rule_matched", Source: "error_rule:key not valid"},
+		},
+		{
+			name:       "server rule matches the raw upstream body",
+			err:        bodyOnly,
+			retryTimes: 1,
+			want:       PolicyDecision{Action: "retry", Reason: "server_rule_matched", Source: "error_rule:key not valid"},
+		},
+		{
+			name:       "unmatched 400 falls back to the status policy",
+			err:        types.NewOpenAIError(errors.New("bad request"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest),
+			retryTimes: 1,
+			want:       PolicyDecision{Action: "stop", Reason: "status_not_retryable", Source: "global"},
+		},
+		{
+			name:       "client rule with return immediately stops",
+			err:        types.NewOpenAIError(errors.New("Prompt is too long"), types.ErrorCodeBadResponseStatusCode, http.StatusInternalServerError),
+			retryTimes: 3,
+			want:       PolicyDecision{Action: "stop", Reason: "client_rule_return_immediately", Source: "error_rule:prompt too long"},
+		},
+		{
+			name:       "client rule retries while attempts remain",
+			err:        types.NewOpenAIError(errors.New("Invalid argument"), types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests),
+			retryTimes: 1,
+			want:       PolicyDecision{Action: "retry", Reason: "client_rule_matched", Source: "error_rule:invalid argument"},
+		},
+		{
+			name:       "matched rule stops when attempts are exhausted",
+			err:        types.NewOpenAIError(errors.New("Invalid argument"), types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests),
+			retryTimes: 0,
+			want:       PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "error_rule:invalid argument"},
+		},
+		{
+			name:       "skip-retry error ignores matching rules",
+			err:        types.NewOpenAIError(errors.New("API key not valid"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest, types.ErrOptionWithSkipRetry()),
+			retryTimes: 1,
+			want:       PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			assert.Equal(t, test.want, DecideRelayRetry(c, test.err, test.retryTimes))
+		})
+	}
+}
+
+func TestShouldDisableChannelSkipsClientRuleMatches(t *testing.T) {
+	previous := common.AutomaticDisableChannelEnabled
+	common.AutomaticDisableChannelEnabled = true
+	t.Cleanup(func() { common.AutomaticDisableChannelEnabled = previous })
+	useChannelErrorRules(t, `[{"id":"client","name":"org verification","status_codes":[401],"keywords":["organization must be verified"],"match_type":"AND","enabled":true,"error_type":"client"}]`)
+
+	clientErr := types.NewOpenAIError(errors.New("Your organization must be verified"), types.ErrorCodeBadResponseStatusCode, http.StatusUnauthorized)
+	assert.False(t, ShouldDisableChannel(clientErr))
+
+	channelErr := types.NewOpenAIError(errors.New("invalid api key"), types.ErrorCodeBadResponseStatusCode, http.StatusUnauthorized)
+	assert.True(t, ShouldDisableChannel(channelErr))
 }

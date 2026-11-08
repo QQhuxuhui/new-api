@@ -37,6 +37,18 @@ func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) Po
 	if types.IsSkipRetryError(err) {
 		return PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}
 	}
+	// Channel error rules classify the failure before the status-code policy,
+	// so a rule can retry a status the policy skips (e.g. a channel-specific 400).
+	if rule := operation_setting.MatchChannelErrorRule(err.StatusCode, err.RuleMatchInput()); rule != nil {
+		source := "error_rule:" + rule.Name
+		if rule.ErrorType == operation_setting.ChannelErrorRuleTypeClient && rule.ReturnImmediately {
+			return PolicyDecision{Action: "stop", Reason: "client_rule_return_immediately", Source: source}
+		}
+		if retryTimes <= 0 {
+			return PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: source}
+		}
+		return PolicyDecision{Action: "retry", Reason: rule.ErrorType + "_rule_matched", Source: source}
+	}
 	if retryTimes <= 0 {
 		return PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}
 	}

@@ -70,6 +70,10 @@ func ShouldDisableChannel(err *types.NewAPIError) bool {
 	if types.IsSkipRetryError(err) {
 		return false
 	}
+	// A failure classified as a client error says nothing about the channel.
+	if rule := operation_setting.MatchChannelErrorRule(err.StatusCode, err.RuleMatchInput()); rule != nil && rule.ErrorType == operation_setting.ChannelErrorRuleTypeClient {
+		return false
+	}
 	if operation_setting.ShouldDisableByStatusCode(err.StatusCode) {
 		return true
 	}
