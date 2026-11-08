@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
@@ -53,10 +54,12 @@ func relayWithSameChannelRetry(c *gin.Context, attempt func() *types.NewAPIError
 }
 
 // canReplayOnSameChannel reports whether a failed attempt may be sent again.
-// A broken response body may follow a completed upstream generation, so
+// Requests pinned to a single attempt are never replayed. A broken response
+// body may follow a completed upstream generation, so
 // replaying it could bill the upstream twice.
 func canReplayOnSameChannel(c *gin.Context, err *types.NewAPIError) bool {
 	return err != nil &&
+		!service.GetChannelConstraints(c).SuppressesRetry() &&
 		!types.IsSkipRetryError(err) &&
 		!operation_setting.IsAlwaysSkipRetryCode(err.GetErrorCode()) &&
 		!helper.ResponseBusinessStarted(c)

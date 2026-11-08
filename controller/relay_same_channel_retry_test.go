@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
@@ -31,6 +33,7 @@ func TestRelayWithSameChannelRetry(t *testing.T) {
 		name         string
 		results      []*types.NewAPIError
 		writeFirst   bool
+		pin          *dto.ChannelPin
 		cancelled    bool
 		wantAttempts int
 		wantErr      bool
@@ -57,6 +60,18 @@ func TestRelayWithSameChannelRetry(t *testing.T) {
 			results:      []*types.NewAPIError{busy(), types.NewOpenAIError(errors.New("upstream busy"), types.ErrorCodeBadResponseBody, http.StatusInternalServerError), nil},
 			wantAttempts: 2, wantErr: true,
 		},
+		{
+			name:         "single-attempt pinned request is not replayed",
+			results:      []*types.NewAPIError{busy(), nil},
+			pin:          &dto.ChannelPin{ChannelId: 1, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt},
+			wantAttempts: 1, wantErr: true,
+		},
+		{
+			name:         "same-channel pinned request is still replayed",
+			results:      []*types.NewAPIError{busy(), nil},
+			pin:          &dto.ChannelPin{ChannelId: 1, Source: dto.PinSourceOriginTask, Rank: dto.PinRankOriginTask, RetryMode: dto.PinRetrySameChannel},
+			wantAttempts: 2,
+		},
 		{name: "written response is not replayed", results: []*types.NewAPIError{busy(), nil}, writeFirst: true, wantAttempts: 1, wantErr: true},
 		{
 			name:         "client disconnect during the interval stops replay",
@@ -71,6 +86,9 @@ func TestRelayWithSameChannelRetry(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+			if test.pin != nil {
+				service.GetChannelConstraints(c).AddPin(*test.pin)
+			}
 			if test.cancelled {
 				cancel()
 			}
