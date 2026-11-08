@@ -283,6 +283,8 @@ func TestShouldRecordChannelHealthFailure(t *testing.T) {
 		{name: "client rule never counts", err: types.NewOpenAIError(errors.New("Prompt is too long"), types.ErrorCodeBadResponseStatusCode, http.StatusInternalServerError)},
 		{name: "skip-retry error", err: types.NewOpenAIError(errors.New("unavailable"), types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())},
 		{name: "local conversion failure", err: types.NewError(errors.New("convert failed"), types.ErrorCodeConvertRequestFailed)},
+		{name: "unreadable upstream response body", err: types.NewErrorWithStatusCode(errors.New("unexpected EOF"), types.ErrorCodeBadResponseBody, http.StatusInternalServerError), want: true},
+		{name: "insufficient user quota", err: types.NewError(errors.New("quota"), types.ErrorCodeInsufficientUserQuota)},
 		{name: "transport failure", err: types.NewError(errors.New("dial tcp: connection refused"), types.ErrorCodeDoRequestFailed), want: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {

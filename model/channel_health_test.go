@@ -103,3 +103,34 @@ func TestWarningChannelsReceiveOnlyProbeTraffic(t *testing.T) {
 	counts := pickNames(t, 0)
 	assert.Equal(t, 200, counts["degraded"]+counts["steady"], "when every candidate is warning they all stay eligible")
 }
+
+func TestSuspensionDoesNotShiftRetryPriorityLevels(t *testing.T) {
+	originalMemoryCache := common.MemoryCacheEnabled
+	t.Cleanup(func() { common.MemoryCacheEnabled = originalMemoryCache; InitChannelCache() })
+	p30, p20, p10 := int64(30), int64(20), int64(10)
+
+	for _, memoryCache := range []bool{false, true} {
+		t.Run(fmt.Sprintf("memory cache %v", memoryCache), func(t *testing.T) {
+			truncateTables(t)
+			server := useHealthRedis(t)
+			for _, channel := range []Channel{
+				{Id: 942001, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: "A", Models: "health-model", Group: "default", Priority: &p30},
+				{Id: 942002, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: "B", Models: "health-model", Group: "default", Priority: &p20},
+				{Id: 942003, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: "C", Models: "health-model", Group: "default", Priority: &p10},
+			} {
+				require.NoError(t, channel.Insert())
+			}
+			common.MemoryCacheEnabled = memoryCache
+			InitChannelCache()
+
+			// A failed on the first attempt and got suspended before the retry.
+			require.NoError(t, server.Set(fmt.Sprintf(ChannelHealthSuspendedKey, 942001), "1"))
+			assert.Equal(t, map[string]int{"B": 200}, pickNames(t, 1), "the retry still reaches the second level instead of skipping to C")
+			assert.Equal(t, map[string]int{"B": 200}, pickNames(t, 0), "a suspended top level passes to the next healthy level")
+
+			require.NoError(t, server.Set(fmt.Sprintf(ChannelHealthSuspendedKey, 942002), "1"))
+			require.NoError(t, server.Set(fmt.Sprintf(ChannelHealthSuspendedKey, 942003), "1"))
+			assert.Equal(t, map[string]int{"B": 200}, pickNames(t, 1), "with every level suspended the retry's own level is kept")
+		})
+	}
+}

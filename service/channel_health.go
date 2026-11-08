@@ -160,7 +160,7 @@ func ShouldRecordChannelHealthFailure(err *types.NewAPIError) bool {
 	if types.IsChannelError(err) {
 		return true
 	}
-	if err.GetErrorType() == types.ErrorTypeNewAPIError && err.GetErrorCode() != types.ErrorCodeDoRequestFailed {
+	if err.GetErrorType() == types.ErrorTypeNewAPIError && isLocalPreparationError(err.GetErrorCode()) {
 		return false
 	}
 	if rule := operation_setting.MatchChannelErrorRule(err.StatusCode, err.RuleMatchInput()); rule != nil {
@@ -180,6 +180,23 @@ func ShouldRecordChannelHealthFailure(err *types.NewAPIError) bool {
 		if strings.Contains(lower, marker) {
 			return true
 		}
+	}
+	return false
+}
+
+// isLocalPreparationError matches gateway-side failures raised before or
+// around the upstream call that say nothing about the channel. Other local
+// errors, such as an unreadable upstream response body, still count.
+func isLocalPreparationError(code types.ErrorCode) bool {
+	if strings.HasPrefix(string(code), "violation_fee.") {
+		return true
+	}
+	switch code {
+	case types.ErrorCodeInvalidRequest, types.ErrorCodeSensitiveWordsDetected, types.ErrorCodeReadRequestBodyFailed,
+		types.ErrorCodeConvertRequestFailed, types.ErrorCodeAccessDenied, types.ErrorCodeBadRequestBody,
+		types.ErrorCodeInsufficientUserQuota, types.ErrorCodePreConsumeTokenQuotaFailed, types.ErrorCodePromptBlocked,
+		types.ErrorCodeModelPriceError, types.ErrorCodeGetChannelFailed, types.ErrorCodeGenRelayInfoFailed:
+		return true
 	}
 	return false
 }

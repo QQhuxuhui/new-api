@@ -141,9 +141,6 @@ func GetRandomSatisfiedChannel(
 	if len(channels) == 0 {
 		return nil, nil
 	}
-	healthFlags := loadChannelHealthFlags(channels)
-	channels = excludeSuspendedChannels(channels, healthFlags)
-
 	if len(channels) == 1 {
 		if channel, ok := channelsIDM[channels[0]]; ok {
 			return channel, nil
@@ -165,25 +162,21 @@ func GetRandomSatisfiedChannel(
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(sortedUniquePriorities)))
 
-	if retry >= len(uniquePriorities) {
-		retry = len(uniquePriorities) - 1
+	levelIndex := make(map[int64]int, len(sortedUniquePriorities))
+	for i, priority := range sortedUniquePriorities {
+		levelIndex[int64(priority)] = i
 	}
-	targetPriority := int64(sortedUniquePriorities[retry])
-
-	// get the priority for the given retry number
-	var priorityIDs []int
+	levels := make([][]int, len(sortedUniquePriorities))
 	for _, channelId := range channels {
-		if channel, ok := channelsIDM[channelId]; ok {
-			if channel.GetPriority() == targetPriority {
-				priorityIDs = append(priorityIDs, channelId)
-			}
-		} else {
-			return nil, fmt.Errorf("database consistency error: channel #%d does not exist, please contact the administrator", channelId)
-		}
+		i := levelIndex[channelsIDM[channelId].GetPriority()]
+		levels[i] = append(levels[i], channelId)
 	}
+	selected := selectHealthyPriorityLevel(levels, retry, loadChannelHealthFlags(channels))
+	targetPriority := channelsIDM[selected[0]].GetPriority()
+
 	var sumWeight = 0
 	var targetChannels []*Channel
-	for _, channelId := range thinOutWarningChannels(priorityIDs, healthFlags) {
+	for _, channelId := range selected {
 		channel := channelsIDM[channelId]
 		sumWeight += channel.GetWeight()
 		targetChannels = append(targetChannels, channel)

@@ -90,19 +90,27 @@ func loadChannelHealthFlags(channelIDs []int) map[int]channelHealthFlags {
 	return flags
 }
 
-// excludeSuspendedChannels drops suspended candidates. When every candidate is
-// suspended it keeps them all, so a model never loses every channel at once.
-func excludeSuspendedChannels(channelIDs []int, flags map[int]channelHealthFlags) []int {
-	healthy := make([]int, 0, len(channelIDs))
-	for _, id := range channelIDs {
-		if !flags[id].suspended {
-			healthy = append(healthy, id)
+// selectHealthyPriorityLevel picks the candidates for one retry. levels holds
+// the channel IDs of each priority, highest first, built from every candidate
+// so suspensions never shift which level a retry index points at. Starting at
+// the retry's level it takes the first level that still has a channel that is
+// not suspended; when all of them are suspended it keeps the retry's level as
+// is, so a model never loses every channel at once. Warning channels in the
+// chosen level are then thinned to their probe share.
+func selectHealthyPriorityLevel(levels [][]int, retry int, flags map[int]channelHealthFlags) []int {
+	start := min(retry, len(levels)-1)
+	for _, level := range levels[start:] {
+		healthy := make([]int, 0, len(level))
+		for _, id := range level {
+			if !flags[id].suspended {
+				healthy = append(healthy, id)
+			}
+		}
+		if len(healthy) > 0 {
+			return thinOutWarningChannels(healthy, flags)
 		}
 	}
-	if len(healthy) == 0 {
-		return channelIDs
-	}
-	return healthy
+	return thinOutWarningChannels(levels[start], flags)
 }
 
 // thinOutWarningChannels lets each warning candidate through with probability
@@ -118,26 +126,6 @@ func thinOutWarningChannels(channelIDs []int, flags map[int]channelHealthFlags) 
 	}
 	if len(kept) == 0 {
 		return channelIDs
-	}
-	return kept
-}
-
-// filterAbilitiesByHealth applies a health filter to the database-mode
-// candidates, keeping the abilities of the channels the filter returns.
-func filterAbilitiesByHealth(abilities []Ability, filter func([]int, map[int]channelHealthFlags) []int) []Ability {
-	ids := make([]int, len(abilities))
-	for i := range abilities {
-		ids[i] = abilities[i].ChannelId
-	}
-	keep := make(map[int]bool)
-	for _, id := range filter(ids, loadChannelHealthFlags(ids)) {
-		keep[id] = true
-	}
-	kept := make([]Ability, 0, len(abilities))
-	for _, ability := range abilities {
-		if keep[ability.ChannelId] {
-			kept = append(kept, ability)
-		}
 	}
 	return kept
 }

@@ -127,7 +127,6 @@ func GetChannel(
 		abilities = filterAbilitiesByConstraints(abilities, model, filters)
 	}
 	if len(abilities) > 0 {
-		abilities = filterAbilitiesByHealth(abilities, excludeSuspendedChannels)
 		priorities := make([]int64, 0)
 		seen := make(map[int64]bool)
 		for _, ability := range abilities {
@@ -141,14 +140,25 @@ func GetChannel(
 			}
 		}
 		sort.Slice(priorities, func(i, j int) bool { return priorities[i] > priorities[j] })
-		if retry >= len(priorities) {
-			retry = len(priorities) - 1
+		levelIndex := make(map[int64]int, len(priorities))
+		for i, priority := range priorities {
+			levelIndex[priority] = i
 		}
-		targetPriority := priorities[retry]
-		abilities = lo.Filter(abilities, func(ability Ability, _ int) bool {
-			return ability.Priority == nil && targetPriority == 0 || ability.Priority != nil && *ability.Priority == targetPriority
-		})
-		abilities = filterAbilitiesByHealth(abilities, thinOutWarningChannels)
+		levels := make([][]int, len(priorities))
+		ids := make([]int, 0, len(abilities))
+		for _, ability := range abilities {
+			priority := int64(0)
+			if ability.Priority != nil {
+				priority = *ability.Priority
+			}
+			levels[levelIndex[priority]] = append(levels[levelIndex[priority]], ability.ChannelId)
+			ids = append(ids, ability.ChannelId)
+		}
+		keep := make(map[int]bool)
+		for _, id := range selectHealthyPriorityLevel(levels, retry, loadChannelHealthFlags(ids)) {
+			keep[id] = true
+		}
+		abilities = lo.Filter(abilities, func(ability Ability, _ int) bool { return keep[ability.ChannelId] })
 	}
 	channel := Channel{}
 	if len(abilities) > 0 {
