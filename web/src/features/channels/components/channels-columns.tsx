@@ -90,6 +90,7 @@ import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import { TaskPluginChannelBadge } from './channel-type-badge'
+import { ChannelHealthCell } from './channel-health-cell'
 import { useChannels } from './channels-provider'
 import { DataTableRowActions } from './data-table-row-actions'
 import { DataTableTagRowActions } from './data-table-tag-row-actions'
@@ -1067,6 +1068,18 @@ export function useChannelsColumns(
           return false
         },
         size: 120,
+        enableSorting: false,
+      },
+
+      // Health column
+      {
+        id: 'health',
+        header: t('Health'),
+        cell: ({ row }) =>
+          isTagAggregateRow(row.original) ? null : (
+            <ChannelHealthCell channelId={(row.original as Channel).id} />
+          ),
+        size: 150,
         enableSorting: false,
       },
 

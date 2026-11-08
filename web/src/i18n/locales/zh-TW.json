@@ -7443,6 +7443,13 @@
     "Tests the rules shown above, including unsaved changes.": "測試上方列出的規則，包括未儲存的修改。",
     "This match type needs at least one keyword": "此比對條件至少需要一個關鍵詞",
     "This match type needs at least one status code": "此比對條件至少需要一個狀態碼",
-    "No error rules": "尚無錯誤規則"
+    "No error rules": "尚無錯誤規則",
+    "Suspended ({{seconds}}s)": "已暫停（{{seconds}} 秒）",
+    "Last 60s: {{failures}}/{{total}} failed ({{rate}}%)": "最近 60 秒：{{total}} 次中失敗 {{failures}} 次（{{rate}}%）",
+    "Reset channel health": "重設渠道健康狀態",
+    "Channel health reset": "渠道健康狀態已重設",
+    "Always Healthy": "始終健康",
+    "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "失敗率高時也不將此渠道標為警告或暫停；請求仍計入其健康統計。",
+    "Too many channel IDs": "渠道 ID 過多"
   }
 }

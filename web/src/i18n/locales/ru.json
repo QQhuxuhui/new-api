@@ -7443,6 +7443,13 @@
     "Tests the rules shown above, including unsaved changes.": "Проверяет правила выше, включая несохранённые изменения.",
     "This match type needs at least one keyword": "Для этого условия нужно хотя бы одно ключевое слово",
     "This match type needs at least one status code": "Для этого условия нужен хотя бы один код статуса",
-    "No error rules": "Нет правил ошибок"
+    "No error rules": "Нет правил ошибок",
+    "Suspended ({{seconds}}s)": "Приостановлен ({{seconds}} с)",
+    "Last 60s: {{failures}}/{{total}} failed ({{rate}}%)": "За 60 с: {{failures}}/{{total}} ошибок ({{rate}}%)",
+    "Reset channel health": "Сбросить состояние канала",
+    "Channel health reset": "Состояние канала сброшено",
+    "Always Healthy": "Всегда исправен",
+    "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "Не помечать канал предупреждением и не приостанавливать его при высокой доле ошибок. Запросы по-прежнему учитываются в статистике.",
+    "Too many channel IDs": "Слишком много ID каналов"
   }
 }

@@ -7443,6 +7443,13 @@
     "Tests the rules shown above, including unsaved changes.": "未保存の変更を含め、上に表示されたルールをテストします。",
     "This match type needs at least one keyword": "この一致条件には少なくとも1つのキーワードが必要です",
     "This match type needs at least one status code": "この一致条件には少なくとも1つのステータスコードが必要です",
-    "No error rules": "エラールールはありません"
+    "No error rules": "エラールールはありません",
+    "Suspended ({{seconds}}s)": "一時停止中（{{seconds}} 秒）",
+    "Last 60s: {{failures}}/{{total}} failed ({{rate}}%)": "直近 60 秒：{{total}} 件中 {{failures}} 件失敗（{{rate}}%）",
+    "Reset channel health": "チャネルの健全性をリセット",
+    "Channel health reset": "チャネルの健全性をリセットしました",
+    "Always Healthy": "常に正常",
+    "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "失敗率が高くてもこのチャネルを警告や一時停止にしません。リクエストは引き続き健全性の統計に記録されます。",
+    "Too many channel IDs": "チャネル ID が多すぎます"
   }
 }

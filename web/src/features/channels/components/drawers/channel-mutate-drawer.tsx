@@ -2288,6 +2288,29 @@ export function ChannelMutateDrawer({
           </FormItem>
         )}
       />
+
+      <FormField
+        control={form.control}
+        name='always_healthy'
+        render={({ field }) => (
+          <FormItem className='flex items-center justify-between'>
+            <div className='space-y-0.5'>
+              <FormLabel>{t('Always Healthy')}</FormLabel>
+              <FormDescription>
+                {t(
+                  'Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.'
+                )}
+              </FormDescription>
+            </div>
+            <FormControl>
+              <Switch
+                checked={field.value === true}
+                onCheckedChange={field.onChange}
+              />
+            </FormControl>
+          </FormItem>
+        )}
+      />
     </div>
   )
 

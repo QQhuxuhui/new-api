@@ -7443,6 +7443,13 @@
     "Tests the rules shown above, including unsaved changes.": "Teste les règles affichées ci-dessus, y compris les modifications non enregistrées.",
     "This match type needs at least one keyword": "Ce type de correspondance nécessite au moins un mot-clé",
     "This match type needs at least one status code": "Ce type de correspondance nécessite au moins un code de statut",
-    "No error rules": "Aucune règle d'erreur"
+    "No error rules": "Aucune règle d'erreur",
+    "Suspended ({{seconds}}s)": "Suspendu ({{seconds}} s)",
+    "Last 60s: {{failures}}/{{total}} failed ({{rate}}%)": "60 dernières secondes : {{failures}}/{{total}} échecs ({{rate}} %)",
+    "Reset channel health": "Réinitialiser la santé du canal",
+    "Channel health reset": "Santé du canal réinitialisée",
+    "Always Healthy": "Toujours sain",
+    "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "Ne jamais signaler ce canal en avertissement ni le suspendre en cas de taux d'échec élevé. Les requêtes restent comptées dans ses statistiques de santé.",
+    "Too many channel IDs": "Trop d’identifiants de canal"
   }
 }

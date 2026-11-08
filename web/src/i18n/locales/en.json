@@ -7443,6 +7443,13 @@
     "Tests the rules shown above, including unsaved changes.": "Tests the rules shown above, including unsaved changes.",
     "This match type needs at least one keyword": "This match type needs at least one keyword",
     "This match type needs at least one status code": "This match type needs at least one status code",
-    "No error rules": "No error rules"
+    "No error rules": "No error rules",
+    "Suspended ({{seconds}}s)": "Suspended ({{seconds}}s)",
+    "Last 60s: {{failures}}/{{total}} failed ({{rate}}%)": "Last 60s: {{failures}}/{{total}} failed ({{rate}}%)",
+    "Reset channel health": "Reset channel health",
+    "Channel health reset": "Channel health reset",
+    "Always Healthy": "Always Healthy",
+    "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.",
+    "Too many channel IDs": "Too many channel IDs"
   }
 }

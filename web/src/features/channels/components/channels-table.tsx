@@ -52,7 +52,12 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { getChannels, searchChannels, getGroups } from '../api'
+import {
+  getChannels,
+  getChannelsHealth,
+  searchChannels,
+  getGroups,
+} from '../api'
 import {
   DEFAULT_PAGE_SIZE,
   CHANNEL_STATUS,
@@ -69,6 +74,10 @@ import {
 } from '../lib'
 import type { Channel, ChannelSortBy } from '../types'
 import { ChannelCard } from './channel-card'
+import {
+  ChannelHealthContext,
+  channelHealthQueryKey,
+} from './channel-health-context'
 import { ChannelPriorityContext } from './channel-priority-context'
 import {
   ChannelPriorityHandle,
@@ -318,6 +327,27 @@ export function ChannelsTable() {
     return rawChannels
   }, [data, enableTagMode])
 
+  const healthIds = useMemo(() => {
+    const ids: number[] = []
+    for (const row of channels as (Channel & { children?: Channel[] })[]) {
+      for (const channel of row.children ?? [row]) {
+        if (channel.id > 0) ids.push(channel.id)
+      }
+    }
+    return ids
+  }, [channels])
+  const healthQuery = useQuery({
+    queryKey: [...channelHealthQueryKey, healthIds],
+    queryFn: () => getChannelsHealth(healthIds),
+    enabled: healthIds.length > 0,
+    refetchInterval: 30_000,
+    meta: { errorToast: false },
+  })
+  const healthById = useMemo(() => {
+    const items = healthQuery.data?.available ? healthQuery.data.items : []
+    return new Map(items.map((item) => [item.channel_id, item]))
+  }, [healthQuery.data])
+
   const totalCount = data?.data?.total || 0
   const typeCounts = data?.data?.type_counts
 
@@ -501,6 +531,7 @@ export function ChannelsTable() {
   ]
 
   return (
+    <ChannelHealthContext.Provider value={healthById}>
     <ChannelPriorityContext.Provider value={dragControls}>
       {priorityActionContainer &&
         createPortal(
@@ -646,5 +677,6 @@ export function ChannelsTable() {
         />
       </div>
     </ChannelPriorityContext.Provider>
+    </ChannelHealthContext.Provider>
   )
 }

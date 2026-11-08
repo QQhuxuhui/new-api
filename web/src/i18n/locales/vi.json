@@ -7443,6 +7443,13 @@
     "Tests the rules shown above, including unsaved changes.": "Kiểm tra các quy tắc ở trên, bao gồm cả thay đổi chưa lưu.",
     "This match type needs at least one keyword": "Điều kiện khớp này cần ít nhất một từ khóa",
     "This match type needs at least one status code": "Điều kiện khớp này cần ít nhất một mã trạng thái",
-    "No error rules": "Chưa có quy tắc lỗi"
+    "No error rules": "Chưa có quy tắc lỗi",
+    "Suspended ({{seconds}}s)": "Tạm ngưng ({{seconds}} giây)",
+    "Last 60s: {{failures}}/{{total}} failed ({{rate}}%)": "60 giây gần nhất: {{failures}}/{{total}} lỗi ({{rate}}%)",
+    "Reset channel health": "Đặt lại tình trạng kênh",
+    "Channel health reset": "Đã đặt lại tình trạng kênh",
+    "Always Healthy": "Luôn khỏe",
+    "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "Không đánh dấu cảnh báo hay tạm ngưng kênh này khi tỉ lệ lỗi cao. Yêu cầu vẫn được tính vào thống kê sức khỏe.",
+    "Too many channel IDs": "Quá nhiều ID kênh"
   }
 }

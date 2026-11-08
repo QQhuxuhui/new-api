@@ -720,3 +720,37 @@ export async function getPrefillGroups(
   const res = await api.get('/api/prefill_group', { params: { type } })
   return res.data
 }
+
+export type ChannelHealth = {
+  channel_id: number
+  always_healthy: boolean
+  is_warning: boolean
+  is_suspended: boolean
+  suspended_until?: number
+  consecutive_failures: number
+  current_failure_rate: number
+  window_total_requests: number
+  window_failure_count: number
+}
+
+export type ChannelHealthResponse = {
+  available: boolean
+  items: ChannelHealth[]
+}
+
+export async function getChannelsHealth(
+  ids: number[]
+): Promise<ChannelHealthResponse> {
+  const response = await api.get<{
+    success: boolean
+    data: ChannelHealthResponse
+  }>('/api/channel/health', { params: { ids: ids.join(',') } })
+  return requireServerSuccess(response.data).data
+}
+
+export async function resetChannelHealth(id: number): Promise<void> {
+  const response = await api.post<{ success: boolean }>(
+    `/api/channel/${id}/health/reset`
+  )
+  requireServerSuccess(response.data)
+}
