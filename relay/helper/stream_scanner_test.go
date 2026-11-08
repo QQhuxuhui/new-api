@@ -737,3 +737,23 @@ func TestResponseBusinessStartedIgnoresKeepAliveLifecycle(t *testing.T) {
 	require.NoError(t, StringData(c, "chunk"))
 	assert.True(t, ResponseBusinessStarted(c))
 }
+
+func TestResponseBusinessStartedIgnoresScannerPings(t *testing.T) {
+	for _, keepAlive := range []bool{false, true} {
+		t.Run(fmt.Sprintf("keepalive=%v", keepAlive), func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			if keepAlive {
+				stop := StartStreamKeepAlive(c, time.Hour)
+				defer stop()
+			}
+
+			require.NoError(t, PingData(c))
+			require.NoError(t, PingData(c))
+			assert.False(t, ResponseBusinessStarted(c), "pings sent before the first event are not payload")
+
+			require.NoError(t, StringData(c, "chunk"))
+			assert.True(t, ResponseBusinessStarted(c))
+		})
+	}
+}

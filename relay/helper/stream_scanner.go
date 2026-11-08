@@ -162,6 +162,8 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	if pingEnabled {
 		pingTicker = time.NewTicker(pingInterval)
+		// Create the ping counter before the ping goroutine writes to it.
+		pingBytes(c)
 	}
 
 	logger.LogDebug(c, "relay timeout seconds: %d", common.RelayTimeout)

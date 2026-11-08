@@ -25,9 +25,6 @@ type streamKeepAliveWriter struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 	pingContext *gin.Context
-	// businessStarted is set by the first business write. Pings use the
-	// wrapped writer directly, and stopping the pinger does not set it.
-	businessStarted atomic.Bool
 }
 
 func (writer *streamKeepAliveWriter) stop() {
@@ -40,25 +37,21 @@ func (writer *streamKeepAliveWriter) Unwrap() http.ResponseWriter {
 }
 
 func (writer *streamKeepAliveWriter) Write(data []byte) (int, error) {
-	writer.businessStarted.Store(true)
 	writer.stop()
 	return writer.ResponseWriter.Write(data)
 }
 
 func (writer *streamKeepAliveWriter) WriteString(data string) (int, error) {
-	writer.businessStarted.Store(true)
 	writer.stop()
 	return writer.ResponseWriter.WriteString(data)
 }
 
 func (writer *streamKeepAliveWriter) WriteHeader(status int) {
-	writer.businessStarted.Store(true)
 	writer.stop()
 	writer.ResponseWriter.WriteHeader(status)
 }
 
 func (writer *streamKeepAliveWriter) WriteHeaderNow() {
-	writer.businessStarted.Store(true)
 	writer.stop()
 	writer.ResponseWriter.WriteHeaderNow()
 }
@@ -111,6 +104,8 @@ func StartStreamKeepAlive(c *gin.Context, interval time.Duration) func() {
 	}
 	SetEventStreamHeaders(c)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Minute)
+	// Create the ping counter before copying so both contexts share it.
+	pingBytes(c)
 	pingContext := c.Copy()
 	// 心跳使用原 writer，业务写入才会触发交接。
 	pingContext.Writer = c.Writer
@@ -142,17 +137,29 @@ func (writer *streamKeepAliveWriter) keepAlive(ctx context.Context, interval tim
 	}
 }
 
+const pingBytesKey = "relay_ping_bytes"
+
+// pingBytes returns the request's counter of bytes written by SSE pings. It is
+// created on first use and shared with copies of the context made afterwards.
+func pingBytes(c *gin.Context) *atomic.Int64 {
+	if value, ok := c.Get(pingBytesKey); ok {
+		if counter, ok := value.(*atomic.Int64); ok {
+			return counter
+		}
+	}
+	counter := &atomic.Int64{}
+	c.Set(pingBytesKey, counter)
+	return counter
+}
+
 // ResponseBusinessStarted reports whether response payload has been written to
-// the client. Keep-alive pings do not count, so a request that only received
-// pings can still be replayed.
+// the client. SSE pings do not count, so a request that only received pings
+// can still be replayed.
 func ResponseBusinessStarted(c *gin.Context) bool {
 	if c == nil || c.Writer == nil {
 		return false
 	}
-	if writer, ok := c.Writer.(*streamKeepAliveWriter); ok {
-		return writer.businessStarted.Load()
-	}
-	return c.Writer.Written()
+	return int64(c.Writer.Size()) > pingBytes(c).Load()
 }
 
 func FlushWriter(c *gin.Context) (err error) {
@@ -278,7 +285,10 @@ func PingData(c *gin.Context) error {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	if _, err := c.Writer.Write([]byte(": PING\n\n")); err != nil {
+	payload := []byte(": PING\n\n")
+	written, err := c.Writer.Write(payload)
+	pingBytes(c).Add(int64(written))
+	if err != nil {
 		return fmt.Errorf("write ping data failed: %w", err)
 	}
 	return FlushWriter(c)
