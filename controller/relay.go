@@ -207,16 +207,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			relayInfo.PerformanceBusinessRejection = false
 			relayInfo.PerformanceOutputTokens = 0
 
+			var attemptErr *types.NewAPIError
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
-				return relay.WssHelper(c, relayInfo)
+				attemptErr = relay.WssHelper(c, relayInfo)
 			case types.RelayFormatClaude:
-				return relay.ClaudeHelper(c, relayInfo)
+				attemptErr = relay.ClaudeHelper(c, relayInfo)
 			case types.RelayFormatGemini:
-				return geminiRelayHandler(c, relayInfo)
+				attemptErr = geminiRelayHandler(c, relayInfo)
 			default:
-				return relayHandler(c, relayInfo)
+				attemptErr = relayHandler(c, relayInfo)
 			}
+			// Violation errors become skip-retry here, before any replay decision.
+			return service.NormalizeViolationFeeError(attemptErr)
 		}
 		if relayFormat == types.RelayFormatOpenAIRealtime {
 			newAPIError = attempt()
@@ -233,10 +236,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			return
 		}
 
-		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
 		decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		// Output already sent to the client cannot be replayed on another channel.
+		if decision.Action == "retry" && relayFormat != types.RelayFormatOpenAIRealtime && helper.ResponseBusinessStarted(c) {
+			decision = service.PolicyDecision{Action: "stop", Reason: "response_already_written", Source: "system"}
+		}
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
 

@@ -724,3 +724,16 @@ func TestSetEventStreamHeadersBoundsStreamWritesByBudget(t *testing.T) {
 	assert.False(t, recorder.deadlines[0].Before(before.Add(streamWriteTimeout+450*time.Second)))
 	assert.Contains(t, recorder.Body.String(), "data: AAAA")
 }
+
+func TestResponseBusinessStartedIgnoresKeepAliveLifecycle(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	stop := StartStreamKeepAlive(c, time.Hour)
+	assert.False(t, ResponseBusinessStarted(c), "starting the pinger writes no payload")
+	stop()
+	assert.False(t, ResponseBusinessStarted(c), "stopping the pinger must not count as payload")
+
+	require.NoError(t, StringData(c, "chunk"))
+	assert.True(t, ResponseBusinessStarted(c))
+}

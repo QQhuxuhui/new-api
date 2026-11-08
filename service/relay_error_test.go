@@ -340,6 +340,12 @@ func TestDecideRelayRetryAppliesChannelErrorRules(t *testing.T) {
 			want:       PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "error_rule:invalid argument"},
 		},
 		{
+			name:       "broken response body is never retried even when a rule matches",
+			err:        types.NewOpenAIError(errors.New("API key not valid"), types.ErrorCodeBadResponseBody, http.StatusBadRequest),
+			retryTimes: 1,
+			want:       PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"},
+		},
+		{
 			name:       "skip-retry error ignores matching rules",
 			err:        types.NewOpenAIError(errors.New("API key not valid"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest, types.ErrOptionWithSkipRetry()),
 			retryTimes: 1,

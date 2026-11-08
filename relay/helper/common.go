@@ -25,13 +25,12 @@ type streamKeepAliveWriter struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 	pingContext *gin.Context
-	// businessStarted is set by the first business write; pings use the
-	// wrapped writer directly and never set it.
+	// businessStarted is set by the first business write. Pings use the
+	// wrapped writer directly, and stopping the pinger does not set it.
 	businessStarted atomic.Bool
 }
 
 func (writer *streamKeepAliveWriter) stop() {
-	writer.businessStarted.Store(true)
 	writer.cancel()
 	<-writer.done
 }
@@ -41,21 +40,25 @@ func (writer *streamKeepAliveWriter) Unwrap() http.ResponseWriter {
 }
 
 func (writer *streamKeepAliveWriter) Write(data []byte) (int, error) {
+	writer.businessStarted.Store(true)
 	writer.stop()
 	return writer.ResponseWriter.Write(data)
 }
 
 func (writer *streamKeepAliveWriter) WriteString(data string) (int, error) {
+	writer.businessStarted.Store(true)
 	writer.stop()
 	return writer.ResponseWriter.WriteString(data)
 }
 
 func (writer *streamKeepAliveWriter) WriteHeader(status int) {
+	writer.businessStarted.Store(true)
 	writer.stop()
 	writer.ResponseWriter.WriteHeader(status)
 }
 
 func (writer *streamKeepAliveWriter) WriteHeaderNow() {
+	writer.businessStarted.Store(true)
 	writer.stop()
 	writer.ResponseWriter.WriteHeaderNow()
 }
