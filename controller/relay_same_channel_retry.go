@@ -17,10 +17,11 @@ import (
 // auto-disable observe a single attempt per channel.
 //
 // A replay is skipped once response payload reached the client, for
-// non-retryable errors, and after the client disconnects.
+// non-retryable errors and broken response bodies, and after the client
+// disconnects.
 func relayWithSameChannelRetry(c *gin.Context, attempt func() *types.NewAPIError) *types.NewAPIError {
 	err := attempt()
-	if err == nil || types.IsSkipRetryError(err) || helper.ResponseBusinessStarted(c) {
+	if !canReplayOnSameChannel(c, err) {
 		return err
 	}
 	rule := operation_setting.MatchChannelErrorRule(err.StatusCode, err.RuleMatchInput())
@@ -44,9 +45,19 @@ func relayWithSameChannelRetry(c *gin.Context, attempt func() *types.NewAPIError
 			return err
 		}
 		err = attempt()
-		if err == nil || types.IsSkipRetryError(err) || helper.ResponseBusinessStarted(c) {
+		if !canReplayOnSameChannel(c, err) {
 			return err
 		}
 	}
 	return err
+}
+
+// canReplayOnSameChannel reports whether a failed attempt may be sent again.
+// A broken response body may follow a completed upstream generation, so
+// replaying it could bill the upstream twice.
+func canReplayOnSameChannel(c *gin.Context, err *types.NewAPIError) bool {
+	return err != nil &&
+		!types.IsSkipRetryError(err) &&
+		!operation_setting.IsAlwaysSkipRetryCode(err.GetErrorCode()) &&
+		!helper.ResponseBusinessStarted(c)
 }

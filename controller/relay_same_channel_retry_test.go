@@ -47,6 +47,16 @@ func TestRelayWithSameChannelRetry(t *testing.T) {
 			results:      []*types.NewAPIError{types.NewOpenAIError(errors.New("upstream busy"), types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry()), nil},
 			wantAttempts: 1, wantErr: true,
 		},
+		{
+			name:         "broken response body is not replayed",
+			results:      []*types.NewAPIError{types.NewOpenAIError(errors.New("upstream busy"), types.ErrorCodeBadResponseBody, http.StatusInternalServerError), nil},
+			wantAttempts: 1, wantErr: true,
+		},
+		{
+			name:         "replay stops when a retry returns a broken response body",
+			results:      []*types.NewAPIError{busy(), types.NewOpenAIError(errors.New("upstream busy"), types.ErrorCodeBadResponseBody, http.StatusInternalServerError), nil},
+			wantAttempts: 2, wantErr: true,
+		},
 		{name: "written response is not replayed", results: []*types.NewAPIError{busy(), nil}, writeFirst: true, wantAttempts: 1, wantErr: true},
 		{
 			name:         "client disconnect during the interval stops replay",
