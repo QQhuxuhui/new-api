@@ -95,6 +95,7 @@ func InitChannelCache() {
 		}
 	}
 	channelsIDM = newChannelId2channel
+	rebuildAlwaysHealthyChannels(newChannelId2channel)
 	channel2advancedCustomConfig = newChannel2advancedCustomConfig
 	channelSyncLock.Unlock()
 	// Lock ordering: InvalidatePricingCache acquires updatePricingLock, and
@@ -140,6 +141,8 @@ func GetRandomSatisfiedChannel(
 	if len(channels) == 0 {
 		return nil, nil
 	}
+	healthFlags := loadChannelHealthFlags(channels)
+	channels = excludeSuspendedChannels(channels, healthFlags)
 
 	if len(channels) == 1 {
 		if channel, ok := channelsIDM[channels[0]]; ok {
@@ -168,17 +171,22 @@ func GetRandomSatisfiedChannel(
 	targetPriority := int64(sortedUniquePriorities[retry])
 
 	// get the priority for the given retry number
-	var sumWeight = 0
-	var targetChannels []*Channel
+	var priorityIDs []int
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
 			if channel.GetPriority() == targetPriority {
-				sumWeight += channel.GetWeight()
-				targetChannels = append(targetChannels, channel)
+				priorityIDs = append(priorityIDs, channelId)
 			}
 		} else {
 			return nil, fmt.Errorf("database consistency error: channel #%d does not exist, please contact the administrator", channelId)
 		}
+	}
+	var sumWeight = 0
+	var targetChannels []*Channel
+	for _, channelId := range thinOutWarningChannels(priorityIDs, healthFlags) {
+		channel := channelsIDM[channelId]
+		sumWeight += channel.GetWeight()
+		targetChannels = append(targetChannels, channel)
 	}
 
 	if len(targetChannels) == 0 {

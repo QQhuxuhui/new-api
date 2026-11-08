@@ -171,6 +171,11 @@ var BatchUpdateInterval int
 
 var RelayTimeout int // unit is second
 
+// Channel health tuning. A warning channel still receives WarningProbePercent
+// of the picks that land on it, and the warning flag lasts WarningTTLSeconds.
+var WarningProbePercent = 20
+var WarningTTLSeconds = 60
+
 var RelayIdleConnTimeout int // unit is second
 
 var RelayHTTP2PingIdleTimeout int // seconds without incoming frames before probing; 0 disables probes

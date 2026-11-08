@@ -230,6 +230,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 
+		service.RecordChannelHealthOutcome(channel.Id, newAPIError)
 		if newAPIError == nil {
 			service.MarkRequestPolicySuccess(c, relayInfo.StreamStatus)
 			relayInfo.LastError = nil
@@ -608,6 +609,7 @@ func executeTaskSubmissionWith(
 			break
 		}
 		if taskErr == nil {
+			service.RecordChannelHealthOutcome(channel.Id, nil)
 			diagnostics.attemptSucceeded(retryParam.GetRetry()+1, result)
 			break
 		}
@@ -617,6 +619,7 @@ func executeTaskSubmissionWith(
 		decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
 		if !taskErr.LocalError {
+			service.RecordChannelHealthOutcome(channel.Id, taskAPIError)
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),

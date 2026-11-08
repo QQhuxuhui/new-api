@@ -127,6 +127,7 @@ func GetChannel(
 		abilities = filterAbilitiesByConstraints(abilities, model, filters)
 	}
 	if len(abilities) > 0 {
+		abilities = filterAbilitiesByHealth(abilities, excludeSuspendedChannels)
 		priorities := make([]int64, 0)
 		seen := make(map[int64]bool)
 		for _, ability := range abilities {
@@ -147,6 +148,7 @@ func GetChannel(
 		abilities = lo.Filter(abilities, func(ability Ability, _ int) bool {
 			return ability.Priority == nil && targetPriority == 0 || ability.Priority != nil && *ability.Priority == targetPriority
 		})
+		abilities = filterAbilitiesByHealth(abilities, thinOutWarningChannels)
 	}
 	channel := Channel{}
 	if len(abilities) > 0 {

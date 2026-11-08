@@ -35,6 +35,9 @@ type ChannelSettings struct {
 	// TLSInsecureSkipVerify accepts upstream certificates that fail
 	// verification, such as self-signed ones, for this channel only.
 	TLSInsecureSkipVerify bool `json:"tls_insecure_skip_verify,omitempty"`
+	// AlwaysHealthy exempts the channel from health warning and temporary
+	// suspension; its request statistics are still recorded.
+	AlwaysHealthy bool `json:"always_healthy,omitempty"`
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,
