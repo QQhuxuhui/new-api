@@ -5,9 +5,9 @@
 
 ## 1. 功能取舍
 
-### 第一阶段（上线必需）
+### 第一阶段（已完成，2026-11-09，已合入 next）
 
-后端移植 + 新前端最少配置界面：
+后端移植 + 新前端最少配置界面，各项均经 Codex 多轮复查：
 
 | 功能 | dev 关键位置 | 上游现状 | 落点 |
 |---|---|---|---|
@@ -15,10 +15,17 @@
 | 渠道健康滑窗 / 挂起 / always_healthy | `service/channel_health.go` | 无（仅自动禁用/启用） | 渠道选择层 |
 | 渠道级流式超时 | 渠道设置 `stream_timeout_seconds`、`relay/helper/stream_idle_body.go` | 仅全局 `STREAMING_TIMEOUT` | `relaykit/dto/channel_settings.go` |
 | 并发限制（用户级 / 渠道 key 级） | `service/concurrency*.go`、`users.max_concurrency`、`channels.max_concurrent_requests_per_key` | 仅按次数的 model-rate-limit | 中间件 |
-| 图片档位选路 / 尺寸规整 / 超分 | `dto/image_size_tier.go`、`service/image_resample*.go`、`image_upscale*.go` | 无 | 渠道过滤 + 图片 handler（涉及计费，须读 `.agents/rules/billing.md`） |
-| Claude 缓存模拟 | 渠道设置 `cache_simulation` | 无 | Claude 适配器（涉及计费） |
-| USDT 支付 | `controller/topup_usdt.go`、`service/usdt_rate.go`、`EpUsdt*` | 无 | 支付体系，对齐上游 payment 抽象 |
-| 邀请返现（按充值比例 + 审核 + 反作弊） | `service/aff_*.go`、`aff_audit_logs` 等 | 仅注册固定奖励 | 返佣基数改为**实付人民币 × 比例** |
+
+落地差异：容错规则存请求策略项 `ChannelErrorRules`（options 表）；always_healthy、stream_timeout_seconds、max_concurrent_requests_per_key 存渠道 `setting` JSON；用户并发上限存用户 `setting.max_concurrency`；并发计数改为 Redis 租约（无需清理任务）。均不改表结构。
+
+### 不移植，回归上游原生（2026-11-09 用户决定）
+
+| 功能 | 新站行为 |
+|---|---|
+| 图片档位选路 / 尺寸规整 / 超分 | 上游原生图片处理，无档位选路、规整与超分 |
+| Claude 缓存模拟 | 无；按上游真实用量计费 |
+| USDT 支付 | 无；只用上游支付方式（易支付 / Stripe / Creem / Waffo） |
+| 邀请返现（按充值比例 + 审核 + 反作弊） | 上游原生邀请：注册奖励 + `aff_quota` 转余额，无充值返现与审核 |
 
 ### 改用上游（不移植）
 
@@ -38,7 +45,7 @@
 - 新分组倍率 = 老分组倍率 × k（所有分组统一乘），**`GroupGroupRatio` 特殊倍率同样 × k**（next `relay/helper/price.go` 优先取 GroupGroupRatio，漏乘会让对应用户购买力变化）。
 - 模型价格：**新站统一使用上游价格**（next 内置默认值 + 上游倍率同步），不迁老站的模型倍率、补全倍率、阶梯计费表达式。
 - 渠道倍率（D12 放弃）：演练时列出所有 `ratio ≠ 1` 或 `model_ratio` 非空的启用渠道；对这些渠道承载的模型，要么拆成独立分组把渠道倍率折进分组倍率，要么接受价格变化——逐项报给用户确认。
-- 充值：`Price = 1`（¥1 = $1）；清空 `TopupGroupRatio`、`AmountDiscount`；余额按 ¥ 显示，`USDExchangeRate = 1`。各支付方式定价独立：Stripe 用 `StripeUnitPrice`（默认 8），Creem 用商品自带 Price/Quota，USDT 有自己的汇率。上线只开启逐项核对过的支付方式，每种用真实小额支付验证 ¥1 → 500000 quota，其余保持停用。
+- 充值：`Price = 1`（¥1 = $1）；清空 `TopupGroupRatio`、`AmountDiscount`；余额按 ¥ 显示，`USDExchangeRate = 1`。各支付方式定价独立：Stripe 用 `StripeUnitPrice`（默认 8），Creem 用商品自带 Price/Quota。上线只开启逐项核对过的支付方式，每种用真实小额支付验证 ¥1 → 500000 quota，其余保持停用。
 
 **性质**：分组倍率与余额同乘 k，余额对应的“分组折扣力度”不变；但模型基础价格换成上游价格，**单个模型的可用 token 量会随新旧模型价差变化**（用户已接受，2026-11-08）。演练只输出在用模型的新旧价格对照表供运营参考，不阻断上线。
 注意：这**不**保证每个用户的余额人民币价值 ≤ 实付——赠送、管理员发放、兑换码、返佣、历史低价订单、限期套餐转永久余额都会突破这个上界；演练报告单独统计这几类额度的总量，供评估负债。
@@ -50,13 +57,14 @@
 | 对象 | 处理 |
 |---|---|
 | users | 全量，ID 不变（含密码哈希、邮箱、第三方绑定、角色、`aff_code`、`inviter_id`）。`quota` 按下式重算；`aff_quota × k` |
-| 返佣反作弊数据 | 随邀请返现（D14）一起迁：`users.aff_status`（next 无此字段，移植时补）、`user_payment_accounts` 全量、反作弊窗口内的 `user_login_ip_logs`；演练覆盖已冻结邀请人、历史共享支付账号的审核结果 |
-| 容错规则 | `channel_disable_rules` 逐条导出，映射到移植后的规则表（保留启用状态、优先级、匹配方式、客户端错误处理、重试次数与间隔）；用同一组状态码和错误文本比对新旧规则的匹配结果和重试次数 |
+| 用户并发上限 | `users.max_concurrency > 0` 写入新库 `users.setting.max_concurrency`（实测 2 人：1、3） |
+| 返佣数据 | 不迁（邀请返现不移植）：`aff_audit_logs`、`inviter_reward_payouts`、`user_payment_accounts`、`user_login_ip_logs`、`users.aff_status` 留在老库只读 |
+| 容错规则 | `channel_disable_rules` 逐条转成请求策略项 `ChannelErrorRules` 的 JSON 数组（name、status_codes、keywords、match_type、enabled、priority、error_type、return_immediately、retry_count、retry_interval_ms、description，另生成稳定 id）；用规则测试接口 `POST /api/option/request_policy/error_rules/test` 以同一组状态码和错误文本比对新旧匹配结果 |
 | 认证关联表 | `two_fas`、`two_fa_backup_codes`、`passkey_credentials` 原样迁移（保留启用状态与备用码使用状态）；next 的 Passkey 新增 RPID 字段，按新站域名填充，`api.sparkcode.top` 不变则 Passkey 可继续用。演练覆盖 密码+TOTP、备用码、Passkey 登录 |
 | 分组 | 演练前生成完整映射表：把老分组树（含继承倍率、父组选路到子组）展开成扁平分组；对每个 `users.group`、令牌分组（含空组、父组）给出新组名、`auto_groups` 顺序、是否 `cross_group_retry`。脚本按模型比对每个迁移令牌新旧可达渠道集合，不丢失、不扩大 |
 | 套餐专属分组 | 只能通过套餐访问、不在 `UserUsableGroups` 里的分组（实测：`cc逆向1`、`gemini-t3`、`claude-福利`、`glm`）**新站下线**；这些分组上的令牌**不迁移**（实测 cc逆向1 ×16、gemini-t3 ×12，其余两个分组无令牌）。新站不再有套餐分组权限，不生成独立用户组；持有套餐的用户都在 `default` 组，套餐取消后与普通用户权限一致 |
 | tokens | 原样（key 值、过期、模型限制）；`remain_quota × k`（无限额度令牌不变）；分组按上表映射 |
-| channels | 迁上游通用字段，第一阶段已移植的二开设置随之映射，其余丢弃。**通过 next 的渠道创建逻辑导入（会调用 `AddAbilities`），或导入后重建 `abilities` 表**；导出"各分组 × 各模型的可用渠道数"，并对每个分组发一次真实请求验收 |
+| channels | 迁上游通用字段；`setting` JSON 保留 `always_healthy`、`stream_timeout_seconds`，并把列 `max_concurrent_requests_per_key > 0` 写入 `setting.max_concurrent_requests_per_key`（实测 24 个启用渠道）；其余 dev 二开设置（`cache_simulation`、`image_sizes` 等）与列（`ratio`、`model_ratio` 等）丢弃。**通过 next 的渠道创建逻辑导入（会调用 `AddAbilities`），或导入后重建 `abilities` 表**；导出"各分组 × 各模型的可用渠道数"，并对每个分组发一次真实请求验收 |
 | 系统配置 | 迁：分组倍率（× k）、GroupGroupRatio（× k）、用户可选分组、站点基础配置。重设：支付相关（§2 充值）、Turnstile、OAuth 回调地址。丢弃：老站模型倍率/价格/补全倍率/阶梯计费（改用上游价格）、dev 独有 option 键 |
 | redemptions（未使用） | 码值、`status`、`expired_time`、`deleted_at` 原样；面额统一 = **该码自身的 `redemptions.quota` × k**（套餐码 `plan_id>0` 也用自身 quota，不读套餐模板），转为余额码；关联套餐已删除/禁用的码单列核对 |
 | logs / 订单 / 套餐表 / tasks | 不迁；老库只读保留 ≥ 6 个月（老任务结果查询由只读老库承接，客诉时人工查） |
