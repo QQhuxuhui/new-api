@@ -125,7 +125,7 @@ func runReport(ctx context.Context, cfg config) error {
 	sort.Strings(skipped)
 	fmt.Fprintf(&out, "- migrated: GroupRatio (× k), GroupGroupRatio (× k), UserUsableGroups (dropped groups removed), %s\n", strings.Join(cfg.SiteOptionKeys, ", "))
 	fmt.Fprintf(&out, "- migrated by prefix: %s; times k: %s\n", strings.Join(copiedOptionPrefixes, ", "), strings.Join(quotaOptionKeys, ", "))
-	out.WriteString("- set again by hand: StripeUnitPrice (legacy value priced the old exchange rate); review CreemProducts quotas against ¥1 = $1\n")
+	out.WriteString("- not copied: StripeUnitPrice (legacy value priced the old exchange rate; set it again only if Stripe is used)\n")
 	out.WriteString("- reset: Price = 1, USDExchangeRate = 1, TopupGroupRatio = {}, payment_setting.amount_discount = {}, quota shown in CNY\n")
 	fmt.Fprintf(&out, "- not migrated (%d keys, review): %s\n", len(skipped), strings.Join(skipped, ", "))
 	fmt.Print(out.String())
