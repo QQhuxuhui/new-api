@@ -157,6 +157,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		defer stopKeepAlive()
 	}
 
+	if userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting); ok && userSetting.MaxConcurrency > 0 {
+		defer service.ReleaseRequestConcurrency(c)
+		if !service.AcquireConcurrencyLease(c, service.UserConcurrencyKey(c.GetInt("id")), userSetting.MaxConcurrency) {
+			newAPIError = types.NewErrorWithStatusCode(
+				errors.New(i18n.T(c, i18n.MsgRelayUserConcurrencyLimit, map[string]any{"Limit": userSetting.MaxConcurrency})),
+				types.ErrorCodeUserConcurrencyLimit, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry())
+			return
+		}
+	}
+
 	if newAPIError = relay.PrepareRequestBilling(c, relayInfo); newAPIError != nil {
 		return
 	}
@@ -186,6 +196,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		service.AppendUsedChannel(c, channel.Id)
+		if setupErr := service.TakeChannelSetupError(c); setupErr != nil {
+			newAPIError = setupErr
+			relayInfo.LastError = newAPIError
+			decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+			service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
+			if decision.Action != "retry" {
+				break
+			}
+			continue
+		}
 		if billingErr := service.PrepareTieredBillingForSelectedGroup(c, relayInfo); billingErr != nil {
 			newAPIError = billingErr
 			break
@@ -316,7 +336,9 @@ var upgrader = websocket.Upgrader{
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
-	if info.ChannelMeta == nil {
+	// The first attempt uses the distributor's channel; after a key-limit
+	// rejection later attempts select again even before any handler ran.
+	if info.ChannelMeta == nil && (retryParam.GetRetry() == 0 || !service.ChannelReselectRequired(c)) {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
 		if !autoBan {
@@ -343,6 +365,12 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 
 	service.RequestPolicy(c).BeginAttempt(channel, selectGroup)
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+	if newAPIError != nil && newAPIError.GetErrorCode() == types.ErrorCodeChannelKeyConcurrencyLimit {
+		// A key at its cap is a failed attempt on this channel, not a reason
+		// to stop: the relay loop counts it and moves on.
+		service.StoreChannelSetupError(c, newAPIError)
+		return channel, nil
+	}
 	if newAPIError != nil {
 		return nil, newAPIError
 	}
@@ -572,7 +600,9 @@ func executeTaskSubmissionWith(
 			channel = lockedCh
 			policy.BeginAttempt(channel, relayInfo.UsingGroup)
 			if retryParam.GetRetry() > 0 {
-				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
+				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil && setupErr.GetErrorCode() == types.ErrorCodeChannelKeyConcurrencyLimit {
+					service.StoreChannelSetupError(c, setupErr)
+				} else if setupErr != nil {
 					taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
 					break
 				}
@@ -589,6 +619,15 @@ func executeTaskSubmissionWith(
 		diagnostics.attempt(retryParam.GetRetry()+1, channel, relayInfo.LockedChannel != nil)
 
 		service.AppendUsedChannel(c, channel.Id)
+		if setupErr := service.TakeChannelSetupError(c); setupErr != nil {
+			taskErr = service.TaskErrorWrapperLocal(setupErr.Err, string(setupErr.GetErrorCode()), setupErr.StatusCode)
+			decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
+			service.RecordPolicyFailure(c, channel.Id, taskSubmissionAPIError(taskErr), decision)
+			if decision.Action != "retry" {
+				break
+			}
+			continue
+		}
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
 			stage = "read_body"

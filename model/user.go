@@ -197,6 +197,23 @@ func UpdateUserSetting(userId int, setting dto.UserSetting) error {
 	return PublishUserAuthCache(userId)
 }
 
+// SetUserMaxConcurrencyWithTx writes the user's concurrency cap into the
+// setting JSON on top of the setting stored at that moment, so the other
+// setting fields are kept.
+func SetUserMaxConcurrencyWithTx(tx *gorm.DB, userId int, maxConcurrency int) error {
+	var current User
+	if err := tx.Select("id", "setting").Where("id = ?", userId).First(&current).Error; err != nil {
+		return err
+	}
+	setting := current.GetSetting()
+	setting.MaxConcurrency = maxConcurrency
+	settingBytes, err := common.Marshal(setting)
+	if err != nil {
+		return err
+	}
+	return tx.Model(&User{}).Where("id = ?", userId).Update("setting", string(settingBytes)).Error
+}
+
 // userBindColumns 允许通过 UpdateUserBindColumn 更新的第三方账号绑定列白名单。
 // 列名只可能来自代码内部的 provider 实现，白名单是防御纵深，不依赖调用方自律。
 var userBindColumns = map[string]bool{

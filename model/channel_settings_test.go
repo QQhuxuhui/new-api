@@ -36,6 +36,8 @@ func TestChannelValidateSettingsRejectsInvalidHTTPTransport(t *testing.T) {
 		{name: "stream timeout zero never times out", setting: dto.ChannelSettings{StreamTimeoutSeconds: common.GetPointer(0)}},
 		{name: "stream timeout at the 7-day cap", setting: dto.ChannelSettings{StreamTimeoutSeconds: common.GetPointer(dto.MaxStreamTimeoutSeconds)}},
 		{name: "negative stream timeout rejected", setting: dto.ChannelSettings{StreamTimeoutSeconds: common.GetPointer(-1)}, wantErr: "stream_timeout_seconds"},
+		{name: "per-key concurrency cap", setting: dto.ChannelSettings{MaxConcurrentRequestsPerKey: 200}},
+		{name: "negative per-key concurrency rejected", setting: dto.ChannelSettings{MaxConcurrentRequestsPerKey: -1}, wantErr: "max_concurrent_requests_per_key"},
 		{name: "stream timeout above the cap rejected", setting: dto.ChannelSettings{StreamTimeoutSeconds: common.GetPointer(dto.MaxStreamTimeoutSeconds + 1)}, wantErr: "stream_timeout_seconds"},
 	}
 

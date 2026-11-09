@@ -170,6 +170,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	c.Set("group", group)
 
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)
+	defer service.ReleaseRequestConcurrency(c)
 	if newAPIError != nil {
 		return testResult{
 			context:     c,

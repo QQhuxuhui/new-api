@@ -50,6 +50,10 @@ const (
 	ErrorCodeDoRequestFailed    ErrorCode = "do_request_failed"
 	ErrorCodeGetChannelFailed   ErrorCode = "get_channel_failed"
 	ErrorCodeGenRelayInfoFailed ErrorCode = "gen_relay_info_failed"
+	// Concurrency limits. The key limit is not a channel error: the channel
+	// is healthy, so it must fail over without being disabled.
+	ErrorCodeUserConcurrencyLimit       ErrorCode = "user_concurrency_limit"
+	ErrorCodeChannelKeyConcurrencyLimit ErrorCode = "key_concurrency_limit"
 
 	// channel error
 	ErrorCodeChannelNoAvailableKey        ErrorCode = "channel:no_available_key"

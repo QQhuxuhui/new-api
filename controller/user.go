@@ -650,9 +650,18 @@ func GetUserModels(c *gin.Context) {
 }
 
 func UpdateUser(c *gin.Context) {
-	var updatedUser model.User
-	err := common.DecodeJson(c.Request.Body, &updatedUser)
+	var request struct {
+		model.User
+		// MaxConcurrency lives in the user's setting JSON; nil leaves it as is.
+		MaxConcurrency *int `json:"max_concurrency"`
+	}
+	err := common.DecodeJson(c.Request.Body, &request)
+	updatedUser := request.User
 	if err != nil || updatedUser.Id == 0 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	if request.MaxConcurrency != nil && (*request.MaxConcurrency < 0 || *request.MaxConcurrency > dto.MaxConcurrencyLimit) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
@@ -700,6 +709,11 @@ func UpdateUser(c *gin.Context) {
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
 		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
 			return err
+		}
+		if request.MaxConcurrency != nil {
+			if err := model.SetUserMaxConcurrencyWithTx(tx, updatedUser.Id, *request.MaxConcurrency); err != nil {
+				return err
+			}
 		}
 		touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, updatedUser.AdminPermissions)
 		authzTouched = touched

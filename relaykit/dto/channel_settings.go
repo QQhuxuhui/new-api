@@ -43,7 +43,14 @@ type ChannelSettings struct {
 	// never times out. When set, a successful stream is not cut by the
 	// RELAY_TIMEOUT total duration; the response header wait still is.
 	StreamTimeoutSeconds *int `json:"stream_timeout_seconds,omitempty"`
+	// MaxConcurrentRequestsPerKey caps the in-flight requests on each upstream
+	// key of the channel. A key at the cap fails over to another channel. 0
+	// means no limit.
+	MaxConcurrentRequestsPerKey int `json:"max_concurrent_requests_per_key,omitempty"`
 }
+
+// MaxConcurrencyLimit is the largest accepted concurrency cap.
+const MaxConcurrencyLimit = 1_000_000
 
 // MaxStreamTimeoutSeconds is the largest accepted stream_timeout_seconds.
 const MaxStreamTimeoutSeconds = 7 * 24 * 60 * 60
@@ -58,6 +65,17 @@ func (s *ChannelSettings) ValidateStreamTimeout() error {
 	}
 	if *s.StreamTimeoutSeconds > MaxStreamTimeoutSeconds {
 		return fmt.Errorf("stream_timeout_seconds must be at most %d (7 days); use 0 to never time out", MaxStreamTimeoutSeconds)
+	}
+	return nil
+}
+
+// ValidateConcurrency rejects a negative or oversized per-key cap.
+func (s *ChannelSettings) ValidateConcurrency() error {
+	if s == nil {
+		return nil
+	}
+	if s.MaxConcurrentRequestsPerKey < 0 || s.MaxConcurrentRequestsPerKey > MaxConcurrencyLimit {
+		return fmt.Errorf("max_concurrent_requests_per_key must be between 0 and %d (0 means no limit)", MaxConcurrencyLimit)
 	}
 	return nil
 }

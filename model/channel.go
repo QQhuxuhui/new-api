@@ -1022,6 +1022,9 @@ func (channel *Channel) ValidateSettings() error {
 	if err := channelParams.ValidateStreamTimeout(); err != nil {
 		return err
 	}
+	if err := channelParams.ValidateConcurrency(); err != nil {
+		return err
+	}
 	channelOtherSettings := &dto.ChannelOtherSettings{}
 	if channel.OtherSettings != "" {
 		err := common.UnmarshalJsonStr(channel.OtherSettings, channelOtherSettings)

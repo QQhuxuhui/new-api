@@ -623,3 +623,19 @@ func TestValidateAuthSessionWithTxChecksAccessTokenIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestSetUserMaxConcurrencyKeepsOtherSettings(t *testing.T) {
+	setupUserUpdateTestState(t)
+	user := createUserBindTestUser(t)
+	user.SetSetting(dto.UserSetting{Language: "zh", NotifyType: dto.NotifyTypeEmail})
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("setting", user.Setting).Error)
+
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error { return SetUserMaxConcurrencyWithTx(tx, user.Id, 3) }))
+
+	stored, err := GetUserById(user.Id, true)
+	require.NoError(t, err)
+	setting := stored.GetSetting()
+	assert.Equal(t, 3, setting.MaxConcurrency)
+	assert.Equal(t, "zh", setting.Language, "other setting fields survive")
+	assert.Equal(t, dto.NotifyTypeEmail, setting.NotifyType)
+}
