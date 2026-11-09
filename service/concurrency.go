@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"
@@ -56,11 +57,10 @@ func ChannelKeyConcurrencyKey(apiKey string, channelType int) string {
 // requestLeases holds the leases of one request and renews them until the
 // request releases everything.
 type requestLeases struct {
-	mu      sync.Mutex
-	member  string
-	held    map[string]bool
-	stop    chan struct{}
-	stopped bool
+	mu     sync.Mutex
+	member string
+	held   map[string]bool
+	stop   chan struct{}
 }
 
 func leasesOf(c *gin.Context) *requestLeases {
@@ -101,7 +101,7 @@ func AcquireConcurrencyLease(c *gin.Context, key string, limit int) bool {
 		return false
 	}
 	leases.held[key] = true
-	if leases.stop == nil && !leases.stopped {
+	if leases.stop == nil {
 		leases.stop = make(chan struct{})
 		go leases.renew(leases.stop)
 	}
@@ -128,7 +128,8 @@ func ReleaseConcurrencyLease(c *gin.Context, key string) {
 }
 
 // ReleaseRequestConcurrency drops every lease of the request and stops
-// renewing them. It is safe to call more than once.
+// renewing them. It is safe to call more than once, and a later acquisition on
+// the same context (a WebSocket connection runs several calls) starts afresh.
 func ReleaseRequestConcurrency(c *gin.Context) {
 	value, ok := c.Get(concurrencyLeasesKey)
 	if !ok {
@@ -144,10 +145,10 @@ func ReleaseRequestConcurrency(c *gin.Context) {
 		leases.remove(key)
 	}
 	leases.held = map[string]bool{}
-	if leases.stop != nil && !leases.stopped {
+	if leases.stop != nil {
 		close(leases.stop)
+		leases.stop = nil
 	}
-	leases.stopped = true
 }
 
 func (leases *requestLeases) remove(key string) {
@@ -232,6 +233,16 @@ func StoreChannelSetupError(c *gin.Context, err *types.NewAPIError) {
 // channel again instead of reusing the one chosen by the distributor.
 func ChannelReselectRequired(c *gin.Context) bool {
 	return c.GetBool(channelReselectKey)
+}
+
+// MidjourneyQueueFullCode is the Midjourney proxy's "queue full" code; the
+// relay answers it with 429.
+const MidjourneyQueueFullCode = 30
+
+// MidjourneyKeyConcurrencyError reports a Midjourney key at its cap as a full
+// queue, so the client sees 429 and retries later.
+func MidjourneyKeyConcurrencyError() *taskdto.MidjourneyResponse {
+	return &taskdto.MidjourneyResponse{Code: MidjourneyQueueFullCode, Description: "channel key at concurrency limit"}
 }
 
 // TakeChannelSetupError returns and clears the stored setup rejection.

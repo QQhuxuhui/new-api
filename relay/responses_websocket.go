@@ -244,6 +244,8 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 	started := time.Now()
 	var info *relaycommon.RelayInfo
 	billingPrepared := false
+	// Each response.create holds the key's concurrency lease only while it runs.
+	defer service.ReleaseRequestConcurrency(c)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			apiErr = types.NewError(fmt.Errorf("responses websocket call panic: %v", recovered), types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
@@ -298,6 +300,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		for ; retry.GetRetry() <= common.RetryTimes; retry.IncreaseRetry() {
 			var channel *appmodel.Channel
 			channel, apiErr = selectResponsesWSChannel(c, modelName, retry)
+			if apiErr != nil && apiErr.GetErrorCode() == types.ErrorCodeChannelKeyConcurrencyLimit && retry.GetRetry() < common.RetryTimes {
+				continue
+			}
 			if apiErr != nil {
 				return apiErr
 			}
@@ -608,6 +613,11 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 	common.SetContextKey(c, appconstant.ContextKeyChannelParamOverride, channel.GetParamOverride())
 	common.SetContextKey(c, appconstant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, appconstant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
+	// The connection cannot move to another key, so a key at its cap rejects
+	// this call instead of failing over.
+	if !service.AcquireChannelKeyLease(c, s.lockedKey, channel.Type, channel.GetSetting().MaxConcurrentRequestsPerKey) {
+		return types.NewErrorWithStatusCode(errors.New("channel key at concurrency limit"), types.ErrorCodeChannelKeyConcurrencyLimit, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry())
+	}
 	policy := service.RequestPolicy(c)
 	policy.BeginAttempt(channel, s.lockedGroup)
 	policy.AddEvent(service.PolicyEvent{ChannelID: channel.Id, Decision: service.PolicyDecision{Action: "select", Reason: "pinned_channel", Source: "channel_constraint"}})

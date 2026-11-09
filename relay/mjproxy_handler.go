@@ -323,6 +323,9 @@ func RelayMidjourneyTaskImageSeed(c *gin.Context) *dto.MidjourneyResponse {
 	if channel.Status != common.ChannelStatusEnabled {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, i18n.T(c, i18n.MsgRelayTaskChannelDisabled))
 	}
+	if !service.AcquireChannelKeyLease(c, channel.Key, channel.Type, channel.GetSetting().MaxConcurrentRequestsPerKey) {
+		return service.MidjourneyKeyConcurrencyError()
+	}
 	c.Set("channel_id", originTask.ChannelId)
 	c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
 
@@ -496,6 +499,9 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			}
 			if channel.Status != common.ChannelStatusEnabled {
 				return service.MidjourneyErrorWrapper(constant.MjRequestError, i18n.T(c, i18n.MsgRelayTaskChannelDisabled))
+			}
+			if !service.AcquireChannelKeyLease(c, channel.Key, channel.Type, channel.GetSetting().MaxConcurrentRequestsPerKey) {
+				return service.MidjourneyKeyConcurrencyError()
 			}
 			c.Set("base_url", channel.GetBaseURL())
 			c.Set("channel_id", originTask.ChannelId)

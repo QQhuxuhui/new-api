@@ -408,8 +408,18 @@ func RelayMidjourney(c *gin.Context) {
 	case relayconstant.RelayModeMidjourneyTaskImageSeed:
 		mjErr = relay.RelayMidjourneyTaskImageSeed(c)
 	case relayconstant.RelayModeSwapFace:
+		if service.TakeChannelSetupError(c) != nil {
+			mjErr = service.MidjourneyKeyConcurrencyError()
+			break
+		}
 		mjErr = relay.RelaySwapFace(c, relayInfo)
 	default:
+		// The distributor's channel had no key slot, so nothing was set up to
+		// send to; report a full queue instead of submitting.
+		if service.TakeChannelSetupError(c) != nil {
+			mjErr = service.MidjourneyKeyConcurrencyError()
+			break
+		}
 		mjErr = relay.RelayMidjourneySubmit(c, relayInfo)
 	}
 	//err = relayMidjourneySubmit(c, relayMode)

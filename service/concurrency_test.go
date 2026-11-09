@@ -104,3 +104,28 @@ func TestChannelSetupErrorIsTakenOnce(t *testing.T) {
 	StoreChannelSetupError(c, nil)
 	assert.True(t, ChannelReselectRequired(c), "a stored rejection forces later attempts to select again")
 }
+
+func TestConcurrencyLeasesRestartOnAReusedContext(t *testing.T) {
+	server := useConcurrencyRedis(t)
+	key := ChannelKeyConcurrencyKey("sk-ws", 1)
+	connection := newLeaseContext()
+
+	// Two response.create calls on one WebSocket connection share a context.
+	require.True(t, AcquireConcurrencyLease(connection, key, 1))
+	ReleaseRequestConcurrency(connection)
+	another := newLeaseContext()
+	assert.True(t, AcquireConcurrencyLease(another, key, 1), "a finished call frees the key")
+	ReleaseRequestConcurrency(another)
+
+	other := newLeaseContext()
+	require.True(t, AcquireConcurrencyLease(other, key, 2))
+	require.True(t, AcquireConcurrencyLease(connection, key, 2), "the next call on the connection leases again")
+	leases := leasesOf(connection)
+	leases.mu.Lock()
+	renewing := leases.stop != nil
+	leases.mu.Unlock()
+	assert.True(t, renewing, "the lease of the next call is renewed")
+	ReleaseRequestConcurrency(connection)
+	ReleaseRequestConcurrency(other)
+	assert.False(t, server.Exists(key))
+}
