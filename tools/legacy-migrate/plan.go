@@ -22,6 +22,30 @@ const quotaPerUnit = 500000
 // bound the rebuilt site applies to wallet quota.
 const maxWalletQuota = int64(1<<53 - 1)
 
+// defaultCopiedOptionKeys are copied unchanged (confirmed 2026-11-09): site
+// texts, registration and mail, console content, rate limits and payments.
+// StripeUnitPrice is left out: it priced the legacy exchange rate and must be
+// set again for ¥1 = $1.
+var defaultCopiedOptionKeys = []string{
+	"SystemName", "Logo", "Footer", "Notice", "About", "HomePageContent", "ServerAddress", "TopUpLink",
+	"RegisterEnabled", "PasswordRegisterEnabled", "EmailVerificationEnabled", "EmailDomainRestrictionEnabled",
+	"EmailAliasRestrictionEnabled", "EmailDomainWhitelist", "SMTPServer", "SMTPPort", "SMTPAccount", "SMTPFrom",
+	"SMTPToken", "SMTPSSLEnabled", "WeChatAuthEnabled", "WeChatServerAddress", "WeChatAccountQRCodeImageURL",
+	"TurnstileCheckEnabled", "TurnstileSiteKey", "TurnstileSecretKey",
+	"general_setting.docs_link", "SensitiveWords",
+	"RetryTimes", "ModelRequestRateLimitEnabled", "ModelRequestRateLimitCount", "ModelRequestRateLimitSuccessCount",
+	"ModelRequestRateLimitDurationMinutes", "group_ratio_setting.group_special_usable_group",
+	"EpayId", "EpayKey", "PayAddress", "PayMethods", "CustomCallbackAddress", "MinTopUp", "payment_setting.amount_options",
+	"StripeApiSecret", "StripeWebhookSecret", "StripePriceId", "StripeMinTopUp",
+	"CreemProducts", "CreemTestMode", "CreemWebhookSecret",
+}
+
+// copiedOptionPrefixes copy every legacy option under these prefixes.
+var copiedOptionPrefixes = []string{"passkey.", "console_setting.", "legal.", "channel_affinity_setting."}
+
+// quotaOptionKeys hold quota amounts and are copied times k.
+var quotaOptionKeys = []string{"QuotaForNewUser", "QuotaForInviter", "QuotaForInvitee", "PreConsumedQuota"}
+
 // devOnlySettingKeys are channel setting keys of features the rebuilt site
 // does not port; they are dropped instead of lingering unused.
 var devOnlySettingKeys = []string{

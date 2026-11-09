@@ -106,6 +106,16 @@ func runReport(ctx context.Context, cfg config) error {
 	for _, key := range cfg.SiteOptionKeys {
 		migrated[key] = true
 	}
+	for _, key := range quotaOptionKeys {
+		migrated[key] = true
+	}
+	for key := range data.Options {
+		for _, prefix := range copiedOptionPrefixes {
+			if strings.HasPrefix(key, prefix) {
+				migrated[key] = true
+			}
+		}
+	}
 	var skipped []string
 	for key := range data.Options {
 		if !migrated[key] {
@@ -114,6 +124,8 @@ func runReport(ctx context.Context, cfg config) error {
 	}
 	sort.Strings(skipped)
 	fmt.Fprintf(&out, "- migrated: GroupRatio (× k), GroupGroupRatio (× k), UserUsableGroups (dropped groups removed), %s\n", strings.Join(cfg.SiteOptionKeys, ", "))
+	fmt.Fprintf(&out, "- migrated by prefix: %s; times k: %s\n", strings.Join(copiedOptionPrefixes, ", "), strings.Join(quotaOptionKeys, ", "))
+	out.WriteString("- set again by hand: StripeUnitPrice (legacy value priced the old exchange rate); review CreemProducts quotas against ¥1 = $1\n")
 	out.WriteString("- reset: Price = 1, USDExchangeRate = 1, TopupGroupRatio = {}, payment_setting.amount_discount = {}, quota shown in CNY\n")
 	fmt.Fprintf(&out, "- not migrated (%d keys, review): %s\n", len(skipped), strings.Join(skipped, ", "))
 	fmt.Print(out.String())

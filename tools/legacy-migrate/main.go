@@ -53,7 +53,7 @@ func parseConfig(command string, args []string) (config, error) {
 	forfeitPlans := flags.String("forfeit-plan-ids", "23", "plan ids whose remaining quota is not converted")
 	kExclude := flags.String("k-exclude-plan-ids", "5,23", "custom or enterprise plan ids excluded from k")
 	dropped := flags.String("drop-groups", "cc逆向1,gemini-t3,claude-福利,glm", "plan-only groups taken offline")
-	siteKeys := flags.String("site-option-keys", "SystemName,Logo,Footer,Notice,About,HomePageContent,ServerAddress,TopUpLink", "site options copied as is")
+	siteKeys := flags.String("site-option-keys", strings.Join(defaultCopiedOptionKeys, ","), "options copied as is")
 	allowInflight := flags.Bool("allow-inflight", false, "import despite unsettled records (rehearsal on an old snapshot only)")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err

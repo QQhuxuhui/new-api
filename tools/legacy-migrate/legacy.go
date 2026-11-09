@@ -168,7 +168,8 @@ func loadUsers(ctx context.Context, db *pgx.Conn, cfg config, data *legacyData) 
 		return err
 	}
 
-	snapshot := cfg.Snapshot.Unix()
+	// Plan timestamps (started_at, expires_at, paused_at) are milliseconds.
+	snapshot := cfg.Snapshot.UnixMilli()
 	forfeit := cfg.ForfeitPlanIDs
 	if forfeit == nil {
 		forfeit = []int64{}
@@ -177,7 +178,7 @@ func loadUsers(ctx context.Context, db *pgx.Conn, cfg config, data *legacyData) 
 	// paused by a ban; excluding refunds, legacy copies and forfeited plans.
 	planRows, err := db.Query(ctx, `SELECT user_id, sum(quota)::bigint FROM user_plans
 		WHERE status = 1 AND coalesce(refund_status, 'none') <> 'refunded'
-		  AND coalesce(plan_name, '') <> 'legacy' AND NOT (plan_id = ANY($2))
+		  AND coalesce(plan_name, '') <> 'legacy' AND (plan_id IS NULL OR NOT (plan_id = ANY($2)))
 		  AND (paused_at > 0 OR started_at = 0 OR expires_at = 0 OR expires_at > $1)
 		GROUP BY user_id`, snapshot, forfeit)
 	if err != nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -307,6 +308,24 @@ func importOptions(ctx context.Context, tx pgx.Tx, cfg config, data *legacyData)
 		if value, ok := data.Options[key]; ok {
 			values[key] = value
 		}
+	}
+	for key, value := range data.Options {
+		for _, prefix := range copiedOptionPrefixes {
+			if strings.HasPrefix(key, prefix) {
+				values[key] = value
+			}
+		}
+	}
+	for _, key := range quotaOptionKeys {
+		raw, ok := data.Options[key]
+		if !ok || strings.TrimSpace(raw) == "" {
+			continue
+		}
+		quota, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("option %s: %w", key, err)
+		}
+		values[key] = strconv.FormatInt(scaleQuota(quota, cfg.K), 10)
 	}
 	for key, value := range values {
 		if _, err := tx.Exec(ctx, `INSERT INTO options (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, value); err != nil {
