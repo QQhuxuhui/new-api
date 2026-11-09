@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -134,7 +136,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
+	streamingTimeout := ResolveStreamTimeout(info)
 
 	var (
 		stopChan    = make(chan bool, 3) // 增加缓冲区避免阻塞
@@ -367,4 +369,23 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	} else {
 		logger.LogError(c, common.LogText("stream ended: %s, received=%d", info.StreamStatus.Summary(), info.ReceivedResponseCount))
 	}
+}
+
+// neverStreamTimeout stands in for "never time out" so the idle ticker keeps
+// its select structure (a zero ticker period panics).
+const neverStreamTimeout = time.Duration(math.MaxInt64)
+
+// ResolveStreamTimeout returns the idle timeout of this stream: the channel's
+// stream_timeout_seconds when set, otherwise STREAMING_TIMEOUT. Zero or less
+// never times out.
+func ResolveStreamTimeout(info *relaycommon.RelayInfo) time.Duration {
+	seconds := constant.StreamingTimeout
+	if info != nil && info.ChannelMeta != nil && info.ChannelSetting.StreamTimeoutSeconds != nil {
+		seconds = *info.ChannelSetting.StreamTimeoutSeconds
+	}
+	if seconds <= 0 {
+		return neverStreamTimeout
+	}
+	// Validation rejects larger values; clamp data written around it.
+	return time.Duration(min(seconds, dto.MaxStreamTimeoutSeconds)) * time.Second
 }

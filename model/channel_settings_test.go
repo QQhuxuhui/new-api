@@ -33,6 +33,10 @@ func TestChannelValidateSettingsRejectsInvalidHTTPTransport(t *testing.T) {
 			setting: dto.ChannelSettings{HTTPProtocol: "http1", HTTP2ConnectionShards: 2},
 			wantErr: "http2_connection_shards",
 		},
+		{name: "stream timeout zero never times out", setting: dto.ChannelSettings{StreamTimeoutSeconds: common.GetPointer(0)}},
+		{name: "stream timeout at the 7-day cap", setting: dto.ChannelSettings{StreamTimeoutSeconds: common.GetPointer(dto.MaxStreamTimeoutSeconds)}},
+		{name: "negative stream timeout rejected", setting: dto.ChannelSettings{StreamTimeoutSeconds: common.GetPointer(-1)}, wantErr: "stream_timeout_seconds"},
+		{name: "stream timeout above the cap rejected", setting: dto.ChannelSettings{StreamTimeoutSeconds: common.GetPointer(dto.MaxStreamTimeoutSeconds + 1)}, wantErr: "stream_timeout_seconds"},
 	}
 
 	for _, tt := range tests {

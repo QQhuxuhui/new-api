@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -486,13 +488,38 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 
 	common2.SetContextKey(c, appconstant.ContextKeyUpstreamRequestOrigin, req.URL.Scheme+"://"+req.URL.Host)
+	// A channel with stream_timeout_seconds streams without the RELAY_TIMEOUT
+	// total duration. RELAY_TIMEOUT still bounds the wait for the response
+	// headers and the read of a non-200 error body.
+	var releaseRelayTimeout func()
+	var stopHeaderTimer func() bool
+	if info.IsStream && info.ChannelMeta != nil && info.ChannelSetting.StreamTimeoutSeconds != nil && relayClient.Timeout > 0 {
+		ctx, cancel := context.WithCancel(req.Context())
+		req = req.WithContext(ctx)
+		headerTimer := time.AfterFunc(relayClient.Timeout, cancel)
+		relayClient.Timeout = 0
+		stopHeaderTimer = headerTimer.Stop
+		var once sync.Once
+		releaseRelayTimeout = func() { once.Do(func() { headerTimer.Stop(); cancel() }) }
+	}
 	resp, err := relayClient.Do(req)
+	if releaseRelayTimeout != nil && (err != nil || resp == nil) {
+		releaseRelayTimeout()
+	}
 	if err != nil {
 		logger.LogError(c, common2.LogText("do request failed: %s", err.Error()))
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")
+	}
+	if releaseRelayTimeout != nil {
+		var idle time.Duration
+		if resp.StatusCode == http.StatusOK {
+			stopHeaderTimer()
+			idle = streamIdleBackstop(info)
+		}
+		resp.Body = newStreamIdleBody(resp.Body, idle, releaseRelayTimeout)
 	}
 	if common2.DebugEnabled {
 		policy := service.NormalizeHTTPTransportPolicy(info.ChannelSetting)
@@ -551,4 +578,50 @@ func newTaskAPIRequest(c *gin.Context, fullRequestURL string, requestBody io.Rea
 		return nil, errors.New("task client request is missing")
 	}
 	return http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
+}
+
+// streamIdleBackstop is the idle limit on reading a successful stream once the
+// RELAY_TIMEOUT total duration is lifted. It trails the channel's stream
+// timeout so the stream scanner reports the timeout itself; it exists for
+// adaptors that scan the body without the stream scanner. Zero means none.
+func streamIdleBackstop(info *common.RelayInfo) time.Duration {
+	timeout := helper.ResolveStreamTimeout(info)
+	if timeout >= time.Duration(dto.MaxStreamTimeoutSeconds)*time.Second {
+		return 0
+	}
+	return timeout + 30*time.Second
+}
+
+// streamIdleBody releases the request context when the body is closed and,
+// with a non-zero idle limit, cancels it once no data arrives for that long.
+type streamIdleBody struct {
+	io.ReadCloser
+	idle    time.Duration
+	timer   *time.Timer
+	release func()
+}
+
+func newStreamIdleBody(body io.ReadCloser, idle time.Duration, release func()) *streamIdleBody {
+	wrapped := &streamIdleBody{ReadCloser: body, idle: idle, release: release}
+	if idle > 0 {
+		wrapped.timer = time.AfterFunc(idle, release)
+	}
+	return wrapped
+}
+
+func (b *streamIdleBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 && b.timer != nil {
+		b.timer.Reset(b.idle)
+	}
+	return n, err
+}
+
+func (b *streamIdleBody) Close() error {
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	err := b.ReadCloser.Close()
+	b.release()
+	return err
 }

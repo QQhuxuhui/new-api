@@ -38,6 +38,28 @@ type ChannelSettings struct {
 	// AlwaysHealthy exempts the channel from health warning and temporary
 	// suspension; its request statistics are still recorded.
 	AlwaysHealthy bool `json:"always_healthy,omitempty"`
+	// StreamTimeoutSeconds overrides STREAMING_TIMEOUT for this channel's
+	// streams: the longest wait for the first event and between events. 0
+	// never times out. When set, a successful stream is not cut by the
+	// RELAY_TIMEOUT total duration; the response header wait still is.
+	StreamTimeoutSeconds *int `json:"stream_timeout_seconds,omitempty"`
+}
+
+// MaxStreamTimeoutSeconds is the largest accepted stream_timeout_seconds.
+const MaxStreamTimeoutSeconds = 7 * 24 * 60 * 60
+
+// ValidateStreamTimeout rejects a negative or oversized stream timeout.
+func (s *ChannelSettings) ValidateStreamTimeout() error {
+	if s == nil || s.StreamTimeoutSeconds == nil {
+		return nil
+	}
+	if *s.StreamTimeoutSeconds < 0 {
+		return fmt.Errorf("stream_timeout_seconds must not be negative (0 never times out)")
+	}
+	if *s.StreamTimeoutSeconds > MaxStreamTimeoutSeconds {
+		return fmt.Errorf("stream_timeout_seconds must be at most %d (7 days); use 0 to never time out", MaxStreamTimeoutSeconds)
+	}
+	return nil
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,

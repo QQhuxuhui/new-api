@@ -15,6 +15,7 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -754,6 +755,29 @@ func TestResponseBusinessStartedIgnoresScannerPings(t *testing.T) {
 
 			require.NoError(t, StringData(c, "chunk"))
 			assert.True(t, ResponseBusinessStarted(c))
+		})
+	}
+}
+
+func TestResolveStreamTimeout(t *testing.T) {
+	previous := constant.StreamingTimeout
+	constant.StreamingTimeout = 300
+	t.Cleanup(func() { constant.StreamingTimeout = previous })
+	seconds := func(value int) *int { return &value }
+	for _, test := range []struct {
+		name    string
+		setting *int
+		want    time.Duration
+	}{
+		{name: "falls back to STREAMING_TIMEOUT", want: 300 * time.Second},
+		{name: "channel setting wins", setting: seconds(60), want: 60 * time.Second},
+		{name: "zero never times out", setting: seconds(0), want: neverStreamTimeout},
+		{name: "oversized value is clamped", setting: seconds(1 << 40), want: time.Duration(dto.MaxStreamTimeoutSeconds) * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+			info.ChannelSetting.StreamTimeoutSeconds = test.setting
+			assert.Equal(t, test.want, ResolveStreamTimeout(info))
 		})
 	}
 }

@@ -2,11 +2,16 @@ package channel
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -215,5 +220,105 @@ func TestToWebSocketURL(t *testing.T) {
 		"ws://127.0.0.1:3000/backend-api/codex/responses": "ws://127.0.0.1:3000/backend-api/codex/responses",
 	} {
 		assert.Equal(t, want, toWebSocketURL(input), input)
+	}
+}
+
+// TestDoRequestChannelStreamTimeoutLiftsRelayTimeout runs real upstreams
+// against a 1-second RELAY_TIMEOUT, the smallest the setting allows.
+func TestDoRequestChannelStreamTimeoutLiftsRelayTimeout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previous := common.RelayTimeout
+	common.RelayTimeout = 1
+	service.InitHttpClient()
+	t.Cleanup(func() {
+		common.RelayTimeout = previous
+		service.InitHttpClient()
+	})
+	streamFor := func(total time.Duration) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			for deadline := time.Now().Add(total); time.Now().Before(deadline); {
+				_, _ = io.WriteString(w, "data: {}\n\n")
+				w.(http.Flusher).Flush()
+				time.Sleep(200 * time.Millisecond)
+			}
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		}
+	}
+	sixty := 60
+	for _, test := range []struct {
+		name          string
+		handler       http.HandlerFunc
+		streamTimeout *int
+		wantDoErr     bool
+		wantReadErr   bool
+	}{
+		{name: "configured channel streams past RELAY_TIMEOUT", handler: streamFor(1500 * time.Millisecond), streamTimeout: &sixty},
+		{name: "unconfigured channel keeps the RELAY_TIMEOUT total", handler: streamFor(1500 * time.Millisecond), wantReadErr: true},
+		{
+			name: "configured channel still bounds the header wait",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				time.Sleep(1500 * time.Millisecond)
+				w.WriteHeader(http.StatusOK)
+			},
+			streamTimeout: &sixty,
+			wantDoErr:     true,
+		},
+		{
+			name: "configured channel still bounds a non-200 error body",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusBadGateway)
+				w.(http.Flusher).Flush()
+				time.Sleep(1500 * time.Millisecond)
+				_, _ = io.WriteString(w, `{"error":"late"}`)
+			},
+			streamTimeout: &sixty,
+			wantReadErr:   true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := httptest.NewServer(test.handler)
+			defer upstream.Close()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			req, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader("{}"))
+			require.NoError(t, err)
+			info := &relaycommon.RelayInfo{IsStream: true, DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+			info.ChannelSetting.StreamTimeoutSeconds = test.streamTimeout
+
+			resp, err := doRequest(c, req, info)
+			if test.wantDoErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			_, err = io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			assert.Equal(t, test.wantReadErr, err != nil, "read error: %v", err)
+		})
+	}
+}
+
+func TestStreamIdleBodyReleasesAfterIdleAndOnClose(t *testing.T) {
+	reader, writer := io.Pipe()
+	released := make(chan struct{}, 2)
+	body := newStreamIdleBody(reader, 50*time.Millisecond, func() { released <- struct{}{} })
+
+	go func() { _, _ = writer.Write([]byte("chunk")) }()
+	buffer := make([]byte, 8)
+	_, err := body.Read(buffer)
+	require.NoError(t, err)
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("an idle body must release the request context")
+	}
+
+	require.NoError(t, body.Close())
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("closing the body must release the request context")
 	}
 }
