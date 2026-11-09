@@ -771,6 +771,8 @@ func ReselectMidjourneyChannelAfterKeyLimit(c *gin.Context, relayInfo *relaycomm
 		}
 		setupErr := middleware.SetupContextForSelectedChannel(c, channel, modelName)
 		if setupErr == nil {
+			// Billing and the task record read the channel from relayInfo.
+			relayInfo.InitChannelMeta(c)
 			return true
 		}
 		if setupErr.GetErrorCode() != types.ErrorCodeChannelKeyConcurrencyLimit {
