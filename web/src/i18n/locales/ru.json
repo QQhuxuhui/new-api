@@ -7450,6 +7450,10 @@
     "Channel health reset": "Состояние канала сброшено",
     "Always Healthy": "Всегда исправен",
     "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "Не помечать канал предупреждением и не приостанавливать его при высокой доле ошибок. Запросы по-прежнему учитываются в статистике.",
-    "Too many channel IDs": "Слишком много ID каналов"
+    "Too many channel IDs": "Слишком много ID каналов",
+    "Stream Timeout (seconds)": "Таймаут потока (секунды)",
+    "Use the global setting": "Использовать глобальную настройку",
+    "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "Максимальное ожидание первого и каждого следующего события потока на этом канале. 0 — без ограничения. Если задано, успешные потоки не обрываются общим таймаутом запроса. Оставьте пустым, чтобы использовать STREAMING_TIMEOUT.",
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "Таймаут потока должен быть целым числом секунд от 0 до 604800"
   }
 }

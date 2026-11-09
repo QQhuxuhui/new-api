@@ -82,6 +82,8 @@ function isOptionalProxyURL(value: string | undefined): boolean {
 export const HTTP_PROTOCOL_AUTO = 'auto'
 export const HTTP_PROTOCOL_HTTP1 = 'http1'
 export const MAX_HTTP2_CONNECTION_SHARDS = 8
+/** Largest stream_timeout_seconds the server accepts (7 days). */
+export const MAX_STREAM_TIMEOUT_SECONDS = 7 * 24 * 60 * 60
 
 export function normalizeHttpProtocol(
   value: string | undefined | null
@@ -271,6 +273,7 @@ export const channelFormSchema = z
     http2_connection_shards: z.number().int().optional(),
     tls_insecure_skip_verify: z.boolean().optional(),
     always_healthy: z.boolean().optional(),
+    stream_timeout_seconds: z.string().optional(),
     pass_through_body_enabled: z.boolean().optional(),
     responses_websocket_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
@@ -407,6 +410,21 @@ export const channelFormSchema = z
       )
     }
 
+    const streamTimeout = data.stream_timeout_seconds?.trim() ?? ''
+    if (
+      streamTimeout !== '' &&
+      !(
+        /^\d+$/.test(streamTimeout) &&
+        Number(streamTimeout) <= MAX_STREAM_TIMEOUT_SECONDS
+      )
+    ) {
+      addRequiredIssue(
+        ctx,
+        'stream_timeout_seconds',
+        ERROR_MESSAGES.INVALID_STREAM_TIMEOUT
+      )
+    }
+
     const protocol = normalizeHttpProtocol(data.http_protocol)
     const shards = data.http2_connection_shards ?? 1
     if (shards < 1 || shards > MAX_HTTP2_CONNECTION_SHARDS) {
@@ -467,6 +485,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   http2_connection_shards: 1,
   tls_insecure_skip_verify: false,
   always_healthy: false,
+  stream_timeout_seconds: '',
   pass_through_body_enabled: false,
   responses_websocket_enabled: false,
   system_prompt: '',
@@ -516,6 +535,7 @@ export function transformChannelToFormDefaults(
     http2_connection_shards: 1,
     tls_insecure_skip_verify: false,
     always_healthy: false,
+    stream_timeout_seconds: '',
     pass_through_body_enabled: false,
     responses_websocket_enabled: false,
     system_prompt: '',
@@ -539,6 +559,10 @@ export function transformChannelToFormDefaults(
         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
         tls_insecure_skip_verify: parsed.tls_insecure_skip_verify === true,
         always_healthy: parsed.always_healthy === true,
+        stream_timeout_seconds:
+          typeof parsed.stream_timeout_seconds === 'number'
+            ? String(parsed.stream_timeout_seconds)
+            : '',
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         responses_websocket_enabled:
           parsed.responses_websocket_enabled === true,
@@ -705,6 +729,10 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   }
   if (formData.always_healthy === true) {
     settingObj.always_healthy = true
+  }
+  const streamTimeout = formData.stream_timeout_seconds?.trim() ?? ''
+  if (streamTimeout !== '') {
+    settingObj.stream_timeout_seconds = Number(streamTimeout)
   }
 
   return JSON.stringify(settingObj)

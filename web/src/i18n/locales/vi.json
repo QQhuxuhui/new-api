@@ -7450,6 +7450,10 @@
     "Channel health reset": "Đã đặt lại tình trạng kênh",
     "Always Healthy": "Luôn khỏe",
     "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "Không đánh dấu cảnh báo hay tạm ngưng kênh này khi tỉ lệ lỗi cao. Yêu cầu vẫn được tính vào thống kê sức khỏe.",
-    "Too many channel IDs": "Quá nhiều ID kênh"
+    "Too many channel IDs": "Quá nhiều ID kênh",
+    "Stream Timeout (seconds)": "Thời gian chờ luồng (giây)",
+    "Use the global setting": "Dùng cài đặt chung",
+    "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "Thời gian chờ tối đa cho sự kiện luồng đầu tiên và mỗi sự kiện tiếp theo trên kênh này. 0 là không giới hạn. Khi đặt, luồng thành công không bị cắt bởi thời gian chờ tổng của yêu cầu. Để trống để dùng STREAMING_TIMEOUT.",
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "Thời gian chờ luồng phải là số giây nguyên từ 0 đến 604800"
   }
 }

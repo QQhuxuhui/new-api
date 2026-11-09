@@ -7450,6 +7450,10 @@
     "Channel health reset": "チャネルの健全性をリセットしました",
     "Always Healthy": "常に正常",
     "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "失敗率が高くてもこのチャネルを警告や一時停止にしません。リクエストは引き続き健全性の統計に記録されます。",
-    "Too many channel IDs": "チャネル ID が多すぎます"
+    "Too many channel IDs": "チャネル ID が多すぎます",
+    "Stream Timeout (seconds)": "ストリームタイムアウト（秒）",
+    "Use the global setting": "グローバル設定を使用",
+    "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "このチャネルで最初および以降の各ストリームイベントを待つ最大時間。0 はタイムアウトなし。設定すると、成功したストリームは全体のリレータイムアウトで切断されません。空欄の場合は STREAMING_TIMEOUT を使用します。",
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "ストリームタイムアウトは 0〜604800 の整数秒で指定してください"
   }
 }

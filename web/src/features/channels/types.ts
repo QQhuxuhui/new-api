@@ -93,6 +93,7 @@ export interface ChannelSettings {
   http2_connection_shards?: number
   tls_insecure_skip_verify?: boolean
   always_healthy?: boolean
+  stream_timeout_seconds?: number
 }
 
 export interface ChannelOtherSettings {

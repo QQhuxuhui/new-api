@@ -7450,6 +7450,10 @@
     "Channel health reset": "渠道健康状态已重置",
     "Always Healthy": "始终健康",
     "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "失败率高时也不将此渠道标为告警或挂起；请求仍计入其健康统计。",
-    "Too many channel IDs": "渠道 ID 过多"
+    "Too many channel IDs": "渠道 ID 过多",
+    "Stream Timeout (seconds)": "流式超时（秒）",
+    "Use the global setting": "使用全局设置",
+    "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "此渠道等待首个及后续每个流式事件的最长时间。0 表示永不超时。设置后，成功的流式响应不再受总请求超时截断。留空则使用 STREAMING_TIMEOUT。",
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "流式超时必须是 0 到 604800 之间的整数秒"
   }
 }

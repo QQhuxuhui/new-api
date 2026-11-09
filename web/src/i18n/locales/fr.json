@@ -7450,6 +7450,10 @@
     "Channel health reset": "Santé du canal réinitialisée",
     "Always Healthy": "Toujours sain",
     "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "Ne jamais signaler ce canal en avertissement ni le suspendre en cas de taux d'échec élevé. Les requêtes restent comptées dans ses statistiques de santé.",
-    "Too many channel IDs": "Trop d’identifiants de canal"
+    "Too many channel IDs": "Trop d’identifiants de canal",
+    "Stream Timeout (seconds)": "Délai du flux (secondes)",
+    "Use the global setting": "Utiliser le réglage global",
+    "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "Attente maximale du premier événement de flux et de chacun des suivants sur ce canal. 0 désactive le délai. Une fois défini, les flux réussis ne sont plus coupés par le délai total de relais. Laissez vide pour utiliser STREAMING_TIMEOUT.",
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "Le délai du flux doit être un nombre entier de secondes entre 0 et 604800"
   }
 }

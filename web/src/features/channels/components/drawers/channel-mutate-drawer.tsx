@@ -2163,6 +2163,32 @@ export function ChannelMutateDrawer({
     />
   )
 
+  const streamTimeoutFields = (
+    <FormField
+      control={form.control}
+      name='stream_timeout_seconds'
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{t('Stream Timeout (seconds)')}</FormLabel>
+          <FormControl>
+            <Input
+              inputMode='numeric'
+              placeholder={t('Use the global setting')}
+              {...field}
+              value={field.value ?? ''}
+            />
+          </FormControl>
+          <FormDescription>
+            {t(
+              'Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.'
+            )}
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
+
   const tlsInsecureSkipVerifyFields = (
     <FormField
       control={form.control}
@@ -4842,6 +4868,7 @@ export function ChannelMutateDrawer({
                 {httpShardsFields}
                 {tlsInsecureSkipVerifyFields}
               </fieldset>
+              {streamTimeoutFields}
             </div>
             {upstreamModelDetectionFields}
             {notesFields}

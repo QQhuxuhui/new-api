@@ -361,6 +361,8 @@ export const ERROR_MESSAGES = {
   INVALID_PROXY:
     'Proxy address must use HTTP, HTTPS, SOCKS5, or SOCKS5H and include a valid host',
   INVALID_HTTP_PROTOCOL: 'HTTP protocol must be Auto or HTTP/1.1',
+  INVALID_STREAM_TIMEOUT:
+    'Stream timeout must be a whole number of seconds from 0 to 604800',
   INVALID_HTTP2_CONNECTION_SHARDS:
     'HTTP/2 connection shards must be between 1 and 8',
   INVALID_HTTP1_WITH_SHARDS:

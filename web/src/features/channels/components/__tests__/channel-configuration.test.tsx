@@ -1795,6 +1795,51 @@ test('turning on always healthy saves it in the channel setting', async () => {
   expect(JSON.parse(payload.setting)).toMatchObject({ always_healthy: true })
 })
 
+test('a saved channel stream timeout marks Other Settings and clearing it removes the setting', async () => {
+  editingChannel = { ...editingChannel, setting: '{"stream_timeout_seconds":600}' }
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  const otherTab = screen.getByRole('tab', { name: /Other Settings/ })
+  expect(otherTab).toHaveAccessibleName(/Configured/)
+  await user.click(otherTab)
+  const input = screen.getByRole('textbox', { name: 'Stream Timeout (seconds)' })
+  expect(input).toHaveValue('600')
+  await user.clear(input)
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+  await waitFor(() => expect(put).toHaveBeenCalled())
+  const payload = put.mock.calls[0]?.[1] as { setting: string }
+  expect(JSON.parse(payload.setting)).not.toHaveProperty('stream_timeout_seconds')
+})
+
+test('a zero stream timeout is saved and an out-of-range one is rejected', async () => {
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  await user.click(screen.getByRole('tab', { name: /Other Settings/ }))
+  const input = screen.getByRole('textbox', { name: 'Stream Timeout (seconds)' })
+
+  await user.type(input, '604801')
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+  expect(
+    await screen.findByText('Stream timeout must be a whole number of seconds from 0 to 604800')
+  ).toBeInTheDocument()
+  expect(put).not.toHaveBeenCalled()
+
+  await user.clear(input)
+  await user.type(input, '0')
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+  await waitFor(() => expect(put).toHaveBeenCalled())
+  const payload = put.mock.calls[0]?.[1] as { setting: string }
+  expect(JSON.parse(payload.setting)).toMatchObject({ stream_timeout_seconds: 0 })
+})
+
 test('an invalid edit switches categories and replaces configured styling with the field error', async () => {
   const user = userEvent.setup()
   render(<ConfigurationHarness currentRow={editingChannel} />)

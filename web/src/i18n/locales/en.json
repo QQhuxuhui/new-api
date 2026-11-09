@@ -7450,6 +7450,10 @@
     "Channel health reset": "Channel health reset",
     "Always Healthy": "Always Healthy",
     "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.": "Never mark this channel as warning or suspend it when its failure rate is high. Requests are still counted in its health statistics.",
-    "Too many channel IDs": "Too many channel IDs"
+    "Too many channel IDs": "Too many channel IDs",
+    "Stream Timeout (seconds)": "Stream Timeout (seconds)",
+    "Use the global setting": "Use the global setting",
+    "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.",
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "Stream timeout must be a whole number of seconds from 0 to 604800"
   }
 }
