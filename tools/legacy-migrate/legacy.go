@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -266,8 +267,30 @@ func loadInflight(ctx context.Context, db *pgx.Conn, cfg config, data *legacyDat
 		{"top-ups pending in the last 24 hours", `SELECT count(*) FROM top_ups WHERE status = 'pending' AND create_time > $1`, []any{recentTopup}},
 		{"plan refunds requested", `SELECT count(*) FROM user_plans WHERE refund_status = 'refund_requested'`, nil},
 		{"rebates awaiting review", `SELECT count(*) FROM aff_audit_logs WHERE status = 'pending'`, nil},
-		{"tasks awaiting billing", `SELECT count(*) FROM tasks WHERE billing_status = 'pending'`, nil},
+		// Every unsettled state of the legacy settlement machine: a success may
+		// stop at calculating or accounting before its quota delta lands.
+		{"tasks awaiting billing", `SELECT count(*) FROM tasks WHERE billing_status IN ('waiting', 'calculating', 'pending', 'accounting')`, nil},
+		// Running tasks hold pre-consumed quota that their outcome settles.
+		{"tasks still running", `SELECT count(*) FROM tasks WHERE status IN ('NOT_START', 'SUBMITTED', 'QUEUED', 'IN_PROGRESS')`, nil},
 		{"task billing compensations open", `SELECT count(*) FROM task_billing_compensations WHERE status IN ('pending', 'accounting')`, nil},
+	}
+	tree, err := groupTreeChildrenWithChannels(ctx, db, data.Options["GroupTree"])
+	if err != nil {
+		return err
+	}
+	// The rebuilt site has no group tree: a parent group no longer reaches its
+	// children's channels, so children with channels need a mapping first.
+	data.Inflight = append(data.Inflight, inflightCheck{Name: "group-tree children with enabled channels (" + strings.Join(tree, ", ") + ")", Count: int64(len(tree))})
+	var hasMidjourney bool
+	if err := db.QueryRow(ctx, `SELECT to_regclass('midjourneys') IS NOT NULL`).Scan(&hasMidjourney); err != nil {
+		return err
+	}
+	if hasMidjourney {
+		checks = append(checks, struct {
+			name  string
+			query string
+			args  []any
+		}{"Midjourney tasks still running", `SELECT count(*) FROM midjourneys WHERE status IN ('NOT_START', 'SUBMITTED', 'IN_PROGRESS')`, nil})
 	}
 	for _, check := range checks {
 		var count int64
@@ -301,4 +324,49 @@ func parseIDSet(value string) (map[int64]bool, []int64, error) {
 		list = append(list, id)
 	}
 	return set, list, nil
+}
+
+// groupTreeChildrenWithChannels lists the child groups of the legacy group
+// tree that enabled channels serve.
+func groupTreeChildrenWithChannels(ctx context.Context, db *pgx.Conn, treeJSON string) ([]string, error) {
+	tree := map[string][]string{}
+	if strings.TrimSpace(treeJSON) != "" {
+		if err := json.Unmarshal([]byte(treeJSON), &tree); err != nil {
+			return nil, fmt.Errorf("option GroupTree: %w", err)
+		}
+	}
+	children := map[string]bool{}
+	for _, list := range tree {
+		for _, child := range list {
+			children[strings.TrimSpace(child)] = true
+		}
+	}
+	if len(children) == 0 {
+		return nil, nil
+	}
+	rows, err := db.Query(ctx, `SELECT coalesce("group", '') FROM channels WHERE status = 1`)
+	if err != nil {
+		return nil, err
+	}
+	served := map[string]bool{}
+	for rows.Next() {
+		var groups string
+		if err := rows.Scan(&groups); err != nil {
+			return nil, err
+		}
+		for _, group := range splitCSV(groups) {
+			if children[strings.TrimSpace(group)] {
+				served[strings.TrimSpace(group)] = true
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var result []string
+	for group := range served {
+		result = append(result, group)
+	}
+	sort.Strings(result)
+	return result, nil
 }
