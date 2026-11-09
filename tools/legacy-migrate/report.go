@@ -101,7 +101,7 @@ func runReport(ctx context.Context, cfg config) error {
 
 	fmt.Fprintf(&out, "\n## Error rules\n\n- %d legacy rules convert to ChannelErrorRules\n", len(data.Rules))
 	out.WriteString("\n## Options\n\n")
-	migrated := map[string]bool{"GroupRatio": true, "GroupGroupRatio": true, "UserUsableGroups": true,
+	migrated := map[string]bool{"GroupRatio": true, "GroupGroupRatio": true, "UserUsableGroups": true, "AutoGroups": true,
 		"Price": true, "USDExchangeRate": true, "TopupGroupRatio": true, "payment_setting.amount_discount": true}
 	for _, key := range cfg.SiteOptionKeys {
 		migrated[key] = true

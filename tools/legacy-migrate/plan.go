@@ -34,7 +34,8 @@ var defaultCopiedOptionKeys = []string{
 	"TurnstileCheckEnabled", "TurnstileSiteKey", "TurnstileSecretKey",
 	"general_setting.docs_link", "SensitiveWords",
 	"RetryTimes", "ModelRequestRateLimitEnabled", "ModelRequestRateLimitCount", "ModelRequestRateLimitSuccessCount",
-	"ModelRequestRateLimitDurationMinutes", "group_ratio_setting.group_special_usable_group",
+	"ModelRequestRateLimitDurationMinutes", "ModelRequestRateLimitGroup", "group_ratio_setting.group_special_usable_group",
+	"DefaultUseAutoGroup",
 	"EpayId", "EpayKey", "PayAddress", "PayMethods", "CustomCallbackAddress", "MinTopUp", "payment_setting.amount_options",
 	"StripeApiSecret", "StripeWebhookSecret", "StripePriceId", "StripeMinTopUp",
 	"CreemProducts", "CreemTestMode", "CreemWebhookSecret",
@@ -236,6 +237,26 @@ func dropUsableGroups(value string, dropped map[string]bool) (string, error) {
 		delete(groups, group)
 	}
 	return marshalSorted(groups)
+}
+
+// dropAutoGroups removes dropped groups from AutoGroups (a JSON array) and
+// keeps the order, which is the order auto tokens try groups in.
+func dropAutoGroups(value string, dropped map[string]bool) (string, error) {
+	var groups []string
+	if err := json.Unmarshal([]byte(value), &groups); err != nil {
+		return "", fmt.Errorf("invalid AutoGroups: %w", err)
+	}
+	kept := make([]string, 0, len(groups))
+	for _, group := range groups {
+		if !dropped[strings.TrimSpace(group)] {
+			kept = append(kept, group)
+		}
+	}
+	encoded, err := json.Marshal(kept)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func marshalSorted[V any](values map[string]V) (string, error) {

@@ -304,6 +304,11 @@ func importOptions(ctx context.Context, tx pgx.Tx, cfg config, data *legacyData)
 	if values["ChannelErrorRules"], err = convertRules(data.Rules); err != nil {
 		return 0, err
 	}
+	if raw := strings.TrimSpace(data.Options["AutoGroups"]); raw != "" {
+		if values["AutoGroups"], err = dropAutoGroups(raw, cfg.DroppedGroups); err != nil {
+			return 0, err
+		}
+	}
 	for _, key := range cfg.SiteOptionKeys {
 		if value, ok := data.Options[key]; ok {
 			values[key] = value

@@ -123,3 +123,9 @@ func TestAbilitiesForMirrorsTheGateway(t *testing.T) {
 	assert.Len(t, rows, 4, "duplicate models collapse")
 	assert.Equal(t, abilityRow{Group: "default", Model: "gpt-5", ChannelID: 9, Enabled: true, Priority: 10, Weight: 5}, rows[0])
 }
+
+func TestDropAutoGroupsKeepsOrder(t *testing.T) {
+	got, err := dropAutoGroups(`["codex","glm","default"]`, map[string]bool{"glm": true})
+	require.NoError(t, err)
+	assert.Equal(t, `["codex","default"]`, got)
+}
