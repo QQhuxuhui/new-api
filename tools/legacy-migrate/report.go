@@ -195,6 +195,29 @@ func reportTokensAndChannels(ctx context.Context, db *pgx.Conn, cfg config, k de
 	}
 	fmt.Fprintf(out, "\n## Channels\n\n- channels: %d (dropped groups removed: %d, disabled for having no group left: %d, per-key cap mapped: %d)\n", channels, groupsRemoved, disabledByGroups, withCap)
 	fmt.Fprintf(out, "- dev-only setting keys dropped: %v\n", devKeys)
+	// The rebuilt site has no channel ratios (plan §2): every enabled channel
+	// that priced differently needs a decision before import.
+	ratioRows, err := db.Query(ctx, `SELECT id, coalesce(name, ''), coalesce(ratio, 1)::text, coalesce(model_ratio, '') FROM channels
+		WHERE status = 1 AND (coalesce(ratio, 1) <> 1 OR coalesce(trim(model_ratio), '') NOT IN ('', '{}', 'null')) ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var ratioChannels []string
+	for ratioRows.Next() {
+		var id int64
+		var name, ratio, modelRatio string
+		if err := ratioRows.Scan(&id, &name, &ratio, &modelRatio); err != nil {
+			return err
+		}
+		ratioChannels = append(ratioChannels, fmt.Sprintf("#%d %s ratio=%s model_ratio=%s", id, name, ratio, modelRatio))
+	}
+	if err := ratioRows.Err(); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "- enabled channels with a channel ratio that the new site drops (decide: own group or accept the price change): %d\n", len(ratioChannels))
+	for _, line := range ratioChannels {
+		fmt.Fprintf(out, "  - %s\n", line)
+	}
 
 	var redemptions, redemptionQuota int64
 	if err := db.QueryRow(ctx, `SELECT count(*), coalesce(sum(quota), 0)::bigint FROM redemptions
