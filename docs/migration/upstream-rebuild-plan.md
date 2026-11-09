@@ -100,6 +100,20 @@ new_quota = round_half_up( ( users.quota
 - `user_asset_snapshots` 是封禁没收的申诉备份，`restored_at=0` 只表示未恢复，**不算在途**；导出清单存档，对应没收资产按 D20 不换算。仅当存在正在处理中的申诉恢复时人工清零。
 - `tasks` 中 `billing_status` 为待结算的任务；未处理的 `task_billing_compensations`。`billing_status` 为空的是结算 outbox 上线前的历史行（实测 10 条，均为 2026-07-20），不检查。
 
+## 迁移工具
+
+`tools/legacy-migrate`（独立 Go 模块，仅 PostgreSQL，不属于网关代码）：
+
+```bash
+cd tools/legacy-migrate && go build -o legacy-migrate .
+# 只读老库，输出对账报告（只有统计数字）
+./legacy-migrate report -legacy "$LEGACY_DSN"
+# 写入刚完成自动建表、尚未初始化管理员的新库；在途项不为 0 时拒绝执行
+./legacy-migrate import -legacy "$LEGACY_DSN" -target "$TARGET_DSN" -k 0.5
+```
+
+可调参数（默认值即本文档的决定）：`-fixed-balance-cny 10000`、`-fixed-balance-user-ids 4`、`-forfeit-plan-ids 23`、`-k-exclude-plan-ids 5,23`、`-drop-groups cc逆向1,gemini-t3,claude-福利,glm`、`-snapshot`（RFC 3339）。`-allow-inflight` 仅用于旧快照演练。import 在一个事务里完成，提交后逐用户比对余额；新库必须是空库（目标表有数据即拒绝）。
+
 ## 4. 切换流程
 
 1. T-3 天：关闭**所有**付款入口（套餐购买、钱包充值、USDT、Stripe/Creem/易支付）和退款申请；公告"余额数字 × k、单价同比下调、可用量不变"。
