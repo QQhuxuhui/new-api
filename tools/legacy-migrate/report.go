@@ -110,10 +110,8 @@ func runReport(ctx context.Context, cfg config) error {
 		migrated[key] = true
 	}
 	for key := range data.Options {
-		for _, prefix := range copiedOptionPrefixes {
-			if strings.HasPrefix(key, prefix) {
-				migrated[key] = true
-			}
+		if copiesOption(key) {
+			migrated[key] = true
 		}
 	}
 	var skipped []string

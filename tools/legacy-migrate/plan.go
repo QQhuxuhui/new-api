@@ -44,6 +44,25 @@ var defaultCopiedOptionKeys = []string{
 // copiedOptionPrefixes copy every legacy option under these prefixes.
 var copiedOptionPrefixes = []string{"passkey.", "console_setting.", "legal.", "channel_affinity_setting."}
 
+// skippedOptionPrefixes exclude legacy-only options under the copied
+// prefixes: the tutorial page does not exist on the rebuilt site.
+var skippedOptionPrefixes = []string{"console_setting.tutorial"}
+
+// copiesOption reports whether a legacy option is copied by prefix.
+func copiesOption(key string) bool {
+	for _, prefix := range skippedOptionPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return false
+		}
+	}
+	for _, prefix := range copiedOptionPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // quotaOptionKeys hold quota amounts and are copied times k.
 var quotaOptionKeys = []string{"QuotaForNewUser", "QuotaForInviter", "QuotaForInvitee", "PreConsumedQuota"}
 

@@ -129,3 +129,10 @@ func TestDropAutoGroupsKeepsOrder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, `["codex","default"]`, got)
 }
+
+func TestCopiesOptionSkipsTheLegacyTutorial(t *testing.T) {
+	assert.True(t, copiesOption("console_setting.announcements"))
+	assert.True(t, copiesOption("passkey.rp_id"))
+	assert.False(t, copiesOption("console_setting.tutorial_content"))
+	assert.False(t, copiesOption("SystemName"), "exact keys are listed separately")
+}

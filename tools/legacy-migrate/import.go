@@ -315,10 +315,8 @@ func importOptions(ctx context.Context, tx pgx.Tx, cfg config, data *legacyData)
 		}
 	}
 	for key, value := range data.Options {
-		for _, prefix := range copiedOptionPrefixes {
-			if strings.HasPrefix(key, prefix) {
-				values[key] = value
-			}
+		if copiesOption(key) {
+			values[key] = value
 		}
 	}
 	for _, key := range quotaOptionKeys {
