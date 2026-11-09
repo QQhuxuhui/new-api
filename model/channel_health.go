@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync/atomic"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -55,15 +56,21 @@ type channelHealthFlags struct {
 	warning   bool
 }
 
+// channelHealthLookupTimeout bounds the Redis lookup made while selecting a
+// channel. Memory-cache selection holds the channel cache read lock during it,
+// so a slow Redis must not stall selection or cache refreshes.
+const channelHealthLookupTimeout = 200 * time.Millisecond
+
 // loadChannelHealthFlags reads the suspended and warning flags of the
-// candidates in one Redis round trip. Without Redis, or on a Redis error, every
-// channel counts as healthy so selection fails open.
+// candidates in one Redis round trip. Without Redis, or on a Redis error or
+// timeout, every channel counts as healthy so selection fails open.
 func loadChannelHealthFlags(channelIDs []int) map[int]channelHealthFlags {
 	flags := make(map[int]channelHealthFlags, len(channelIDs))
 	if common.RDB == nil || len(channelIDs) == 0 {
 		return flags
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), channelHealthLookupTimeout)
+	defer cancel()
 	pipe := common.RDB.Pipeline()
 	suspended := make([]*redis.IntCmd, len(channelIDs))
 	warning := make([]*redis.IntCmd, len(channelIDs))

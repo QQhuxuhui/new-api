@@ -134,3 +134,22 @@ func TestSuspensionDoesNotShiftRetryPriorityLevels(t *testing.T) {
 		})
 	}
 }
+
+func TestChannelSelectionFailsOpenWhenRedisStalls(t *testing.T) {
+	originalMemoryCache := common.MemoryCacheEnabled
+	t.Cleanup(func() { common.MemoryCacheEnabled = originalMemoryCache; InitChannelCache() })
+	truncateTables(t)
+	server := useHealthRedis(t)
+	for i, name := range []string{"first", "second"} {
+		channel := Channel{Id: 943001 + i, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: name, Models: "health-model", Group: "default"}
+		require.NoError(t, channel.Insert())
+	}
+	common.MemoryCacheEnabled = true
+	InitChannelCache()
+	require.NoError(t, server.Set(fmt.Sprintf(ChannelHealthSuspendedKey, 943001), "1"))
+	server.SetError("redis stalled")
+
+	selected, err := GetRandomSatisfiedChannel("default", "health-model", 0, nil)
+	require.NoError(t, err)
+	require.NotNil(t, selected, "an unusable Redis leaves selection working without health")
+}
