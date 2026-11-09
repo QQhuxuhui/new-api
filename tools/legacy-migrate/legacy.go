@@ -306,7 +306,7 @@ func loadInflight(ctx context.Context, db *pgx.Conn, cfg config, data *legacyDat
 	}{
 		{"plan orders pending or paid but undelivered", `SELECT count(*) FROM plan_orders WHERE status IN ('pending', 'paid')`, nil},
 		{"top-up orders pending", `SELECT count(*) FROM topup_orders WHERE status = 'pending'`, nil},
-		{"top-ups pending in the last 24 hours", `SELECT count(*) FROM top_ups WHERE status = 'pending' AND create_time > $1`, []any{recentTopup}},
+		{"top-ups pending within " + cfg.PendingTopupHold.String(), `SELECT count(*) FROM top_ups WHERE status = 'pending' AND create_time > $1`, []any{recentTopup}},
 		{"plan refunds requested", `SELECT count(*) FROM user_plans WHERE refund_status = 'refund_requested'`, nil},
 		// Every unsettled state of the legacy settlement machine: a success may
 		// stop at calculating or accounting before its quota delta lands.

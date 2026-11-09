@@ -56,6 +56,7 @@ func parseConfig(command string, args []string) (config, error) {
 	siteKeys := flags.String("site-option-keys", strings.Join(defaultCopiedOptionKeys, ","), "options copied as is")
 	compensationDays := flags.Int("topup-compensation-days", 30, "compensate top-ups bought above k in this many days before the snapshot (0 disables)")
 	ledger := flags.String("ledger", "", "write a per-user reconciliation CSV to this path (mode 0600)")
+	pendingHold := flags.Duration("pending-topup-hold", 24*time.Hour, "pending top-ups younger than this block the import; shorten only after confirming them unpaid with the payment provider")
 	allowInflight := flags.Bool("allow-inflight", false, "import despite unsettled records (rehearsal on an old snapshot only)")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
@@ -67,8 +68,11 @@ func parseConfig(command string, args []string) (config, error) {
 		FixedBalanceCNY:  *fixedCNY,
 		DroppedGroups:    map[string]bool{},
 		AllowInflight:    *allowInflight,
-		PendingTopupHold: 24 * time.Hour,
+		PendingTopupHold: *pendingHold,
 		LedgerPath:       *ledger,
+	}
+	if *pendingHold <= 0 {
+		return cfg, fmt.Errorf("-pending-topup-hold must be positive")
 	}
 	if *compensationDays < 0 {
 		return cfg, fmt.Errorf("-topup-compensation-days must not be negative")
