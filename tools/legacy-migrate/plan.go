@@ -119,11 +119,42 @@ type userBalanceInput struct {
 	PlanRemaining int64
 	DailyPool     int64
 	FixedBalance  bool
+	// RecentTopups are the wallet top-ups inside the compensation window.
+	RecentTopups []recentTopup
+}
+
+// recentTopup is one successful wallet top-up: USD credited and CNY paid.
+type recentTopup struct {
+	USD int64
+	CNY decimal.Decimal
+}
+
+// topupCompensation returns the quota added on top of the converted balance
+// for recent top-ups bought above k per USD. Only the part of those top-ups
+// still held in the wallet counts: held = min(wallet, their USD). Each held
+// USD is topped up by (average paid price - k), so a recent full-price
+// buyer keeps the CNY value of what they paid. Plans and gifts get nothing.
+func topupCompensation(wallet int64, topups []recentTopup, k decimal.Decimal) int64 {
+	var usd int64
+	cny := decimal.Zero
+	for _, topup := range topups {
+		if topup.USD <= 0 || !topup.CNY.GreaterThan(k.Mul(decimal.NewFromInt(topup.USD))) {
+			continue
+		}
+		usd += topup.USD
+		cny = cny.Add(topup.CNY)
+	}
+	if usd == 0 || wallet <= 0 {
+		return 0
+	}
+	held := min(wallet, usd*quotaPerUnit)
+	price := cny.Div(decimal.NewFromInt(usd))
+	return decimal.NewFromInt(held).Mul(price.Sub(k)).Round(0).IntPart()
 }
 
 // newWalletQuota converts a legacy balance: wallet (negative clamped to zero)
-// plus remaining plan quota plus today's daily pool, all times k. Fixed
-// accounts get fixedQuota instead.
+// plus remaining plan quota plus today's daily pool, all times k, plus the
+// recent top-up compensation. Fixed accounts get fixedQuota instead.
 func newWalletQuota(input userBalanceInput, k decimal.Decimal, fixedQuota int64) (int64, error) {
 	if input.FixedBalance {
 		return fixedQuota, nil
@@ -137,7 +168,7 @@ func newWalletQuota(input userBalanceInput, k decimal.Decimal, fixedQuota int64)
 			total += part
 		}
 	}
-	scaled := scaleQuota(total, k)
+	scaled := scaleQuota(total, k) + topupCompensation(input.Wallet, input.RecentTopups, k)
 	if scaled > maxWalletQuota {
 		return 0, fmt.Errorf("converted balance %d exceeds the wallet limit", scaled)
 	}

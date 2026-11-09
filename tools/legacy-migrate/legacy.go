@@ -29,11 +29,17 @@ type config struct {
 	AllowInflight    bool
 	SiteOptionKeys   []string
 	PendingTopupHold time.Duration
+	// CompensationWindow is how far back top-ups bought above k are
+	// compensated; zero disables compensation.
+	CompensationWindow time.Duration
+	// LedgerPath, when set, receives one CSV row per user.
+	LedgerPath string
 }
 
 // legacyUser is one row of the legacy users table plus its balance parts.
 type legacyUser struct {
 	ID             int64
+	Username       string
 	Role           int64
 	Status         int64
 	Group          string
@@ -45,6 +51,13 @@ type legacyUser struct {
 	MaxConcurrency int64
 	PlanRemaining  int64
 	DailyPool      int64
+	RecentTopups   []recentTopup
+}
+
+// balanceInput is the user's balance input for newWalletQuota.
+func (user legacyUser) balanceInput(cfg config) userBalanceInput {
+	return userBalanceInput{Wallet: user.Quota, PlanRemaining: user.PlanRemaining, DailyPool: user.DailyPool,
+		FixedBalance: cfg.isFixed(user), RecentTopups: user.RecentTopups}
 }
 
 // legacyData is everything the plan is computed from.
@@ -148,7 +161,7 @@ func loadKCandidates(ctx context.Context, db *pgx.Conn, cfg config, data *legacy
 }
 
 func loadUsers(ctx context.Context, db *pgx.Conn, cfg config, data *legacyData) error {
-	rows, err := db.Query(ctx, `SELECT id, role, status, coalesce("group", ''), quota, used_quota,
+	rows, err := db.Query(ctx, `SELECT id, coalesce(username, ''), role, status, coalesce("group", ''), quota, used_quota,
 		coalesce(aff_quota, 0), coalesce(aff_history, 0), coalesce(setting, ''), coalesce(max_concurrency, 0)
 		FROM users ORDER BY id`)
 	if err != nil {
@@ -157,7 +170,7 @@ func loadUsers(ctx context.Context, db *pgx.Conn, cfg config, data *legacyData) 
 	index := map[int64]int{}
 	for rows.Next() {
 		var user legacyUser
-		if err := rows.Scan(&user.ID, &user.Role, &user.Status, &user.Group, &user.Quota, &user.UsedQuota,
+		if err := rows.Scan(&user.ID, &user.Username, &user.Role, &user.Status, &user.Group, &user.Quota, &user.UsedQuota,
 			&user.AffQuota, &user.AffHistory, &user.Setting, &user.MaxConcurrency); err != nil {
 			return err
 		}
@@ -227,7 +240,35 @@ func loadUsers(ctx context.Context, db *pgx.Conn, cfg config, data *legacyData) 
 			data.Users[i].DailyPool = quota
 		}
 	}
-	return poolRows.Err()
+	if err := poolRows.Err(); err != nil {
+		return err
+	}
+
+	if cfg.CompensationWindow <= 0 {
+		return nil
+	}
+	// top_ups.create_time is in seconds; amount is USD, money is CNY paid.
+	topupRows, err := db.Query(ctx, `SELECT user_id, amount, money::text FROM top_ups
+		WHERE status = 'success' AND amount > 0 AND money > 0 AND create_time > $1 AND create_time <= $2`,
+		cfg.Snapshot.Add(-cfg.CompensationWindow).Unix(), cfg.Snapshot.Unix())
+	if err != nil {
+		return err
+	}
+	for topupRows.Next() {
+		var userID, amount int64
+		var money string
+		if err := topupRows.Scan(&userID, &amount, &money); err != nil {
+			return err
+		}
+		paid, err := decimal.NewFromString(money)
+		if err != nil {
+			return fmt.Errorf("top-up of user %d: %w", userID, err)
+		}
+		if i, ok := index[userID]; ok {
+			data.Users[i].RecentTopups = append(data.Users[i].RecentTopups, recentTopup{USD: amount, CNY: paid})
+		}
+	}
+	return topupRows.Err()
 }
 
 func loadRules(ctx context.Context, db *pgx.Conn, data *legacyData) error {

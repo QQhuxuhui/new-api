@@ -48,6 +48,14 @@ func runImport(ctx context.Context, cfg config) error {
 		}
 	}
 
+	// The ledger is written before anything is imported, so a failed write
+	// stops the run instead of leaving an import without its reconciliation.
+	if cfg.LedgerPath != "" {
+		if err := writeLedger(cfg.LedgerPath, cfg, cfg.K, data.Users); err != nil {
+			return err
+		}
+	}
+
 	expected := map[int64]int64{}
 	tx, err := target.Begin(ctx)
 	if err != nil {
@@ -112,7 +120,7 @@ func importUsers(ctx context.Context, legacy *pgx.Conn, tx pgx.Tx, cfg config, d
 		}
 		id := values[0].(int64)
 		user := byID[id]
-		quota, err := newWalletQuota(userBalanceInput{Wallet: user.Quota, PlanRemaining: user.PlanRemaining, DailyPool: user.DailyPool, FixedBalance: cfg.isFixed(user)}, cfg.K, cfg.fixedQuota())
+		quota, err := newWalletQuota(user.balanceInput(cfg), cfg.K, cfg.fixedQuota())
 		if err != nil {
 			return 0, fmt.Errorf("user %d: %w", id, err)
 		}

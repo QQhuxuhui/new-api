@@ -76,7 +76,12 @@ new_quota = round_half_up( ( users.quota
             + Σ 有效套餐 user_plans.quota
             + 当日 user_daily_pools.(total_quota - used_quota)
             ) × k )
+            + 近期高价充值补偿
 ```
+
+**近期高价充值补偿**（2026-11-09 定，方案 A+C）：快照前 30 天内成功、单价高于 k 的钱包充值（`top_ups.money > amount × k`），按"仍持有的部分"补差价：`持有 = min(钱包余额, 这些充值的美元合计)`，`补偿 = 持有 × (这些充值的平均单价 − k)`，直接以 ¥ 计入新余额，不再乘 k。套餐、赠送、兑换码不补；固定余额账号不补。效果：最近按原价充值、钱还没用的用户，新余额的人民币面值等于实付。2026-11-09 快照实测 16 人、¥322.57。参数 `-topup-compensation-days`（默认 30，0 关闭）。
+
+**对账明细**：`-ledger <路径>` 为每个用户输出一行 CSV（老钱包、套餐剩余、当日池、窗口内充值、k、补偿、新余额），文件权限 600、不覆盖已有文件；import 在写库前生成，写失败则不导入。切换后与只读保留的老库一起用于单个用户的对账客诉。
 
 有效套餐：`status=1` 且 `refund_status≠'refunded'`，并满足下面其一：
 - 已开始：`started_at>0` 且 `expires_at=0 或 expires_at>T`；
@@ -112,7 +117,7 @@ cd tools/legacy-migrate && go build -o legacy-migrate .
 ./legacy-migrate import -legacy "$LEGACY_DSN" -target "$TARGET_DSN" -k 0.5
 ```
 
-可调参数（默认值即本文档的决定）：`-fixed-balance-cny 10000`、`-fixed-balance-user-ids 4`、`-forfeit-plan-ids 23`、`-k-exclude-plan-ids 5,23`、`-drop-groups cc逆向1,gemini-t3,claude-福利,glm`、`-snapshot`（RFC 3339）。`-allow-inflight` 仅用于旧快照演练。import 在一个事务里完成，提交后逐用户比对余额；新库必须是空库（目标表有数据即拒绝）。
+可调参数（默认值即本文档的决定）：`-topup-compensation-days 30`、`-ledger <路径>`、`-fixed-balance-cny 10000`、`-fixed-balance-user-ids 4`、`-forfeit-plan-ids 23`、`-k-exclude-plan-ids 5,23`、`-drop-groups cc逆向1,gemini-t3,claude-福利,glm`、`-snapshot`（RFC 3339）。`-allow-inflight` 仅用于旧快照演练。import 在一个事务里完成，提交后逐用户比对余额；新库必须是空库（目标表有数据即拒绝）。
 
 ## 4. 切换流程
 

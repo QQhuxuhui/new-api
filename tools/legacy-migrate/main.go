@@ -54,6 +54,8 @@ func parseConfig(command string, args []string) (config, error) {
 	kExclude := flags.String("k-exclude-plan-ids", "5,23", "custom or enterprise plan ids excluded from k")
 	dropped := flags.String("drop-groups", "cc逆向1,gemini-t3,claude-福利,glm", "plan-only groups taken offline")
 	siteKeys := flags.String("site-option-keys", strings.Join(defaultCopiedOptionKeys, ","), "options copied as is")
+	compensationDays := flags.Int("topup-compensation-days", 30, "compensate top-ups bought above k in this many days before the snapshot (0 disables)")
+	ledger := flags.String("ledger", "", "write a per-user reconciliation CSV to this path (mode 0600)")
 	allowInflight := flags.Bool("allow-inflight", false, "import despite unsettled records (rehearsal on an old snapshot only)")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
@@ -66,7 +68,12 @@ func parseConfig(command string, args []string) (config, error) {
 		DroppedGroups:    map[string]bool{},
 		AllowInflight:    *allowInflight,
 		PendingTopupHold: 24 * time.Hour,
+		LedgerPath:       *ledger,
 	}
+	if *compensationDays < 0 {
+		return cfg, fmt.Errorf("-topup-compensation-days must not be negative")
+	}
+	cfg.CompensationWindow = time.Duration(*compensationDays) * 24 * time.Hour
 	if cfg.LegacyDSN == "" {
 		return cfg, fmt.Errorf("-legacy is required")
 	}

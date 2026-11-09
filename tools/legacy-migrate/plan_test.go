@@ -136,3 +136,30 @@ func TestCopiesOptionSkipsTheLegacyTutorial(t *testing.T) {
 	assert.False(t, copiesOption("console_setting.tutorial_content"))
 	assert.False(t, copiesOption("SystemName"), "exact keys are listed separately")
 }
+
+func TestTopupCompensation(t *testing.T) {
+	full := recentTopup{USD: 100, CNY: decimal.NewFromInt(100)}
+	tier200 := recentTopup{USD: 200, CNY: decimal.NewFromInt(140)}
+	best := recentTopup{USD: 2000, CNY: decimal.NewFromInt(1000)}
+
+	assert.Equal(t, int64(50*quotaPerUnit), topupCompensation(100*quotaPerUnit, []recentTopup{full}, half),
+		"a full-price buyer keeps the CNY paid: $100 -> ¥50 converted + ¥50 compensation")
+	assert.Equal(t, int64(10*quotaPerUnit), topupCompensation(20*quotaPerUnit, []recentTopup{full}, half),
+		"only the part still held counts")
+	assert.Equal(t, int64(0), topupCompensation(5000*quotaPerUnit, []recentTopup{best}, half),
+		"top-ups bought at k are not compensated")
+	assert.Equal(t, int64(0), topupCompensation(-quotaPerUnit, []recentTopup{full}, half), "negative wallet")
+	// $300 bought for ¥240 (avg 0.8); $1000 held of it -> capped at $300 × 0.3 = ¥90.
+	assert.Equal(t, int64(90*quotaPerUnit), topupCompensation(1000*quotaPerUnit, []recentTopup{full, tier200, best}, half))
+}
+
+func TestNewWalletQuotaAddsCompensationOnce(t *testing.T) {
+	topups := []recentTopup{{USD: 100, CNY: decimal.NewFromInt(100)}}
+	got, err := newWalletQuota(userBalanceInput{Wallet: 100 * quotaPerUnit, PlanRemaining: 40 * quotaPerUnit, RecentTopups: topups}, half, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64((70+50)*quotaPerUnit), got, "(100+40) × 0.5 + 50")
+
+	got, err = newWalletQuota(userBalanceInput{Wallet: 100 * quotaPerUnit, FixedBalance: true, RecentTopups: topups}, half, 7)
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), got, "fixed accounts get no compensation")
+}

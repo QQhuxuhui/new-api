@@ -52,7 +52,7 @@ func runReport(ctx context.Context, cfg config) error {
 	}
 
 	var users, fixed, negative, withConcurrency int64
-	var wallet, plans, pool, aff, newTotal int64
+	var wallet, plans, pool, aff, newTotal, compensated, compensation int64
 	type balance struct {
 		id    int64
 		quota int64
@@ -74,9 +74,13 @@ func runReport(ctx context.Context, cfg config) error {
 		plans += user.PlanRemaining
 		pool += user.DailyPool
 		aff += user.AffQuota
-		quota, err := newWalletQuota(userBalanceInput{Wallet: user.Quota, PlanRemaining: user.PlanRemaining, DailyPool: user.DailyPool}, k, cfg.fixedQuota())
+		quota, err := newWalletQuota(user.balanceInput(cfg), k, cfg.fixedQuota())
 		if err != nil {
 			return fmt.Errorf("user %d: %w", user.ID, err)
+		}
+		if extra := topupCompensation(user.Quota, user.RecentTopups, k); extra > 0 {
+			compensated++
+			compensation += extra
 		}
 		newTotal += quota
 		balances = append(balances, balance{user.ID, quota})
@@ -84,6 +88,7 @@ func runReport(ctx context.Context, cfg config) error {
 	out.WriteString("\n## Balances (fixed accounts excluded)\n\n")
 	fmt.Fprintf(&out, "- users: %d (fixed balance: %d, negative wallets zeroed: %d, with a concurrency cap: %d)\n", users, fixed, negative, withConcurrency)
 	fmt.Fprintf(&out, "- legacy wallets: $%s\n- active plan remainder: $%s\n- today's daily pools: $%s\n- invitation balance (aff_quota): $%s\n", usd(wallet), usd(plans), usd(pool), usd(aff))
+	fmt.Fprintf(&out, "- recent top-up compensation (last %s, bought above k, still held): %d users, ¥%s (included below)\n", cfg.CompensationWindow, compensated, usd(compensation))
 	fmt.Fprintf(&out, "- new wallets (× k): ¥%s\n- new invitation balance (× k): ¥%s\n", usd(newTotal), usd(scaleQuota(aff, k)))
 	sort.Slice(balances, func(i, j int) bool { return balances[i].quota > balances[j].quota })
 	out.WriteString("- largest new balances:")
@@ -127,6 +132,9 @@ func runReport(ctx context.Context, cfg config) error {
 	out.WriteString("- reset: Price = 1, USDExchangeRate = 1, TopupGroupRatio = {}, payment_setting.amount_discount = {}, quota shown in CNY\n")
 	fmt.Fprintf(&out, "- not migrated (%d keys, review): %s\n", len(skipped), strings.Join(skipped, ", "))
 	fmt.Print(out.String())
+	if cfg.LedgerPath != "" {
+		return writeLedger(cfg.LedgerPath, cfg, k, data.Users)
+	}
 	return nil
 }
 
