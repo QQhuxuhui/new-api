@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -378,4 +379,25 @@ func TestStreamIdleBodyReleasesAfterIdleAndOnClose(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("closing the body must release the request context")
 	}
+}
+
+func TestStreamIdleBodyFinishesAtEOFWithoutClose(t *testing.T) {
+	released := 0
+	body := newStreamIdleBody(io.NopCloser(strings.NewReader("data: {}\n\n")), time.Hour, func() { released++ })
+
+	_, err := io.ReadAll(body)
+	require.NoError(t, err)
+	assert.Equal(t, 1, released, "reaching EOF releases the context without Close")
+	assert.False(t, body.timer.Stop(), "the idle timer is already stopped")
+	require.NoError(t, body.Close())
+	assert.Equal(t, 1, released, "release runs once")
+}
+
+func TestStreamIdleBackstopKeepsLongestFiniteTimeout(t *testing.T) {
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	info.ChannelSetting.StreamTimeoutSeconds = common.GetPointer(dto.MaxStreamTimeoutSeconds)
+	assert.Equal(t, time.Duration(dto.MaxStreamTimeoutSeconds)*time.Second+30*time.Second, streamIdleBackstop(info))
+
+	info.ChannelSetting.StreamTimeoutSeconds = common.GetPointer(0)
+	assert.Zero(t, streamIdleBackstop(info), "never timing out disables the backstop")
 }

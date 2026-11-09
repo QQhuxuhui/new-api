@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	common2 "github.com/QuantumNous/new-api/common"
@@ -19,7 +21,6 @@ import (
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
-	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -591,7 +592,7 @@ func newTaskAPIRequest(c *gin.Context, fullRequestURL string, requestBody io.Rea
 // adaptors that scan the body without the stream scanner. Zero means none.
 func streamIdleBackstop(info *common.RelayInfo) time.Duration {
 	timeout := helper.ResolveStreamTimeout(info)
-	if timeout >= time.Duration(dto.MaxStreamTimeoutSeconds)*time.Second {
+	if timeout == time.Duration(math.MaxInt64) {
 		return 0
 	}
 	return timeout + 30*time.Second
@@ -606,6 +607,7 @@ type streamIdleBody struct {
 	idle    time.Duration
 	timer   *time.Timer
 	release func()
+	done    atomic.Bool
 }
 
 func newStreamIdleBody(body io.ReadCloser, idle time.Duration, release func()) *streamIdleBody {
@@ -618,17 +620,30 @@ func newStreamIdleBody(body io.ReadCloser, idle time.Duration, release func()) *
 
 func (b *streamIdleBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
-	if n > 0 && b.timer != nil && bytes.IndexByte(p[:n], '\n') >= 0 {
+	if err != nil {
+		// Some adaptors read to EOF without closing the body; finish here so
+		// the timer and request context do not outlive the response.
+		b.finish()
+		return n, err
+	}
+	if n > 0 && b.timer != nil && !b.done.Load() && bytes.IndexByte(p[:n], '\n') >= 0 {
 		b.timer.Reset(b.idle)
 	}
 	return n, err
 }
 
 func (b *streamIdleBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.finish()
+	return err
+}
+
+func (b *streamIdleBody) finish() {
+	if b.done.Swap(true) {
+		return
+	}
 	if b.timer != nil {
 		b.timer.Stop()
 	}
-	err := b.ReadCloser.Close()
 	b.release()
-	return err
 }
