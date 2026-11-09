@@ -273,6 +273,9 @@ func loadInflight(ctx context.Context, db *pgx.Conn, cfg config, data *legacyDat
 		{"tasks awaiting billing", `SELECT count(*) FROM tasks WHERE billing_status IN ('waiting', 'calculating', 'pending', 'accounting')`, nil},
 		// Running tasks hold pre-consumed quota that their outcome settles.
 		{"tasks still running", `SELECT count(*) FROM tasks WHERE status IN ('NOT_START', 'SUBMITTED', 'QUEUED', 'IN_PROGRESS')`, nil},
+		// A failed task keeps its pre-consumed quota until the refund job zeroes
+		// it (dev GetUnrefundedFailedTasks; tasks before 2025-02-22 are exempt).
+		{"failed tasks awaiting refund", `SELECT count(*) FROM tasks WHERE status = 'FAILURE' AND quota <> 0 AND (submit_time <= 0 OR submit_time >= 1740182400)`, nil},
 		{"task billing compensations open", `SELECT count(*) FROM task_billing_compensations WHERE status IN ('pending', 'accounting')`, nil},
 	}
 	tree, err := groupTreeChildrenWithChannels(ctx, db, data.Options["GroupTree"])
