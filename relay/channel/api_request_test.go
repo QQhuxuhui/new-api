@@ -300,6 +300,63 @@ func TestDoRequestChannelStreamTimeoutLiftsRelayTimeout(t *testing.T) {
 	}
 }
 
+func TestStreamIdleBodyResetsOnlyOnCompleteLines(t *testing.T) {
+	reader, writer := io.Pipe()
+	released := make(chan struct{}, 1)
+	body := newStreamIdleBody(reader, 150*time.Millisecond, func() { released <- struct{}{} })
+	go func() {
+		// Bytes that never finish a line must not extend the idle limit.
+		for range 10 {
+			_, _ = writer.Write([]byte("x"))
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	go func() {
+		buffer := make([]byte, 8)
+		for {
+			if _, err := body.Read(buffer); err != nil {
+				return
+			}
+		}
+	}()
+	select {
+	case <-released:
+	case <-time.After(400 * time.Millisecond):
+		t.Fatal("a trickle without newlines must still hit the idle limit")
+	}
+	_ = writer.Close()
+}
+
+func TestDoRequestChannelStreamTimeoutWithoutRelayTimeout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previous := common.RelayTimeout
+	common.RelayTimeout = 0
+	service.InitHttpClient()
+	t.Cleanup(func() {
+		common.RelayTimeout = previous
+		service.InitHttpClient()
+	})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		time.Sleep(200 * time.Millisecond)
+	}))
+	defer upstream.Close()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader("{}"))
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{IsStream: true, DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+	info.ChannelSetting.StreamTimeoutSeconds = common.GetPointer(60)
+
+	resp, err := doRequest(c, req, info)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	idle, ok := resp.Body.(*streamIdleBody)
+	require.True(t, ok, "the idle backstop applies even without RELAY_TIMEOUT")
+	assert.Equal(t, 90*time.Second, idle.idle)
+}
+
 func TestStreamIdleBodyReleasesAfterIdleAndOnClose(t *testing.T) {
 	reader, writer := io.Pipe()
 	released := make(chan struct{}, 2)

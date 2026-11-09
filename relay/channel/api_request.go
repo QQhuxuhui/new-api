@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -492,15 +493,19 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	// total duration. RELAY_TIMEOUT still bounds the wait for the response
 	// headers and the read of a non-200 error body.
 	var releaseRelayTimeout func()
-	var stopHeaderTimer func() bool
-	if info.IsStream && info.ChannelMeta != nil && info.ChannelSetting.StreamTimeoutSeconds != nil && relayClient.Timeout > 0 {
+	stopHeaderTimer := func() bool { return false }
+	if info.IsStream && info.ChannelMeta != nil && info.ChannelSetting.StreamTimeoutSeconds != nil {
 		ctx, cancel := context.WithCancel(req.Context())
 		req = req.WithContext(ctx)
-		headerTimer := time.AfterFunc(relayClient.Timeout, cancel)
-		relayClient.Timeout = 0
-		stopHeaderTimer = headerTimer.Stop
+		release := cancel
+		if relayClient.Timeout > 0 {
+			headerTimer := time.AfterFunc(relayClient.Timeout, cancel)
+			relayClient.Timeout = 0
+			stopHeaderTimer = headerTimer.Stop
+			release = func() { headerTimer.Stop(); cancel() }
+		}
 		var once sync.Once
-		releaseRelayTimeout = func() { once.Do(func() { headerTimer.Stop(); cancel() }) }
+		releaseRelayTimeout = func() { once.Do(release) }
 	}
 	resp, err := relayClient.Do(req)
 	if releaseRelayTimeout != nil && (err != nil || resp == nil) {
@@ -593,7 +598,9 @@ func streamIdleBackstop(info *common.RelayInfo) time.Duration {
 }
 
 // streamIdleBody releases the request context when the body is closed and,
-// with a non-zero idle limit, cancels it once no data arrives for that long.
+// with a non-zero idle limit, cancels it once no complete line arrives for
+// that long. Only a newline resets the limit, so an upstream trickling bytes
+// without finishing an event cannot hold the request open.
 type streamIdleBody struct {
 	io.ReadCloser
 	idle    time.Duration
@@ -611,7 +618,7 @@ func newStreamIdleBody(body io.ReadCloser, idle time.Duration, release func()) *
 
 func (b *streamIdleBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
-	if n > 0 && b.timer != nil {
+	if n > 0 && b.timer != nil && bytes.IndexByte(p[:n], '\n') >= 0 {
 		b.timer.Reset(b.idle)
 	}
 	return n, err
