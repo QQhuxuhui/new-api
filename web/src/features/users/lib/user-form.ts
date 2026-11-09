@@ -33,6 +33,19 @@ import { type UserFormData, type User } from '../types'
 // Form Schema
 // ============================================================================
 
+/** Largest user concurrency cap the server accepts. */
+export const MAX_USER_CONCURRENCY = 1_000_000
+
+/** Reads the concurrency cap from the user's setting JSON; 0 means no limit. */
+function readMaxConcurrency(setting: string | undefined): number {
+  try {
+    const parsed = JSON.parse(setting || '{}') as { max_concurrency?: unknown }
+    return typeof parsed.max_concurrency === 'number' ? parsed.max_concurrency : 0
+  } catch {
+    return 0
+  }
+}
+
 export const userFormSchema = z.object({
   username: z.string().min(1, 'Username is required'),
   display_name: z.string().optional(),
@@ -41,6 +54,7 @@ export const userFormSchema = z.object({
   quota_dollars: z.number().min(0).optional(),
   group: z.string().optional(),
   remark: z.string().optional(),
+  max_concurrency: z.number().int().min(0).max(MAX_USER_CONCURRENCY).optional(),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
     .optional(),
@@ -60,6 +74,7 @@ export const USER_FORM_DEFAULT_VALUES: UserFormValues = {
   quota_dollars: 0,
   group: DEFAULT_GROUP,
   remark: '',
+  max_concurrency: 0,
   // Filled against the backend catalog at render time; see UsersMutateDrawer.
   admin_permissions: {},
 }
@@ -101,6 +116,7 @@ export function transformFormDataToPayload(
     // For update: quota is adjusted atomically via /api/user/manage, not sent here
     payload.group = data.group
     payload.remark = data.remark || undefined
+    payload.max_concurrency = data.max_concurrency ?? 0
     payload.id = userId
   }
 
@@ -121,6 +137,7 @@ export function transformUserToFormDefaults(user: User): UserFormValues {
     quota_dollars: quotaUnitsToDollars(user.quota),
     group: user.group || DEFAULT_GROUP,
     remark: user.remark || '',
+    max_concurrency: readMaxConcurrency(user.setting),
     admin_permissions: user.admin_permissions ?? {},
   }
 }

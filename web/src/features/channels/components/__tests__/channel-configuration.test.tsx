@@ -1840,6 +1840,34 @@ test('a zero stream timeout is saved and an out-of-range one is rejected', async
   expect(JSON.parse(payload.setting)).toMatchObject({ stream_timeout_seconds: 0 })
 })
 
+test('a saved per-key concurrency cap marks Routing & Mapping and is saved back', async () => {
+  editingChannel = {
+    ...editingChannel,
+    setting: '{"max_concurrent_requests_per_key":200}',
+  }
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  const routingTab = screen.getByRole('tab', { name: /Routing & Mapping/ })
+  expect(routingTab).toHaveAccessibleName(/Configured/)
+  await user.click(routingTab)
+  const input = screen.getByRole('spinbutton', {
+    name: 'Max Concurrent Requests per Key',
+  })
+  expect(input).toHaveValue(200)
+  await user.clear(input)
+  await user.type(input, '50')
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+  await waitFor(() => expect(put).toHaveBeenCalled())
+  const payload = put.mock.calls[0]?.[1] as { setting: string }
+  expect(JSON.parse(payload.setting)).toMatchObject({
+    max_concurrent_requests_per_key: 50,
+  })
+})
+
 test('an invalid edit switches categories and replaces configured styling with the field error', async () => {
   const user = userEvent.setup()
   render(<ConfigurationHarness currentRow={editingChannel} />)

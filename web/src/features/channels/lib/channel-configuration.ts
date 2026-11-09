@@ -48,7 +48,14 @@ const CONFIGURATION_BLOCKS = {
   modelMapping: { section: 'routing', fields: ['model_mapping'] },
   routingStrategy: {
     section: 'routing',
-    fields: ['priority', 'weight', 'test_model', 'auto_ban', 'always_healthy'],
+    fields: [
+      'priority',
+      'weight',
+      'test_model',
+      'auto_ban',
+      'always_healthy',
+      'max_concurrent_requests_per_key',
+    ],
   },
   overrideRules: {
     section: 'request',
@@ -146,7 +153,8 @@ export function getChannelConfigurationState(
       values.weight ||
       values.test_model?.trim() ||
       (values.auto_ban ?? 1) !== 1 ||
-      values.always_healthy === true
+      values.always_healthy === true ||
+      (values.max_concurrent_requests_per_key ?? 0) > 0
     ),
     overrideRules:
       hasConfiguredJson(values.status_code_mapping) ||

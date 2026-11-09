@@ -479,6 +479,39 @@ export function UsersMutateDrawer({
 
                   <FormField
                     control={form.control}
+                    name='max_concurrency'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Max Concurrency')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min={0}
+                            step={1}
+                            name={field.name}
+                            ref={field.ref}
+                            onBlur={field.onBlur}
+                            value={field.value ?? 0}
+                            onChange={(event) =>
+                              field.onChange(
+                                event.target.value === ''
+                                  ? 0
+                                  : Number(event.target.value)
+                              )
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Most model requests this user can run at the same time. 0 means no limit.'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
                     name='remark'
                     render={({ field }) => (
                       <FormItem>

@@ -94,6 +94,7 @@ export interface ChannelSettings {
   tls_insecure_skip_verify?: boolean
   always_healthy?: boolean
   stream_timeout_seconds?: number
+  max_concurrent_requests_per_key?: number
 }
 
 export interface ChannelOtherSettings {

@@ -7454,6 +7454,10 @@
     "Stream Timeout (seconds)": "流式超时（秒）",
     "Use the global setting": "使用全局设置",
     "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "此渠道等待首个及后续每个流式事件的最长时间。0 表示永不超时。设置后，成功的流式响应不再受总请求超时截断。留空则使用 STREAMING_TIMEOUT。",
-    "Stream timeout must be a whole number of seconds from 0 to 604800": "流式超时必须是 0 到 604800 之间的整数秒"
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "流式超时必须是 0 到 604800 之间的整数秒",
+    "Max Concurrency": "最大并发",
+    "Most model requests this user can run at the same time. 0 means no limit.": "该用户最多可同时进行的模型请求数，0 表示不限制。",
+    "Max Concurrent Requests per Key": "每个 Key 最大并发",
+    "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "此渠道每个 Key 最多可同时进行的请求数，达到上限的 Key 会切换到其他渠道。0 表示不限制。"
   }
 }

@@ -2317,6 +2317,38 @@ export function ChannelMutateDrawer({
 
       <FormField
         control={form.control}
+        name='max_concurrent_requests_per_key'
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t('Max Concurrent Requests per Key')}</FormLabel>
+            <FormControl>
+              <Input
+                type='number'
+                min={0}
+                step={1}
+                name={field.name}
+                ref={field.ref}
+                onBlur={field.onBlur}
+                value={field.value ?? 0}
+                onChange={(event) =>
+                  field.onChange(
+                    event.target.value === '' ? 0 : Number(event.target.value)
+                  )
+                }
+              />
+            </FormControl>
+            <FormDescription>
+              {t(
+                'Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.'
+              )}
+            </FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <FormField
+        control={form.control}
         name='always_healthy'
         render={({ field }) => (
           <FormItem className='flex items-center justify-between'>

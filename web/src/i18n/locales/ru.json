@@ -7454,6 +7454,10 @@
     "Stream Timeout (seconds)": "Таймаут потока (секунды)",
     "Use the global setting": "Использовать глобальную настройку",
     "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "Максимальное ожидание первого и каждого следующего события потока на этом канале. 0 — без ограничения. Если задано, успешные потоки не обрываются общим таймаутом запроса. Оставьте пустым, чтобы использовать STREAMING_TIMEOUT.",
-    "Stream timeout must be a whole number of seconds from 0 to 604800": "Таймаут потока должен быть целым числом секунд от 0 до 604800"
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "Таймаут потока должен быть целым числом секунд от 0 до 604800",
+    "Max Concurrency": "Макс. параллельных запросов",
+    "Most model requests this user can run at the same time. 0 means no limit.": "Сколько запросов к моделям пользователь может выполнять одновременно. 0 — без ограничения.",
+    "Max Concurrent Requests per Key": "Макс. параллельных запросов на ключ",
+    "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "Сколько запросов одновременно может выполнять каждый ключ канала. Ключ на пределе переключается на другой канал. 0 — без ограничения."
   }
 }

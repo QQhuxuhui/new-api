@@ -7454,6 +7454,10 @@
     "Stream Timeout (seconds)": "ストリームタイムアウト（秒）",
     "Use the global setting": "グローバル設定を使用",
     "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "このチャネルで最初および以降の各ストリームイベントを待つ最大時間。0 はタイムアウトなし。設定すると、成功したストリームは全体のリレータイムアウトで切断されません。空欄の場合は STREAMING_TIMEOUT を使用します。",
-    "Stream timeout must be a whole number of seconds from 0 to 604800": "ストリームタイムアウトは 0〜604800 の整数秒で指定してください"
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "ストリームタイムアウトは 0〜604800 の整数秒で指定してください",
+    "Max Concurrency": "最大同時実行数",
+    "Most model requests this user can run at the same time. 0 means no limit.": "このユーザーが同時に実行できるモデルリクエストの最大数。0 は無制限です。",
+    "Max Concurrent Requests per Key": "キーごとの最大同時リクエスト数",
+    "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "このチャネルの各キーが同時に処理できるリクエストの最大数。上限に達したキーは別のチャネルに切り替わります。0 は無制限です。"
   }
 }

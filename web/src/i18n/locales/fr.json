@@ -7454,6 +7454,10 @@
     "Stream Timeout (seconds)": "Délai du flux (secondes)",
     "Use the global setting": "Utiliser le réglage global",
     "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "Attente maximale du premier événement de flux et de chacun des suivants sur ce canal. 0 désactive le délai. Une fois défini, les flux réussis ne sont plus coupés par le délai total de relais. Laissez vide pour utiliser STREAMING_TIMEOUT.",
-    "Stream timeout must be a whole number of seconds from 0 to 604800": "Le délai du flux doit être un nombre entier de secondes entre 0 et 604800"
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "Le délai du flux doit être un nombre entier de secondes entre 0 et 604800",
+    "Max Concurrency": "Concurrence maximale",
+    "Most model requests this user can run at the same time. 0 means no limit.": "Nombre maximal de requêtes de modèle que cet utilisateur peut exécuter simultanément. 0 signifie sans limite.",
+    "Max Concurrent Requests per Key": "Requêtes simultanées max. par clé",
+    "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "Nombre maximal de requêtes simultanées pour chaque clé de ce canal. Une clé à la limite bascule vers un autre canal. 0 signifie sans limite."
   }
 }

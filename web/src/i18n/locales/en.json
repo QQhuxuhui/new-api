@@ -7454,6 +7454,10 @@
     "Stream Timeout (seconds)": "Stream Timeout (seconds)",
     "Use the global setting": "Use the global setting",
     "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.",
-    "Stream timeout must be a whole number of seconds from 0 to 604800": "Stream timeout must be a whole number of seconds from 0 to 604800"
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "Stream timeout must be a whole number of seconds from 0 to 604800",
+    "Max Concurrency": "Max Concurrency",
+    "Most model requests this user can run at the same time. 0 means no limit.": "Most model requests this user can run at the same time. 0 means no limit.",
+    "Max Concurrent Requests per Key": "Max Concurrent Requests per Key",
+    "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit."
   }
 }

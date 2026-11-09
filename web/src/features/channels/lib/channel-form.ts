@@ -82,6 +82,8 @@ function isOptionalProxyURL(value: string | undefined): boolean {
 export const HTTP_PROTOCOL_AUTO = 'auto'
 export const HTTP_PROTOCOL_HTTP1 = 'http1'
 export const MAX_HTTP2_CONNECTION_SHARDS = 8
+/** Largest per-key concurrency cap the server accepts. */
+export const MAX_CONCURRENT_REQUESTS_PER_KEY = 1_000_000
 /** Largest stream_timeout_seconds the server accepts (7 days). */
 export const MAX_STREAM_TIMEOUT_SECONDS = 7 * 24 * 60 * 60
 
@@ -274,6 +276,12 @@ export const channelFormSchema = z
     tls_insecure_skip_verify: z.boolean().optional(),
     always_healthy: z.boolean().optional(),
     stream_timeout_seconds: z.string().optional(),
+    max_concurrent_requests_per_key: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CONCURRENT_REQUESTS_PER_KEY)
+      .optional(),
     pass_through_body_enabled: z.boolean().optional(),
     responses_websocket_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
@@ -486,6 +494,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   tls_insecure_skip_verify: false,
   always_healthy: false,
   stream_timeout_seconds: '',
+  max_concurrent_requests_per_key: 0,
   pass_through_body_enabled: false,
   responses_websocket_enabled: false,
   system_prompt: '',
@@ -536,6 +545,7 @@ export function transformChannelToFormDefaults(
     tls_insecure_skip_verify: false,
     always_healthy: false,
     stream_timeout_seconds: '',
+    max_concurrent_requests_per_key: 0,
     pass_through_body_enabled: false,
     responses_websocket_enabled: false,
     system_prompt: '',
@@ -563,6 +573,10 @@ export function transformChannelToFormDefaults(
           typeof parsed.stream_timeout_seconds === 'number'
             ? String(parsed.stream_timeout_seconds)
             : '',
+        max_concurrent_requests_per_key:
+          typeof parsed.max_concurrent_requests_per_key === 'number'
+            ? parsed.max_concurrent_requests_per_key
+            : 0,
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         responses_websocket_enabled:
           parsed.responses_websocket_enabled === true,
@@ -733,6 +747,10 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   const streamTimeout = formData.stream_timeout_seconds?.trim() ?? ''
   if (streamTimeout !== '') {
     settingObj.stream_timeout_seconds = Number(streamTimeout)
+  }
+  if ((formData.max_concurrent_requests_per_key ?? 0) > 0) {
+    settingObj.max_concurrent_requests_per_key =
+      formData.max_concurrent_requests_per_key
   }
 
   return JSON.stringify(settingObj)

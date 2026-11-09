@@ -7454,6 +7454,10 @@
     "Stream Timeout (seconds)": "串流逾時（秒）",
     "Use the global setting": "使用全域設定",
     "Longest wait for the first and each following stream event on this channel. 0 never times out. When set, successful streams are not cut by the total relay timeout. Leave empty to use STREAMING_TIMEOUT.": "此渠道等待首個及後續每個串流事件的最長時間。0 表示永不逾時。設定後，成功的串流回應不再受總請求逾時截斷。留空則使用 STREAMING_TIMEOUT。",
-    "Stream timeout must be a whole number of seconds from 0 to 604800": "串流逾時必須是 0 到 604800 之間的整數秒"
+    "Stream timeout must be a whole number of seconds from 0 to 604800": "串流逾時必須是 0 到 604800 之間的整數秒",
+    "Max Concurrency": "最大並行數",
+    "Most model requests this user can run at the same time. 0 means no limit.": "該使用者最多可同時進行的模型請求數，0 表示不限制。",
+    "Max Concurrent Requests per Key": "每個 Key 最大並行數",
+    "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "此渠道每個 Key 最多可同時進行的請求數，達到上限的 Key 會切換到其他渠道。0 表示不限制。"
   }
 }
