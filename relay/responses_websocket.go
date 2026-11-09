@@ -300,7 +300,10 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		for ; retry.GetRetry() <= common.RetryTimes; retry.IncreaseRetry() {
 			var channel *appmodel.Channel
 			channel, apiErr = selectResponsesWSChannel(c, modelName, retry)
-			if apiErr != nil && apiErr.GetErrorCode() == types.ErrorCodeChannelKeyConcurrencyLimit && retry.GetRetry() < common.RetryTimes {
+			// A key at its cap fails over unless the request is pinned to a
+			// channel or bound by a strict session.
+			if apiErr != nil && apiErr.GetErrorCode() == types.ErrorCodeChannelKeyConcurrencyLimit && retry.GetRetry() < common.RetryTimes &&
+				!service.GetChannelConstraints(c).SuppressesRetry() && !service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 				continue
 			}
 			if apiErr != nil {

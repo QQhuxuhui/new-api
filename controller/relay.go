@@ -381,42 +381,6 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	service.ProcessChannelError(c, channelError, err, relayInfo)
 }
 
-// reselectMidjourneyChannelAfterKeyLimit handles a distributor channel whose
-// key had no free slot: it selects other channels, up to RetryTimes, until one
-// is set up with a free key. It reports false when none could be, and the
-// request then answers with a full queue.
-func reselectMidjourneyChannelAfterKeyLimit(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
-	if service.TakeChannelSetupError(c) == nil {
-		return true
-	}
-	// A pinned channel or a strict session must not move to another upstream.
-	if service.GetChannelConstraints(c).SuppressesRetry() || service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
-		return false
-	}
-	modelName := c.GetString("original_model")
-	for retry := 1; retry <= common.RetryTimes; retry++ {
-		attempt := retry
-		channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
-			Ctx:         c,
-			TokenGroup:  relayInfo.TokenGroup,
-			ModelName:   modelName,
-			RequestPath: c.Request.URL.Path,
-			Retry:       &attempt,
-		})
-		if err != nil || channel == nil {
-			return false
-		}
-		setupErr := middleware.SetupContextForSelectedChannel(c, channel, modelName)
-		if setupErr == nil {
-			return true
-		}
-		if setupErr.GetErrorCode() != types.ErrorCodeChannelKeyConcurrencyLimit {
-			return false
-		}
-	}
-	return false
-}
-
 func RelayMidjourney(c *gin.Context) {
 	policy := service.RequestPolicy(c)
 	defer func() {
@@ -444,16 +408,14 @@ func RelayMidjourney(c *gin.Context) {
 	case relayconstant.RelayModeMidjourneyTaskImageSeed:
 		mjErr = relay.RelayMidjourneyTaskImageSeed(c)
 	case relayconstant.RelayModeSwapFace:
-		if !reselectMidjourneyChannelAfterKeyLimit(c, relayInfo) {
+		if !relay.ReselectMidjourneyChannelAfterKeyLimit(c, relayInfo) {
 			mjErr = service.MidjourneyKeyConcurrencyError()
 			break
 		}
 		mjErr = relay.RelaySwapFace(c, relayInfo)
 	default:
-		if !reselectMidjourneyChannelAfterKeyLimit(c, relayInfo) {
-			mjErr = service.MidjourneyKeyConcurrencyError()
-			break
-		}
+		// Submissions handle a key at its cap themselves: actions on an origin
+		// task move to that task's channel first.
 		mjErr = relay.RelayMidjourneySubmit(c, relayInfo)
 	}
 	//err = relayMidjourneySubmit(c, relayMode)

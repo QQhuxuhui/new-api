@@ -15,10 +15,12 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -506,6 +508,9 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			if !service.AcquireChannelKeyLease(c, channel.Key, channel.Type, channel.GetSetting().MaxConcurrentRequestsPerKey) {
 				return service.MidjourneyKeyConcurrencyError()
 			}
+			// The distributor's channel is not used, so its key rejection no
+			// longer applies.
+			service.TakeChannelSetupError(c)
 			c.Set("base_url", channel.GetBaseURL())
 			c.Set("channel_id", originTask.ChannelId)
 			c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
@@ -524,6 +529,10 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 
 	if midjRequest.Action == constant.MjActionInPaint || midjRequest.Action == constant.MjActionCustomZoom {
 		consumeQuota = false
+	}
+
+	if !ReselectMidjourneyChannelAfterKeyLimit(c, relayInfo) {
+		return service.MidjourneyKeyConcurrencyError()
 	}
 
 	//baseURL := common.ChannelBaseURLs[channelType]
@@ -733,4 +742,40 @@ func getMjRequestPath(path string) string {
 		requestURL = "/mj/" + urls[1]
 	}
 	return requestURL
+}
+
+// ReselectMidjourneyChannelAfterKeyLimit handles a distributor channel whose
+// key had no free slot: it selects other channels, up to RetryTimes, until one
+// is set up with a free key. It reports false when none could be, and the
+// request then answers with a full queue.
+func ReselectMidjourneyChannelAfterKeyLimit(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+	if service.TakeChannelSetupError(c) == nil {
+		return true
+	}
+	// A pinned channel or a strict session must not move to another upstream.
+	if service.GetChannelConstraints(c).SuppressesRetry() || service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+		return false
+	}
+	modelName := c.GetString("original_model")
+	for retry := 1; retry <= common.RetryTimes; retry++ {
+		attempt := retry
+		channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+			Ctx:         c,
+			TokenGroup:  relayInfo.TokenGroup,
+			ModelName:   modelName,
+			RequestPath: c.Request.URL.Path,
+			Retry:       &attempt,
+		})
+		if err != nil || channel == nil {
+			return false
+		}
+		setupErr := middleware.SetupContextForSelectedChannel(c, channel, modelName)
+		if setupErr == nil {
+			return true
+		}
+		if setupErr.GetErrorCode() != types.ErrorCodeChannelKeyConcurrencyLimit {
+			return false
+		}
+	}
+	return false
 }
