@@ -389,6 +389,10 @@ func reselectMidjourneyChannelAfterKeyLimit(c *gin.Context, relayInfo *relaycomm
 	if service.TakeChannelSetupError(c) == nil {
 		return true
 	}
+	// A pinned channel or a strict session must not move to another upstream.
+	if service.GetChannelConstraints(c).SuppressesRetry() || service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+		return false
+	}
 	modelName := c.GetString("original_model")
 	for retry := 1; retry <= common.RetryTimes; retry++ {
 		attempt := retry
