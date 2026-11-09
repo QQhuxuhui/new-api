@@ -381,6 +381,38 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	service.ProcessChannelError(c, channelError, err, relayInfo)
 }
 
+// reselectMidjourneyChannelAfterKeyLimit handles a distributor channel whose
+// key had no free slot: it selects other channels, up to RetryTimes, until one
+// is set up with a free key. It reports false when none could be, and the
+// request then answers with a full queue.
+func reselectMidjourneyChannelAfterKeyLimit(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+	if service.TakeChannelSetupError(c) == nil {
+		return true
+	}
+	modelName := c.GetString("original_model")
+	for retry := 1; retry <= common.RetryTimes; retry++ {
+		attempt := retry
+		channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+			Ctx:         c,
+			TokenGroup:  relayInfo.TokenGroup,
+			ModelName:   modelName,
+			RequestPath: c.Request.URL.Path,
+			Retry:       &attempt,
+		})
+		if err != nil || channel == nil {
+			return false
+		}
+		setupErr := middleware.SetupContextForSelectedChannel(c, channel, modelName)
+		if setupErr == nil {
+			return true
+		}
+		if setupErr.GetErrorCode() != types.ErrorCodeChannelKeyConcurrencyLimit {
+			return false
+		}
+	}
+	return false
+}
+
 func RelayMidjourney(c *gin.Context) {
 	policy := service.RequestPolicy(c)
 	defer func() {
@@ -408,15 +440,13 @@ func RelayMidjourney(c *gin.Context) {
 	case relayconstant.RelayModeMidjourneyTaskImageSeed:
 		mjErr = relay.RelayMidjourneyTaskImageSeed(c)
 	case relayconstant.RelayModeSwapFace:
-		if service.TakeChannelSetupError(c) != nil {
+		if !reselectMidjourneyChannelAfterKeyLimit(c, relayInfo) {
 			mjErr = service.MidjourneyKeyConcurrencyError()
 			break
 		}
 		mjErr = relay.RelaySwapFace(c, relayInfo)
 	default:
-		// The distributor's channel had no key slot, so nothing was set up to
-		// send to; report a full queue instead of submitting.
-		if service.TakeChannelSetupError(c) != nil {
+		if !reselectMidjourneyChannelAfterKeyLimit(c, relayInfo) {
 			mjErr = service.MidjourneyKeyConcurrencyError()
 			break
 		}
@@ -615,6 +645,13 @@ func executeTaskSubmissionWith(
 				} else if setupErr != nil {
 					taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
 					break
+				}
+			} else {
+				// The origin task set this channel's key without the distributor,
+				// so the first attempt takes the key's lease here.
+				lockedKey := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
+				if lockedKey != "" && !service.AcquireChannelKeyLease(c, lockedKey, channel.Type, channel.GetSetting().MaxConcurrentRequestsPerKey) {
+					service.StoreChannelSetupError(c, types.NewErrorWithStatusCode(errors.New("channel key at concurrency limit"), types.ErrorCodeChannelKeyConcurrencyLimit, http.StatusTooManyRequests))
 				}
 			}
 		} else {
