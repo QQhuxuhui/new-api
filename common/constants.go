@@ -15,6 +15,10 @@ var Version = "v0.0.0"            // this hard coding will be replaced automatic
 var SystemName = "New API"
 var Footer = ""
 var Logo = ""
+
+// CustomerServiceQRCode is the image URL of the customer service QR code
+// (for example a QQ group) shown behind the header "Contact support" button.
+var CustomerServiceQRCode = ""
 var TopUpLink = ""
 
 // var ChatLink = ""

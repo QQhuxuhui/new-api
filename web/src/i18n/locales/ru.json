@@ -7462,6 +7462,13 @@
     "Change group: {{group}}": "Изменить группу: {{group}}",
     "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "Остаток квоты этого ключа отрицательный. Измените квоту в редактировании, прежде чем менять группу.",
     "Hide error logs from users": "Скрывать журналы ошибок от пользователей",
-    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Пользователи не видят журналы ошибок в журналах использования, экспорте журналов и запросах журналов по токену. На администраторов это не влияет."
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Пользователи не видят журналы ошибок в журналах использования, экспорте журналов и запросах журналов по токену. На администраторов это не влияет.",
+    "Contact support": "Связаться с поддержкой",
+    "Scan to join our QQ group": "Отсканируйте, чтобы вступить в нашу группу QQ",
+    "Support QR code": "QR-код поддержки",
+    "QR code failed to load": "Не удалось загрузить QR-код",
+    "Support QR code image URL": "URL изображения QR-кода поддержки",
+    "Image of your QQ group or support QR code. Every page shows a Contact support button in the header; leave empty to hide it.": "Изображение группы QQ или QR-кода поддержки. На каждой странице в шапке появится кнопка «Связаться с поддержкой»; оставьте пустым, чтобы скрыть её.",
+    "Enter an image address starting with http or https": "Введите адрес изображения, начинающийся с http или https"
   }
 }

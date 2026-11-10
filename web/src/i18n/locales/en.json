@@ -7462,6 +7462,13 @@
     "Change group: {{group}}": "Change group: {{group}}",
     "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.",
     "Hide error logs from users": "Hide error logs from users",
-    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected."
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.",
+    "Contact support": "Contact support",
+    "Scan to join our QQ group": "Scan to join our QQ group",
+    "Support QR code": "Support QR code",
+    "QR code failed to load": "QR code failed to load",
+    "Support QR code image URL": "Support QR code image URL",
+    "Image of your QQ group or support QR code. Every page shows a Contact support button in the header; leave empty to hide it.": "Image of your QQ group or support QR code. Every page shows a Contact support button in the header; leave empty to hide it.",
+    "Enter an image address starting with http or https": "Enter an image address starting with http or https"
   }
 }

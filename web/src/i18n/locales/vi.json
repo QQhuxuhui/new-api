@@ -7462,6 +7462,13 @@
     "Change group: {{group}}": "Đổi nhóm: {{group}}",
     "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "Hạn mức còn lại của khóa này đang âm. Hãy điều chỉnh hạn mức trong Chỉnh sửa trước khi đổi nhóm.",
     "Hide error logs from users": "Ẩn nhật ký lỗi với người dùng",
-    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Người dùng không thấy nhật ký lỗi trong nhật ký sử dụng, bản xuất nhật ký và truy vấn nhật ký theo token. Quản trị viên không bị ảnh hưởng."
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Người dùng không thấy nhật ký lỗi trong nhật ký sử dụng, bản xuất nhật ký và truy vấn nhật ký theo token. Quản trị viên không bị ảnh hưởng.",
+    "Contact support": "Liên hệ hỗ trợ",
+    "Scan to join our QQ group": "Quét mã để tham gia nhóm QQ",
+    "Support QR code": "Mã QR hỗ trợ",
+    "QR code failed to load": "Không tải được mã QR",
+    "Support QR code image URL": "URL ảnh mã QR hỗ trợ",
+    "Image of your QQ group or support QR code. Every page shows a Contact support button in the header; leave empty to hide it.": "Ảnh nhóm QQ hoặc mã QR hỗ trợ. Mọi trang sẽ hiện nút Liên hệ hỗ trợ ở thanh trên cùng; để trống để ẩn nút.",
+    "Enter an image address starting with http or https": "Nhập địa chỉ ảnh bắt đầu bằng http hoặc https"
   }
 }

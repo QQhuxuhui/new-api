@@ -21,6 +21,7 @@ import type { Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import * as z from 'zod'
 
+import { SupportQRCode } from '@/components/customer-service-button'
 import {
   Form,
   FormControl,
@@ -32,6 +33,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { isHttpUrl } from '@/lib/content-format'
 
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
@@ -51,6 +53,7 @@ const _systemInfoSchema = z.object({
   ServerAddress: z.string().optional(),
   TaskPublicAddress: z.string().refine(isValidTaskPublicAddress),
   Logo: z.string().url().optional().or(z.literal('')),
+  CustomerServiceQRCode: z.string().refine(isEmptyOrHttpUrl),
   Footer: z.string().optional(),
   About: z.string().optional(),
   HomePageContent: z.string().optional(),
@@ -62,6 +65,13 @@ const _systemInfoSchema = z.object({
     privacy_policy: z.string().optional(),
   }),
 })
+
+// The QR code shows in an <img>, so only http(s) addresses are accepted;
+// empty clears it and hides the header button.
+function isEmptyOrHttpUrl(value: string): boolean {
+  const trimmed = value.trim()
+  return trimmed === '' || isHttpUrl(trimmed)
+}
 
 type SystemInfoFormValues = z.infer<typeof _systemInfoSchema>
 
@@ -83,6 +93,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
     ServerAddress: normalizeValue(defaultValues.ServerAddress),
     TaskPublicAddress: normalizeValue(defaultValues.TaskPublicAddress),
     Logo: normalizeValue(defaultValues.Logo),
+    CustomerServiceQRCode: normalizeValue(defaultValues.CustomerServiceQRCode),
     Footer: normalizeValue(defaultValues.Footer),
     About: normalizeValue(defaultValues.About),
     HomePageContent: normalizeValue(defaultValues.HomePageContent),
@@ -107,6 +118,9 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
         ),
     }),
     Logo: z.string().url().optional().or(z.literal('')),
+    CustomerServiceQRCode: z.string().refine(isEmptyOrHttpUrl, {
+      error: () => t('Enter an image address starting with http or https'),
+    }),
     Footer: z.string().optional(),
     About: z.string().optional(),
     HomePageContent: z.string().optional(),
@@ -133,6 +147,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
           if (key === 'ServerAddress' || key === 'TaskPublicAddress') {
             v = v.replace(/\/+$/, '')
           }
+          if (key === 'CustomerServiceQRCode') v = v.trim()
           await updateOption.mutateAsync({
             key,
             value: v,
@@ -253,6 +268,35 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
                   </FormItem>
                 )}
               />
+
+              <SettingsFormGridItem span='full'>
+                <FormField
+                  control={form.control}
+                  name='CustomerServiceQRCode'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Support QR code image URL')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder='https://example.com/qq-group.jpg'
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Image of your QQ group or support QR code. Every page shows a Contact support button in the header; leave empty to hide it.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                      {isHttpUrl(field.value.trim()) && (
+                        <div className='bg-muted/40 w-24 rounded-md border p-1'>
+                          <SupportQRCode src={field.value.trim()} />
+                        </div>
+                      )}
+                    </FormItem>
+                  )}
+                />
+              </SettingsFormGridItem>
 
               <FormField
                 control={form.control}

@@ -28,6 +28,7 @@ const defaultSiteSettings: SiteSettings = {
   Notice: '',
   SystemName: 'New API',
   Logo: '',
+  CustomerServiceQRCode: '',
   Footer: '',
   About: '',
   HomePageContent: '',

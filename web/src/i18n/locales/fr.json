@@ -7462,6 +7462,13 @@
     "Change group: {{group}}": "Changer de groupe : {{group}}",
     "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "Le quota restant de cette clé est négatif. Ajustez son quota dans Modifier avant de changer de groupe.",
     "Hide error logs from users": "Masquer les journaux d’erreur aux utilisateurs",
-    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Les utilisateurs ne voient pas les journaux d’erreur dans leurs journaux d’utilisation, leurs exports ni les requêtes de journaux par jeton. Les administrateurs ne sont pas concernés."
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Les utilisateurs ne voient pas les journaux d’erreur dans leurs journaux d’utilisation, leurs exports ni les requêtes de journaux par jeton. Les administrateurs ne sont pas concernés.",
+    "Contact support": "Contacter le support",
+    "Scan to join our QQ group": "Scannez pour rejoindre notre groupe QQ",
+    "Support QR code": "QR code du support",
+    "QR code failed to load": "Impossible de charger le QR code",
+    "Support QR code image URL": "URL de l’image du QR code du support",
+    "Image of your QQ group or support QR code. Every page shows a Contact support button in the header; leave empty to hide it.": "Image de votre groupe QQ ou du QR code du support. Chaque page affiche un bouton « Contacter le support » dans l’en-tête ; laissez vide pour le masquer.",
+    "Enter an image address starting with http or https": "Saisissez une adresse d’image commençant par http ou https"
   }
 }

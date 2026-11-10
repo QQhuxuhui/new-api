@@ -7462,6 +7462,13 @@
     "Change group: {{group}}": "修改分组：{{group}}",
     "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "该 API 密钥剩余额度为负数，请先在编辑中调整额度，再修改分组。",
     "Hide error logs from users": "向用户隐藏错误日志",
-    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "开启后，用户的使用日志、日志导出和令牌日志查询中都不显示错误日志，管理员不受影响。"
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "开启后，用户的使用日志、日志导出和令牌日志查询中都不显示错误日志，管理员不受影响。",
+    "Contact support": "联系客服",
+    "Scan to join our QQ group": "扫码加入 QQ 群",
+    "Support QR code": "客服二维码",
+    "QR code failed to load": "二维码加载失败",
+    "Support QR code image URL": "客服二维码图片 URL",
+    "Image of your QQ group or support QR code. Every page shows a Contact support button in the header; leave empty to hide it.": "填写 QQ 群或客服二维码图片地址，所有页面顶栏会显示「联系客服」按钮；留空则不显示。",
+    "Enter an image address starting with http or https": "请输入以 http 或 https 开头的图片地址"
   }
 }

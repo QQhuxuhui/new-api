@@ -7462,6 +7462,13 @@
     "Change group: {{group}}": "グループを変更：{{group}}",
     "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "このキーの残りクォータがマイナスです。グループを変更する前に、編集でクォータを調整してください。",
     "Hide error logs from users": "ユーザーにエラーログを表示しない",
-    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "ユーザーの使用ログ、ログのエクスポート、トークンによるログ照会にエラーログを表示しません。管理者には影響しません。"
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "ユーザーの使用ログ、ログのエクスポート、トークンによるログ照会にエラーログを表示しません。管理者には影響しません。",
+    "Contact support": "サポートに連絡",
+    "Scan to join our QQ group": "スキャンして QQ グループに参加",
+    "Support QR code": "サポート QR コード",
+    "QR code failed to load": "QR コードを読み込めませんでした",
+    "Support QR code image URL": "サポート QR コード画像の URL",
+    "Image of your QQ group or support QR code. Every page shows a Contact support button in the header; leave empty to hide it.": "QQ グループまたはサポート QR コードの画像。すべてのページのヘッダーに「サポートに連絡」ボタンが表示されます。空欄にすると非表示になります。",
+    "Enter an image address starting with http or https": "http または https で始まる画像アドレスを入力してください"
   }
 }
