@@ -39,8 +39,12 @@ export function ApiKeyGroupColumnCell(props: CellContext<ApiKey, unknown>) {
   const group = apiKey.group ?? ''
   const updateGroup = editing?.updateGroup
 
+  // Rows are keyed by position, so a refresh can put another key in this
+  // row; keying by the key's id closes an open list instead of letting it
+  // change the key that took this row's place.
   return (
     <ApiKeyGroupCell
+      key={apiKey.id}
       group={group}
       ratio={(editing?.ratios ?? EMPTY_RATIOS)[group]}
       crossGroupRetry={apiKey.cross_group_retry}

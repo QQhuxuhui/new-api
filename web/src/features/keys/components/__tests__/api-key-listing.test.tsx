@@ -125,13 +125,19 @@ function QuotaTable(props: { apiKey: ApiKey }) {
   )
 }
 
-function GroupTable(props: { now: number; editing: ApiKeyGroupEditing }) {
+const stagingKey = { ...key, id: 8, name: 'staging', group: 'vip' }
+
+function GroupTable(props: {
+  now: number
+  editing: ApiKeyGroupEditing
+  data?: ApiKey[]
+}) {
   const columns = useApiKeysColumns(props.now).filter(
     (column) => 'accessorKey' in column && column.accessorKey === 'group'
   )
   const table = useReactTable({
     columns,
-    data: [key, { ...key, id: 8, name: 'staging', group: 'vip' }],
+    data: props.data ?? [key, stagingKey],
     getCoreRowModel: getCoreRowModel(),
   })
   return (
@@ -601,4 +607,43 @@ it("keeps another row's open group list and search when a save ends and the cloc
     'true'
   )
   expect(screen.getByPlaceholderText('Search...')).toHaveValue('pri')
+})
+
+it('closes an open group list when a refresh puts another key in its row', () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, enabled: false } },
+  })
+  clients.push(client)
+  const updateGroup = vi.fn()
+  const editing = {
+    ratios: { default: 1, vip: 3 },
+    options: [
+      { value: 'default', label: 'default', desc: 'User group', ratio: 1 },
+      { value: 'vip', label: 'vip', desc: 'Priority group', ratio: 3 },
+    ],
+    pendingIds: new Set<number>(),
+    updateGroup,
+  }
+  const renderTable = (data: ApiKey[]) => (
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={client}>
+        <TooltipProvider>
+          <GroupTable now={now} editing={editing} data={data} />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </I18nextProvider>
+  )
+  const { rerender } = render(renderTable([key, stagingKey]))
+  fireEvent.click(screen.getAllByRole('combobox')[1])
+  expect(screen.getByPlaceholderText('Search...')).toBeInTheDocument()
+
+  const newestKey = { ...key, id: 9, name: 'newest', group: 'default' }
+  rerender(renderTable([newestKey, key, stagingKey]))
+
+  expect(screen.getAllByRole('combobox')[1]).toHaveAttribute(
+    'aria-expanded',
+    'false'
+  )
+  expect(screen.queryByPlaceholderText('Search...')).not.toBeInTheDocument()
+  expect(updateGroup).not.toHaveBeenCalled()
 })
