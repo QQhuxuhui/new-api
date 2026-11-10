@@ -7458,6 +7458,8 @@
     "Max Concurrency": "Số yêu cầu đồng thời tối đa",
     "Most model requests this user can run at the same time. 0 means no limit.": "Số yêu cầu mô hình tối đa người dùng này có thể chạy cùng lúc. 0 là không giới hạn.",
     "Max Concurrent Requests per Key": "Yêu cầu đồng thời tối đa mỗi key",
-    "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "Số yêu cầu tối đa mỗi key của kênh này có thể chạy cùng lúc. Key đạt giới hạn sẽ chuyển sang kênh khác. 0 là không giới hạn."
+    "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "Số yêu cầu tối đa mỗi key của kênh này có thể chạy cùng lúc. Key đạt giới hạn sẽ chuyển sang kênh khác. 0 là không giới hạn.",
+    "Change group: {{group}}": "Đổi nhóm: {{group}}",
+    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "Hạn mức còn lại của khóa này đang âm. Hãy điều chỉnh hạn mức trong Chỉnh sửa trước khi đổi nhóm."
   }
 }

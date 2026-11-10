@@ -16,9 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
@@ -36,6 +36,7 @@ await i18n.use(initReactI18next).init({
         Ratio: 'Ratio',
         'Automatically selects the best available group with circuit breaker mechanism':
           'Automatically selects the best available group with circuit breaker mechanism',
+        'Change group: {{group}}': 'Change group: {{group}}',
       },
     },
   },
@@ -46,6 +47,9 @@ function CellHarness(props: {
   ratio?: number | string
   crossGroupRetry?: boolean
   shouldReduceMotion?: boolean
+  options?: { value: string; label: string; desc?: string; ratio?: number }[]
+  onGroupChange?: (group: string) => void
+  isUpdating?: boolean
 }) {
   return (
     <I18nextProvider i18n={i18n}>
@@ -55,6 +59,9 @@ function CellHarness(props: {
           ratio={props.ratio}
           crossGroupRetry={props.crossGroupRetry ?? false}
           shouldReduceMotion={props.shouldReduceMotion ?? false}
+          options={props.options}
+          onGroupChange={props.onGroupChange}
+          isUpdating={props.isUpdating}
         />
       </TooltipProvider>
     </I18nextProvider>
@@ -141,7 +148,7 @@ describe('API key group table cell', () => {
     render(<CellHarness group={groupName} ratio={12.345678} />)
     expect(
       screen.getByText(groupName).closest('[data-slot="tooltip-trigger"]')
-    ).toHaveClass('max-w-50')
+    ).toHaveClass('max-w-66')
     expect(screen.getByText('12.345678x')).toBeInTheDocument()
     await userEvent.tab()
     expect(
@@ -156,5 +163,130 @@ describe('API key group table cell', () => {
     expect(screen.getByText('vip')).toBeInTheDocument()
     expect(screen.queryByText('Auto')).not.toBeInTheDocument()
     expect(screen.queryByText('自动')).not.toBeInTheDocument()
+  })
+})
+
+const groupOptions = [
+  { value: 'default', label: 'default', desc: 'User group', ratio: 0.5 },
+  {
+    value: '【稳定】Claude【Kiro正价企业号】',
+    label: '【稳定】Claude【Kiro正价企业号】',
+    desc: 'kiro正价企业号池',
+    ratio: 0.7,
+  },
+]
+
+function getCommandItem(label: string): HTMLElement {
+  const item = [
+    ...document.querySelectorAll<HTMLElement>('[data-slot="command-item"]'),
+  ].find((candidate) => candidate.textContent?.includes(label))
+  if (!item) throw new Error(`Expected command item containing "${label}"`)
+  return item
+}
+
+function matchNarrowScreen() {
+  const original = window.matchMedia
+  vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+    ...original(query),
+    matches: query === '(max-width: 640px)' || original(query).matches,
+  }))
+}
+
+describe('API key group cell inline editing', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  test('opens the group list from the cell and saves a different group', () => {
+    const onGroupChange = vi.fn()
+    render(
+      <CellHarness
+        group='default'
+        ratio={0.5}
+        options={groupOptions}
+        onGroupChange={onGroupChange}
+      />
+    )
+
+    const trigger = screen.getByRole('combobox', {
+      name: 'Change group: default',
+    })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(trigger)
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(getCommandItem('kiro正价企业号池'))
+
+    expect(onGroupChange).toHaveBeenCalledTimes(1)
+    expect(onGroupChange).toHaveBeenCalledWith(
+      '【稳定】Claude【Kiro正价企业号】'
+    )
+  })
+
+  test('does not save when the current group is picked again', () => {
+    const onGroupChange = vi.fn()
+    render(
+      <CellHarness
+        group='default'
+        options={groupOptions}
+        onGroupChange={onGroupChange}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('combobox'))
+    fireEvent.click(getCommandItem('User group'))
+
+    expect(onGroupChange).not.toHaveBeenCalled()
+  })
+
+  test('locks the cell while its group is being saved', () => {
+    render(
+      <CellHarness
+        group='default'
+        options={groupOptions}
+        onGroupChange={vi.fn()}
+        isUpdating
+      />
+    )
+
+    expect(screen.getByRole('combobox')).toBeDisabled()
+  })
+
+  test('names the trigger with the full group so long names stay reachable', () => {
+    const groupName = '【稳定】Claude【Kiro正价企业号】'
+    render(
+      <CellHarness
+        group={groupName}
+        options={groupOptions}
+        onGroupChange={vi.fn()}
+      />
+    )
+
+    const trigger = screen.getByRole('combobox', {
+      name: `Change group: ${groupName}`,
+    })
+    expect(trigger.closest('[data-api-key-group-cell]')).toHaveClass('max-w-66')
+    expect(
+      trigger.querySelector('[data-api-key-group-chevron]')
+    ).toHaveAttribute('aria-hidden', 'true')
+  })
+
+  test('stays read-only on the narrow mobile card layout', () => {
+    matchNarrowScreen()
+    render(
+      <CellHarness
+        group='default'
+        options={groupOptions}
+        onGroupChange={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    expect(screen.getByText('default')).toBeInTheDocument()
+  })
+
+  test('stays read-only until the selectable groups have loaded', () => {
+    render(<CellHarness group='default' options={[]} onGroupChange={vi.fn()} />)
+
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
   })
 })

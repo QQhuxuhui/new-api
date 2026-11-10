@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Check, ChevronsUpDown } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { Check, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -56,6 +56,15 @@ type ApiKeyGroupComboboxProps = {
   onValueChange: (value: string) => void
   placeholder?: string
   disabled?: boolean
+  /**
+   * Compact trigger content for inline use (for example a table cell). When
+   * set, the trigger is a borderless button around this content with a chevron
+   * that appears on hover, focus, or while open, and the list keeps a fixed
+   * width instead of following the narrow trigger.
+   */
+  children?: ReactNode
+  /** Accessible name of the compact trigger. */
+  triggerAriaLabel?: string
 }
 
 export function ApiKeyGroupCombobox({
@@ -64,6 +73,8 @@ export function ApiKeyGroupCombobox({
   onValueChange,
   placeholder,
   disabled,
+  children,
+  triggerAriaLabel,
 }: ApiKeyGroupComboboxProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -71,6 +82,7 @@ export function ApiKeyGroupCombobox({
   const shouldReduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const selectedOption = options.find((option) => option.value === value)
   const isAutoSelected = selectedOption?.value === 'auto'
+  const isCompact = children !== undefined
 
   const filteredOptions = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
@@ -95,55 +107,85 @@ export function ApiKeyGroupCombobox({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button
-            type='button'
-            variant='outline'
-            role='combobox'
-            aria-expanded={open}
-            data-auto-group-effect={isAutoSelected ? 'trigger' : undefined}
-            disabled={disabled}
-            className={cn(
-              'border-input bg-muted/40 hover:bg-muted/55 hover:text-foreground active:bg-background data-popup-open:border-ring data-popup-open:bg-background data-popup-open:ring-ring/20 relative h-auto min-h-14 w-full justify-between gap-2 rounded-lg px-3 py-2 text-start shadow-none transition-[background-color,border-color,box-shadow] duration-150 data-popup-open:ring-[3px] sm:min-h-20 sm:gap-3 sm:px-4 sm:py-3',
-              isAutoSelected &&
-                cn(
-                  AUTO_GROUP_FRAME_CLASS_NAME,
-                  'hover:border-primary/55 data-popup-open:border-primary/55 data-popup-open:ring-primary/20'
-                )
-            )}
-          />
-        }
-      >
-        {isAutoSelected && (
-          <AutoGroupFlowBorder shouldReduceMotion={shouldReduceMotion} />
-        )}
-        <span className='flex min-w-0 flex-1 items-center justify-between gap-2 sm:gap-3'>
-          <span className='min-w-0'>
-            <span className='block truncate font-medium'>
-              {selectedOption?.label || placeholder || t('Select a group')}
-            </span>
-            {selectedOption?.desc && (
-              <span className='text-muted-foreground block truncate text-[11px] sm:text-xs'>
-                {selectedOption.desc}
-              </span>
-            )}
-          </span>
-          <span className='hidden sm:block'>
-            <GroupRatioBadge
-              ratio={selectedOption?.ratio}
-              isAuto={isAutoSelected}
-              shouldReduceMotion={shouldReduceMotion}
+      {isCompact ? (
+        <PopoverTrigger
+          render={
+            <Button
+              type='button'
+              variant='ghost'
+              role='combobox'
+              aria-expanded={open}
+              aria-label={triggerAriaLabel}
+              disabled={disabled}
+              data-api-key-group-trigger='compact'
+              className='group/group-trigger hover:bg-muted/60 data-popup-open:bg-muted/60 h-auto w-full min-w-0 justify-start gap-1 rounded-md px-1 py-0.5 text-start font-normal'
             />
+          }
+        >
+          <span className='min-w-0 flex-1'>{children}</span>
+          <ChevronDown
+            aria-hidden='true'
+            data-api-key-group-chevron
+            className='text-muted-foreground size-3.5 shrink-0 opacity-0 transition-opacity group-hover/group-trigger:opacity-100 group-focus-visible/group-trigger:opacity-100 group-data-popup-open/group-trigger:opacity-100'
+          />
+        </PopoverTrigger>
+      ) : (
+        <PopoverTrigger
+          render={
+            <Button
+              type='button'
+              variant='outline'
+              role='combobox'
+              aria-expanded={open}
+              data-auto-group-effect={isAutoSelected ? 'trigger' : undefined}
+              disabled={disabled}
+              className={cn(
+                'border-input bg-muted/40 hover:bg-muted/55 hover:text-foreground active:bg-background data-popup-open:border-ring data-popup-open:bg-background data-popup-open:ring-ring/20 relative h-auto min-h-14 w-full justify-between gap-2 rounded-lg px-3 py-2 text-start shadow-none transition-[background-color,border-color,box-shadow] duration-150 data-popup-open:ring-[3px] sm:min-h-20 sm:gap-3 sm:px-4 sm:py-3',
+                isAutoSelected &&
+                  cn(
+                    AUTO_GROUP_FRAME_CLASS_NAME,
+                    'hover:border-primary/55 data-popup-open:border-primary/55 data-popup-open:ring-primary/20'
+                  )
+              )}
+            />
+          }
+        >
+          {isAutoSelected && (
+            <AutoGroupFlowBorder shouldReduceMotion={shouldReduceMotion} />
+          )}
+          <span className='flex min-w-0 flex-1 items-center justify-between gap-2 sm:gap-3'>
+            <span className='min-w-0'>
+              <span className='block truncate font-medium'>
+                {selectedOption?.label || placeholder || t('Select a group')}
+              </span>
+              {selectedOption?.desc && (
+                <span className='text-muted-foreground block truncate text-[11px] sm:text-xs'>
+                  {selectedOption.desc}
+                </span>
+              )}
+            </span>
+            <span className='hidden sm:block'>
+              <GroupRatioBadge
+                ratio={selectedOption?.ratio}
+                isAuto={isAutoSelected}
+                shouldReduceMotion={shouldReduceMotion}
+              />
+            </span>
           </span>
-        </span>
-        <ChevronsUpDown
-          aria-hidden='true'
-          className='size-4 shrink-0 opacity-50'
-        />
-      </PopoverTrigger>
+          <ChevronsUpDown
+            aria-hidden='true'
+            className='size-4 shrink-0 opacity-50'
+          />
+        </PopoverTrigger>
+      )}
       <PopoverContent
-        className='data-closed:zoom-out-100 data-open:zoom-in-100 data-[side=bottom]:slide-in-from-top-0 data-[side=left]:slide-in-from-right-0 data-[side=right]:slide-in-from-left-0 data-[side=top]:slide-in-from-bottom-0 w-[var(--anchor-width)] overflow-hidden rounded-xl p-0 shadow-lg data-closed:duration-75 data-open:duration-100'
+        align={isCompact ? 'start' : undefined}
+        className={cn(
+          'data-closed:zoom-out-100 data-open:zoom-in-100 data-[side=bottom]:slide-in-from-top-0 data-[side=left]:slide-in-from-right-0 data-[side=right]:slide-in-from-left-0 data-[side=top]:slide-in-from-bottom-0 overflow-hidden rounded-xl p-0 shadow-lg data-closed:duration-75 data-open:duration-100',
+          isCompact
+            ? 'w-96 max-w-[calc(100vw-2rem)]'
+            : 'w-[var(--anchor-width)]'
+        )}
         onWheel={(event) => event.stopPropagation()}
         onTouchMove={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}

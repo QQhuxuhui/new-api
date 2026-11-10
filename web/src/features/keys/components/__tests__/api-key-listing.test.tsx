@@ -127,7 +127,9 @@ function renderQuota(apiKey: ApiKey = key) {
   return render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={client}>
-        <QuotaTable apiKey={apiKey} />
+        <ApiKeysProvider>
+          <QuotaTable apiKey={apiKey} />
+        </ApiKeysProvider>
       </QueryClientProvider>
     </I18nextProvider>
   )

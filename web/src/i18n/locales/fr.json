@@ -7458,6 +7458,8 @@
     "Max Concurrency": "Concurrence maximale",
     "Most model requests this user can run at the same time. 0 means no limit.": "Nombre maximal de requêtes de modèle que cet utilisateur peut exécuter simultanément. 0 signifie sans limite.",
     "Max Concurrent Requests per Key": "Requêtes simultanées max. par clé",
-    "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "Nombre maximal de requêtes simultanées pour chaque clé de ce canal. Une clé à la limite bascule vers un autre canal. 0 signifie sans limite."
+    "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "Nombre maximal de requêtes simultanées pour chaque clé de ce canal. Une clé à la limite bascule vers un autre canal. 0 signifie sans limite.",
+    "Change group: {{group}}": "Changer de groupe : {{group}}",
+    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "Le quota restant de cette clé est négatif. Ajustez son quota dans Modifier avant de changer de groupe."
   }
 }

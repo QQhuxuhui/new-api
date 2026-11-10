@@ -198,3 +198,29 @@ export function transformApiKeyToFormDefaults(
     tokenCount: 1,
   }
 }
+
+/**
+ * Payload that changes only a key's group. Every other field is copied
+ * verbatim from the latest server copy, because the update endpoint replaces
+ * all of them; going through the form transforms would recompute
+ * model_limits_enabled and round-trip the quota through the display currency.
+ */
+export function buildApiKeyGroupUpdatePayload(
+  apiKey: ApiKey,
+  group: string
+): ApiKeyFormData {
+  const isAuto = group === 'auto'
+  return {
+    name: apiKey.name,
+    remain_quota: apiKey.remain_quota,
+    expired_time: apiKey.expired_time,
+    unlimited_quota: apiKey.unlimited_quota,
+    model_limits_enabled: apiKey.model_limits_enabled,
+    model_limits: apiKey.model_limits ?? '',
+    allow_ips: apiKey.allow_ips ?? '',
+    allow_user_quota_query: !!apiKey.allow_user_quota_query,
+    group,
+    auto_groups: isAuto ? (apiKey.auto_groups ?? []) : [],
+    cross_group_retry: isAuto,
+  }
+}

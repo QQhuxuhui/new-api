@@ -222,3 +222,46 @@ describe('API key group combobox Auto effect', () => {
     setReducedMotion(false)
   })
 })
+
+describe('API key group combobox compact trigger', () => {
+  test('wraps the given content with a hidden chevron and a fixed-width list', () => {
+    render(
+      <I18nextProvider i18n={i18n}>
+        <ApiKeyGroupCombobox
+          options={options}
+          value='vip'
+          onValueChange={() => undefined}
+          triggerAriaLabel='Change group: vip'
+        >
+          <span>vip badge</span>
+        </ApiKeyGroupCombobox>
+      </I18nextProvider>
+    )
+
+    const trigger = screen.getByRole('combobox', { name: 'Change group: vip' })
+    expect(trigger).toHaveAttribute('data-api-key-group-trigger', 'compact')
+    expect(trigger).toHaveTextContent('vip badge')
+    expect(trigger).not.toHaveTextContent('Priority group')
+    expect(
+      trigger.querySelector('[data-api-key-group-chevron]')
+    ).toHaveAttribute('aria-hidden', 'true')
+
+    fireEvent.click(trigger)
+    const list = document.querySelector<HTMLElement>(
+      '[data-slot="popover-content"]'
+    )
+    expect(list).toHaveClass('w-96')
+    expect(list).not.toHaveClass('w-[var(--anchor-width)]')
+    expect(
+      getCommandItem('Priority group').querySelector('svg.lucide-check')
+    ).toHaveClass('opacity-100')
+  })
+
+  test('keeps the full field trigger when no compact content is given', () => {
+    render(<Harness initialValue='vip' />)
+
+    const trigger = getTrigger()
+    expect(trigger).not.toHaveAttribute('data-api-key-group-trigger')
+    expect(trigger).toHaveTextContent('Priority group')
+  })
+})
