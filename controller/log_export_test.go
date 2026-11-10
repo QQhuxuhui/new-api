@@ -146,6 +146,23 @@ func TestLogExportDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, "primary", all[2]["channel_name"])
 			assert.Contains(t, all[2]["other"], "admin_info")
 			assert.Equal(t, true, all[3]["success"])
+
+			logSetting := operation_setting.GetLogSetting()
+			logSetting.UserHideErrorLogs = true
+			t.Cleanup(func() { logSetting.UserHideErrorLogs = false })
+			hidden := callLogHandler(t, GetUserLogs, 1, common.RoleCommonUser, query)[0]
+			require.Equal(t, true, hidden["success"])
+			assert.EqualValues(t, 1, hidden["data"].(map[string]any)["total"], "error logs are hidden from the user's list")
+			onlyErrors := callLogHandler(t, GetUserLogs, 1, common.RoleCommonUser, query+"&type=5")[0]
+			require.Equal(t, true, onlyErrors["success"])
+			assert.EqualValues(t, 0, onlyErrors["data"].(map[string]any)["total"], "asking for error logs finds none")
+			hiddenExport := callLogHandler(t, ExportUserLogs, 1, common.RoleCommonUser, query)
+			require.Len(t, hiddenExport, 2)
+			assert.Equal(t, []any{"a-1"}, exportedRequestIds(hiddenExport))
+			assert.Equal(t, float64(1), hiddenExport[1]["data"].(map[string]any)["count"])
+			adminOwn := callLogHandler(t, GetUserLogs, 1, common.RoleAdminUser, query)[0]
+			assert.EqualValues(t, 2, adminOwn["data"].(map[string]any)["total"], "administrators still see error logs in their own view")
+			assert.Len(t, callLogHandler(t, ExportAllLogs, 3, common.RoleAdminUser, query+"&model_name=gpt-%25"), 4, "exporting all logs is unaffected")
 		})
 	}
 }
@@ -154,7 +171,7 @@ func TestLogExportRules(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, _ := newAuditTestDatabase(t, "sqlite", "")
 	useLogExportDatabases(t, db, db, common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Log{}, &model.QuotaData{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Log{}, &model.QuotaData{}, &model.User{}))
 	now := time.Now().Unix()
 	seedExportLogs(t, db, db, now)
 	logSetting := operation_setting.GetLogSetting()
@@ -211,6 +228,43 @@ func TestLogExportRules(t *testing.T) {
 		assert.Equal(t, true, other[len(other)-1]["success"], "other users are not blocked")
 		release()
 		assert.Len(t, callLogHandler(t, ExportUserLogs, 1, common.RoleCommonUser, recent), 3)
+	})
+
+	t.Run("hide error logs from token log query", func(t *testing.T) {
+		require.NoError(t, db.Create(&model.User{Id: 1, Username: "alice", AffCode: "alice", Role: common.RoleCommonUser, Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&model.User{Id: 3, Username: "root", AffCode: "root", Role: common.RoleAdminUser, Status: common.UserStatusEnabled}).Error)
+		for _, log := range []model.Log{
+			{UserId: 1, TokenId: 77, CreatedAt: now - 10, Type: model.LogTypeConsume, RequestId: "t-ok"},
+			{UserId: 1, TokenId: 77, CreatedAt: now - 5, Type: model.LogTypeError, RequestId: "t-err"},
+			{UserId: 3, TokenId: 78, CreatedAt: now - 5, Type: model.LogTypeError, RequestId: "t-admin-err"},
+		} {
+			require.NoError(t, db.Create(&log).Error)
+		}
+		tokenLogs := func(userId int, tokenId int) []any {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/token", nil)
+			ctx.Set("id", userId)
+			ctx.Set("token_id", tokenId)
+			GetLogByKey(ctx)
+			var body struct {
+				Success bool             `json:"success"`
+				Data    []map[string]any `json:"data"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(recorder.Body.String(), &body))
+			require.True(t, body.Success)
+			ids := make([]any, 0, len(body.Data))
+			for _, log := range body.Data {
+				ids = append(ids, log["request_id"])
+			}
+			return ids
+		}
+
+		assert.Equal(t, []any{"t-err", "t-ok"}, tokenLogs(1, 77), "shown while the switch is off")
+		logSetting.UserHideErrorLogs = true
+		t.Cleanup(func() { logSetting.UserHideErrorLogs = previousSetting.UserHideErrorLogs })
+		assert.Equal(t, []any{"t-ok"}, tokenLogs(1, 77), "hidden from a regular user's token")
+		assert.Equal(t, []any{"t-admin-err"}, tokenLogs(3, 78), "an administrator's token still shows them")
 	})
 }
 

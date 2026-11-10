@@ -184,6 +184,7 @@ export interface SystemStatus {
   custom_oauth_providers?: CustomOAuthProviderInfo[]
   log_export_enabled?: boolean
   log_max_range_days?: number
+  log_user_hide_error_logs?: boolean
   quota_remind_enabled?: boolean
   /** Site default low balance reminder threshold, in quota units */
   quota_remind_threshold?: number

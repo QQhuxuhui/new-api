@@ -7460,6 +7460,8 @@
     "Max Concurrent Requests per Key": "Requêtes simultanées max. par clé",
     "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "Nombre maximal de requêtes simultanées pour chaque clé de ce canal. Une clé à la limite bascule vers un autre canal. 0 signifie sans limite.",
     "Change group: {{group}}": "Changer de groupe : {{group}}",
-    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "Le quota restant de cette clé est négatif. Ajustez son quota dans Modifier avant de changer de groupe."
+    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "Le quota restant de cette clé est négatif. Ajustez son quota dans Modifier avant de changer de groupe.",
+    "Hide error logs from users": "Masquer les journaux d’erreur aux utilisateurs",
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Les utilisateurs ne voient pas les journaux d’erreur dans leurs journaux d’utilisation, leurs exports ni les requêtes de journaux par jeton. Les administrateurs ne sont pas concernés."
   }
 }

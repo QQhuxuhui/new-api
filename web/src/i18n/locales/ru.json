@@ -7460,6 +7460,8 @@
     "Max Concurrent Requests per Key": "Макс. параллельных запросов на ключ",
     "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "Сколько запросов одновременно может выполнять каждый ключ канала. Ключ на пределе переключается на другой канал. 0 — без ограничения.",
     "Change group: {{group}}": "Изменить группу: {{group}}",
-    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "Остаток квоты этого ключа отрицательный. Измените квоту в редактировании, прежде чем менять группу."
+    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "Остаток квоты этого ключа отрицательный. Измените квоту в редактировании, прежде чем менять группу.",
+    "Hide error logs from users": "Скрывать журналы ошибок от пользователей",
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Пользователи не видят журналы ошибок в журналах использования, экспорте журналов и запросах журналов по токену. На администраторов это не влияет."
   }
 }

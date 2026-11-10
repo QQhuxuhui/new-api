@@ -7460,6 +7460,8 @@
     "Max Concurrent Requests per Key": "Max Concurrent Requests per Key",
     "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.",
     "Change group: {{group}}": "Change group: {{group}}",
-    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "This key's remaining quota is negative. Adjust its quota in Edit before changing the group."
+    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.",
+    "Hide error logs from users": "Hide error logs from users",
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected."
   }
 }

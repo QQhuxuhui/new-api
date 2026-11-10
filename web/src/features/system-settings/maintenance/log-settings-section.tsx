@@ -53,6 +53,7 @@ const logSettingsSchema = z.object({
   log_setting: z.object({
     user_export_enabled: z.boolean(),
     max_range_days: z.number().int().min(1),
+    user_hide_error_logs: z.boolean(),
   }),
 })
 
@@ -63,6 +64,7 @@ type LogSettingsSectionProps = {
     LogConsumeEnabled: boolean
     'log_setting.user_export_enabled': boolean
     'log_setting.max_range_days': number
+    'log_setting.user_hide_error_logs': boolean
   }
 }
 
@@ -78,6 +80,8 @@ export function LogSettingsSection(props: LogSettingsSectionProps) {
         user_export_enabled:
           props.defaultValues['log_setting.user_export_enabled'],
         max_range_days: props.defaultValues['log_setting.max_range_days'],
+        user_hide_error_logs:
+          props.defaultValues['log_setting.user_hide_error_logs'],
       },
     }),
     [props.defaultValues]
@@ -99,6 +103,10 @@ export function LogSettingsSection(props: LogSettingsSectionProps) {
         values.log_setting.user_export_enabled,
       ],
       ['log_setting.max_range_days', values.log_setting.max_range_days],
+      [
+        'log_setting.user_hide_error_logs',
+        values.log_setting.user_hide_error_logs,
+      ],
     ] as const
     for (const [key, value] of changes) {
       if (value === props.defaultValues[key]) continue
@@ -169,6 +177,29 @@ export function LogSettingsSection(props: LogSettingsSectionProps) {
                       <FormDescription>
                         {t(
                           'Users can download their own logs from the usage log page. Administrators can always export.'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </SettingsSwitchItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='log_setting.user_hide_error_logs'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Hide error logs from users')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.'
                         )}
                       </FormDescription>
                     </SettingsSwitchContent>

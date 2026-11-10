@@ -7460,6 +7460,8 @@
     "Max Concurrent Requests per Key": "キーごとの最大同時リクエスト数",
     "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "このチャネルの各キーが同時に処理できるリクエストの最大数。上限に達したキーは別のチャネルに切り替わります。0 は無制限です。",
     "Change group: {{group}}": "グループを変更：{{group}}",
-    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "このキーの残りクォータがマイナスです。グループを変更する前に、編集でクォータを調整してください。"
+    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "このキーの残りクォータがマイナスです。グループを変更する前に、編集でクォータを調整してください。",
+    "Hide error logs from users": "ユーザーにエラーログを表示しない",
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "ユーザーの使用ログ、ログのエクスポート、トークンによるログ照会にエラーログを表示しません。管理者には影響しません。"
   }
 }

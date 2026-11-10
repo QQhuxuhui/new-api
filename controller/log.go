@@ -75,6 +75,7 @@ func GetAllLogs(c *gin.Context) {
 func GetUserLogs(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	filter := logFilterFromQuery(c, false)
+	filter.ExcludeErrorLogs = operation_setting.GetLogSetting().HidesErrorLogsFrom(c.GetInt("role"))
 	if c.GetInt("role") < common.RoleAdminUser {
 		startTimestamp, err := limitLogTimeRange(filter.StartTimestamp, filter.EndTimestamp)
 		if err != nil {
@@ -114,6 +115,9 @@ func ExportUserLogs(c *gin.Context) {
 // range.
 func exportLogs(c *gin.Context, all bool) {
 	filter := logFilterFromQuery(c, all)
+	if !all {
+		filter.ExcludeErrorLogs = operation_setting.GetLogSetting().HidesErrorLogsFrom(c.GetInt("role"))
+	}
 	startTimestamp, err := limitLogTimeRange(filter.StartTimestamp, filter.EndTimestamp)
 	if err != nil {
 		common.ApiError(c, err)
@@ -185,7 +189,13 @@ func GetLogByKey(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenInvalid)
 		return
 	}
-	logs, err := model.GetLogByTokenId(tokenId)
+	// Token-authenticated requests carry no role, so read it from the user.
+	// If that fails, hide error logs as for a regular user.
+	role := common.RoleCommonUser
+	if user, err := model.GetUserCache(c.GetInt("id")); err == nil {
+		role = user.Role
+	}
+	logs, err := model.GetLogByTokenId(tokenId, operation_setting.GetLogSetting().HidesErrorLogsFrom(role))
 	if err != nil {
 		c.JSON(200, gin.H{
 			"success": false,

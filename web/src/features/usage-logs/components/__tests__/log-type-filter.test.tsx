@@ -36,6 +36,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { CommonLogsFilterBar } from '../common-logs-filter-bar'
 import { UsageLogsProvider } from '../usage-logs-provider'
@@ -53,13 +54,18 @@ function FilterFixture() {
   )
 }
 
-async function renderFilter() {
-  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
-    data: {
-      success: true,
-      data: url === '/api/user/self/groups' ? {} : { quota: 0, rpm: 0, tpm: 0 },
-    },
-  }))
+async function renderFilter(status: Record<string, unknown> = {}) {
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/status') return { data: { success: true, data: status } }
+    if (url === '/api/group/') return { data: { success: true, data: [] } }
+    return {
+      data: {
+        success: true,
+        data:
+          url === '/api/user/self/groups' ? {} : { quota: 0, rpm: 0, tpm: 0 },
+      },
+    }
+  })
   const root = createRootRoute()
   const auth = createRoute({ getParentRoute: () => root, id: '_authenticated' })
   const logs = createRoute({
@@ -87,6 +93,8 @@ async function renderFilter() {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  localStorage.clear()
+  useAuthStore.getState().auth.setUser(null)
 })
 
 it('marks only retired log types as deprecated while keeping historical filters selectable', async () => {
@@ -127,4 +135,25 @@ it('marks only retired log types as deprecated while keeping historical filters 
   await waitFor(() =>
     expect(router.state.location.search).toMatchObject({ type: ['7'], page: 1 })
   )
+})
+
+it('does not offer the Error type to a regular user when error logs are hidden from users', async () => {
+  await renderFilter({ log_user_hide_error_logs: true })
+  await userEvent.click(screen.getByRole('combobox', { name: 'Type' }))
+
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('option', { name: 'Error' })
+    ).not.toBeInTheDocument()
+  )
+  expect(screen.getByRole('option', { name: 'Consume' })).toBeVisible()
+  expect(screen.getByRole('option', { name: 'Refund' })).toBeVisible()
+})
+
+it('keeps the Error type for an administrator when error logs are hidden from users', async () => {
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'admin', role: 10 })
+  await renderFilter({ log_user_hide_error_logs: true })
+  await userEvent.click(screen.getByRole('combobox', { name: 'Type' }))
+
+  expect(await screen.findByRole('option', { name: 'Error' })).toBeVisible()
 })

@@ -17,6 +17,9 @@ type LogSetting struct {
 	// MaxRangeDays is the longest time range a user can search in their logs
 	// and dashboard, and the longest range any export can cover.
 	MaxRangeDays int `json:"max_range_days"`
+	// UserHideErrorLogs hides error logs from regular users' own log list,
+	// export, and token log query. Administrators always see them.
+	UserHideErrorLogs bool `json:"user_hide_error_logs"`
 }
 
 var logSetting = LogSetting{
@@ -30,6 +33,11 @@ func init() {
 
 func GetLogSetting() *LogSetting {
 	return &logSetting
+}
+
+// HidesErrorLogsFrom reports whether error logs are hidden from a user of role.
+func (s *LogSetting) HidesErrorLogsFrom(role int) bool {
+	return s.UserHideErrorLogs && role < common.RoleAdminUser
 }
 
 func (s *LogSetting) MaxRangeSeconds() int64 {

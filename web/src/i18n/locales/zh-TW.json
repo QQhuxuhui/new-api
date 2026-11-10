@@ -7460,6 +7460,8 @@
     "Max Concurrent Requests per Key": "每個 Key 最大並行數",
     "Most requests each key of this channel can run at the same time. A key at the limit fails over to another channel. 0 means no limit.": "此渠道每個 Key 最多可同時進行的請求數，達到上限的 Key 會切換到其他渠道。0 表示不限制。",
     "Change group: {{group}}": "修改分組：{{group}}",
-    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "該 API 金鑰剩餘額度為負數，請先在編輯中調整額度，再修改分組。"
+    "This key's remaining quota is negative. Adjust its quota in Edit before changing the group.": "該 API 金鑰剩餘額度為負數，請先在編輯中調整額度，再修改分組。",
+    "Hide error logs from users": "向使用者隱藏錯誤日誌",
+    "Users do not see error logs in their usage logs, log exports, or token log queries. Administrators are not affected.": "開啟後，使用者的使用日誌、日誌匯出和令牌日誌查詢中都不顯示錯誤日誌，管理員不受影響。"
   }
 }

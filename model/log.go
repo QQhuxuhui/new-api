@@ -135,12 +135,16 @@ func FormatRootLogs(logs []*Log) {
 	}
 }
 
-func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
+func GetLogByTokenId(tokenId int, excludeErrorLogs bool) (logs []*Log, err error) {
 	order := "id desc"
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		order = clickHouseLogOrder("")
 	}
-	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
+	tx := LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId)
+	if excludeErrorLogs {
+		tx = tx.Where("type <> ?", LogTypeError)
+	}
+	err = tx.Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
 	formatUserLogs(logs, 0)
 	return logs, err
 }
@@ -486,12 +490,17 @@ type LogFilter struct {
 	Group             string
 	RequestId         string
 	UpstreamRequestId string
+	// ExcludeErrorLogs leaves out error logs, for users they are hidden from.
+	ExcludeErrorLogs bool
 }
 
 func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	var err error
 	if f.Type != LogTypeUnknown {
 		tx = tx.Where("logs.type = ?", f.Type)
+	}
+	if f.ExcludeErrorLogs {
+		tx = tx.Where("logs.type <> ?", LogTypeError)
 	}
 	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", f.ModelName); err != nil {
 		return nil, err

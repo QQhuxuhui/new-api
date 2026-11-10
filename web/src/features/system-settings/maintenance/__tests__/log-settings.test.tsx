@@ -44,6 +44,7 @@ function Fixture() {
             LogConsumeEnabled: true,
             'log_setting.user_export_enabled': true,
             'log_setting.max_range_days': 30,
+            'log_setting.user_hide_error_logs': false,
           }}
         />
       </SettingsPageProvider>
@@ -98,6 +99,9 @@ test('the page shows the four log modules in order, each with its own controls',
   expect(
     within(search).getByRole('switch', { name: 'Allow users to export logs' })
   ).toBeVisible()
+  expect(
+    within(search).getByRole('switch', { name: 'Hide error logs from users' })
+  ).not.toBeChecked()
   expect(
     within(search).getByRole('spinbutton', {
       name: 'Longest log time range (days)',
@@ -181,4 +185,20 @@ test('a time range under one day shows a field error and is not saved', async ()
 
   await waitFor(() => expect(days).toHaveAttribute('aria-invalid', 'true'))
   expect(api.put).not.toHaveBeenCalled()
+})
+
+test('turning on hiding error logs saves only that setting', async () => {
+  const user = userEvent.setup()
+  await renderSettings()
+
+  await user.click(
+    screen.getByRole('switch', { name: 'Hide error logs from users' })
+  )
+  await user.click(screen.getByRole('button', { name: 'Save log settings' }))
+
+  await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+  expect(api.put).toHaveBeenCalledWith('/api/option/', {
+    key: 'log_setting.user_hide_error_logs',
+    value: true,
+  })
 })
