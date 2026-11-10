@@ -16,28 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
 import { Checkbox } from '@/components/ui/checkbox'
-import { useMediaQuery } from '@/hooks'
 import { toIntlLocale } from '@/i18n/languages'
-import { getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay } from '@/lib/currency'
-import {
-  requireServerSuccess,
-  translateServerText,
-} from '@/lib/server-error-message'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { API_KEY_STATUSES } from '../constants'
-import { useApiKeyGroupUpdate } from '../hooks/use-api-key-group-update'
 import type { ApiKey } from '../types'
-import { ApiKeyGroupCell } from './api-key-group-cell'
-import type { ApiKeyGroupOption } from './api-key-group-combobox'
+import { ApiKeyGroupColumnCell } from './api-key-group-editing'
 import { ApiKeyQuotaCell } from './api-key-quota-cell'
 import {
   ApiKeyActivityCell,
@@ -50,53 +41,11 @@ import {
 } from './api-keys-cells'
 import { DataTableRowActions } from './data-table-row-actions'
 
-type UserGroupInfo = { desc?: string; ratio?: number | string }
-
-const EMPTY_USER_GROUPS: Record<string, UserGroupInfo> = {}
-
-/** Groups the user may pick, with their ratios, built like the edit drawer. */
-function useGroupChoices(): {
-  ratios: Record<string, number | string>
-  options: ApiKeyGroupOption[]
-} {
-  const { t } = useTranslation()
-  const { data } = useQuery({
-    queryKey: ['user-groups'],
-    queryFn: async () => requireServerSuccess(await getUserGroups()),
-    staleTime: 0,
-    select: (res): Record<string, UserGroupInfo> =>
-      res.success && res.data ? res.data : EMPTY_USER_GROUPS,
-  })
-  const groups = data ?? EMPTY_USER_GROUPS
-
-  return useMemo(() => {
-    const ratios: Record<string, number | string> = {}
-    const options: ApiKeyGroupOption[] = []
-    for (const [group, info] of Object.entries(groups)) {
-      const ratio =
-        typeof info.ratio === 'number' || typeof info.ratio === 'string'
-          ? info.ratio
-          : undefined
-      if (ratio !== undefined) ratios[group] = ratio
-      options.push({
-        value: group,
-        label: group,
-        desc: info.desc ? translateServerText(t, info.desc) : group,
-        ratio,
-      })
-    }
-    return { ratios, options }
-  }, [groups, t])
-}
-
 export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
   const { t, i18n } = useTranslation()
   useSystemConfigStore((state) => state.config.currency)
   const { meta: currency } = getCurrencyDisplay()
   const quotaUnit = currency.kind === 'tokens' ? t('Tokens') : currency.symbol
-  const { ratios: groupRatios, options: groupOptions } = useGroupChoices()
-  const { pendingIds, updateGroup } = useApiKeyGroupUpdate()
-  const shouldReduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const justNowLabel = t('Just now')
   return useMemo<ColumnDef<ApiKey>[]>(
@@ -174,23 +123,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
       {
         accessorKey: 'group',
         header: t('Group'),
-        cell: ({ row }) => {
-          const apiKey = row.original
-          const group = row.getValue('group') as string
-          return (
-            <ApiKeyGroupCell
-              group={group}
-              ratio={groupRatios[group]}
-              crossGroupRetry={apiKey.cross_group_retry}
-              shouldReduceMotion={shouldReduceMotion}
-              options={groupOptions}
-              isUpdating={pendingIds.has(apiKey.id)}
-              onGroupChange={(next) =>
-                updateGroup({ id: apiKey.id, group: next })
-              }
-            />
-          )
-        },
+        cell: ApiKeyGroupColumnCell,
         size: 280,
         meta: { mobileHidden: true },
       },
@@ -261,17 +194,6 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         meta: { pinned: 'right' as const },
       },
     ],
-    [
-      t,
-      quotaUnit,
-      now,
-      groupRatios,
-      groupOptions,
-      pendingIds,
-      updateGroup,
-      shouldReduceMotion,
-      locale,
-      justNowLabel,
-    ]
+    [t, quotaUnit, now, locale, justNowLabel]
   )
 }

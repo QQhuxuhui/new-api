@@ -32,6 +32,7 @@ import {
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   within,
@@ -43,6 +44,7 @@ import { I18nextProvider } from 'react-i18next'
 import { Toaster, toast } from 'sonner'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
+import { TooltipProvider } from '@/components/ui/tooltip'
 import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
 import {
@@ -50,6 +52,10 @@ import {
   useSystemConfigStore,
 } from '@/stores/system-config-store'
 
+import {
+  ApiKeyGroupEditingContext,
+  type ApiKeyGroupEditing,
+} from '../../hooks/use-api-key-group-editing'
 import { apiKeySchema, type ApiKey } from '../../types'
 import { ApiKeyQuotaCell } from '../api-key-quota-cell'
 import { useApiKeysColumns } from '../api-keys-columns'
@@ -116,6 +122,34 @@ function QuotaTable(props: { apiKey: ApiKey }) {
         ))}
       </tbody>
     </table>
+  )
+}
+
+function GroupTable(props: { now: number; editing: ApiKeyGroupEditing }) {
+  const columns = useApiKeysColumns(props.now).filter(
+    (column) => 'accessorKey' in column && column.accessorKey === 'group'
+  )
+  const table = useReactTable({
+    columns,
+    data: [key, { ...key, id: 8, name: 'staging', group: 'vip' }],
+    getCoreRowModel: getCoreRowModel(),
+  })
+  return (
+    <ApiKeyGroupEditingContext value={props.editing}>
+      <table>
+        <tbody>
+          {table.getRowModel().rows.map((row) => (
+            <tr key={row.id}>
+              {row.getVisibleCells().map((cell) => (
+                <td key={cell.id}>
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </ApiKeyGroupEditingContext>
   )
 }
 
@@ -526,4 +560,45 @@ it('keeps mobile quota readable and opens complete model and IP restrictions by 
   details = await screen.findByRole('dialog')
   expect(within(details).getByText('192.0.2.1')).toBeVisible()
   expect(within(details).getByText('2001:db8::1')).toBeVisible()
+})
+
+it("keeps another row's open group list and search when a save ends and the clock ticks", () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, enabled: false } },
+  })
+  clients.push(client)
+  const editing = {
+    ratios: { default: 1, vip: 3 },
+    options: [
+      { value: 'default', label: 'default', desc: 'User group', ratio: 1 },
+      { value: 'vip', label: 'vip', desc: 'Priority group', ratio: 3 },
+    ],
+    updateGroup: vi.fn(),
+  }
+  const renderTable = (tableNow: number, pendingIds: ReadonlySet<number>) => (
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={client}>
+        <TooltipProvider>
+          <GroupTable now={tableNow} editing={{ ...editing, pendingIds }} />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </I18nextProvider>
+  )
+  const { rerender } = render(renderTable(now, new Set([7])))
+  expect(screen.getAllByRole('combobox')[0]).toBeDisabled()
+
+  const staging = screen.getAllByRole('combobox')[1]
+  fireEvent.click(staging)
+  fireEvent.change(screen.getByPlaceholderText('Search...'), {
+    target: { value: 'pri' },
+  })
+
+  rerender(renderTable(now + 30_000, new Set()))
+
+  expect(screen.getAllByRole('combobox')[0]).toBeEnabled()
+  expect(screen.getAllByRole('combobox')[1]).toHaveAttribute(
+    'aria-expanded',
+    'true'
+  )
+  expect(screen.getByPlaceholderText('Search...')).toHaveValue('pri')
 })
