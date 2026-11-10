@@ -142,3 +142,4 @@ cd tools/legacy-migrate && go build -o legacy-migrate .
 - 22:21:42 新站接管 127.0.0.1:3000，停服约 8 分钟。
 - 事故：开放后约 4 分钟内渠道 180（codex_sub2api）请求失败 26 次，原因是上游地址 `http://sub2api:8080` 是老站 Docker 网络内的容器名；新站接入 `new-api_default` 网络后恢复，并写入 compose（external 网络）。演练时未覆盖：演练只做了冒烟请求，没逐渠道发请求。
 - 遗留：Claude 渠道（kiro 系列、claude_proxy_cpa）在老站开启的"文本工具调用转换""占位符清理"未移植，开放后观察 Claude Code 工具调用失败情况，必要时热修复移植。
+- 2026-11-10 复核套餐换算：过期（状态 2）354 个 $31,017.71、用尽（状态 4）506 个均正确排除；但有 2 个边界套餐被误算：#394（用户 2281，admin 锁定 `locked=1`、排队中，老站永远无法激活，$2000）与 #162（用户 1084，30 天月卡 2026-03-09 开通但 `expires_at` 漏写为 0，$200.76）。两人切换后未消费，已按"导入值未变"为条件改为 ¥0 / ¥5.98（共多给 ¥1,100.38），修正记录 `tools/cutover-20261109/ledger-corrections.csv`。迁移工具的有效套餐谓词未判断 `locked`，也未用 `started_at + plan_validity_days` 兜底缺失的到期时间，复用前需补上。
