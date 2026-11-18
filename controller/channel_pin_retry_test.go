@@ -30,7 +30,7 @@ func TestShouldRetryHonorsPinRetryMode(t *testing.T) {
 	openaiErr := types.NewOpenAIError(errors.New("upstream"), types.ErrorCodeBadResponseStatusCode, http.StatusInternalServerError)
 
 	c := newPinRetryContext()
-	assert.True(t, service.ShouldRetryRelayError(c, openaiErr, 1))
+	assert.True(t, service.ShouldRetryRelayError(c, openaiErr))
 
 	origin := newPinRetryContext()
 	service.GetChannelConstraints(origin).AddPin(dto.ChannelPin{
@@ -39,7 +39,7 @@ func TestShouldRetryHonorsPinRetryMode(t *testing.T) {
 		Rank:      dto.PinRankOriginTask,
 		RetryMode: dto.PinRetrySameChannel,
 	})
-	assert.True(t, service.ShouldRetryRelayError(origin, openaiErr, 1), "origin pin retries on the same channel")
+	assert.True(t, service.ShouldRetryRelayError(origin, openaiErr), "origin pin retries on the same channel")
 
 	token := newPinRetryContext()
 	service.GetChannelConstraints(token).AddPin(dto.ChannelPin{
@@ -48,14 +48,14 @@ func TestShouldRetryHonorsPinRetryMode(t *testing.T) {
 		Rank:      dto.PinRankToken,
 		RetryMode: dto.PinRetrySingleAttempt,
 	})
-	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}, service.DecideRelayRetry(token, openaiErr, 1), "token pin suppresses retry")
+	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}, service.DecideRelayRetry(token, openaiErr), "token pin suppresses retry")
 }
 
 func TestShouldRetryTaskRelayHonorsPinRetryMode(t *testing.T) {
 	taskErr := &dto.TaskError{StatusCode: http.StatusInternalServerError}
 
 	c := newPinRetryContext()
-	assert.Equal(t, "retry", decideTaskRetry(c, taskErr, 1).Action)
+	assert.Equal(t, "retry", decideTaskRetry(c, taskErr, false).Action)
 
 	origin := newPinRetryContext()
 	service.GetChannelConstraints(origin).AddPin(dto.ChannelPin{
@@ -64,7 +64,7 @@ func TestShouldRetryTaskRelayHonorsPinRetryMode(t *testing.T) {
 		Rank:      dto.PinRankOriginTask,
 		RetryMode: dto.PinRetrySameChannel,
 	})
-	assert.Equal(t, "retry", decideTaskRetry(origin, taskErr, 1).Action)
+	assert.Equal(t, "retry", decideTaskRetry(origin, taskErr, false).Action)
 
 	token := newPinRetryContext()
 	service.GetChannelConstraints(token).AddPin(dto.ChannelPin{
@@ -73,7 +73,25 @@ func TestShouldRetryTaskRelayHonorsPinRetryMode(t *testing.T) {
 		Rank:      dto.PinRankToken,
 		RetryMode: dto.PinRetrySingleAttempt,
 	})
-	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}, decideTaskRetry(token, taskErr, 1))
+	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}, decideTaskRetry(token, taskErr, false))
+}
+
+func TestDecideTaskRetryAppliesErrorRules(t *testing.T) {
+	require.NoError(t, operation_setting.ChannelErrorRulesFromString(`[
+		{"id":"immediate","name":"busy","status_codes":[429],"keywords":["busy"],"match_type":"AND","enabled":true,"priority":90,"error_type":"client","return_immediately":true},
+		{"id":"server","name":"key invalid","status_codes":[400],"keywords":["key invalid"],"match_type":"AND","enabled":true,"priority":80,"error_type":"server"}
+	]`))
+	t.Cleanup(func() {
+		require.NoError(t, operation_setting.ChannelErrorRulesFromString(operation_setting.DefaultChannelErrorRulesToString()))
+	})
+	c := newPinRetryContext()
+	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "client_rule_return_immediately", Source: "error_rule:busy"},
+		decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusTooManyRequests, Message: "upstream busy"}, false))
+	assert.Equal(t, service.PolicyDecision{Action: "retry", Reason: "server_rule_matched", Source: "error_rule:key invalid"},
+		decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusBadRequest, Message: "key invalid"}, false))
+	assert.Equal(t, "stop", decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusBadRequest, Message: "key invalid", NoRetry: true}, false).Action, "an accepted task is never resubmitted")
+	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"},
+		decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusInternalServerError}, true), "a locked channel stops after RetryTimes")
 }
 
 func TestSameChannelPinsMergeToStricterRetryMode(t *testing.T) {
@@ -96,7 +114,7 @@ func TestSameChannelPinsMergeToStricterRetryMode(t *testing.T) {
 	assert.Equal(t, 7, pin.ChannelId)
 	assert.Equal(t, dto.PinRetrySingleAttempt, pin.RetryMode)
 	assert.Empty(t, overridden)
-	assert.False(t, service.ShouldRetryRelayError(c, types.NewOpenAIError(errors.New("upstream"), types.ErrorCodeBadResponseStatusCode, http.StatusInternalServerError), 1))
+	assert.False(t, service.ShouldRetryRelayError(c, types.NewOpenAIError(errors.New("upstream"), types.ErrorCodeBadResponseStatusCode, http.StatusInternalServerError)))
 }
 
 func newPinRetryContext() *gin.Context {
@@ -167,23 +185,22 @@ func TestChannelAffinityRetryPriorities(t *testing.T) {
 				for _, tc := range []struct {
 					name, mode string
 					binding    int
-					retries    int
 					autoGroups []string
 					crossGroup bool
 					want       []int
 				}{
-					{name: "ordinary routing", mode: "off", retries: 2, want: []int{24, 27, 30}},
-					{name: "affinity miss", mode: "prefer", retries: 2, want: []int{24, 27, 30}},
-					{name: "affinity hit", mode: "prefer", binding: 27, retries: 2, want: []int{27, 24, 27}},
-					{name: "no retry budget", mode: "prefer", binding: 27, want: []int{27}},
-					{name: "one retry", mode: "prefer", binding: 27, retries: 1, want: []int{27, 24}},
-					{name: "strict session", mode: "strict", binding: 27, retries: 2, want: []int{27}},
-					{name: "auto group", mode: "prefer", binding: 27, retries: 1, autoGroups: []string{"default", "vip"}, want: []int{27, 24}},
-					{name: "cross group", mode: "prefer", binding: 27, retries: 1, autoGroups: []string{"default", "vip"}, crossGroup: true, want: []int{27, 24, 34, 37}},
-					{name: "skip empty group", mode: "prefer", binding: 27, retries: 1, autoGroups: []string{"empty", "default"}, want: []int{27, 24, 27}},
+					// RetryTimes is 0 throughout: moving to another channel is
+					// bounded by the candidates, not by the retry setting.
+					{name: "ordinary routing", mode: "off", want: []int{24, 27, 30}},
+					{name: "affinity miss", mode: "prefer", want: []int{24, 27, 30}},
+					{name: "affinity hit", mode: "prefer", binding: 27, want: []int{27, 24, 30}},
+					{name: "strict session", mode: "strict", binding: 27, want: []int{27}},
+					{name: "auto group", mode: "prefer", binding: 27, autoGroups: []string{"default", "vip"}, want: []int{27, 24, 30}},
+					{name: "cross group", mode: "prefer", binding: 27, autoGroups: []string{"default", "vip"}, crossGroup: true, want: []int{27, 24, 30, 34, 37}},
+					{name: "skip empty group", mode: "prefer", binding: 27, autoGroups: []string{"empty", "default"}, want: []int{27, 24, 30}},
 				} {
 					t.Run(fmt.Sprintf("cache=%t/%s", cached, tc.name), func(t *testing.T) {
-						common.RetryTimes = tc.retries
+						common.RetryTimes = 0
 						*affinity = operation_setting.ChannelAffinitySetting{
 							Enabled: true, DefaultTTLSeconds: 60, MaxEntries: 100,
 							Rules: []operation_setting.ChannelAffinityRule{{
@@ -213,7 +230,7 @@ func TestChannelAffinityRetryPriorities(t *testing.T) {
 						retry := &service.RetryParam{Ctx: ctx, TokenGroup: group, ModelName: modelName}
 						upstreamErr := types.NewOpenAIError(errors.New("upstream failure"), types.ErrorCodeBadResponseStatusCode, http.StatusInternalServerError)
 						var attempts []int
-						for ; retry.GetRetry() <= common.RetryTimes; retry.IncreaseRetry() {
+						for ; ; retry.IncreaseRetry() {
 							if len(attempts) > 0 {
 								var err error
 								channel, _, err = service.CacheGetRandomSatisfiedChannel(retry)
@@ -224,8 +241,8 @@ func TestChannelAffinityRetryPriorities(t *testing.T) {
 							}
 							service.AppendUsedChannel(ctx, channel.Id)
 							attempts = append(attempts, channel.Id)
-							require.LessOrEqual(t, len(attempts), len(tc.want), "retry budget must not increase")
-							if service.DecideRelayRetry(ctx, upstreamErr, common.RetryTimes-retry.GetRetry()).Action != "retry" {
+							require.LessOrEqual(t, len(attempts), len(tc.want), "each channel is tried once")
+							if service.DecideRelayRetry(ctx, upstreamErr).Action != "retry" {
 								break
 							}
 						}

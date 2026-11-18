@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -1023,6 +1025,15 @@ func TestResponsesHTTPHealthCountsFinalResult(t *testing.T) {
 			}))
 			t.Cleanup(upstream.Close)
 			require.NoError(t, model.DB.Model(&model.Channel{}).Where("name = ?", "responses-ws-upstream").Update("base_url", upstream.URL).Error)
+			// A retry moves to a channel the request has not tried, so the
+			// second attempt needs a second channel.
+			backup := &model.Channel{Name: "responses-ws-backup", Key: "upstream-backup", Status: common.ChannelStatusEnabled, Type: constant.ChannelTypeOpenAI, Group: "default", Models: "ws-billing", BaseURL: &upstream.URL, ModelMapping: fixture.channel.ModelMapping}
+			require.NoError(t, model.DB.Create(backup).Error)
+			require.NoError(t, model.DB.Create(&model.Ability{ChannelId: backup.Id, Model: "ws-billing", Group: "default", Enabled: true}).Error)
+			t.Cleanup(func() {
+				require.NoError(t, model.DB.Where("channel_id = ?", backup.Id).Delete(&model.Ability{}).Error)
+				require.NoError(t, model.DB.Delete(backup).Error)
+			})
 			request, err := http.NewRequest(http.MethodPost, fixture.gatewayURL+"/v1/responses", strings.NewReader(`{"model":"ws-billing","input":"hello"}`))
 			require.NoError(t, err)
 			request.Header.Set("Authorization", "Bearer sk-"+fixture.token.Key)
@@ -1426,5 +1437,132 @@ func TestResponsesWebSocketPreRoutingRejectionsFollowHealthClassification(t *tes
 			assert.Equal(t, int64(1), requests)
 			assert.Zero(t, successes)
 		})
+	}
+}
+
+// TestRelayRetryMovesToUntriedChannels drives real requests through the
+// distributor and the relay loop. RetryTimes is 0 throughout: a retry moves
+// to a channel the request has not tried, bounded by the candidates only.
+func TestRelayRetryMovesToUntriedChannels(t *testing.T) {
+	saturated := `{"error":{"type":"rate_limit","code":"rate_limit","message":"当前分组上游负载已饱和，请稍后再试"}}`
+	for _, tc := range []struct {
+		name string
+		// channels in priority order, highest first
+		channels  []string
+		suspended []string
+		// noKey channels have no enabled key, so their setup fails locally
+		noKey     []string
+		responses map[string]int
+		wantOrder []string
+		wantCode  int
+	}{
+		{
+			// The production incident of 2026-11-18.
+			name:      "suspended levels and a saturated channel lead to the last healthy level",
+			channels:  []string{"214", "219", "177", "213", "119", "205"},
+			suspended: []string{"214", "219", "177", "213"},
+			responses: map[string]int{"119": http.StatusTooManyRequests, "205": http.StatusOK},
+			wantOrder: []string{"119", "205"},
+			wantCode:  http.StatusOK,
+		},
+		{
+			name:      "every candidate fails and the last upstream error is returned",
+			channels:  []string{"A", "B"},
+			responses: map[string]int{"A": http.StatusBadGateway, "B": http.StatusTooManyRequests},
+			wantOrder: []string{"A", "B"},
+			wantCode:  http.StatusTooManyRequests,
+		},
+		{
+			name:      "a channel without an enabled key is passed without an upstream request",
+			channels:  []string{"A", "B", "C"},
+			noKey:     []string{"B"},
+			responses: map[string]int{"A": http.StatusTooManyRequests, "C": http.StatusOK},
+			wantOrder: []string{"A", "C"},
+			wantCode:  http.StatusOK,
+		},
+		{
+			name:      "a local failure after an upstream failure keeps the upstream error",
+			channels:  []string{"A", "B"},
+			noKey:     []string{"B"},
+			responses: map[string]int{"A": http.StatusBadGateway},
+			wantOrder: []string{"A"},
+			wantCode:  http.StatusBadGateway,
+		},
+	} {
+		for _, memoryCache := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/memory cache %v", tc.name, memoryCache), func(t *testing.T) {
+				fixture := newResponsesWSBillingTest(t, `tier("request", fixed(0.002))`, func(*websocket.Conn, *http.Request) {})
+				previousRetries, previousMemory := common.RetryTimes, common.MemoryCacheEnabled
+				common.RetryTimes = 0
+				require.NoError(t, operation_setting.ChannelErrorRulesFromString(`[{"id":"saturated","name":"saturated","keywords":["当前分组上游负载已饱和"],"match_type":"KEYWORD_ONLY","enabled":true,"priority":90,"error_type":"client"}]`))
+				t.Cleanup(func() {
+					common.RetryTimes, common.MemoryCacheEnabled = previousRetries, previousMemory
+					require.NoError(t, operation_setting.ChannelErrorRulesFromString(operation_setting.DefaultChannelErrorRulesToString()))
+					model.InitChannelCache()
+				})
+				// Only the channels of the case serve the model.
+				require.NoError(t, model.DB.Where("channel_id = ?", fixture.channel.Id).Delete(&model.Ability{}).Error)
+				require.NoError(t, model.DB.Model(fixture.channel).Update("status", common.ChannelStatusManuallyDisabled).Error)
+
+				var mu sync.Mutex
+				var order []string
+				fixture.httpUpstream = func(w http.ResponseWriter, r *http.Request) {
+					name := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer key-")
+					mu.Lock()
+					order = append(order, name)
+					mu.Unlock()
+					w.Header().Set("Content-Type", "application/json")
+					status := tc.responses[name]
+					if status == http.StatusOK {
+						_, _ = fmt.Fprint(w, `{"id":"completed","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+						return
+					}
+					w.WriteHeader(status)
+					if status == http.StatusTooManyRequests && name == "119" {
+						_, _ = fmt.Fprint(w, saturated)
+						return
+					}
+					_, _ = fmt.Fprintf(w, `{"error":{"type":"upstream","code":"upstream","message":"channel %s failed"}}`, name)
+				}
+				baseURL := *fixture.channel.BaseURL
+				modelMapping := `{"ws-billing":"gpt-4o"}`
+				for i, name := range tc.channels {
+					priority := int64(len(tc.channels) - i)
+					weight := uint(1)
+					channel := &model.Channel{Name: "retry-" + name, Key: "key-" + name, Status: common.ChannelStatusEnabled, Type: constant.ChannelTypeOpenAI, Group: "default", Models: "ws-billing", BaseURL: &baseURL, ModelMapping: &modelMapping, Priority: &priority, Weight: &weight}
+					if slices.Contains(tc.noKey, name) {
+						channel.ChannelInfo = model.ChannelInfo{IsMultiKey: true, MultiKeySize: 1, MultiKeyStatusList: map[int]int{0: common.ChannelStatusManuallyDisabled}}
+					}
+					require.NoError(t, model.DB.Create(channel).Error)
+					require.NoError(t, model.DB.Create(&model.Ability{ChannelId: channel.Id, Model: "ws-billing", Group: "default", Enabled: true, Priority: &priority, Weight: weight}).Error)
+					t.Cleanup(func() {
+						require.NoError(t, model.DB.Where("channel_id = ?", channel.Id).Delete(&model.Ability{}).Error)
+						require.NoError(t, model.DB.Delete(channel).Error)
+					})
+					if slices.Contains(tc.suspended, name) {
+						require.NoError(t, common.RDB.Set(context.Background(), fmt.Sprintf(model.ChannelHealthSuspendedKey, channel.Id), "1", time.Minute).Err())
+					}
+				}
+				common.MemoryCacheEnabled = memoryCache
+				model.InitChannelCache()
+
+				request, err := http.NewRequest(http.MethodPost, fixture.gatewayURL+"/v1/responses", strings.NewReader(`{"model":"ws-billing","input":"hello"}`))
+				require.NoError(t, err)
+				request.Header.Set("Authorization", "Bearer sk-"+fixture.token.Key)
+				request.Header.Set("Content-Type", "application/json")
+				response, err := http.DefaultClient.Do(request)
+				require.NoError(t, err)
+				body, err := io.ReadAll(response.Body)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				<-fixture.httpDone
+
+				mu.Lock()
+				defer mu.Unlock()
+				assert.Equal(t, tc.wantOrder, order, "each channel receives at most one request, in priority order")
+				assert.Equal(t, tc.wantCode, response.StatusCode, string(body))
+				assert.NotContains(t, string(body), baseURL, "earlier channels' upstream addresses stay masked")
+			})
+		}
 	}
 }

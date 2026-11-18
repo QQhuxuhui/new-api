@@ -183,23 +183,48 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
+	// An adaptor may rewrite the inbound Content-Type (a re-encoded multipart
+	// body gets a new boundary); every replay restores it with the body.
+	originalContentType := c.Request.Header.Get("Content-Type")
+	// The final error of a request whose candidates all failed is the last
+	// one an attempt returned, else the last setup failure.
+	var lastAttemptErr, lastSetupErr *types.NewAPIError
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	// Each retry moves to a channel the request has not tried, so the
+	// candidates bound the loop; RetryTimes does not.
+	for ; ; retryParam.IncreaseRetry() {
+		if retryParam.GetRetry() > 0 && c.Request.Context().Err() != nil {
+			break
+		}
 		relayInfo.StreamStatus = nil
 		relayInfo.PerformanceBusinessRejection = false
 		relayInfo.PerformanceOutputTokens = 0
 		relayInfo.RetryIndex = retryParam.GetRetry()
-		channel, channelErr := getChannel(c, relayInfo, retryParam)
+		channel, exhausted, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
 			newAPIError = channelErr
 			break
 		}
+		if exhausted {
+			service.RecordCandidatesExhausted(c)
+			switch {
+			case lastAttemptErr != nil:
+				newAPIError = lastAttemptErr
+			case lastSetupErr != nil:
+				newAPIError = lastSetupErr
+			default:
+				newAPIError = types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryNoAvailableChannel, map[string]any{"Group": relayInfo.TokenGroup, "Model": relayInfo.OriginModelName})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+			}
+			break
+		}
 		service.AppendUsedChannel(c, channel.Id)
 		if setupErr := service.TakeChannelSetupError(c); setupErr != nil {
 			newAPIError = setupErr
+			lastSetupErr = setupErr
 			relayInfo.LastError = newAPIError
-			decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+			common.RecordTriedUpstreamAddresses(c)
+			decision := service.DecideSetupFailureRetry(c)
 			service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 			if decision.Action != "retry" {
 				break
@@ -223,6 +248,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				return types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 			}
 			c.Request.Body = io.NopCloser(bodyStorage)
+			restoreContentType(c, originalContentType)
 			relayInfo.StreamStatus = nil
 			relayInfo.PerformanceBusinessRejection = false
 			relayInfo.PerformanceOutputTokens = 0
@@ -246,6 +272,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		} else {
 			newAPIError = relayWithSameChannelRetry(c, attempt)
 		}
+		common.RecordTriedUpstreamAddresses(c)
 		if bodyFailed {
 			break
 		}
@@ -258,8 +285,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		relayInfo.LastError = newAPIError
+		lastAttemptErr = newAPIError
 
-		decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		decision := service.DecideRelayRetry(c, newAPIError)
 		// Output already sent to the client cannot be replayed on another channel.
 		if decision.Action == "retry" && relayFormat != types.RelayFormatOpenAIRealtime && helper.ResponseBusinessStarted(c) {
 			decision = service.PolicyDecision{Action: "stop", Reason: "response_already_written", Source: "system"}
@@ -335,8 +363,12 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
-	// The first attempt uses the distributor's channel; after a key-limit
+// getChannel returns the channel of the next attempt. exhausted reports that
+// no untried candidate is left; an error is a selection failure that ends the
+// request. A selected channel whose setup fails is still returned, with the
+// failure stored for the caller to count as a failed attempt.
+func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (channel *model.Channel, exhausted bool, apiErr *types.NewAPIError) {
+	// The first attempt uses the distributor's channel; after a setup
 	// rejection later attempts select again even before any handler ran.
 	if info.ChannelMeta == nil && (retryParam.GetRetry() == 0 || !service.ChannelReselectRequired(c)) {
 		autoBan := c.GetBool("auto_ban")
@@ -351,30 +383,39 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}
 		service.RequestPolicy(c).BeginAttempt(channel, info.UsingGroup)
-		return channel, nil
+		return channel, false, nil
 	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 	if err != nil {
-		return nil, types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryGetChannelFailed, map[string]any{"Group": selectGroup, "Model": info.OriginModelName, "Error": err.Error()})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		return nil, false, types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryGetChannelFailed, map[string]any{"Group": selectGroup, "Model": info.OriginModelName, "Error": err.Error()})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 	if channel == nil {
-		return nil, types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryNoAvailableChannel, map[string]any{"Group": selectGroup, "Model": info.OriginModelName})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		return nil, true, nil
+	}
+	if service.TriedChannels(c)[channel.Id] {
+		// Selection excludes tried channels; reaching one means the trail is
+		// inconsistent, and retrying it could loop.
+		logger.LogError(c, common.LogText("channel #%d selected again within one request, stopping retries", channel.Id))
+		return nil, true, nil
 	}
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
 	service.RequestPolicy(c).BeginAttempt(channel, selectGroup)
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
-	if newAPIError != nil && newAPIError.GetErrorCode() == types.ErrorCodeChannelKeyConcurrencyLimit {
-		// A key at its cap is a failed attempt on this channel, not a reason
-		// to stop: the relay loop counts it and moves on.
-		service.StoreChannelSetupError(c, newAPIError)
-		return channel, nil
+	if setupErr := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName); setupErr != nil {
+		service.StoreChannelSetupError(c, setupErr)
 	}
-	if newAPIError != nil {
-		return nil, newAPIError
+	return channel, false, nil
+}
+
+// restoreContentType puts back the inbound Content-Type an earlier attempt's
+// adaptor may have rewritten, so a replayed body is read with its own header.
+func restoreContentType(c *gin.Context, contentType string) {
+	if contentType == "" {
+		c.Request.Header.Del("Content-Type")
+		return
 	}
-	return channel, nil
+	c.Request.Header.Set("Content-Type", contentType)
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) {
@@ -593,16 +634,30 @@ func executeTaskSubmissionWith(
 		Retry:       common.GetPointer(0),
 	}
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	// A native SSE submission swaps c.Request to a detached context, so the
+	// decision to start another attempt reads the context the request
+	// arrived with.
+	requestCtx := c.Request.Context()
+	originalContentType := c.Request.Header.Get("Content-Type")
+	// The final error of a request whose candidates all failed is the last
+	// one a submission returned, else the last setup failure.
+	var lastAttemptErr, lastSetupErr *taskdto.TaskError
+	// A locked channel (a remix or continuation) is retried in place up to
+	// RetryTimes; other submissions move to an untried channel per retry, so
+	// the candidates bound the loop.
+	for ; ; retryParam.IncreaseRetry() {
 		stage = "select_channel"
-		if requestErr := c.Request.Context().Err(); requestErr != nil {
+		if requestErr := requestCtx.Err(); requestErr != nil {
 			diagnostics.cancelled("before_attempt", retryParam.GetRetry()+1)
 			taskErr = service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)
 			break
 		}
 		var channel *model.Channel
 
-		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
+		lockedCh, locked := relayInfo.LockedChannel.(*model.Channel)
+		locked = locked && lockedCh != nil
+		budgetExhausted := locked && retryParam.GetRetry() >= common.RetryTimes
+		if locked {
 			channel = lockedCh
 			policy.BeginAttempt(channel, relayInfo.UsingGroup)
 			if retryParam.GetRetry() > 0 {
@@ -621,11 +676,24 @@ func executeTaskSubmissionWith(
 				}
 			}
 		} else {
+			var exhausted bool
 			var channelErr *types.NewAPIError
-			channel, channelErr = getChannel(c, relayInfo, retryParam)
+			channel, exhausted, channelErr = getChannel(c, relayInfo, retryParam)
 			if channelErr != nil {
 				logger.LogError(c, channelErr.Error())
 				taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", channelErr.StatusCode)
+				break
+			}
+			if exhausted {
+				service.RecordCandidatesExhausted(c)
+				switch {
+				case lastAttemptErr != nil:
+					taskErr = lastAttemptErr
+				case lastSetupErr != nil:
+					taskErr = lastSetupErr
+				default:
+					taskErr = service.TaskErrorWrapperLocal(errors.New(i18n.T(c, i18n.MsgRelayRetryNoAvailableChannel, map[string]any{"Group": relayInfo.TokenGroup, "Model": relayInfo.OriginModelName})), "get_channel_failed", http.StatusServiceUnavailable)
+				}
 				break
 			}
 		}
@@ -634,7 +702,12 @@ func executeTaskSubmissionWith(
 		service.AppendUsedChannel(c, channel.Id)
 		if setupErr := service.TakeChannelSetupError(c); setupErr != nil {
 			taskErr = service.TaskErrorWrapperLocal(setupErr.Err, string(setupErr.GetErrorCode()), setupErr.StatusCode)
-			decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
+			lastSetupErr = taskErr
+			common.RecordTriedUpstreamAddresses(c)
+			decision := service.DecideSetupFailureRetry(c)
+			if decision.Action == "retry" && budgetExhausted {
+				decision = service.PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}
+			}
 			service.RecordPolicyFailure(c, channel.Id, taskSubmissionAPIError(taskErr), decision)
 			if decision.Action != "retry" {
 				break
@@ -652,9 +725,11 @@ func executeTaskSubmissionWith(
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		restoreContentType(c, originalContentType)
 
 		stage = "submit"
 		result, taskErr = submit(c, relayInfo)
+		common.RecordTriedUpstreamAddresses(c)
 		if requestErr := c.Request.Context().Err(); requestErr != nil {
 			diagnostics.cancelled("after_submit", retryParam.GetRetry()+1)
 			taskErr = service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)
@@ -668,7 +743,8 @@ func executeTaskSubmissionWith(
 
 		taskAPIError := taskSubmissionAPIError(taskErr)
 		relayInfo.LastError = taskAPIError
-		decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
+		lastAttemptErr = taskErr
+		decision := decideTaskRetry(c, taskErr, budgetExhausted)
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
 		if !taskErr.LocalError {
 			service.RecordChannelHealthOutcome(c.Request.Context(), channel.Id, taskAPIError, nil)
@@ -929,9 +1005,16 @@ func taskSubmissionAPIError(taskErr *taskdto.TaskError) *types.NewAPIError {
 
 // decideTaskRetry is the single retry decision for task submissions. The
 // reason is recorded in the request policy decision events of the log details.
-func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int) service.PolicyDecision {
+// budgetExhausted is set for a locked channel that used its RetryTimes in
+// place; other submissions have no attempt budget. Error rules apply to
+// upstream failures as in DecideRelayRetry.
+func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, budgetExhausted bool) service.PolicyDecision {
 	stop := service.PolicyDecision{Action: "stop", Source: "system"}
 	retry := service.PolicyDecision{Action: "retry", Reason: "retry_status_matched", Source: "system"}
+	var rule *operation_setting.ChannelErrorRule
+	if taskErr != nil && !taskErr.LocalError {
+		rule = operation_setting.MatchChannelErrorRule(taskErr.StatusCode, taskErr.Message)
+	}
 	switch {
 	case taskErr == nil:
 		stop.Reason = "request_completed"
@@ -942,10 +1025,14 @@ func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int)
 		if source := service.RequestPolicy(c).SessionModeSource; source != "" {
 			stop.Source = source
 		}
-	case retryTimes <= 0:
+	case budgetExhausted:
 		stop.Reason, stop.Source = "attempt_budget_exhausted", "global"
 	case service.GetChannelConstraints(c).SuppressesRetry():
 		stop.Reason, stop.Source = "pinned_channel", "channel_constraint"
+	case rule != nil && rule.ErrorType == operation_setting.ChannelErrorRuleTypeClient && rule.ReturnImmediately:
+		stop.Reason, stop.Source = "client_rule_return_immediately", "error_rule:"+rule.Name
+	case rule != nil:
+		return service.PolicyDecision{Action: "retry", Reason: rule.ErrorType + "_rule_matched", Source: "error_rule:" + rule.Name}
 	case taskErr.StatusCode == http.StatusTooManyRequests, taskErr.StatusCode == 307:
 		return retry
 	case taskErr.StatusCode/100 == 5:

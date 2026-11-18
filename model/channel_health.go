@@ -97,42 +97,50 @@ func loadChannelHealthFlags(channelIDs []int) map[int]channelHealthFlags {
 	return flags
 }
 
-// selectHealthyPriorityLevel picks the candidates for one retry. levels holds
-// the channel IDs of each priority, highest first, built from every candidate
-// so suspensions never shift which level a retry index points at. Starting at
-// the retry's level it takes the first level that still has a channel that is
-// not suspended; when all of them are suspended it keeps the retry's level as
-// is, so a model never loses every channel at once. Warning channels in the
-// chosen level are then thinned to their probe share.
-func selectHealthyPriorityLevel(levels [][]int, retry int, flags map[int]channelHealthFlags) []int {
-	start := min(retry, len(levels)-1)
-	for _, level := range levels[start:] {
-		healthy := make([]int, 0, len(level))
-		for _, id := range level {
-			if !flags[id].suspended {
-				healthy = append(healthy, id)
-			}
-		}
-		if len(healthy) > 0 {
-			return thinOutWarningChannels(healthy, flags)
-		}
-	}
-	return thinOutWarningChannels(levels[start], flags)
+// ChannelPick is what a request already knows when it selects a channel:
+// the channels it has tried, the warning channels whose probe roll already
+// missed during this request, and whether this pass ignores the warning roll.
+type ChannelPick struct {
+	Tried          map[int]bool
+	WarningMissed  map[int]bool
+	IncludeWarning bool
 }
 
-// thinOutWarningChannels lets each warning candidate through with probability
-// WarningProbePercent so its recovery is still probed. When that leaves no
-// candidate it keeps them all.
-func thinOutWarningChannels(channelIDs []int, flags map[int]channelHealthFlags) []int {
-	kept := make([]int, 0, len(channelIDs))
-	for _, id := range channelIDs {
-		if flags[id].warning && rand.Intn(100) >= common.WarningProbePercent {
-			continue
+// pickPriorityLevel walks the priority levels, highest first, and returns the
+// candidates of the first level that still has an untried channel that is not
+// suspended. Each warning channel rolls against WarningProbePercent; a channel
+// whose roll misses is skipped and reported, so the request leaves it for the
+// pass that ignores the roll after every other candidate is exhausted.
+// Suspended channels are never returned: nil means nothing is left to try.
+func pickPriorityLevel(levels [][]int, pick ChannelPick, flags map[int]channelHealthFlags) (selected []int, missed []int) {
+	for _, level := range levels {
+		var kept []int
+		for _, id := range level {
+			state := flags[id]
+			if pick.Tried[id] || state.suspended {
+				continue
+			}
+			if state.warning && !pick.IncludeWarning {
+				if pick.WarningMissed[id] {
+					continue
+				}
+				if rand.Intn(100) >= common.WarningProbePercent {
+					missed = append(missed, id)
+					continue
+				}
+			}
+			kept = append(kept, id)
 		}
-		kept = append(kept, id)
+		if len(kept) > 0 {
+			return kept, missed
+		}
 	}
-	if len(kept) == 0 {
-		return channelIDs
-	}
-	return kept
+	return nil, missed
+}
+
+// IsChannelSuspended reports whether health tracking currently suspends the
+// channel. Always-healthy channels and an unavailable Redis count as not
+// suspended, the same as during selection.
+func IsChannelSuspended(channelID int) bool {
+	return loadChannelHealthFlags([]int{channelID})[channelID].suspended
 }

@@ -16,8 +16,10 @@ import (
 )
 
 // DecideRelayRetry is the single retry decision for relay attempts. The reason
-// is recorded in the request policy decision events of the log details.
-func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) PolicyDecision {
+// is recorded in the request policy decision events of the log details. It
+// sets no attempt budget: a retry moves to a channel the request has not
+// tried, so the candidates bound the attempts.
+func DecideRelayRetry(c *gin.Context, err *types.NewAPIError) PolicyDecision {
 	if err == nil {
 		return PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}
 	}
@@ -48,13 +50,7 @@ func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) Po
 		if rule.ErrorType == operation_setting.ChannelErrorRuleTypeClient && rule.ReturnImmediately {
 			return PolicyDecision{Action: "stop", Reason: "client_rule_return_immediately", Source: source}
 		}
-		if retryTimes <= 0 {
-			return PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: source}
-		}
 		return PolicyDecision{Action: "retry", Reason: rule.ErrorType + "_rule_matched", Source: source}
-	}
-	if retryTimes <= 0 {
-		return PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}
 	}
 	code := err.StatusCode
 	if code >= 200 && code < 300 {
@@ -72,8 +68,8 @@ func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) Po
 	return PolicyDecision{Action: "stop", Reason: "status_not_retryable", Source: "global"}
 }
 
-func ShouldRetryRelayError(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
-	return DecideRelayRetry(c, openaiErr, retryTimes).Action == "retry"
+func ShouldRetryRelayError(c *gin.Context, openaiErr *types.NewAPIError) bool {
+	return DecideRelayRetry(c, openaiErr).Action == "retry"
 }
 
 func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) {
@@ -112,4 +108,23 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		useTimeSeconds := int(time.Since(startTime).Seconds())
 		model.RecordErrorLog(c, userId, channelError.ChannelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(upstreamURLs...), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
+}
+
+// DecideSetupFailureRetry decides whether the request moves past a selected
+// channel whose setup failed before any request reached it, such as a key at
+// its concurrency cap or a channel without an enabled key. Error rules and
+// the status policy describe upstream responses, so they do not apply here:
+// only a pinned channel or a strict session keeps the request where it is.
+func DecideSetupFailureRetry(c *gin.Context) PolicyDecision {
+	if ShouldSkipRetryAfterChannelAffinityFailure(c) {
+		source := RequestPolicy(c).SessionModeSource
+		if source == "" {
+			source = "session_rule"
+		}
+		return PolicyDecision{Action: "stop", Reason: "strict_session", Source: source}
+	}
+	if GetChannelConstraints(c).SuppressesRetry() {
+		return PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}
+	}
+	return PolicyDecision{Action: "retry", Reason: "setup_failed", Source: "system"}
 }

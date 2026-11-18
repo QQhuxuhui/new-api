@@ -297,14 +297,36 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		}
 	} else {
 		retry := &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup), ModelName: modelName, RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0)}
-		for ; retry.GetRetry() <= common.RetryTimes; retry.IncreaseRetry() {
+		// Each retry moves to a channel this call has not tried, so the
+		// candidates bound the loop. When they run out the call answers with
+		// the last dial error, else the last setup failure.
+		var lastDialErr, lastSetupErr *types.NewAPIError
+		for ; ; retry.IncreaseRetry() {
+			if err := c.Request.Context().Err(); err != nil && retry.GetRetry() > 0 {
+				return types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry())
+			}
 			var channel *appmodel.Channel
-			channel, apiErr = selectResponsesWSChannel(c, modelName, retry)
-			// A key at its cap fails over unless the request is pinned to a
-			// channel or bound by a strict session.
-			if apiErr != nil && apiErr.GetErrorCode() == types.ErrorCodeChannelKeyConcurrencyLimit && retry.GetRetry() < common.RetryTimes &&
-				!service.GetChannelConstraints(c).SuppressesRetry() && !service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
-				continue
+			var exhausted bool
+			channel, exhausted, apiErr = selectResponsesWSChannel(c, modelName, retry)
+			if exhausted {
+				if lastDialErr != nil {
+					return lastDialErr
+				}
+				if lastSetupErr != nil {
+					return lastSetupErr
+				}
+				return apiErr
+			}
+			if apiErr != nil && channel != nil {
+				// A selected channel that failed setup is a failed attempt; the
+				// call moves on unless it is pinned or bound by a strict session.
+				service.AppendUsedChannel(c, channel.Id)
+				lastSetupErr = apiErr
+				common.RecordTriedUpstreamAddresses(c)
+				if service.DecideSetupFailureRetry(c).Action == "retry" {
+					continue
+				}
+				return apiErr
 			}
 			if apiErr != nil {
 				return apiErr
@@ -338,7 +360,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				apiErr = service.NormalizeViolationFeeError(types.NewError(dialErr, types.ErrorCodeDoRequestFailed))
 				service.ResetStatusCode(apiErr, c.GetString("status_code_mapping"))
 				info.LastError = apiErr
-				decision := service.DecideRelayRetry(c, apiErr, common.RetryTimes-retry.GetRetry())
+				lastDialErr = apiErr
+				common.RecordTriedUpstreamAddresses(c)
+				decision := service.DecideRelayRetry(c, apiErr)
 				service.RecordPolicyFailure(c, channel.Id, apiErr, decision)
 				service.ProcessChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, info.ApiKey, channel.GetAutoBan()), apiErr, info)
 				if decision.Action == "retry" {
@@ -947,8 +971,9 @@ func checkResponsesWSModelAccess(c *gin.Context, modelName string) *types.NewAPI
 
 // selectResponsesWSChannel narrows the shared HTTP selection to channels that
 // speak the Responses WebSocket protocol and renders its outcome as a
-// non-retryable NewAPIError.
-func selectResponsesWSChannel(c *gin.Context, modelName string, retryParam *service.RetryParam) (*appmodel.Channel, *types.NewAPIError) {
+// non-retryable NewAPIError. exhausted reports that no untried candidate is
+// left. A selected channel whose setup fails is returned with that error.
+func selectResponsesWSChannel(c *gin.Context, modelName string, retryParam *service.RetryParam) (channel *appmodel.Channel, exhausted bool, apiErr *types.NewAPIError) {
 	constraints := service.GetChannelConstraints(c)
 	if !slices.ContainsFunc(constraints.Filters, func(filter appdto.ChannelFilter) bool {
 		return filter.Kind == appdto.FilterResponsesWebSocket
@@ -965,10 +990,10 @@ func selectResponsesWSChannel(c *gin.Context, modelName string, retryParam *serv
 		if code == "" {
 			code = types.ErrorCodeGetChannelFailed
 		}
-		return nil, types.NewErrorWithStatusCode(errors.New(message), code, selectErr.StatusCode, types.ErrOptionWithSkipRetry())
+		return nil, selectErr.NoAvailableChannel, types.NewErrorWithStatusCode(errors.New(message), code, selectErr.StatusCode, types.ErrOptionWithSkipRetry())
 	}
 	if err := middleware.SetupContextForSelectedChannel(c, channel, modelName); err != nil {
-		return nil, err
+		return channel, false, err
 	}
-	return channel, nil
+	return channel, false, nil
 }

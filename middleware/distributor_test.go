@@ -400,3 +400,13 @@ func TestSharedEndpointRebindsToBoundNewAPIExtension(t *testing.T) {
 	assert.Equal(t, "alpha", c.GetString("task_plugin_key"), "the first bound candidate executes regardless of the earlier pin")
 	assert.Equal(t, "alpha", c.MustGet(jsplugin.ContextKeyPinnedEndpoint).(jsplugin.PinnedEndpoint).Plugin.Meta.Key)
 }
+
+func TestSetupContextOverwritesPreviousOrganization(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	organization := "org-first"
+	require.Nil(t, SetupContextForSelectedChannel(c, &model.Channel{Id: 1, Type: constant.ChannelTypeOpenAI, Key: "first", OpenAIOrganization: &organization}, "gpt-4o"))
+	assert.Equal(t, "org-first", common.GetContextKeyString(c, constant.ContextKeyChannelOrganization))
+	require.Nil(t, SetupContextForSelectedChannel(c, &model.Channel{Id: 2, Type: constant.ChannelTypeOpenAI, Key: "second"}, "gpt-4o"))
+	assert.Empty(t, common.GetContextKeyString(c, constant.ContextKeyChannelOrganization), "a retry must not send the previous channel's organization")
+}

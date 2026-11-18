@@ -105,16 +105,18 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 	return channelQuery, nil
 }
 
+// GetChannel is the database counterpart of GetRandomSatisfiedChannel with
+// the same selection rules.
 func GetChannel(
 	group string,
 	model string,
-	retry int,
+	pick ChannelPick,
 	filters []dto.ChannelFilter,
-) (*Channel, error) {
+) (*Channel, []int, error) {
 	var abilities []Ability
 	err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Order("priority DESC, weight DESC").Find(&abilities).Error
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	abilities = filterAbilitiesByConstraints(abilities, model, filters)
 	// Like the memory cache, retry with the routing name (for example without
@@ -122,10 +124,11 @@ func GetChannel(
 	if normalized := ratio_setting.RoutingMatchModelName(model); len(abilities) == 0 && normalized != "" && normalized != model {
 		err = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, normalized, true).Order("priority DESC, weight DESC").Find(&abilities).Error
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		abilities = filterAbilitiesByConstraints(abilities, model, filters)
 	}
+	var missed []int
 	if len(abilities) > 0 {
 		priorities := make([]int64, 0)
 		seen := make(map[int64]bool)
@@ -155,7 +158,9 @@ func GetChannel(
 			ids = append(ids, ability.ChannelId)
 		}
 		keep := make(map[int]bool)
-		for _, id := range selectHealthyPriorityLevel(levels, retry, loadChannelHealthFlags(ids)) {
+		var selected []int
+		selected, missed = pickPriorityLevel(levels, pick, loadChannelHealthFlags(ids))
+		for _, id := range selected {
 			keep[id] = true
 		}
 		abilities = lo.Filter(abilities, func(ability Ability, _ int) bool { return keep[ability.ChannelId] })
@@ -178,10 +183,10 @@ func GetChannel(
 			}
 		}
 	} else {
-		return nil, nil
+		return nil, missed, nil
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
-	return &channel, err
+	return &channel, missed, err
 }
 
 // filterAbilitiesByConstraints applies the same ChannelSatisfiesFilters

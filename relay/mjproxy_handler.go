@@ -20,7 +20,6 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
-	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -745,9 +744,9 @@ func getMjRequestPath(path string) string {
 }
 
 // ReselectMidjourneyChannelAfterKeyLimit handles a distributor channel whose
-// key had no free slot: it selects other channels, up to RetryTimes, until one
-// is set up with a free key. It reports false when none could be, and the
-// request then answers with a full queue.
+// setup failed (a key with no free slot, a channel without an enabled key): it
+// selects the untried channels, one per try, until one is set up. It reports
+// false when none could be, and the request then answers with a full queue.
 func ReselectMidjourneyChannelAfterKeyLimit(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
 	if service.TakeChannelSetupError(c) == nil {
 		return true
@@ -757,8 +756,11 @@ func ReselectMidjourneyChannelAfterKeyLimit(c *gin.Context, relayInfo *relaycomm
 		return false
 	}
 	modelName := c.GetString("original_model")
-	for retry := 1; retry <= common.RetryTimes; retry++ {
-		attempt := retry
+	service.AppendUsedChannel(c, c.GetInt("channel_id"))
+	for attempt := 1; ; attempt++ {
+		if c.Request.Context().Err() != nil {
+			return false
+		}
 		channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
 			Ctx:         c,
 			TokenGroup:  relayInfo.TokenGroup,
@@ -769,15 +771,11 @@ func ReselectMidjourneyChannelAfterKeyLimit(c *gin.Context, relayInfo *relaycomm
 		if err != nil || channel == nil {
 			return false
 		}
-		setupErr := middleware.SetupContextForSelectedChannel(c, channel, modelName)
-		if setupErr == nil {
+		service.AppendUsedChannel(c, channel.Id)
+		if setupErr := middleware.SetupContextForSelectedChannel(c, channel, modelName); setupErr == nil {
 			// Billing and the task record read the channel from relayInfo.
 			relayInfo.InitChannelMeta(c)
 			return true
 		}
-		if setupErr.GetErrorCode() != types.ErrorCodeChannelKeyConcurrencyLimit {
-			return false
-		}
 	}
-	return false
 }

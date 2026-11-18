@@ -180,3 +180,12 @@ func RecordRequestPolicyTermination(c *gin.Context, apiErr *types.NewAPIError) {
 		state.AddEvent(PolicyEvent{ChannelID: c.GetInt("channel_id"), Status: apiErr.StatusCode, ErrorCode: string(apiErr.GetErrorCode()), Decision: PolicyDecision{Action: "stop", Reason: "request_failed", Source: "system"}, Health: "unchanged"})
 	}
 }
+
+// RecordCandidatesExhausted records that routing stopped because every
+// candidate channel of the request was attempted.
+func RecordCandidatesExhausted(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	RequestPolicy(c).AddEvent(PolicyEvent{ChannelID: c.GetInt("channel_id"), Decision: PolicyDecision{Action: "stop", Reason: "candidates_exhausted", Source: "system"}, Health: "unchanged"})
+}

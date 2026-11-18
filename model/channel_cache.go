@@ -115,15 +115,20 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
+// GetRandomSatisfiedChannel picks a channel of the group that serves the
+// model, skipping the channels the request already tried and the suspended
+// ones (see pickPriorityLevel). It also returns the warning channels whose
+// probe roll missed in this call. A nil channel with a nil error means no
+// candidate is left.
 func GetRandomSatisfiedChannel(
 	group string,
 	model string,
-	retry int,
+	pick ChannelPick,
 	filters []dto.ChannelFilter,
-) (*Channel, error) {
+) (*Channel, []int, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry, filters)
+		return GetChannel(group, model, pick, filters)
 	}
 
 	channelSyncLock.RLock()
@@ -139,13 +144,7 @@ func GetRandomSatisfiedChannel(
 	}
 
 	if len(channels) == 0 {
-		return nil, nil
-	}
-	if len(channels) == 1 {
-		if channel, ok := channelsIDM[channels[0]]; ok {
-			return channel, nil
-		}
-		return nil, fmt.Errorf("database consistency error: channel #%d does not exist, please contact the administrator", channels[0])
+		return nil, nil, nil
 	}
 
 	uniquePriorities := make(map[int]bool)
@@ -153,7 +152,7 @@ func GetRandomSatisfiedChannel(
 		if channel, ok := channelsIDM[channelId]; ok {
 			uniquePriorities[int(channel.GetPriority())] = true
 		} else {
-			return nil, fmt.Errorf("database consistency error: channel #%d does not exist, please contact the administrator", channelId)
+			return nil, nil, fmt.Errorf("database consistency error: channel #%d does not exist, please contact the administrator", channelId)
 		}
 	}
 	var sortedUniquePriorities []int
@@ -171,8 +170,10 @@ func GetRandomSatisfiedChannel(
 		i := levelIndex[channelsIDM[channelId].GetPriority()]
 		levels[i] = append(levels[i], channelId)
 	}
-	selected := selectHealthyPriorityLevel(levels, retry, loadChannelHealthFlags(channels))
-	targetPriority := channelsIDM[selected[0]].GetPriority()
+	selected, missed := pickPriorityLevel(levels, pick, loadChannelHealthFlags(channels))
+	if len(selected) == 0 {
+		return nil, missed, nil
+	}
 
 	var sumWeight = 0
 	var targetChannels []*Channel
@@ -180,10 +181,6 @@ func GetRandomSatisfiedChannel(
 		channel := channelsIDM[channelId]
 		sumWeight += channel.GetWeight()
 		targetChannels = append(targetChannels, channel)
-	}
-
-	if len(targetChannels) == 0 {
-		return nil, errors.New(fmt.Sprintf("no channel found, group: %s, model: %s, priority: %d", group, model, targetPriority))
 	}
 
 	// smoothing factor and adjustment
@@ -210,11 +207,11 @@ func GetRandomSatisfiedChannel(
 	for _, channel := range targetChannels {
 		randomWeight -= channel.GetWeight()*smoothingFactor + smoothingAdjustment
 		if randomWeight < 0 {
-			return channel, nil
+			return channel, missed, nil
 		}
 	}
 	// return null if no channel is not found
-	return nil, errors.New("channel not found")
+	return nil, missed, errors.New("channel not found")
 }
 
 func CacheGetChannel(id int) (*Channel, error) {

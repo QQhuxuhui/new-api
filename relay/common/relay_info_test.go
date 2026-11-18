@@ -230,6 +230,20 @@ func TestInitChannelMetaRestoresRequestReasoningEffortForRetry(t *testing.T) {
 	assert.Equal(t, "max", info.ReasoningEffort)
 }
 
+func TestInitChannelMetaDropsPreviousChannelRuntimeHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	info, err := GenRelayInfo(ctx, types.RelayFormatOpenAI, &dto.GeneralOpenAIRequest{Model: "gpt-4o"}, nil)
+	require.NoError(t, err)
+	// The previous channel's parameter override set a runtime header.
+	info.RuntimeHeadersOverride = map[string]any{"X-First-Channel": "secret"}
+	info.UseRuntimeHeadersOverride = true
+	info.InitChannelMeta(ctx)
+	assert.False(t, info.UseRuntimeHeadersOverride)
+	assert.Nil(t, info.RuntimeHeadersOverride)
+}
+
 func TestInitChannelMetaAppliesAdvancedCustomRoutePassThrough(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	advancedCustom := &dto.AdvancedCustomConfig{

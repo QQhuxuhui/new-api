@@ -45,9 +45,7 @@ const (
 	// and for adaptors that build official endpoints themselves.
 	ContextKeyUpstreamRequestOrigin ContextKey = "upstream_request_origin"
 
-	ContextKeyAutoGroup           ContextKey = "auto_group"
-	ContextKeyAutoGroupIndex      ContextKey = "auto_group_index"
-	ContextKeyAutoGroupRetryIndex ContextKey = "auto_group_retry_index"
+	ContextKeyAutoGroup ContextKey = "auto_group"
 
 	/* user related keys */
 	ContextKeyUserId      ContextKey = "id"

@@ -273,6 +273,10 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	// Per-attempt only. Do not clear StreamStatus, conversion diagnostics,
 	// LastError, or billing accumulators — those are request-scoped.
 	info.SendResponseCount = 0
+	// A previous channel's parameter override may have set runtime headers;
+	// this channel's override sets its own again.
+	info.RuntimeHeadersOverride = nil
+	info.UseRuntimeHeadersOverride = false
 	info.ClaudeToChatStreamState = nil
 	info.ChatToGeminiStreamState = nil
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)

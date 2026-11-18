@@ -53,7 +53,7 @@ func TestShouldRetryRelayErrorHonorsChannelPinOnChannelError(t *testing.T) {
 			if test.pin != nil {
 				GetChannelConstraints(c).AddPin(*test.pin)
 			}
-			assert.Equal(t, test.wantRetry, ShouldRetryRelayError(c, err, 1))
+			assert.Equal(t, test.wantRetry, ShouldRetryRelayError(c, err))
 		})
 	}
 }
@@ -198,36 +198,58 @@ func TestDecideRelayRetryReasons(t *testing.T) {
 		return types.NewOpenAIError(errors.New("upstream"), types.ErrorCodeBadResponseStatusCode, status)
 	}
 	for _, tc := range []struct {
-		name    string
-		err     *types.NewAPIError
-		retries int
-		setup   func(*gin.Context)
-		want    PolicyDecision
+		name  string
+		err   *types.NewAPIError
+		setup func(*gin.Context)
+		want  PolicyDecision
 	}{
-		{name: "retry status matched", err: upstream(http.StatusTooManyRequests), retries: 1, want: PolicyDecision{Action: "retry", Reason: "retry_status_matched", Source: "global"}},
-		{name: "status outside retry rules", err: upstream(http.StatusBadRequest), retries: 1, want: PolicyDecision{Action: "stop", Reason: "status_not_retryable", Source: "global"}},
-		{name: "attempt budget exhausted", err: upstream(http.StatusTooManyRequests), retries: 0, want: PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}},
-		{name: "always skipped status", err: upstream(http.StatusGatewayTimeout), retries: 1, want: PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}},
-		{name: "success status never retries", err: upstream(http.StatusOK), retries: 1, want: PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}},
-		{name: "skip retry error", err: types.NewErrorWithStatusCode(errors.New("local"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry()), retries: 1, want: PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}},
-		{name: "channel error retries without budget", err: types.NewError(errors.New("no key"), types.ErrorCodeChannelNoAvailableKey), retries: 0, want: PolicyDecision{Action: "retry", Reason: "channel_error", Source: "system"}},
-		{name: "single attempt pin", err: upstream(http.StatusTooManyRequests), retries: 1, setup: func(c *gin.Context) {
+		{name: "retry status matched", err: upstream(http.StatusTooManyRequests), want: PolicyDecision{Action: "retry", Reason: "retry_status_matched", Source: "global"}},
+		{name: "status outside retry rules", err: upstream(http.StatusBadRequest), want: PolicyDecision{Action: "stop", Reason: "status_not_retryable", Source: "global"}},
+		{name: "always skipped status", err: upstream(http.StatusGatewayTimeout), want: PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}},
+		{name: "success status never retries", err: upstream(http.StatusOK), want: PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}},
+		{name: "skip retry error", err: types.NewErrorWithStatusCode(errors.New("local"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry()), want: PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}},
+		{name: "channel error retries", err: types.NewError(errors.New("no key"), types.ErrorCodeChannelNoAvailableKey), want: PolicyDecision{Action: "retry", Reason: "channel_error", Source: "system"}},
+		{name: "single attempt pin", err: upstream(http.StatusTooManyRequests), setup: func(c *gin.Context) {
 			GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 1, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
 		}, want: PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}},
-		{name: "strict session", err: upstream(http.StatusTooManyRequests), retries: 1, setup: func(c *gin.Context) {
+		{name: "strict session", err: upstream(http.StatusTooManyRequests), setup: func(c *gin.Context) {
 			c.Set(ginKeyChannelAffinitySkipRetry, true)
 			RequestPolicy(c).SessionModeSource = "global"
 		}, want: PolicyDecision{Action: "stop", Reason: "strict_session", Source: "global"}},
-		{name: "nil error", retries: 1, want: PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}},
+		{name: "nil error", want: PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			if tc.setup != nil {
 				tc.setup(c)
 			}
-			decision := DecideRelayRetry(c, tc.err, tc.retries)
+			decision := DecideRelayRetry(c, tc.err)
 			assert.Equal(t, tc.want, decision)
-			assert.Equal(t, tc.want.Action == "retry", ShouldRetryRelayError(c, tc.err, tc.retries))
+			assert.Equal(t, tc.want.Action == "retry", ShouldRetryRelayError(c, tc.err))
+		})
+	}
+}
+
+func TestDecideSetupFailureRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*gin.Context)
+		want  PolicyDecision
+	}{
+		{name: "moves past the channel", want: PolicyDecision{Action: "retry", Reason: "setup_failed", Source: "system"}},
+		{name: "single attempt pin", setup: func(c *gin.Context) {
+			GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 1, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
+		}, want: PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}},
+		{name: "strict session", setup: func(c *gin.Context) {
+			c.Set(ginKeyChannelAffinitySkipRetry, true)
+		}, want: PolicyDecision{Action: "stop", Reason: "strict_session", Source: "session_rule"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			if tc.setup != nil {
+				tc.setup(c)
+			}
+			assert.Equal(t, tc.want, DecideSetupFailureRetry(c))
 		})
 	}
 }
@@ -243,7 +265,8 @@ func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {
 	state := RequestPolicy(c)
 	state.BeginAttempt(&model.Channel{Id: 7}, "default")
 	apiErr := types.NewOpenAIError(errors.New("invalid credential"), types.ErrorCodeBadResponseStatusCode, http.StatusUnauthorized)
-	RecordPolicyFailure(c, 7, apiErr, DecideRelayRetry(c, apiErr, 0))
+	decision := DecideRelayRetry(c, apiErr)
+	RecordPolicyFailure(c, 7, apiErr, decision)
 
 	failed := model.NewLogOther()
 	AppendRelayLogAdminInfo(c, nil, failed)
@@ -254,10 +277,10 @@ func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {
 	assert.Equal(t, "default", events[0].Group)
 	assert.Equal(t, PolicyDecision{Action: "failure", Reason: "upstream_failure", Source: "upstream"}, events[1].Decision)
 	assert.Equal(t, http.StatusUnauthorized, events[1].Status)
-	assert.Equal(t, PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}, events[2].Decision)
+	assert.Equal(t, decision, events[2].Decision)
 	assert.Equal(t, "channel_disable_requested", events[2].Health, "the health entry follows the automatic disable rules")
 	common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
-	RecordPolicyFailure(c, 7, apiErr, DecideRelayRetry(c, apiErr, 0))
+	RecordPolicyFailure(c, 7, apiErr, DecideRelayRetry(c, apiErr))
 	assert.Equal(t, "key_disable_requested", state.Events()[4].Health)
 
 	state.BeginAttempt(&model.Channel{Id: 8}, "default")
@@ -298,63 +321,49 @@ func TestDecideRelayRetryAppliesChannelErrorRules(t *testing.T) {
 	bodyOnly := types.NewOpenAIError(errors.New("bad response status code 400"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest)
 	bodyOnly.SetRuleMatchInput("bad response status code 400\n{\"error\":\"API key not valid. Please pass a valid API key.\"}")
 	for _, test := range []struct {
-		name       string
-		err        *types.NewAPIError
-		retryTimes int
-		want       PolicyDecision
+		name string
+		err  *types.NewAPIError
+		want PolicyDecision
 	}{
 		{
-			name:       "server rule retries a 400 the status policy skips",
-			err:        types.NewOpenAIError(errors.New("API key not valid"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest),
-			retryTimes: 1,
-			want:       PolicyDecision{Action: "retry", Reason: "server_rule_matched", Source: "error_rule:key not valid"},
+			name: "server rule retries a 400 the status policy skips",
+			err:  types.NewOpenAIError(errors.New("API key not valid"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest),
+			want: PolicyDecision{Action: "retry", Reason: "server_rule_matched", Source: "error_rule:key not valid"},
 		},
 		{
-			name:       "server rule matches the raw upstream body",
-			err:        bodyOnly,
-			retryTimes: 1,
-			want:       PolicyDecision{Action: "retry", Reason: "server_rule_matched", Source: "error_rule:key not valid"},
+			name: "server rule matches the raw upstream body",
+			err:  bodyOnly,
+			want: PolicyDecision{Action: "retry", Reason: "server_rule_matched", Source: "error_rule:key not valid"},
 		},
 		{
-			name:       "unmatched 400 falls back to the status policy",
-			err:        types.NewOpenAIError(errors.New("bad request"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest),
-			retryTimes: 1,
-			want:       PolicyDecision{Action: "stop", Reason: "status_not_retryable", Source: "global"},
+			name: "unmatched 400 falls back to the status policy",
+			err:  types.NewOpenAIError(errors.New("bad request"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest),
+			want: PolicyDecision{Action: "stop", Reason: "status_not_retryable", Source: "global"},
 		},
 		{
-			name:       "client rule with return immediately stops",
-			err:        types.NewOpenAIError(errors.New("Prompt is too long"), types.ErrorCodeBadResponseStatusCode, http.StatusInternalServerError),
-			retryTimes: 3,
-			want:       PolicyDecision{Action: "stop", Reason: "client_rule_return_immediately", Source: "error_rule:prompt too long"},
+			name: "client rule with return immediately stops",
+			err:  types.NewOpenAIError(errors.New("Prompt is too long"), types.ErrorCodeBadResponseStatusCode, http.StatusInternalServerError),
+			want: PolicyDecision{Action: "stop", Reason: "client_rule_return_immediately", Source: "error_rule:prompt too long"},
 		},
 		{
-			name:       "client rule retries while attempts remain",
-			err:        types.NewOpenAIError(errors.New("Invalid argument"), types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests),
-			retryTimes: 1,
-			want:       PolicyDecision{Action: "retry", Reason: "client_rule_matched", Source: "error_rule:invalid argument"},
+			name: "client rule without return immediately moves on",
+			err:  types.NewOpenAIError(errors.New("Invalid argument"), types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests),
+			want: PolicyDecision{Action: "retry", Reason: "client_rule_matched", Source: "error_rule:invalid argument"},
 		},
 		{
-			name:       "matched rule stops when attempts are exhausted",
-			err:        types.NewOpenAIError(errors.New("Invalid argument"), types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests),
-			retryTimes: 0,
-			want:       PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "error_rule:invalid argument"},
+			name: "broken response body is never retried even when a rule matches",
+			err:  types.NewOpenAIError(errors.New("API key not valid"), types.ErrorCodeBadResponseBody, http.StatusBadRequest),
+			want: PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"},
 		},
 		{
-			name:       "broken response body is never retried even when a rule matches",
-			err:        types.NewOpenAIError(errors.New("API key not valid"), types.ErrorCodeBadResponseBody, http.StatusBadRequest),
-			retryTimes: 1,
-			want:       PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"},
-		},
-		{
-			name:       "skip-retry error ignores matching rules",
-			err:        types.NewOpenAIError(errors.New("API key not valid"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest, types.ErrOptionWithSkipRetry()),
-			retryTimes: 1,
-			want:       PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"},
+			name: "skip-retry error ignores matching rules",
+			err:  types.NewOpenAIError(errors.New("API key not valid"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest, types.ErrOptionWithSkipRetry()),
+			want: PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			assert.Equal(t, test.want, DecideRelayRetry(c, test.err, test.retryTimes))
+			assert.Equal(t, test.want, DecideRelayRetry(c, test.err))
 		})
 	}
 }
@@ -370,4 +379,18 @@ func TestShouldDisableChannelSkipsClientRuleMatches(t *testing.T) {
 
 	channelErr := types.NewOpenAIError(errors.New("invalid api key"), types.ErrorCodeBadResponseStatusCode, http.StatusUnauthorized)
 	assert.True(t, ShouldDisableChannel(channelErr))
+}
+
+func TestUpstreamAddressesKeepTriedChannels(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("HTTP_PROXY", "")
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://first.private.example")
+	common.RecordTriedUpstreamAddresses(c)
+	// A retry switched the channel context before the first channel's error
+	// was returned.
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://second.private.example")
+	apiErr := types.NewErrorWithStatusCode(errors.New("request to https://first.private.example/v1 failed"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway)
+	assert.Equal(t, "request to https://***.example/*** failed", apiErr.ToOpenAIError(common.UpstreamAddresses(c)...).Message)
 }

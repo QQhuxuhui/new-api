@@ -132,7 +132,10 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil && setupErr.GetErrorCode() == types.ErrorCodeChannelKeyConcurrencyLimit {
+		// A selected channel that fails setup counts as a failed attempt the
+		// relay loop moves past. Entries that select no channel (a remix
+		// that reuses its origin task's channel) keep their own setup.
+		if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil && channel != nil {
 			service.StoreChannelSetupError(c, setupErr)
 		}
 		c.Next()
@@ -664,9 +667,12 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelParamOverride, paramOverride)
 	common.SetContextKey(c, constant.ContextKeyChannelHeaderOverride, headerOverride)
-	if nil != channel.OpenAIOrganization && *channel.OpenAIOrganization != "" {
-		common.SetContextKey(c, constant.ContextKeyChannelOrganization, *channel.OpenAIOrganization)
+	// Always overwrite: a retry must not send the previous channel's organization.
+	organization := ""
+	if channel.OpenAIOrganization != nil {
+		organization = *channel.OpenAIOrganization
 	}
+	common.SetContextKey(c, constant.ContextKeyChannelOrganization, organization)
 	common.SetContextKey(c, constant.ContextKeyChannelAutoBan, channel.GetAutoBan())
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())

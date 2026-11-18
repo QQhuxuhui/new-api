@@ -366,12 +366,17 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 10. Parse only. The controller presents the response after the durable
 	// task barrier and billing settlement.
+	// The upstream accepted the submission, so it may already run a billed
+	// task: a failure to read the acceptance must not resubmit elsewhere.
 	parsed, taskErr := adaptor.ParseResponse(c, resp, info)
 	if taskErr != nil {
+		taskErr.NoRetry = true
 		return nil, taskErr
 	}
 	if parsed == nil {
-		return nil, service.TaskErrorWrapperLocal(errors.New("task adaptor returned an empty response"), "plugin_submit_response_invalid", http.StatusBadGateway)
+		taskErr = service.TaskErrorWrapperLocal(errors.New("task adaptor returned an empty response"), "plugin_submit_response_invalid", http.StatusBadGateway)
+		taskErr.NoRetry = true
+		return nil, taskErr
 	}
 
 	// 11. 提交后计费调整：让适配器根据上游实际返回调整 OtherRatios

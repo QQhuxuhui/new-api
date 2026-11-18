@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -207,13 +208,48 @@ func isPresetUpstreamHost(address string) bool {
 	return preset
 }
 
+// ginKeyTriedUpstreamAddresses holds the upstream addresses of the channels a
+// request already attempted, so an error of an earlier channel stays masked
+// after a retry switched the channel context.
+const ginKeyTriedUpstreamAddresses = "tried_upstream_addresses"
+
+// RecordTriedUpstreamAddresses adds the current channel's addresses to the
+// request's tried set. Call it when an attempt ends, after the actual request
+// origin is known.
+func RecordTriedUpstreamAddresses(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	tried := c.GetStringSlice(ginKeyTriedUpstreamAddresses)
+	for _, address := range currentUpstreamAddresses(c) {
+		if !slices.Contains(tried, address) {
+			tried = append(tried, address)
+		}
+	}
+	c.Set(ginKeyTriedUpstreamAddresses, tried)
+}
+
 // UpstreamAddresses returns the addresses masked in errors shown to users: the
 // upstream the admin configured for the selected channel and the proxies its
-// requests may go through. Preset default base URLs are public and stay
+// requests may go through, plus those of every channel the request already
+// attempted. Preset default base URLs are public and stay
 // readable. The origin actually requested only counts for a configured base
 // URL or an Advanced Custom channel, whose routes may target absolute URLs;
 // other adaptors build official endpoints themselves.
 func UpstreamAddresses(c *gin.Context) []string {
+	addresses := currentUpstreamAddresses(c)
+	if c == nil {
+		return addresses
+	}
+	for _, address := range c.GetStringSlice(ginKeyTriedUpstreamAddresses) {
+		if !slices.Contains(addresses, address) {
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses
+}
+
+func currentUpstreamAddresses(c *gin.Context) []string {
 	// A channel without its own proxy dials through the environment proxy.
 	environmentProxy := httpproxy.FromEnvironment()
 	candidates := []string{environmentProxy.HTTPProxy, environmentProxy.HTTPSProxy}
