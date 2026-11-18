@@ -369,14 +369,22 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		return nil, service.TaskErrorWrapperLocal(errors.New("upstream returned an empty response"), "fail_to_fetch_task", http.StatusBadGateway)
 	}
 	defer resp.Body.Close()
+	// An upstream New API gateway that may have created the task (its own
+	// upstream received the request or accepted it without a readable
+	// receipt) says so in a header, whatever status its error renderer chose.
+	outcomeUnknown := resp.Header.Get(service.TaskOutcomeHeader) == "unknown"
 	// Any 2xx is a successful submission: task APIs commonly answer 201 Created
 	// or 202 Accepted, and parseSubmitResponse receives the exact status code.
-	if resp.StatusCode/100 != 2 {
+	// A gateway error renderer may answer a failure with 200, so the header
+	// marks the reply a failure whatever its status.
+	if resp.StatusCode/100 != 2 || outcomeUnknown {
 		responseBody, _ := io.ReadAll(resp.Body)
-		taskErr := service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode, common.UpstreamAddresses(c)...)
-		// An upstream New API gateway that lost its own upstream's reply may
-		// have created the task: the same holds here.
-		if resp.Header.Get(service.TaskOutcomeHeader) == "unknown" {
+		status := resp.StatusCode
+		if status/100 == 2 {
+			status = http.StatusBadGateway
+		}
+		taskErr := service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", status, common.UpstreamAddresses(c)...)
+		if outcomeUnknown {
 			service.MarkTaskOutcomeUnknown(taskErr)
 		}
 		return nil, taskErr

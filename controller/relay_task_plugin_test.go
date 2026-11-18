@@ -483,6 +483,9 @@ func taskSubmissionTestContext() *gin.Context {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/plugin/submit", strings.NewReader(`{}`))
+	// The distributor set up channel 1, the channel taskSubmissionRelayInfo
+	// locks, as for a pinned continuation.
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
 	return c
 }
 
@@ -778,6 +781,41 @@ func TestLockedTaskRetryReadsCurrentKeyStatus(t *testing.T) {
 	assert.Equal(t, common.ChannelStatusManuallyDisabled, stored.ChannelInfo.MultiKeyStatusList[0], "the disabled key stays disabled")
 }
 
+// A locked channel deleted or disabled between attempts is not submitted to
+// again from the request's snapshot.
+func TestLockedTaskRetryStopsOnRemovedChannel(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	for _, removal := range []string{"deleted", "disabled"} {
+		t.Run(removal, func(t *testing.T) {
+			db := modelManagementDB(t, "sqlite", "")
+			previousRetries, previousCache := common.RetryTimes, common.MemoryCacheEnabled
+			common.RetryTimes, common.MemoryCacheEnabled = 2, false
+			t.Cleanup(func() { common.RetryTimes, common.MemoryCacheEnabled = previousRetries, previousCache })
+			channel := model.Channel{Name: "locked", Type: constant.ChannelTypeTaskPlugin, Key: "k0", Status: common.ChannelStatusEnabled}
+			require.NoError(t, db.Create(&channel).Error)
+			snapshot, err := model.GetChannelById(channel.Id, true)
+			require.NoError(t, err)
+
+			c := taskSubmissionTestContext()
+			common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
+			info := taskSubmissionRelayInfo(nil)
+			info.LockedChannel = snapshot
+			submits := 0
+			_, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+				submits++
+				if removal == "deleted" {
+					require.NoError(t, db.Delete(&model.Channel{}, channel.Id).Error)
+				} else {
+					require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("status", common.ChannelStatusManuallyDisabled).Error)
+				}
+				return nil, &dto.TaskError{Code: "upstream_error", Message: "bad gateway", StatusCode: http.StatusBadGateway}
+			})
+			require.NotNil(t, taskErr)
+			assert.Equal(t, 1, submits)
+		})
+	}
+}
+
 // The final task error may come from an earlier channel; its message is
 // masked against every tried upstream, including hosts without a URL.
 func TestRespondTaskSubmissionErrorMasksTriedUpstreams(t *testing.T) {
@@ -809,6 +847,13 @@ func TestTaskOutcomeUnknownStopsHereAndDownstream(t *testing.T) {
 	respondTaskSubmissionError(c, taskErr)
 	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
 	assert.Equal(t, "unknown", recorder.Header().Get(service.TaskOutcomeHeader))
+
+	// A submission accepted without a readable receipt is marked the same.
+	accepted := httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(accepted)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{}`))
+	respondTaskSubmissionError(c, &dto.TaskError{Code: "plugin_submit_response_invalid", Message: "missing taskId", StatusCode: http.StatusBadGateway, NoRetry: true})
+	assert.Equal(t, "unknown", accepted.Header().Get(service.TaskOutcomeHeader))
 
 	ordinary := httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(ordinary)

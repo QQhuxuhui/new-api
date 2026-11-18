@@ -3,10 +3,12 @@ package channel
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -524,7 +526,10 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		},
 	}))
 	resp, err := relayClient.Do(req)
-	c.Set(ginKeyUpstreamRequestWritten, requestWritten.Load())
+	// A request is written into a buffer before it is flushed. The transport
+	// replays a request on a new connection only when nothing of it went out,
+	// so a final failure to connect means the upstream received nothing.
+	c.Set(ginKeyUpstreamRequestWritten, requestWritten.Load() && !failedToConnect(err))
 	if releaseRelayTimeout != nil && (err != nil || resp == nil) {
 		releaseRelayTimeout()
 	}
@@ -606,6 +611,21 @@ const ginKeyUpstreamRequestWritten = "upstream_request_written"
 // leaves the outcome unknown.
 func RequestMayHaveReachedUpstream(c *gin.Context) bool {
 	return c.GetBool(ginKeyUpstreamRequestWritten)
+}
+
+// failedToConnect reports a transport error raised before any connection
+// carried the request: name resolution, dialing, proxy connect or the TLS
+// certificate check.
+func failedToConnect(err error) bool {
+	if err == nil {
+		return false
+	}
+	var dnsErr *net.DNSError
+	var opErr *net.OpError
+	var certErr *tls.CertificateVerificationError
+	return errors.As(err, &dnsErr) ||
+		(errors.As(err, &opErr) && (opErr.Op == "dial" || opErr.Op == "proxyconnect")) ||
+		errors.As(err, &certErr)
 }
 
 // ForgetUpstreamRequest clears the record of an earlier attempt, so a request

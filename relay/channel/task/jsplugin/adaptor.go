@@ -1676,6 +1676,11 @@ func (a *TaskAdaptor) buildSubmit(c *gin.Context, info *relaycommon.RelayInfo) (
 		logger.LogDebug(c, "task_plugin subsystem=adaptor event=build_submit_failed plugin=%q stage=validate_url reason=url_not_allowed", a.plugin.Meta.Key)
 		return nil, err
 	}
+	// A remix must be built as one: a plugin that turns it into another
+	// action would start a new billed task unrelated to the origin video.
+	if info.Action == constant.TaskActionRemix && descriptor.Action != constant.TaskActionRemix {
+		return nil, fmt.Errorf("plugin %s does not support remix", a.plugin.Meta.Key)
+	}
 	if descriptor.Action != "" {
 		info.Action = descriptor.Action
 	}

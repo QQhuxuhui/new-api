@@ -2,10 +2,13 @@ package channel
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -445,4 +448,27 @@ func TestRequestMayHaveReachedUpstream(t *testing.T) {
 	c.Set(ginKeyUpstreamRequestWritten, true)
 	ForgetUpstreamRequest(c)
 	assert.False(t, RequestMayHaveReachedUpstream(c), "a request that fails before the transport sent nothing")
+}
+
+// The transport replays a request on a new connection only when none of it
+// left the old one, so an attempt that ends failing to connect sent nothing,
+// even after the request was written into a connection's buffer.
+func TestFailedToConnect(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"dial refused", &url.Error{Op: "Post", URL: "http://a", Err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}}, true},
+		{"proxy connect", &url.Error{Op: "Post", URL: "http://a", Err: &net.OpError{Op: "proxyconnect", Err: errors.New("refused")}}, true},
+		{"name resolution", &url.Error{Op: "Post", URL: "http://a", Err: &net.OpError{Op: "dial", Err: &net.DNSError{Err: "no such host", Name: "a"}}}, true},
+		{"certificate", &url.Error{Op: "Post", URL: "https://a", Err: &tls.CertificateVerificationError{Err: errors.New("unknown authority")}}, true},
+		{"write on a connection", &url.Error{Op: "Post", URL: "http://a", Err: &net.OpError{Op: "write", Err: errors.New("broken pipe")}}, false},
+		{"read after writing", &url.Error{Op: "Post", URL: "http://a", Err: &net.OpError{Op: "read", Err: errors.New("connection reset by peer")}}, false},
+		{"no error", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, failedToConnect(tc.err))
+		})
+	}
 }

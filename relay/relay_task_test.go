@@ -2,6 +2,7 @@ package relay
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -875,13 +876,23 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 `
 	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
 	require.NoError(t, err)
-	for _, outcome := range []string{"unknown", ""} {
-		t.Run("outcome="+outcome, func(t *testing.T) {
+	for _, tc := range []struct {
+		outcome    string
+		status     int
+		wantStatus int
+	}{
+		{outcome: "unknown", status: http.StatusInternalServerError, wantStatus: http.StatusInternalServerError},
+		// A native error renderer may answer a failure with 200.
+		{outcome: "unknown", status: http.StatusOK, wantStatus: http.StatusBadGateway},
+		{outcome: "", status: http.StatusInternalServerError, wantStatus: http.StatusInternalServerError},
+	} {
+		outcome := tc.outcome
+		t.Run(fmt.Sprintf("outcome=%s/status=%d", outcome, tc.status), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if outcome != "" {
 					w.Header().Set(service.TaskOutcomeHeader, outcome)
 				}
-				w.WriteHeader(http.StatusInternalServerError)
+				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(`{"code":"upstream_error","message":"failed"}`))
 			}))
 			defer server.Close()
@@ -894,9 +905,39 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 
 			_, taskErr := RelayTaskSubmit(c, info)
 			require.NotNil(t, taskErr)
-			assert.Equal(t, http.StatusInternalServerError, taskErr.StatusCode)
+			assert.Equal(t, tc.wantStatus, taskErr.StatusCode)
 			assert.Equal(t, outcome == "unknown", taskErr.SkipRetry)
 			assert.Equal(t, outcome == "unknown", taskErr.Code == service.TaskOutcomeUnknownCode)
 		})
 	}
+}
+
+// A remix on a plugin that builds some other action is rejected before any
+// billing or upstream request, rather than submitted as a new generation.
+func TestRemixRejectedByPluginWithoutRemix(t *testing.T) {
+	const source = `
+export const meta = {apiVersion:1,key:"noremix",name:"noremix",version:"1.0.0",author:{name:"Test"},models:["declared-model"],fetchMode:"per_task"};
+export function buildSubmitRequest(ctx) { return {url: ctx.baseUrl+"/generate", method:"POST", body:{model: ctx.model}, action:"text_to_video"}; }
+export function parseSubmitResponse(ctx, response) { return {taskId: response.body.id}; }
+export function buildQueryRequest(ctx) { return {url: ctx.baseUrl+"/query"}; }
+export function parseTaskResult() { return {status:"SUCCESS"}; }
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++ }))
+	defer server.Close()
+	c, info := newTaskSubmitContext(t, "declared-model", "")
+	c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Plugin: plugin})
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
+	info.OriginModelName, info.Action, info.OriginTaskID = "declared-model", constant.TaskActionRemix, "video_upstream"
+	billing := &imageReservation{limit: 1 << 30}
+	info.Billing = billing
+
+	_, taskErr := RelayTaskSubmit(c, info)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+	assert.Contains(t, taskErr.Message, "does not support remix")
+	assert.Zero(t, requests)
+	assert.Zero(t, billing.held)
 }

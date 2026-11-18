@@ -215,9 +215,10 @@ func MarkTaskOutcomeUnknown(taskErr *taskdto.TaskError) {
 }
 
 // WriteTaskOutcomeHeader adds TaskOutcomeHeader to the error reply of a
-// submission whose outcome is unknown.
+// submission that may have created the task upstream: one whose request may
+// have arrived without a reply, or whose acceptance could not be read.
 func WriteTaskOutcomeHeader(c *gin.Context, taskErr *taskdto.TaskError) {
-	if taskErr != nil && taskErr.Code == TaskOutcomeUnknownCode {
+	if taskErr != nil && (taskErr.NoRetry || taskErr.Code == TaskOutcomeUnknownCode) {
 		c.Header(TaskOutcomeHeader, "unknown")
 	}
 }

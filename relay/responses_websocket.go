@@ -301,7 +301,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		// candidates bound the loop. When they run out the call answers with
 		// the last dial error, else the last setup failure.
 		var lastDialErr, lastSetupErr *types.NewAPIError
-		var lastDialChannelID int
+		var lastDialChannelID, lastSetupChannelID int
 		for ; ; retry.IncreaseRetry() {
 			if err := c.Request.Context().Err(); err != nil && retry.GetRetry() > 0 {
 				return types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry())
@@ -310,10 +310,17 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			var exhausted bool
 			channel, exhausted, apiErr = selectResponsesWSChannel(c, modelName, retry)
 			if exhausted {
+				// The candidates ran out after the last failure was recorded,
+				// so the stop is persisted with the error the client receives.
+				if lastDialErr != nil || lastSetupErr != nil {
+					service.RecordCandidatesExhausted(c)
+				}
 				if lastDialErr != nil {
+					service.RecordChannelErrorLog(c, lastDialChannelID, lastDialErr, info)
 					return lastDialErr
 				}
 				if lastSetupErr != nil {
+					service.RecordChannelErrorLog(c, lastSetupChannelID, lastSetupErr, info)
 					return lastSetupErr
 				}
 				return apiErr
@@ -322,7 +329,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				// A selected channel that failed setup is a failed attempt; the
 				// call moves on unless it is pinned or bound by a strict session.
 				service.AppendUsedChannel(c, channel.Id)
-				lastSetupErr = apiErr
+				lastSetupErr, lastSetupChannelID = apiErr, channel.Id
 				common.RecordTriedUpstreamAddresses(c)
 				decision := service.StopWhenCandidatesExhausted(retry, service.DecideSetupFailureRetry(c))
 				service.RecordPolicyFailure(c, channel.Id, apiErr, decision)

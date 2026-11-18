@@ -189,7 +189,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	// The final error of a request whose candidates all failed is the last
 	// one an attempt returned, else the last setup failure.
 	var lastAttemptErr, lastSetupErr *types.NewAPIError
-	var lastAttemptChannelID int
+	var lastAttemptChannelID, lastSetupChannelID int
 
 	// Each retry moves to a channel the request has not tried, so the
 	// candidates bound the loop; RetryTimes does not.
@@ -209,11 +209,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		if exhausted {
 			service.RecordCandidatesExhausted(c)
+			// The candidates ran out after the last failure was recorded, so
+			// the stop is persisted with the error the client receives.
 			switch {
 			case lastAttemptErr != nil:
 				newAPIError = lastAttemptErr
+				service.RecordChannelErrorLog(c, lastAttemptChannelID, lastAttemptErr, relayInfo)
 			case lastSetupErr != nil:
 				newAPIError = lastSetupErr
+				service.RecordChannelErrorLog(c, lastSetupChannelID, lastSetupErr, relayInfo)
 			default:
 				newAPIError = types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryNoAvailableChannel, map[string]any{"Group": relayInfo.TokenGroup, "Model": relayInfo.OriginModelName})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 			}
@@ -222,7 +226,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		service.AppendUsedChannel(c, channel.Id)
 		if setupErr := service.TakeChannelSetupError(c); setupErr != nil {
 			newAPIError = setupErr
-			lastSetupErr = setupErr
+			lastSetupErr, lastSetupChannelID = setupErr, channel.Id
 			relayInfo.LastError = newAPIError
 			common.RecordTriedUpstreamAddresses(c)
 			decision := service.StopWhenCandidatesExhausted(retryParam, service.DecideSetupFailureRetry(c))
@@ -654,7 +658,7 @@ func executeTaskSubmissionWith(
 	// The final error of a request whose candidates all failed is the last
 	// one a submission returned, else the last setup failure.
 	var lastAttemptErr, lastSetupErr *taskdto.TaskError
-	var lastAttemptChannelID int
+	var lastAttemptChannelID, lastSetupChannelID int
 	// A locked channel (a remix or continuation) is retried in place up to
 	// RetryTimes; other submissions move to an untried channel per retry, so
 	// the candidates bound the loop.
@@ -680,13 +684,17 @@ func executeTaskSubmissionWith(
 				// channel is read again so the key choice and the key status
 				// it saves start from the current state, not the snapshot the
 				// request locked.
-				if current, lookupErr := model.CacheGetChannel(channel.Id); lookupErr == nil {
+				current, lookupErr := model.CacheGetChannel(channel.Id)
+				switch {
+				case lookupErr != nil:
+					service.StoreChannelSetupError(c, types.NewError(lookupErr, types.ErrorCodeGetChannelFailed))
+				case current.Status != common.ChannelStatusEnabled:
+					service.StoreChannelSetupError(c, types.NewErrorWithStatusCode(errors.New("the locked channel is disabled"), types.ErrorCodeGetChannelFailed, http.StatusServiceUnavailable))
+				default:
 					channel = current
-				} else {
-					logger.LogWarn(c, common.LogText("reload locked channel #%d failed, using the request's snapshot: %s", channel.Id, lookupErr.Error()))
-				}
-				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
-					service.StoreChannelSetupError(c, setupErr)
+					if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
+						service.StoreChannelSetupError(c, setupErr)
+					}
 				}
 			} else {
 				// The distributor set up the pinned channel; its key's lease is
@@ -707,11 +715,15 @@ func executeTaskSubmissionWith(
 			}
 			if exhausted {
 				service.RecordCandidatesExhausted(c)
+				// The candidates ran out after the last failure was recorded,
+				// so the stop is persisted with the error the client receives.
 				switch {
 				case lastAttemptErr != nil:
 					taskErr = lastAttemptErr
+					service.RecordChannelErrorLog(c, lastAttemptChannelID, taskSubmissionAPIError(lastAttemptErr), relayInfo)
 				case lastSetupErr != nil:
 					taskErr = lastSetupErr
+					service.RecordChannelErrorLog(c, lastSetupChannelID, taskSubmissionAPIError(lastSetupErr), relayInfo)
 				default:
 					taskErr = service.TaskErrorWrapperLocal(errors.New(i18n.T(c, i18n.MsgRelayRetryNoAvailableChannel, map[string]any{"Group": relayInfo.TokenGroup, "Model": relayInfo.OriginModelName})), "get_channel_failed", http.StatusServiceUnavailable)
 				}
@@ -723,7 +735,7 @@ func executeTaskSubmissionWith(
 		service.AppendUsedChannel(c, channel.Id)
 		if setupErr := service.TakeChannelSetupError(c); setupErr != nil {
 			taskErr = service.TaskErrorWrapperLocal(setupErr.Err, string(setupErr.GetErrorCode()), setupErr.StatusCode)
-			lastSetupErr = taskErr
+			lastSetupErr, lastSetupChannelID = taskErr, channel.Id
 			common.RecordTriedUpstreamAddresses(c)
 			decision := service.DecideSetupFailureRetry(c)
 			if decision.Action == "retry" && budgetExhausted {
