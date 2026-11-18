@@ -778,9 +778,13 @@ func TestRemixSubmitsRemixOfOriginUpstreamVideo(t *testing.T) {
 	database := setupRelayChannelDB(t)
 	require.NoError(t, database.AutoMigrate(&model.Task{}))
 	saveBillingConfig(t)
-	savedPrices := ratio_setting.ModelPrice2JSONString()
-	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices)) })
-	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"sora-2":0.1}`))
+	// Priced per second of video: a remix is billed on its origin's length.
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		billing_setting.PluginBillingExprOption: `{"sora::sora-2":"tier(\"base\", u(\"seconds\") * 0.1)"}`,
+		"billing_setting.billing_mode":          `{}`,
+		"billing_setting.billing_expr":          `{}`,
+		"group_ratio_setting.group_ratio":       `{"default":1}`,
+	}))
 	service.InitHttpClient()
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -793,6 +797,7 @@ func TestRemixSubmitsRemixOfOriginUpstreamVideo(t *testing.T) {
 	require.NoError(t, database.Create(origin).Error)
 	require.NoError(t, database.Create(&model.Task{TaskID: "task_public", UserId: 7, ChannelId: origin.Id, Platform: constant.TaskPlatform("sora"),
 		Properties:  model.Properties{OriginModelName: "sora-2"},
+		Data:        []byte(`{"id":"video_upstream","status":"completed","seconds":"8","size":"1280x720"}`),
 		PrivateData: model.TaskPrivateData{UpstreamTaskID: "video_upstream"}}).Error)
 	source, err := builtinplugins.Source("sora")
 	require.NoError(t, err)
@@ -817,6 +822,19 @@ func TestRemixSubmitsRemixOfOriginUpstreamVideo(t *testing.T) {
 	assert.Equal(t, origin.Id, locked.Id)
 	assert.Equal(t, "sora-2", info.OriginModelName)
 	assert.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyChannelId), "the submission loop sets the locked channel up")
+	assert.Empty(t, c.GetString("expected_task_plugin_key"), "a Sora channel executes its own plugin")
+
+	// On a New API channel, which hosts several plugins, the origin task's
+	// plugin is the one the channel setup must bind.
+	require.NoError(t, database.Model(origin).Update("type", constant.ChannelTypeNewAPI).Error)
+	gateway, _ := gin.CreateTestContext(httptest.NewRecorder())
+	gateway.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/task_public/remix", strings.NewReader(`{"prompt":"make it blue"}`))
+	gateway.Params = c.Params
+	gatewayInfo, err := relaycommon.GenRelayInfo(gateway, kittypes.RelayFormatTask, nil, nil)
+	require.NoError(t, err)
+	gatewayInfo.UserId = 7
+	require.Nil(t, ResolveOriginTask(gateway, gatewayInfo))
+	assert.Equal(t, "sora", gateway.GetString("expected_task_plugin_key"))
 
 	// The submission loop's setup of the locked channel.
 	common.SetContextKey(c, constant.ContextKeyChannelId, origin.Id)
@@ -825,9 +843,60 @@ func TestRemixSubmitsRemixOfOriginUpstreamVideo(t *testing.T) {
 	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
 	c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Plugin: plugin})
 	c.Set("task_plugin_key", "sora")
-	info.Billing = &imageReservation{limit: 1 << 30}
+	billing := &imageReservation{limit: 1 << 30}
+	info.Billing = billing
 	_, taskErr := RelayTaskSubmit(c, info)
 	require.Nil(t, taskErr, "submission error: %+v", taskErr)
 	assert.Equal(t, []string{"POST /v1/videos/video_upstream/remix"}, paths)
 	assert.Equal(t, constant.TaskActionRemix, info.Action)
+	assert.Equal(t, common.QuotaRound(8*0.1*common.QuotaPerUnit), billing.held, "8 seconds of the origin video at 0.1 per second")
+}
+
+// An upstream New API gateway that lost its own upstream's reply answers with
+// the outcome header; this gateway then keeps the submission off its other
+// channels as well, since the task may already exist.
+func TestRelayTaskSubmitKeepsUpstreamGatewayOutcomeUnknown(t *testing.T) {
+	service.InitHttpClient()
+	saveBillingConfig(t)
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices)) })
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"declared-model":0.01}`))
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":    `{}`,
+		"billing_setting.billing_expr":    `{}`,
+		"group_ratio_setting.group_ratio": `{"default":1}`,
+	}))
+	const source = `
+export const meta = {apiVersion:1,key:"outcome",name:"outcome",version:"1.0.0",author:{name:"Test"},models:["declared-model"],fetchMode:"per_task"};
+export function buildSubmitRequest(ctx) { return {url: ctx.baseUrl+"/submit", method:"POST", body:{model: ctx.model}}; }
+export function parseSubmitResponse(ctx, response) { return {taskId: response.body.id}; }
+export function buildQueryRequest(ctx) { return {url: ctx.baseUrl+"/query"}; }
+export function parseTaskResult() { return {status:"SUCCESS"}; }
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	for _, outcome := range []string{"unknown", ""} {
+		t.Run("outcome="+outcome, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if outcome != "" {
+					w.Header().Set(service.TaskOutcomeHeader, outcome)
+				}
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"code":"upstream_error","message":"failed"}`))
+			}))
+			defer server.Close()
+			c, info := newTaskSubmitContext(t, "declared-model", "")
+			c.Set("group", "default")
+			c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Plugin: plugin})
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
+			info.UserGroup, info.UsingGroup, info.OriginModelName = "default", "default", "declared-model"
+			info.Billing = &imageReservation{limit: 1 << 30}
+
+			_, taskErr := RelayTaskSubmit(c, info)
+			require.NotNil(t, taskErr)
+			assert.Equal(t, http.StatusInternalServerError, taskErr.StatusCode)
+			assert.Equal(t, outcome == "unknown", taskErr.SkipRetry)
+			assert.Equal(t, outcome == "unknown", taskErr.Code == service.TaskOutcomeUnknownCode)
+		})
+	}
 }

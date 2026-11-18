@@ -1585,7 +1585,7 @@ func RespondTaskPluginError(c *gin.Context, taskErr *dto.TaskError) bool {
 	}
 	sanitized := sanitizedTaskPluginError(taskErr.StatusCode, taskErr.Message)
 	// The upstream may already run the task: the client must not resubmit.
-	if taskErr.NoRetry {
+	if taskErr.NoRetry || taskErr.Code == service.TaskOutcomeUnknownCode {
 		sanitized.Retryable = false
 	}
 	requestID := c.GetString(common.RequestIdKey)

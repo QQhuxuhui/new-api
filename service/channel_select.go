@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func GetChannelConstraints(c *gin.Context) *dto.ChannelConstraints {
@@ -326,6 +327,14 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 		if preferredChannelID, found := GetPreferredChannelByAffinity(c, modelName, usingGroup); found {
 			affinityUsable := false
 			preferred, err := model.CacheGetChannel(preferredChannelID)
+			// A channel the database could not be read for is not a deleted
+			// one: keep the binding and fail the selection.
+			if err != nil && !common.MemoryCacheEnabled && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, usingGroup, &ChannelSelectError{
+					StatusCode: http.StatusServiceUnavailable, Code: types.ErrorCodeGetChannelFailed, MessageID: i18n.MsgDistributorGetChannelFailed,
+					Params: map[string]any{"Group": usingGroup, "Model": modelName, "Error": err.Error()},
+				}
+			}
 			// The group the bound channel still serves for this model; a
 			// channel that left every allowed group no longer satisfies it.
 			memberGroup := ""

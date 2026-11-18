@@ -1493,6 +1493,13 @@ func TestRelayRetryMovesToUntriedChannels(t *testing.T) {
 			wantCode:         http.StatusBadGateway,
 			wantLastDecision: "stop/candidates_exhausted",
 		},
+		{
+			name:             "every candidate fails setup and the stop is still persisted",
+			channels:         []string{"A", "B"},
+			noKey:            []string{"A", "B"},
+			wantCode:         http.StatusInternalServerError,
+			wantLastDecision: "stop/candidates_exhausted",
+		},
 	} {
 		for _, memoryCache := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/memory cache %v", tc.name, memoryCache), func(t *testing.T) {

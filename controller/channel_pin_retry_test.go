@@ -413,10 +413,10 @@ func TestStrictSessionBindingOnSuspendedChannel(t *testing.T) {
 			*affinity = snapshot.Affinity
 
 			for _, cached := range []bool{false, true} {
-				for _, state := range []string{"suspended", "left_group", "lookup_fails"} {
-					// The database path checks membership with a query; the
-					// memory cache has no lookup to fail.
-					if cached && state == "lookup_fails" {
+				for _, state := range []string{"suspended", "left_group", "lookup_fails", "channel_read_fails"} {
+					// The database path reads the channel and checks membership
+					// with queries; the memory cache has no lookup to fail.
+					if cached && strings.HasSuffix(state, "_fails") {
 						continue
 					}
 					// A failed lookup must not be taken for a channel that left
@@ -457,16 +457,17 @@ func TestStrictSessionBindingOnSuspendedChannel(t *testing.T) {
 							middleware.Distribute()(request)
 							return request
 						}
-						if state == "lookup_fails" {
-							require.NoError(t, db.Callback().Query().Before("gorm:query").Register("membership_lookup_failure", func(tx *gorm.DB) {
-								if tx.Statement.Table == "abilities" {
+						failingTable := map[string]string{"lookup_fails": "abilities", "channel_read_fails": "channels"}[state]
+						if failingTable != "" {
+							require.NoError(t, db.Callback().Query().Before("gorm:query").Register("strict_lookup_failure", func(tx *gorm.DB) {
+								if tx.Statement.Table == failingTable {
 									tx.AddError(errors.New("database unavailable"))
 								}
 							}))
 						}
 						first := distribute()
-						if state == "lookup_fails" {
-							require.NoError(t, db.Callback().Query().Remove("membership_lookup_failure"))
+						if failingTable != "" {
+							require.NoError(t, db.Callback().Query().Remove("strict_lookup_failure"))
 						}
 						assert.Equal(t, http.StatusServiceUnavailable, first.Writer.Status(), "a strict session never moves to another channel")
 						bound, found := service.GetPreferredChannelByAffinity(seed, "policy-test", "default")

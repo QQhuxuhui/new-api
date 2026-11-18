@@ -102,6 +102,22 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 	// Driver hooks address the vendor's own task, so ctx.originTaskId is the
 	// upstream id; the client sent the public one.
 	info.OriginTaskID = originTask.GetUpstreamTaskID()
+	if ch.Type == constant.ChannelTypeNewAPI {
+		// A New API channel hosts several plugins; the origin task's plugin
+		// executes, and the channel setup checks the channel still binds it.
+		c.Set("expected_task_plugin_key", string(originTask.Platform))
+	}
+	if info.Action == constant.TaskActionRemix {
+		// A remix is priced on its origin video, which the driver reads from
+		// ctx.originTasks as it does for any declared origin task.
+		info.OriginTasks = []relaycommon.OriginTaskRef{{
+			TaskID:         originTask.TaskID,
+			UpstreamTaskID: originTask.GetUpstreamTaskID(),
+			Action:         originTask.Action,
+			Status:         string(originTask.Status),
+			Data:           append([]byte(nil), originTask.Data...),
+		}}
+	}
 
 	// 提取 remix 参数（时长、分辨率 → OtherRatios）
 	if info.Action == constant.TaskActionRemix {
@@ -344,7 +360,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		taskErr := service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError, common.UpstreamAddresses(c)...)
 		// A submission the upstream may have received is not sent to another
 		// channel: the first one may already be creating the task.
-		taskErr.SkipRetry = channel.RequestMayHaveReachedUpstream(c)
+		if channel.RequestMayHaveReachedUpstream(c) {
+			service.MarkTaskOutcomeUnknown(taskErr)
+		}
 		return nil, taskErr
 	}
 	if resp == nil {
@@ -355,7 +373,13 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// or 202 Accepted, and parseSubmitResponse receives the exact status code.
 	if resp.StatusCode/100 != 2 {
 		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode, common.UpstreamAddresses(c)...)
+		taskErr := service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode, common.UpstreamAddresses(c)...)
+		// An upstream New API gateway that lost its own upstream's reply may
+		// have created the task: the same holds here.
+		if resp.Header.Get(service.TaskOutcomeHeader) == "unknown" {
+			service.MarkTaskOutcomeUnknown(taskErr)
+		}
+		return nil, taskErr
 	}
 
 	// 10. Parse only. The controller presents the response after the durable

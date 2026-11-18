@@ -7,7 +7,7 @@ export const meta = {
     en: "OpenAI Sora video generation (text-to-video, image-to-video, and remix)",
     zh: "OpenAI Sora 视频生成（文生视频、图生视频、remix）",
   },
-  version: "1.1.0",
+  version: "1.1.1",
   channelTypes: [55, 1], // OpenAI-type channels natively serve sora with the same wire format
   author: { name: "QuantumNous" },
   models: ["sora-2", "sora-2-pro"],
@@ -125,7 +125,13 @@ export function parseSubmitResponse(ctx, resp) {
 }
 
 export function extractUsage(ctx) {
-  if (ctx.action === "remix") return {};
+  if (ctx.action === "remix") {
+    // A remix produces a video of its origin's length and size: read them
+    // from the origin task's last upstream snapshot, as on completion.
+    const origin = ((ctx.originTasks || [])[0] || {}).data || {};
+    const facts = extractUsageOnComplete(null, null, origin);
+    return { seconds: facts.seconds || 4, size: facts.size || "720x1280" };
+  }
   const req = ctx.requestBody || {};
   let seconds = Number(req.seconds || req.duration || 4);
   if (!Number.isFinite(seconds) || seconds <= 0) seconds = 4;

@@ -1457,6 +1457,18 @@ export const native = {error: function(ctx, error) {
 	})
 	require.True(t, RespondTaskPluginError(c, &dto.TaskError{Code: "plugin_submit_response_invalid", Message: "missing taskId", StatusCode: http.StatusBadGateway, NoRetry: true}))
 	assert.Contains(t, accepted.Body.String(), `"retryable":false`, "a task the upstream may already run is not offered for resubmission")
+
+	unknown := httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(unknown)
+	c.Request = httptest.NewRequest(http.MethodPost, "/vendor/failure", nil)
+	c.Set(jsplugin.ContextKeyPinnedRoute, jsplugin.PinnedRoute{Plugin: plugin})
+	c.Set(jsplugin.ContextKeyRouteRequest, jsplugin.RouteRequestContext{
+		Path: "/vendor/failure", Method: http.MethodPost, Params: map[string]string{}, Query: map[string][]string{},
+	})
+	lost := &dto.TaskError{Message: "connection reset", StatusCode: http.StatusInternalServerError}
+	service.MarkTaskOutcomeUnknown(lost)
+	require.True(t, RespondTaskPluginError(c, lost))
+	assert.Contains(t, unknown.Body.String(), `"retryable":false`, "a submission whose reply was lost is not offered for resubmission")
 }
 
 func TestTaskPluginErrorFallbackIsSanitized(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/gin-gonic/gin"
 )
 
 func MidjourneyErrorWrapper(code int, desc string) *taskdto.MidjourneyResponse {
@@ -193,6 +194,31 @@ func parseStatusCodeMappingValue(value any) (int, bool) {
 		return statusCode, true
 	default:
 		return 0, false
+	}
+}
+
+// TaskOutcomeUnknownCode is the code of a task submission whose request may
+// have reached the upstream while its reply was lost: the task may exist.
+const TaskOutcomeUnknownCode = "task_submit_outcome_unknown"
+
+// TaskOutcomeHeader carries TaskOutcomeUnknownCode on the error reply, which
+// every error renderer keeps, so a downstream New API gateway submitting
+// through this one does not resubmit the task on another channel either.
+const TaskOutcomeHeader = "X-New-Api-Task-Outcome"
+
+// MarkTaskOutcomeUnknown makes taskErr the error of a submission that may have
+// created the task upstream: it is not moved to another channel, and the
+// client is told not to resubmit.
+func MarkTaskOutcomeUnknown(taskErr *taskdto.TaskError) {
+	taskErr.Code = TaskOutcomeUnknownCode
+	taskErr.SkipRetry = true
+}
+
+// WriteTaskOutcomeHeader adds TaskOutcomeHeader to the error reply of a
+// submission whose outcome is unknown.
+func WriteTaskOutcomeHeader(c *gin.Context, taskErr *taskdto.TaskError) {
+	if taskErr != nil && taskErr.Code == TaskOutcomeUnknownCode {
+		c.Header(TaskOutcomeHeader, "unknown")
 	}
 }
 

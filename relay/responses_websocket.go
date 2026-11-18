@@ -329,9 +329,14 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				if decision.Action == "retry" {
 					continue
 				}
-				if decision.Reason == "candidates_exhausted" && lastDialErr != nil {
-					service.RecordChannelErrorLog(c, lastDialChannelID, lastDialErr, info)
-					return lastDialErr
+				// Routing ends here without an upstream failure of its own, so
+				// the stop is persisted with the error the client receives.
+				if decision.Reason == "candidates_exhausted" {
+					if lastDialErr != nil {
+						service.RecordChannelErrorLog(c, lastDialChannelID, lastDialErr, info)
+						return lastDialErr
+					}
+					service.RecordChannelErrorLog(c, channel.Id, apiErr, info)
 				}
 				return apiErr
 			}

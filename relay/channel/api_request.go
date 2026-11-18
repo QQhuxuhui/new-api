@@ -514,7 +514,14 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	var requestWritten atomic.Bool
 	c.Set(ginKeyUpstreamRequestWritten, false)
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
-		WroteHeaders: func() { requestWritten.Store(true) },
+		// Headers can be buffered before a write fails, and the transport
+		// may redial; only a request written in full counts as sent. A body
+		// cut short is not a request the upstream can act on.
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			if info.Err == nil {
+				requestWritten.Store(true)
+			}
+		},
 	}))
 	resp, err := relayClient.Do(req)
 	c.Set(ginKeyUpstreamRequestWritten, requestWritten.Load())
@@ -589,14 +596,14 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 }
 
 // ginKeyUpstreamRequestWritten records whether the last upstream request of
-// this context wrote its headers to a connection.
+// this context was written to a connection in full.
 const ginKeyUpstreamRequestWritten = "upstream_request_written"
 
 // RequestMayHaveReachedUpstream reports whether the last upstream request of
-// the context may have been received. A request whose headers were never
-// written to a connection (it failed to build, resolve, dial or complete the
-// TLS handshake) certainly was not; once they were, a lost reply leaves the
-// outcome unknown.
+// the context may have been received. A request that was never written to a
+// connection in full (it failed to build, resolve, dial, complete the TLS
+// handshake or write) certainly was not acted on; once it was, a lost reply
+// leaves the outcome unknown.
 func RequestMayHaveReachedUpstream(c *gin.Context) bool {
 	return c.GetBool(ginKeyUpstreamRequestWritten)
 }

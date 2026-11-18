@@ -227,9 +227,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			common.RecordTriedUpstreamAddresses(c)
 			decision := service.StopWhenCandidatesExhausted(retryParam, service.DecideSetupFailureRetry(c))
 			service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
-			if decision.Reason == "candidates_exhausted" && lastAttemptErr != nil {
-				newAPIError = lastAttemptErr
-				service.RecordChannelErrorLog(c, lastAttemptChannelID, lastAttemptErr, relayInfo)
+			// Routing ends here without an upstream failure of its own, so
+			// the stop is persisted with the error the client receives.
+			if decision.Reason == "candidates_exhausted" {
+				if lastAttemptErr != nil {
+					newAPIError = lastAttemptErr
+					service.RecordChannelErrorLog(c, lastAttemptChannelID, lastAttemptErr, relayInfo)
+				} else {
+					service.RecordChannelErrorLog(c, channel.Id, setupErr, relayInfo)
+				}
 			}
 			if decision.Action != "retry" {
 				break
@@ -667,15 +673,18 @@ func executeTaskSubmissionWith(
 		if locked {
 			channel = lockedCh
 			policy.BeginAttempt(channel, relayInfo.UsingGroup)
-			if retryParam.GetRetry() > 0 {
-				// Every setup failure of the locked channel counts as an
-				// attempt against its RetryTimes budget.
-				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
-					service.StoreChannelSetupError(c, setupErr)
+			if retryParam.GetRetry() > 0 || common.GetContextKeyInt(c, constant.ContextKeyChannelId) != channel.Id {
+				// A retry, or a remix that reached its origin task's channel
+				// without the distributor, sets the channel up here; every
+				// setup failure counts against the RetryTimes budget. The
+				// channel is read again so the key choice and the key status
+				// it saves start from the current state, not the snapshot the
+				// request locked.
+				if current, lookupErr := model.CacheGetChannel(channel.Id); lookupErr == nil {
+					channel = current
+				} else {
+					logger.LogWarn(c, common.LogText("reload locked channel #%d failed, using the request's snapshot: %s", channel.Id, lookupErr.Error()))
 				}
-			} else if common.GetContextKeyInt(c, constant.ContextKeyChannelId) != channel.Id {
-				// A remix reaches its origin task's channel without the
-				// distributor, so the first attempt sets the channel up here.
 				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
 					service.StoreChannelSetupError(c, setupErr)
 				}
@@ -724,9 +733,15 @@ func executeTaskSubmissionWith(
 				decision = service.StopWhenCandidatesExhausted(retryParam, decision)
 			}
 			service.RecordPolicyFailure(c, channel.Id, taskSubmissionAPIError(taskErr), decision)
-			if decision.Reason == "candidates_exhausted" && lastAttemptErr != nil {
-				taskErr = lastAttemptErr
-				service.RecordChannelErrorLog(c, lastAttemptChannelID, taskSubmissionAPIError(lastAttemptErr), relayInfo)
+			// Routing ends here without an upstream failure of its own, so
+			// the stop is persisted with the error the client receives.
+			if decision.Reason == "candidates_exhausted" {
+				if lastAttemptErr != nil {
+					taskErr = lastAttemptErr
+					service.RecordChannelErrorLog(c, lastAttemptChannelID, taskSubmissionAPIError(lastAttemptErr), relayInfo)
+				} else {
+					service.RecordChannelErrorLog(c, channel.Id, setupErr, relayInfo)
+				}
 			}
 			if decision.Action != "retry" {
 				break
@@ -995,6 +1010,7 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 
 func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
 	service.RecordRequestPolicyTermination(c, taskSubmissionAPIError(taskErr))
+	service.WriteTaskOutcomeHeader(c, taskErr)
 	newTaskPluginSubmitDiagnostics(c).presentError(taskErr)
 	// The client of a relayed event stream already has the vendor's events,
 	// including any error event; nothing can follow them.

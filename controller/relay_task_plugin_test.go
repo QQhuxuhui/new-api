@@ -697,9 +697,15 @@ func TestExecuteTaskSubmissionRefundsWhenFinalReserveFails(t *testing.T) {
 // which reaches its origin task's channel without the distributor.
 func TestLockedTaskSetupFailuresUseRetryBudget(t *testing.T) {
 	require.NoError(t, i18n.Init())
-	previousRetries := common.RetryTimes
-	common.RetryTimes = 2
-	t.Cleanup(func() { common.RetryTimes = previousRetries })
+	db := modelManagementDB(t, "sqlite", "")
+	previousRetries, previousCache := common.RetryTimes, common.MemoryCacheEnabled
+	common.RetryTimes, common.MemoryCacheEnabled = 2, false
+	t.Cleanup(func() { common.RetryTimes, common.MemoryCacheEnabled = previousRetries, previousCache })
+	// No key of the locked channel is enabled, so every setup of it fails
+	// before any upstream request.
+	locked := model.Channel{Id: 1, Type: constant.ChannelTypeTaskPlugin, Name: "plugin", Key: "k1\nk2", Status: common.ChannelStatusEnabled,
+		ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeySize: 2, MultiKeyStatusList: map[int]int{0: common.ChannelStatusManuallyDisabled, 1: common.ChannelStatusManuallyDisabled}}}
+	require.NoError(t, db.Create(&locked).Error)
 	for _, tc := range []struct {
 		name string
 		// distributorChannel is the channel the distributor set up: the
@@ -714,10 +720,8 @@ func TestLockedTaskSetupFailuresUseRetryBudget(t *testing.T) {
 			c := taskSubmissionTestContext()
 			common.SetContextKey(c, constant.ContextKeyChannelId, tc.distributorChannel)
 			info := taskSubmissionRelayInfo(nil)
-			// No key of the locked channel is enabled, so every setup of it
-			// fails before any upstream request.
-			info.LockedChannel = &model.Channel{Id: 1, Type: constant.ChannelTypeTaskPlugin, Name: "plugin", Key: "k1\nk2",
-				ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeySize: 2, MultiKeyStatusList: map[int]int{0: common.ChannelStatusManuallyDisabled, 1: common.ChannelStatusManuallyDisabled}}}
+			lockedCopy := locked
+			info.LockedChannel = &lockedCopy
 			submits := 0
 			outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
 				submits++
@@ -733,6 +737,45 @@ func TestLockedTaskSetupFailuresUseRetryBudget(t *testing.T) {
 			assert.Equal(t, "attempt_budget_exhausted", events[len(events)-1].Decision.Reason)
 		})
 	}
+}
+
+// A locked channel is set up from its current state on every retry: a key
+// disabled after the first attempt is skipped, and saving the polling cursor
+// does not write the request's stale key status back.
+func TestLockedTaskRetryReadsCurrentKeyStatus(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	db := modelManagementDB(t, "sqlite", "")
+	previousRetries, previousCache := common.RetryTimes, common.MemoryCacheEnabled
+	common.RetryTimes, common.MemoryCacheEnabled = 1, false
+	t.Cleanup(func() { common.RetryTimes, common.MemoryCacheEnabled = previousRetries, previousCache })
+	channel := model.Channel{Name: "locked", Type: constant.ChannelTypeTaskPlugin, Key: "k0\nk1", Status: common.ChannelStatusEnabled,
+		ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeySize: 2, MultiKeyMode: constant.MultiKeyModePolling}}
+	require.NoError(t, db.Create(&channel).Error)
+	snapshot, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+
+	c := taskSubmissionTestContext()
+	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
+	common.SetContextKey(c, constant.ContextKeyChannelKey, "k0")
+	info := taskSubmissionRelayInfo(nil)
+	info.LockedChannel = snapshot
+	var keys []string
+	_, taskErr := executeTaskSubmissionWith(c, info, func(c *gin.Context, _ *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+		keys = append(keys, common.GetContextKeyString(c, constant.ContextKeyChannelKey))
+		if len(keys) == 1 {
+			// An administrator disables key 0 between the attempts.
+			current, err := model.GetChannelById(channel.Id, true)
+			require.NoError(t, err)
+			current.ChannelInfo.MultiKeyStatusList = map[int]int{0: common.ChannelStatusManuallyDisabled}
+			require.NoError(t, current.SaveChannelInfo())
+		}
+		return nil, &dto.TaskError{Code: "upstream_error", Message: "bad gateway", StatusCode: http.StatusBadGateway}
+	})
+	require.NotNil(t, taskErr)
+	assert.Equal(t, []string{"k0", "k1"}, keys)
+	stored, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	assert.Equal(t, common.ChannelStatusManuallyDisabled, stored.ChannelInfo.MultiKeyStatusList[0], "the disabled key stays disabled")
 }
 
 // The final task error may come from an earlier channel; its message is
@@ -751,6 +794,27 @@ func TestRespondTaskSubmissionErrorMasksTriedUpstreams(t *testing.T) {
 	assert.Equal(t, http.StatusBadGateway, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "upstream_error")
 	assert.NotContains(t, recorder.Body.String(), "private-a.example")
+}
+
+// A submission that may have created the task upstream stops on this
+// gateway, and its error reply tells a downstream gateway the same.
+func TestTaskOutcomeUnknownStopsHereAndDownstream(t *testing.T) {
+	taskErr := service.TaskErrorWrapper(errors.New("read: connection reset by peer"), "do_request_failed", http.StatusInternalServerError)
+	service.MarkTaskOutcomeUnknown(taskErr)
+	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}, decideTaskRetry(taskSubmissionTestContext(), taskErr, false))
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{}`))
+	respondTaskSubmissionError(c, taskErr)
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	assert.Equal(t, "unknown", recorder.Header().Get(service.TaskOutcomeHeader))
+
+	ordinary := httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(ordinary)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{}`))
+	respondTaskSubmissionError(c, &dto.TaskError{Code: "upstream_error", Message: "bad gateway", StatusCode: http.StatusBadGateway})
+	assert.Empty(t, ordinary.Header().Get(service.TaskOutcomeHeader))
 }
 
 // The Images protocol renders the upstream error body itself; it is masked

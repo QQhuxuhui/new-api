@@ -233,6 +233,7 @@ func taskPluginImageResponseFormat(request pluginruntime.ProtocolRequestContext)
 // is surfaced so a client sees the vendor reason instead of raw JSON.
 func respondTaskPluginImageError(c *gin.Context, taskErr *dto.TaskError) {
 	service.RecordRequestPolicyTermination(c, taskSubmissionAPIError(taskErr))
+	service.WriteTaskOutcomeHeader(c, taskErr)
 	status := http.StatusInternalServerError
 	if taskErr.StatusCode >= 400 && taskErr.StatusCode <= 599 {
 		status = taskErr.StatusCode
