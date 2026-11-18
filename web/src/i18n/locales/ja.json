@@ -2428,7 +2428,7 @@
     "Exchange rate adjustments: {{count}}": "為替換算：{{count}} モデル",
     "Exchange rate is required": "為替レートは必須です",
     "Exchange rate must be greater than 0": "為替レートは 0 より大きくする必要があります",
-    "Excludes the first attempt. Counted per group.": "初回を除く、グループごとの回数です。",
+    "Same-channel retries for a task locked to its original channel. Other requests try each untried channel until one succeeds.": "元のチャネルに固定されたタスクの同一チャネルでの再試行回数です。その他のリクエストは成功するまで未試行のチャネルへ順に切り替えます。",
     "Execute code in a sandbox during the response": "応答中にサンドボックスでコードを実行",
     "Executor": "実行ノード",
     "Exhausted": "使い切り",

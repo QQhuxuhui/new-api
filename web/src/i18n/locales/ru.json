@@ -2428,7 +2428,7 @@
     "Exchange rate adjustments: {{count}}": "Пересчёт по курсу: {{count}}",
     "Exchange rate is required": "Требуется курс обмена",
     "Exchange rate must be greater than 0": "Курс обмена должен быть больше 0",
-    "Excludes the first attempt. Counted per group.": "Без первой попытки, отдельно для каждой группы.",
+    "Same-channel retries for a task locked to its original channel. Other requests try each untried channel until one succeeds.": "Повторы на том же канале для задачи, привязанной к исходному каналу. Остальные запросы пробуют каждый ещё не опробованный канал до успеха.",
     "Execute code in a sandbox during the response": "Выполнять код в песочнице во время ответа",
     "Executor": "Исполнитель",
     "Exhausted": "Исчерпано",

@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -400,4 +401,48 @@ func TestStreamIdleBackstopKeepsLongestFiniteTimeout(t *testing.T) {
 
 	info.ChannelSetting.StreamTimeoutSeconds = common.GetPointer(0)
 	assert.Zero(t, streamIdleBackstop(info), "never timing out disables the backstop")
+}
+
+// A task submission is moved to another channel only when the failed request
+// certainly never reached the upstream. The record comes from the transport,
+// since the error the relay returns is masked.
+func TestRequestMayHaveReachedUpstream(t *testing.T) {
+	service.InitHttpClient()
+	gin.SetMode(gin.TestMode)
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	refusedURL := "http://" + closed.Addr().String()
+	require.NoError(t, closed.Close())
+	// The upstream reads the submission, then drops the connection without
+	// a reply, as when it accepted the task but the receipt was lost.
+	hangUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		if conn, _, hijackErr := w.(http.Hijacker).Hijack(); hijackErr == nil {
+			_ = conn.Close()
+		}
+	}))
+	t.Cleanup(hangUp.Close)
+
+	for _, tc := range []struct {
+		name    string
+		baseURL string
+		reached bool
+	}{
+		{"connection refused", refusedURL, false},
+		{"connection dropped after the request", hangUp.URL, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+			// A stale record of an earlier attempt must not leak into this one.
+			c.Set(ginKeyUpstreamRequestWritten, !tc.reached)
+			_, err := DoTaskApiRequest(&stubTaskAdaptor{baseURL: tc.baseURL}, c, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}, strings.NewReader(`{"prompt":"p"}`))
+			require.Error(t, err)
+			assert.Equal(t, tc.reached, RequestMayHaveReachedUpstream(c), err.Error())
+		})
+	}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set(ginKeyUpstreamRequestWritten, true)
+	ForgetUpstreamRequest(c)
+	assert.False(t, RequestMayHaveReachedUpstream(c), "a request that fails before the transport sent nothing")
 }

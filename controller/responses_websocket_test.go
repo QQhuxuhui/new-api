@@ -1455,6 +1455,9 @@ func TestRelayRetryMovesToUntriedChannels(t *testing.T) {
 		responses map[string]int
 		wantOrder []string
 		wantCode  int
+		// wantLastDecision is the final decision persisted with the error
+		// log of the last failed attempt.
+		wantLastDecision string
 	}{
 		{
 			// The production incident of 2026-11-18.
@@ -1466,11 +1469,12 @@ func TestRelayRetryMovesToUntriedChannels(t *testing.T) {
 			wantCode:  http.StatusOK,
 		},
 		{
-			name:      "every candidate fails and the last upstream error is returned",
-			channels:  []string{"A", "B"},
-			responses: map[string]int{"A": http.StatusBadGateway, "B": http.StatusTooManyRequests},
-			wantOrder: []string{"A", "B"},
-			wantCode:  http.StatusTooManyRequests,
+			name:             "every candidate fails and the last upstream error is returned",
+			channels:         []string{"A", "B"},
+			responses:        map[string]int{"A": http.StatusBadGateway, "B": http.StatusTooManyRequests},
+			wantOrder:        []string{"A", "B"},
+			wantCode:         http.StatusTooManyRequests,
+			wantLastDecision: "stop/candidates_exhausted",
 		},
 		{
 			name:      "a channel without an enabled key is passed without an upstream request",
@@ -1481,22 +1485,23 @@ func TestRelayRetryMovesToUntriedChannels(t *testing.T) {
 			wantCode:  http.StatusOK,
 		},
 		{
-			name:      "a local failure after an upstream failure keeps the upstream error",
-			channels:  []string{"A", "B"},
-			noKey:     []string{"B"},
-			responses: map[string]int{"A": http.StatusBadGateway},
-			wantOrder: []string{"A"},
-			wantCode:  http.StatusBadGateway,
+			name:             "a local failure after an upstream failure keeps the upstream error",
+			channels:         []string{"A", "B"},
+			noKey:            []string{"B"},
+			responses:        map[string]int{"A": http.StatusBadGateway},
+			wantOrder:        []string{"A"},
+			wantCode:         http.StatusBadGateway,
+			wantLastDecision: "stop/candidates_exhausted",
 		},
 	} {
 		for _, memoryCache := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/memory cache %v", tc.name, memoryCache), func(t *testing.T) {
 				fixture := newResponsesWSBillingTest(t, `tier("request", fixed(0.002))`, func(*websocket.Conn, *http.Request) {})
-				previousRetries, previousMemory := common.RetryTimes, common.MemoryCacheEnabled
-				common.RetryTimes = 0
+				previousRetries, previousMemory, previousErrorLog := common.RetryTimes, common.MemoryCacheEnabled, constant.ErrorLogEnabled
+				common.RetryTimes, constant.ErrorLogEnabled = 0, true
 				require.NoError(t, operation_setting.ChannelErrorRulesFromString(`[{"id":"saturated","name":"saturated","keywords":["当前分组上游负载已饱和"],"match_type":"KEYWORD_ONLY","enabled":true,"priority":90,"error_type":"client"}]`))
 				t.Cleanup(func() {
-					common.RetryTimes, common.MemoryCacheEnabled = previousRetries, previousMemory
+					common.RetryTimes, common.MemoryCacheEnabled, constant.ErrorLogEnabled = previousRetries, previousMemory, previousErrorLog
 					require.NoError(t, operation_setting.ChannelErrorRulesFromString(operation_setting.DefaultChannelErrorRulesToString()))
 					model.InitChannelCache()
 				})
@@ -1562,6 +1567,22 @@ func TestRelayRetryMovesToUntriedChannels(t *testing.T) {
 				assert.Equal(t, tc.wantOrder, order, "each channel receives at most one request, in priority order")
 				assert.Equal(t, tc.wantCode, response.StatusCode, string(body))
 				assert.NotContains(t, string(body), baseURL, "earlier channels' upstream addresses stay masked")
+				if tc.wantLastDecision != "" {
+					var stored model.Log
+					require.NoError(t, model.LOG_DB.Where("type = ?", model.LogTypeError).Order("id desc").First(&stored).Error)
+					other, err := common.StrToMap(stored.Other)
+					require.NoError(t, err)
+					adminInfo, ok := other["admin_info"].(map[string]any)
+					require.True(t, ok, stored.Other)
+					events, ok := adminInfo["request_policy"].([]any)
+					require.True(t, ok, stored.Other)
+					last, ok := events[len(events)-1].(map[string]any)
+					require.True(t, ok)
+					decision, ok := last["decision"].(map[string]any)
+					require.True(t, ok)
+					assert.Equal(t, tc.wantLastDecision, fmt.Sprintf("%v/%v", decision["action"], decision["reason"]))
+					assert.Equal(t, float64(tc.wantCode), other["status_code"], "the log carries the error returned to the client")
+				}
 			})
 		}
 	}

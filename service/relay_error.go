@@ -85,6 +85,20 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		})
 	}
 
+	RecordChannelErrorLog(c, channelError.ChannelId, err, relayInfo)
+}
+
+// RecordChannelErrorLog writes the error log of a failed attempt with the
+// request's decision record so far. ProcessChannelError writes it for each
+// upstream failure; a request whose routing ended on a failure that has no
+// log of its own, such as the last candidate failing setup, writes it again
+// with the error returned to the client so the persisted record ends in the
+// stop.
+func RecordChannelErrorLog(c *gin.Context, channelID int, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) {
+	if err == nil {
+		return
+	}
+	upstreamURLs := common.UpstreamAddresses(c)
 	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {
 		userId := c.GetInt("id")
 		tokenName := c.GetString("token_name")
@@ -106,7 +120,7 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
-		model.RecordErrorLog(c, userId, channelError.ChannelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(upstreamURLs...), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+		model.RecordErrorLog(c, userId, channelID, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(upstreamURLs...), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 }
 

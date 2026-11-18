@@ -301,6 +301,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		// candidates bound the loop. When they run out the call answers with
 		// the last dial error, else the last setup failure.
 		var lastDialErr, lastSetupErr *types.NewAPIError
+		var lastDialChannelID int
 		for ; ; retry.IncreaseRetry() {
 			if err := c.Request.Context().Err(); err != nil && retry.GetRetry() > 0 {
 				return types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry())
@@ -323,8 +324,14 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				service.AppendUsedChannel(c, channel.Id)
 				lastSetupErr = apiErr
 				common.RecordTriedUpstreamAddresses(c)
-				if service.DecideSetupFailureRetry(c).Action == "retry" {
+				decision := service.StopWhenCandidatesExhausted(retry, service.DecideSetupFailureRetry(c))
+				service.RecordPolicyFailure(c, channel.Id, apiErr, decision)
+				if decision.Action == "retry" {
 					continue
+				}
+				if decision.Reason == "candidates_exhausted" && lastDialErr != nil {
+					service.RecordChannelErrorLog(c, lastDialChannelID, lastDialErr, info)
+					return lastDialErr
 				}
 				return apiErr
 			}
@@ -360,9 +367,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				apiErr = service.NormalizeViolationFeeError(types.NewError(dialErr, types.ErrorCodeDoRequestFailed))
 				service.ResetStatusCode(apiErr, c.GetString("status_code_mapping"))
 				info.LastError = apiErr
-				lastDialErr = apiErr
+				lastDialErr, lastDialChannelID = apiErr, channel.Id
 				common.RecordTriedUpstreamAddresses(c)
-				decision := service.DecideRelayRetry(c, apiErr)
+				decision := service.StopWhenCandidatesExhausted(retry, service.DecideRelayRetry(c, apiErr))
 				service.RecordPolicyFailure(c, channel.Id, apiErr, decision)
 				service.ProcessChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, info.ApiKey, channel.GetAutoBan()), apiErr, info)
 				if decision.Action == "retry" {

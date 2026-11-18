@@ -696,6 +696,39 @@ func TestServeTaskPluginProtocolNonStreamUsesFinalHookAndHostEnvelope(t *testing
 	assert.NotContains(t, recorder.Body.String(), "client_response_secret")
 }
 
+// A retry on a shared endpoint can move the submission to a channel of
+// another candidate plugin; that plugin's task is then presented by it.
+func TestServeTaskPluginProtocolPresentsWithPluginThatTookTheRetry(t *testing.T) {
+	render := func(text string) string {
+		return `export const protocols = {openai_responses: {
+			renderEvents: function() { throw new Error("non-stream called renderEvents"); },
+			renderFinal: function() {
+				return {output: [{type: "message", status: "completed", role: "assistant",
+					content: [{type: "output_text", text: "` + text + `", annotations: [], logprobs: []}]}]};
+			}
+		}};`
+	}
+	first := compilePluginProtocolTestEndpoint(t, "shared-first", render("from-first"))
+	second := compilePluginProtocolTestEndpoint(t, "shared-second", render("from-second"))
+	c, recorder := newPluginProtocolTestContext(false, false)
+	c.Set(pluginruntime.ContextKeyPinnedEndpoint, first)
+	deps := pluginProtocolTestDeps()
+	deps.submit = func(c *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+		// The first plugin's channel failed; setup of the retry channel
+		// re-pinned the endpoint to the second candidate.
+		c.Set(pluginruntime.ContextKeyPinnedEndpoint, second)
+		return pluginProtocolTestOutcome(info, second.Plugin.Meta.Key, "task_shared", nil), nil
+	}
+	deps.loadTask = func(_ context.Context, _ int, platform constant.TaskPlatform, _ string) (*model.Task, bool, error) {
+		return &model.Task{TaskID: "task_shared", Platform: platform, UserId: 71, Status: model.TaskStatusSuccess}, true, nil
+	}
+
+	serveTaskPluginProtocol(c, first, deps)
+
+	assert.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	assert.Contains(t, recorder.Body.String(), "from-second")
+}
+
 func TestServeTaskPluginProtocolNonStreamInjectsHostArtifactCapabilities(t *testing.T) {
 	pinned := compilePluginProtocolTestEndpoint(t, "final-artifacts", `
 		export function listArtifacts() {

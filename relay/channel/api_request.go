@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"regexp"
 	"strings"
@@ -508,7 +509,15 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		var once sync.Once
 		releaseRelayTimeout = func() { once.Do(release) }
 	}
+	// The error below is masked for the client, so whether the request left
+	// is recorded from the transport itself.
+	var requestWritten atomic.Bool
+	c.Set(ginKeyUpstreamRequestWritten, false)
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+		WroteHeaders: func() { requestWritten.Store(true) },
+	}))
 	resp, err := relayClient.Do(req)
+	c.Set(ginKeyUpstreamRequestWritten, requestWritten.Load())
 	if releaseRelayTimeout != nil && (err != nil || resp == nil) {
 		releaseRelayTimeout()
 	}
@@ -577,6 +586,25 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
 	return resp, nil
+}
+
+// ginKeyUpstreamRequestWritten records whether the last upstream request of
+// this context wrote its headers to a connection.
+const ginKeyUpstreamRequestWritten = "upstream_request_written"
+
+// RequestMayHaveReachedUpstream reports whether the last upstream request of
+// the context may have been received. A request whose headers were never
+// written to a connection (it failed to build, resolve, dial or complete the
+// TLS handshake) certainly was not; once they were, a lost reply leaves the
+// outcome unknown.
+func RequestMayHaveReachedUpstream(c *gin.Context) bool {
+	return c.GetBool(ginKeyUpstreamRequestWritten)
+}
+
+// ForgetUpstreamRequest clears the record of an earlier attempt, so a request
+// that fails before reaching the transport is not taken for a sent one.
+func ForgetUpstreamRequest(c *gin.Context) {
+	c.Set(ginKeyUpstreamRequestWritten, false)
 }
 
 func newTaskAPIRequest(c *gin.Context, fullRequestURL string, requestBody io.Reader) (*http.Request, error) {

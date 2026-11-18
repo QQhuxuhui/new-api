@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -8,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestTaskPluginChannelSelectionFiltersBothCachePaths(t *testing.T) {
@@ -72,7 +74,19 @@ func TestSharedPluginKeysFilterBothChannelSources(t *testing.T) {
 		matches, _ := ChannelSatisfiesFilters(&channel, "shared", filters)
 		assert.Equal(t, index < 2, matches)
 	}
-	assert.Equal(t, abilities[:2], filterAbilitiesByConstraints(abilities, "shared", filters))
+	filtered, err := filterAbilitiesByConstraints(abilities, "shared", filters)
+	require.NoError(t, err)
+	assert.Equal(t, abilities[:2], filtered)
+	// A failed channel lookup cannot check the filters, so it is an error
+	// rather than an unfiltered candidate list.
+	require.NoError(t, DB.Callback().Query().Before("gorm:query").Register("channel_lookup_failure", func(tx *gorm.DB) {
+		if tx.Statement.Table == "channels" {
+			tx.AddError(errors.New("database unavailable"))
+		}
+	}))
+	_, err = filterAbilitiesByConstraints(abilities, "shared", nil)
+	require.NoError(t, DB.Callback().Query().Remove("channel_lookup_failure"))
+	assert.Error(t, err)
 	InitChannelCache()
 	channelSyncLock.RLock()
 	kept, emptied := filterCandidateIDs([]int{910001, 910002, 910003}, "shared", filters)

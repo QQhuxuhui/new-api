@@ -88,8 +88,10 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		}
 	}
 
-	// 锁定到原始任务的渠道（重试时复用同一渠道，轮换 key）
-	ch, err := model.GetChannelById(originTask.ChannelId, true)
+	// 锁定到原始任务的渠道（重试时复用同一渠道，轮换 key）。用缓存中的渠道
+	// 对象，多 key 轮询的游标与其他请求共用；取 key 与渠道设置由提交循环的
+	// 首次尝试完成，计入锁定渠道的重试次数。
+	ch, err := model.CacheGetChannel(originTask.ChannelId)
 	if err != nil {
 		return service.TaskErrorWrapperLocal(err, "channel_not_found", http.StatusBadRequest)
 	}
@@ -97,22 +99,9 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		return service.TaskErrorWrapperLocal(errors.New("the channel of the origin task is disabled"), "task_channel_disable", http.StatusBadRequest)
 	}
 	info.LockedChannel = ch
-
-	if originTask.ChannelId != info.ChannelId {
-		key, _, newAPIError := ch.GetNextEnabledKey()
-		if newAPIError != nil {
-			return service.TaskErrorWrapper(newAPIError, "channel_no_available_key", newAPIError.StatusCode, common.UpstreamAddresses(c)...)
-		}
-		common.SetContextKey(c, constant.ContextKeyChannelKey, key)
-		common.SetContextKey(c, constant.ContextKeyChannelType, ch.Type)
-		common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, ch.GetBaseURL())
-		common.SetContextKey(c, constant.ContextKeyChannelId, originTask.ChannelId)
-
-		info.ChannelBaseUrl = ch.GetBaseURL()
-		info.ChannelId = originTask.ChannelId
-		info.ChannelType = ch.Type
-		info.ApiKey = key
-	}
+	// Driver hooks address the vendor's own task, so ctx.originTaskId is the
+	// upstream id; the client sent the public one.
+	info.OriginTaskID = originTask.GetUpstreamTaskID()
 
 	// 提取 remix 参数（时长、分辨率 → OtherRatios）
 	if info.Action == constant.TaskActionRemix {
@@ -349,9 +338,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 9. 发送请求
+	channel.ForgetUpstreamRequest(c)
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError, common.UpstreamAddresses(c)...)
+		taskErr := service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError, common.UpstreamAddresses(c)...)
+		// A submission the upstream may have received is not sent to another
+		// channel: the first one may already be creating the task.
+		taskErr.SkipRetry = channel.RequestMayHaveReachedUpstream(c)
+		return nil, taskErr
 	}
 	if resp == nil {
 		return nil, service.TaskErrorWrapperLocal(errors.New("upstream returned an empty response"), "fail_to_fetch_task", http.StatusBadGateway)

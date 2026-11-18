@@ -62,11 +62,76 @@ func newPluginProtocolObservationLimiter(limits pluginProtocolObservationLimits)
 	}
 }
 
+// pluginProtocolAdmission is one held observation slot.
+type pluginProtocolAdmission struct {
+	limiter   *pluginProtocolObservationLimiter
+	pluginKey string
+	userID    int
+	tokenID   int
+	once      sync.Once
+}
+
 func (l *pluginProtocolObservationLimiter) acquire(
 	pluginKey string,
 	userID int,
 	tokenID int,
 ) (func(), error) {
+	admission, err := l.admit(pluginKey, userID, tokenID)
+	if err != nil {
+		return nil, err
+	}
+	return admission.release, nil
+}
+
+// moveTo counts the slot against another plugin, the one a retry moved the
+// submission to and that the observation now calls. The task is already
+// durable, so the move is never refused, even past that plugin's limit.
+func (a *pluginProtocolAdmission) moveTo(pluginKey string) {
+	pluginKey = strings.TrimSpace(pluginKey)
+	l := a.limiter
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if pluginKey == "" || pluginKey == a.pluginKey {
+		return
+	}
+	l.plugin[a.pluginKey]--
+	if l.plugin[a.pluginKey] == 0 {
+		delete(l.plugin, a.pluginKey)
+	}
+	l.plugin[pluginKey]++
+	a.pluginKey = pluginKey
+}
+
+func (a *pluginProtocolAdmission) release() {
+	a.once.Do(func() {
+		l := a.limiter
+		l.mu.Lock()
+		defer l.mu.Unlock()
+
+		l.global--
+
+		l.plugin[a.pluginKey]--
+		if l.plugin[a.pluginKey] == 0 {
+			delete(l.plugin, a.pluginKey)
+		}
+
+		l.user[a.userID]--
+		if l.user[a.userID] == 0 {
+			delete(l.user, a.userID)
+		}
+
+		l.token[a.tokenID]--
+		if l.token[a.tokenID] == 0 {
+			delete(l.token, a.tokenID)
+		}
+	})
+}
+
+func (l *pluginProtocolObservationLimiter) admit(
+	pluginKey string,
+	userID int,
+	tokenID int,
+) (*pluginProtocolAdmission, error) {
 	pluginKey = strings.TrimSpace(pluginKey)
 	switch {
 	case pluginKey == "":
@@ -129,29 +194,5 @@ func (l *pluginProtocolObservationLimiter) acquire(
 	}
 	l.token[tokenID]++
 	l.mu.Unlock()
-
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			l.mu.Lock()
-			defer l.mu.Unlock()
-
-			l.global--
-
-			l.plugin[pluginKey]--
-			if l.plugin[pluginKey] == 0 {
-				delete(l.plugin, pluginKey)
-			}
-
-			l.user[userID]--
-			if l.user[userID] == 0 {
-				delete(l.user, userID)
-			}
-
-			l.token[tokenID]--
-			if l.token[tokenID] == 0 {
-				delete(l.token, tokenID)
-			}
-		})
-	}, nil
+	return &pluginProtocolAdmission{limiter: l, pluginKey: pluginKey, userID: userID, tokenID: tokenID}, nil
 }

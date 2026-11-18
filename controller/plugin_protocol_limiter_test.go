@@ -246,3 +246,29 @@ func assertLimitError(
 	assert.Equal(t, expectedScope, limitError.scope)
 	assert.Equal(t, expectedLimit, limitError.limit)
 }
+
+// A retry that moved a submission to another plugin moves its observation
+// slot there too, so each plugin's count matches the observations calling it.
+func TestPluginProtocolObservationAdmissionMovesToRetryPlugin(t *testing.T) {
+	limiter := newPluginProtocolObservationLimiter(pluginProtocolObservationLimits{
+		global:    4,
+		perPlugin: 1,
+		perUser:   4,
+		perToken:  4,
+	})
+	moved, err := limiter.admit("first", 1, 1)
+	require.NoError(t, err)
+	moved.moveTo("second")
+
+	releaseFirst, err := limiter.acquire("first", 2, 2)
+	require.NoError(t, err, "the first plugin's slot was freed")
+	_, err = limiter.acquire("second", 3, 3)
+	var limitErr *pluginProtocolObservationLimitError
+	require.ErrorAs(t, err, &limitErr, "the second plugin's slot is held")
+	assert.Equal(t, "plugin", limitErr.scope)
+
+	moved.release()
+	releaseFirst()
+	assert.Empty(t, limiter.plugin)
+	assert.Zero(t, limiter.global)
+}

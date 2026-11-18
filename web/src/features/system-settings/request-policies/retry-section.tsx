@@ -55,7 +55,9 @@ export function RetrySection() {
                 />
               </FormControl>
               <FormDescription>
-                {t('Excludes the first attempt. Counted per group.')}
+                {t(
+                  'Same-channel retries for a task locked to its original channel. Other requests try each untried channel until one succeeds.'
+                )}
               </FormDescription>
               <FormMessage />
             </FormItem>

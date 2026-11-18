@@ -6,7 +6,10 @@ import (
 
 type TaskError struct {
 	// NoRetry prevents duplicate upstream work after a response has been accepted.
-	NoRetry    bool   `json:"-"`
+	NoRetry bool `json:"-"`
+	// SkipRetry stops the move to another channel: a local billing error
+	// no channel avoids, or a submission the upstream may have received.
+	SkipRetry  bool   `json:"-"`
 	Code       string `json:"code"`
 	Message    string `json:"message"`
 	Data       any    `json:"data"`

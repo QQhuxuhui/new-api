@@ -2428,7 +2428,7 @@
     "Exchange rate adjustments: {{count}}": "Quy đổi theo tỷ giá: {{count}}",
     "Exchange rate is required": "Cần có tỷ giá",
     "Exchange rate must be greater than 0": "Tỷ giá phải lớn hơn 0",
-    "Excludes the first attempt. Counted per group.": "Không tính lần đầu, tính theo từng nhóm.",
+    "Same-channel retries for a task locked to its original channel. Other requests try each untried channel until one succeeds.": "Số lần thử lại trên cùng kênh cho tác vụ gắn với kênh gốc. Các yêu cầu khác lần lượt thử từng kênh chưa thử cho đến khi thành công.",
     "Execute code in a sandbox during the response": "Thực thi mã trong sandbox trong quá trình phản hồi",
     "Executor": "Trình thực thi",
     "Exhausted": "Đã cạn kiệt",

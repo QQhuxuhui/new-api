@@ -2428,7 +2428,7 @@
     "Exchange rate adjustments: {{count}}": "Exchange rate adjustments: {{count}}",
     "Exchange rate is required": "Exchange rate is required",
     "Exchange rate must be greater than 0": "Exchange rate must be greater than 0",
-    "Excludes the first attempt. Counted per group.": "Excludes the first attempt. Counted per group.",
+    "Same-channel retries for a task locked to its original channel. Other requests try each untried channel until one succeeds.": "Same-channel retries for a task locked to its original channel. Other requests try each untried channel until one succeeds.",
     "Execute code in a sandbox during the response": "Execute code in a sandbox during the response",
     "Executor": "Executor",
     "Exhausted": "Exhausted",

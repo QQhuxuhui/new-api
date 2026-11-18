@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
@@ -116,27 +117,9 @@ func markAutoGroupStart(c *gin.Context, group string) {
 // with a nil error means no candidate is left.
 func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, error) {
 	c := param.Ctx
-	groups := []string{param.TokenGroup}
-	if param.TokenGroup == "auto" {
-		userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-		autoGroups := GetRequestAutoGroups(c, userGroup)
-		if len(autoGroups) == 0 {
-			return nil, param.TokenGroup, errors.New("auto groups is not enabled")
-		}
-		groups = autoGroups
-		if start := c.GetString(ginKeyAutoGroupStart); start != "" {
-			groups = nil
-			for i, group := range autoGroups {
-				if group != start {
-					continue
-				}
-				groups = autoGroups[i:]
-				if !common.GetContextKeyBool(c, constant.ContextKeyTokenCrossGroupRetry) {
-					groups = autoGroups[i : i+1]
-				}
-				break
-			}
-		}
+	groups, err := retryCandidateGroups(param)
+	if err != nil {
+		return nil, param.TokenGroup, err
 	}
 
 	filters := GetChannelConstraints(c).Filters
@@ -165,6 +148,56 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		}
 	}
 	return nil, param.TokenGroup, nil
+}
+
+// retryCandidateGroups lists the groups a retry may select from: the token
+// group, or for an auto token every auto group until a channel was picked,
+// then that group and, with cross-group retry, the groups after it.
+func retryCandidateGroups(param *RetryParam) ([]string, error) {
+	c := param.Ctx
+	if param.TokenGroup != "auto" {
+		return []string{param.TokenGroup}, nil
+	}
+	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	autoGroups := GetRequestAutoGroups(c, userGroup)
+	if len(autoGroups) == 0 {
+		return nil, errors.New("auto groups is not enabled")
+	}
+	start := c.GetString(ginKeyAutoGroupStart)
+	if start == "" {
+		return autoGroups, nil
+	}
+	i := slices.Index(autoGroups, start)
+	if i < 0 {
+		return nil, nil
+	}
+	if !common.GetContextKeyBool(c, constant.ContextKeyTokenCrossGroupRetry) {
+		return autoGroups[i : i+1], nil
+	}
+	return autoGroups[i:], nil
+}
+
+// StopWhenCandidatesExhausted turns a retry decision into a stop when no
+// untried channel is left, so the decision recorded with the failed attempt
+// (and the error log written for it) is the one that actually ended routing.
+// A lookup error leaves the retry in place for the next selection to report.
+func StopWhenCandidatesExhausted(param *RetryParam, decision PolicyDecision) PolicyDecision {
+	if decision.Action != "retry" {
+		return decision
+	}
+	groups, err := retryCandidateGroups(param)
+	if err != nil {
+		return decision
+	}
+	pick := model.ChannelPick{Tried: TriedChannels(param.Ctx), IncludeWarning: true}
+	filters := GetChannelConstraints(param.Ctx).Filters
+	for _, group := range groups {
+		channel, _, err := model.GetRandomSatisfiedChannel(group, param.ModelName, pick, filters)
+		if err != nil || channel != nil {
+			return decision
+		}
+	}
+	return PolicyDecision{Action: "stop", Reason: "candidates_exhausted", Source: "system"}
 }
 
 func pinnedTaskPluginIdentities(c *gin.Context, expected string) ([]int, []string) {
@@ -293,33 +326,44 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 		if preferredChannelID, found := GetPreferredChannelByAffinity(c, modelName, usingGroup); found {
 			affinityUsable := false
 			preferred, err := model.CacheGetChannel(preferredChannelID)
-			affinitySatisfied := false
+			// The group the bound channel still serves for this model; a
+			// channel that left every allowed group no longer satisfies it.
+			memberGroup := ""
 			if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled {
-				affinitySatisfied, _ = model.ChannelSatisfiesFilters(preferred, modelName, constraints.Filters)
-			}
-			// A suspension is temporary: the request goes elsewhere but the
-			// binding stays, so the session returns once the channel recovers.
-			affinitySuspended := affinitySatisfied && model.IsChannelSuspended(preferred.Id)
-			if affinitySatisfied && !affinitySuspended {
-				if usingGroup == "auto" {
-					userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-					for _, g := range GetRequestAutoGroups(c, userGroup) {
-						if model.IsChannelEnabledForGroupModel(g, modelName, preferred.Id) {
-							selectGroup = g
-							common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
-							markAutoGroupStart(c, g)
-							channel = preferred
-							affinityUsable = true
-							MarkChannelAffinityUsed(c, g, preferred.Id)
+				if satisfied, _ := model.ChannelSatisfiesFilters(preferred, modelName, constraints.Filters); satisfied {
+					groups := []string{usingGroup}
+					if usingGroup == "auto" {
+						groups = GetRequestAutoGroups(c, common.GetContextKeyString(c, constant.ContextKeyUserGroup))
+					}
+					for _, g := range groups {
+						serves, lookupErr := model.ChannelServesGroupModel(g, modelName, preferred.Id)
+						if lookupErr != nil {
+							// Membership is unknown: keep the binding and fail
+							// the selection rather than treat it as removed.
+							return nil, g, &ChannelSelectError{
+								StatusCode: http.StatusServiceUnavailable, Code: types.ErrorCodeGetChannelFailed, MessageID: i18n.MsgDistributorGetChannelFailed,
+								Params: map[string]any{"Group": g, "Model": modelName, "Error": lookupErr.Error()},
+							}
+						}
+						if serves {
+							memberGroup = g
 							break
 						}
 					}
-				} else if model.IsChannelEnabledForGroupModel(usingGroup, modelName, preferred.Id) {
-					channel = preferred
-					selectGroup = usingGroup
-					affinityUsable = true
-					MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
 				}
+			}
+			// A suspension is temporary: the request goes elsewhere but the
+			// binding stays, so the session returns once the channel recovers.
+			affinitySuspended := memberGroup != "" && model.IsChannelSuspended(preferred.Id)
+			if memberGroup != "" && !affinitySuspended {
+				channel = preferred
+				selectGroup = memberGroup
+				affinityUsable = true
+				if usingGroup == "auto" {
+					common.SetContextKey(c, constant.ContextKeyAutoGroup, memberGroup)
+					markAutoGroupStart(c, memberGroup)
+				}
+				MarkChannelAffinityUsed(c, memberGroup, preferred.Id)
 			}
 			if !affinityUsable && !affinitySuspended && !ShouldKeepChannelAffinityOnChannelDisabled() {
 				ClearCurrentChannelAffinityCache(c)

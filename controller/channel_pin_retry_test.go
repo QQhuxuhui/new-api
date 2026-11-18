@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/common"
@@ -17,13 +18,17 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestShouldRetryHonorsPinRetryMode(t *testing.T) {
@@ -92,11 +97,23 @@ func TestDecideTaskRetryAppliesErrorRules(t *testing.T) {
 	assert.Equal(t, "stop", decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusBadRequest, Message: "key invalid", NoRetry: true}, false).Action, "an accepted task is never resubmitted")
 	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"},
 		decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusInternalServerError}, true), "a locked channel stops after RetryTimes")
-	// A pre-consume rejection such as insufficient balance never reached an
-	// upstream: it stops without moving to another channel.
-	insufficient := service.TaskErrorFromAPIError(types.NewErrorWithStatusCode(errors.New("insufficient quota"), types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry()))
-	assert.True(t, insufficient.LocalError, "a local rejection is kept out of channel health")
-	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "local_rejection", Source: "system"}, decideTaskRetry(c, insufficient, false))
+	// Rules match the unmasked upstream error, as channel health does, even
+	// where the client message has the upstream URL masked.
+	raw := errors.New("POST https://busy.internal.example/v1 returned busy")
+	masked := service.TaskErrorWrapper(raw, "upstream_error", http.StatusTooManyRequests, "https://busy.internal.example")
+	require.NotContains(t, masked.Message, "busy.internal.example")
+	assert.Equal(t, "client_rule_return_immediately", decideTaskRetry(c, masked, false).Reason)
+	// Pre-consume failures never reached an upstream: insufficient balance
+	// and a billing database error both stop without moving to another
+	// channel, and neither counts toward channel health.
+	for _, apiErr := range []*types.NewAPIError{
+		types.NewErrorWithStatusCode(errors.New("insufficient quota"), types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry()),
+		types.NewError(errors.New("wallet query failed"), types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry()),
+	} {
+		preConsume := service.TaskErrorFromAPIError(apiErr)
+		assert.True(t, preConsume.LocalError, "a local rejection is kept out of channel health")
+		assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}, decideTaskRetry(c, preConsume, false), apiErr.Error())
+	}
 }
 
 func TestSameChannelPinsMergeToStricterRetryMode(t *testing.T) {
@@ -349,6 +366,120 @@ func TestRequestPolicyRoutingDatabaseMatrix(t *testing.T) {
 							assert.Equal(t, 2, bound, "a successful fallback rebinds the session")
 						})
 					}
+				}
+			}
+		})
+	}
+}
+
+// A strict session keeps its binding while the bound channel is only
+// suspended, so it returns once the channel recovers; a channel that also
+// left the group no longer serves the session, and its binding is dropped.
+func TestStrictSessionBindingOnSuspendedChannel(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			dsn := ""
+			if dialect.env != "" {
+				dsn = os.Getenv(dialect.env)
+				if dsn == "" {
+					t.Skipf("%s not configured", dialect.env)
+				}
+			}
+			db := modelManagementDB(t, dialect.kind, dsn)
+			previousGroups := setting.UserUsableGroups2JSONString()
+			previousRatios, err := common.Marshal(ratio_setting.GetGroupRatioCopy())
+			require.NoError(t, err)
+			previousRDB := common.RDB
+			redisServer := miniredis.RunT(t)
+			common.RDB = redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+			affinity := operation_setting.GetChannelAffinitySetting()
+			previousAffinity := *affinity
+			t.Cleanup(func() {
+				*affinity = previousAffinity
+				common.RDB = previousRDB
+				require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(previousGroups))
+				require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(previousRatios)))
+			})
+			require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default"}`))
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1}`))
+			snapshot, err := model.BuildRequestPolicy(map[string]string{
+				"channel_affinity_setting.enabled":                  "true",
+				"channel_affinity_setting.session_mode":             "strict",
+				"channel_affinity_setting.keep_on_channel_disabled": "false",
+				"channel_affinity_setting.rules":                    `[{"name":"session","model_regex":[".*"],"key_sources":[{"type":"request_header","key":"X-Session"}],"session_mode":"inherit"}]`,
+			})
+			require.NoError(t, err)
+			*affinity = snapshot.Affinity
+
+			for _, cached := range []bool{false, true} {
+				for _, state := range []string{"suspended", "left_group", "lookup_fails"} {
+					// The database path checks membership with a query; the
+					// memory cache has no lookup to fail.
+					if cached && state == "lookup_fails" {
+						continue
+					}
+					// A failed lookup must not be taken for a channel that left
+					// the group, so that case removes the channel as well.
+					leftGroup := state != "suspended"
+					t.Run(fmt.Sprintf("cache=%t/%s", cached, state), func(t *testing.T) {
+						require.NoError(t, db.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Ability{}).Error)
+						require.NoError(t, db.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.Channel{}).Error)
+						channels := []model.Channel{
+							{Id: 1, Name: "A", Type: 1, Key: "test-only", Status: common.ChannelStatusEnabled, Models: "policy-test", Group: "default", Priority: common.GetPointer(int64(10))},
+							{Id: 2, Name: "B", Type: 1, Key: "test-only", Status: common.ChannelStatusEnabled, Models: "policy-test", Group: "default", Priority: common.GetPointer(int64(5))},
+						}
+						if leftGroup {
+							channels[0].Group = "retired"
+						}
+						for i := range channels {
+							require.NoError(t, db.Create(&channels[i]).Error)
+							require.NoError(t, channels[i].AddAbilities(db))
+						}
+						require.NoError(t, common.RDB.Set(context.Background(), fmt.Sprintf(model.ChannelHealthSuspendedKey, 1), "1", time.Minute).Err())
+						common.MemoryCacheEnabled = cached
+						model.InitChannelCache()
+
+						seed := newPinRetryContext()
+						seed.Request.Header.Set("X-Session", t.Name())
+						_, found := service.GetPreferredChannelByAffinity(seed, "policy-test", "default")
+						require.False(t, found)
+						seed.Set("channel_id", 1)
+						service.RecordChannelAffinity(seed, 1)
+						t.Cleanup(func() { service.ClearCurrentChannelAffinityCache(seed) })
+
+						distribute := func() *gin.Context {
+							request := newPinRetryContext()
+							request.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"policy-test"}`))
+							request.Request.Header.Set("Content-Type", "application/json")
+							request.Request.Header.Set("X-Session", t.Name())
+							common.SetContextKey(request, constant.ContextKeyUsingGroup, "default")
+							middleware.Distribute()(request)
+							return request
+						}
+						if state == "lookup_fails" {
+							require.NoError(t, db.Callback().Query().Before("gorm:query").Register("membership_lookup_failure", func(tx *gorm.DB) {
+								if tx.Statement.Table == "abilities" {
+									tx.AddError(errors.New("database unavailable"))
+								}
+							}))
+						}
+						first := distribute()
+						if state == "lookup_fails" {
+							require.NoError(t, db.Callback().Query().Remove("membership_lookup_failure"))
+						}
+						assert.Equal(t, http.StatusServiceUnavailable, first.Writer.Status(), "a strict session never moves to another channel")
+						bound, found := service.GetPreferredChannelByAffinity(seed, "policy-test", "default")
+						if state != "left_group" {
+							require.True(t, found, "a suspension or an unknown membership keeps the binding")
+							assert.Equal(t, 1, bound)
+							return
+						}
+						assert.False(t, found, "a channel that left the group loses the binding")
+						second := distribute()
+						assert.False(t, second.IsAborted())
+						assert.Equal(t, 2, common.GetContextKeyInt(second, constant.ContextKeyChannelId))
+					})
 				}
 			}
 		})

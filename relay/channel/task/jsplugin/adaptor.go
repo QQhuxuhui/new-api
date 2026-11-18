@@ -222,7 +222,13 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		}
 	}
 	if _, exists := c.Get("task_request"); !exists {
-		if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, "image_to_video"); taskErr != nil {
+		// A remix keeps its action: the driver builds a remix of the origin
+		// video, not a new generation.
+		action := "image_to_video"
+		if info.Action == constant.TaskActionRemix {
+			action = constant.TaskActionRemix
+		}
+		if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, action); taskErr != nil {
 			return taskErr
 		}
 	}

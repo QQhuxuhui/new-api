@@ -118,7 +118,10 @@ func GetChannel(
 	if err != nil {
 		return nil, nil, err
 	}
-	abilities = filterAbilitiesByConstraints(abilities, model, filters)
+	abilities, err = filterAbilitiesByConstraints(abilities, model, filters)
+	if err != nil {
+		return nil, nil, err
+	}
 	// Like the memory cache, retry with the routing name (for example without
 	// @ modifiers) when no channel serves the exact name.
 	if normalized := ratio_setting.RoutingMatchModelName(model); len(abilities) == 0 && normalized != "" && normalized != model {
@@ -126,7 +129,10 @@ func GetChannel(
 		if err != nil {
 			return nil, nil, err
 		}
-		abilities = filterAbilitiesByConstraints(abilities, model, filters)
+		abilities, err = filterAbilitiesByConstraints(abilities, model, filters)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	var missed []int
 	if len(abilities) > 0 {
@@ -190,11 +196,11 @@ func GetChannel(
 }
 
 // filterAbilitiesByConstraints applies the same ChannelSatisfiesFilters
-// predicate used by the memory-cache path. A failed channel lookup fails
-// closed when a task-plugin identity is required and fails open otherwise.
-func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters []dto.ChannelFilter) []Ability {
+// predicate used by the memory-cache path. A failed channel lookup is a
+// selection error: the filters cannot be checked, so no candidate is chosen.
+func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters []dto.ChannelFilter) ([]Ability, error) {
 	if len(abilities) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	channelIds := make([]int, 0, len(abilities))
@@ -209,10 +215,7 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
 
 	var channels []*Channel
 	if err := DB.Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
-		if identityFilterRequiresKey(filters) {
-			return nil
-		}
-		return abilities
+		return nil, err
 	}
 
 	channelsByID := make(map[int]*Channel, len(channels))
@@ -227,16 +230,7 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
 			filtered = append(filtered, ability)
 		}
 	}
-	return filtered
-}
-
-func identityFilterRequiresKey(filters []dto.ChannelFilter) bool {
-	for _, filter := range filters {
-		if filter.Kind == dto.FilterTaskPluginIdentity && filter.TaskPluginKey != "" {
-			return true
-		}
-	}
-	return false
+	return filtered, nil
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {

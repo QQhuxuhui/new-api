@@ -159,6 +159,21 @@ func resolveTaskPluginForProtocolRetrieve(platform constant.TaskPlatform) (*plug
 	return plugin, generation, ok
 }
 
+// submittedPinnedEndpoint returns the binding of the plugin that took the
+// submission. A retry on an endpoint several plugins share may move to a
+// channel of another candidate plugin, which then also presents the result.
+func submittedPinnedEndpoint(c *gin.Context, pinned pluginruntime.PinnedEndpoint) pluginruntime.PinnedEndpoint {
+	value, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint)
+	if !exists {
+		return pinned
+	}
+	current, ok := value.(pluginruntime.PinnedEndpoint)
+	if !ok || current.Plugin == nil || current.Protocol != pinned.Protocol {
+		return pinned
+	}
+	return current
+}
+
 func serveTaskPluginProtocol(
 	c *gin.Context,
 	pinned pluginruntime.PinnedEndpoint,
@@ -225,7 +240,7 @@ func serveTaskPluginProtocol(
 		protocolRequest.Stream,
 	)
 
-	release, admissionErr := deps.admissions.acquire(
+	admission, admissionErr := deps.admissions.admit(
 		pinned.Plugin.Meta.Key,
 		common.GetContextKeyInt(c, constant.ContextKeyUserId),
 		common.GetContextKeyInt(c, constant.ContextKeyTokenId),
@@ -240,7 +255,7 @@ func serveTaskPluginProtocol(
 		respondPluginProtocolError(c, http.StatusUnauthorized, "authentication_error", "Authentication failed")
 		return
 	}
-	defer release()
+	defer admission.release()
 	logger.LogDebug(c, "task_plugin subsystem=protocol event=admission_acquired generation=%d plugin=%q", generation, pluginKey)
 
 	clientRequest := c.Request
@@ -323,6 +338,9 @@ func serveTaskPluginProtocol(
 		respondPluginProtocolSubmissionError(c, taskErr)
 		return
 	}
+	pinned = submittedPinnedEndpoint(c, pinned)
+	pluginKey = pinned.Plugin.Meta.Key
+	admission.moveTo(pluginKey)
 	if outcome == nil || outcome.Task == nil || outcome.RelayInfo == nil ||
 		outcome.Task.UserId != relayInfo.UserId ||
 		outcome.Task.Platform != constant.TaskPlatform(pinned.Plugin.Meta.Key) {

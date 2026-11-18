@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
+	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
@@ -768,4 +769,65 @@ export function extractUsage() { return {seconds:2}; }
 			assert.Equal(t, tc.expressions["retry-b::declared-model"], info.TieredBillingSnapshot.ExprString)
 		})
 	}
+}
+
+// A remix arrives without the distributor and before any channel meta. It
+// locks the origin task's channel and is submitted to the vendor as a remix
+// of the origin task's upstream video, not as a new generation.
+func TestRemixSubmitsRemixOfOriginUpstreamVideo(t *testing.T) {
+	database := setupRelayChannelDB(t)
+	require.NoError(t, database.AutoMigrate(&model.Task{}))
+	saveBillingConfig(t)
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices)) })
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"sora-2":0.1}`))
+	service.InitHttpClient()
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"video_remixed","status":"queued"}`))
+	}))
+	t.Cleanup(server.Close)
+	origin := &model.Channel{Name: "sora", Type: constant.ChannelTypeSora, Key: "origin-key", Status: common.ChannelStatusEnabled, BaseURL: &server.URL}
+	require.NoError(t, database.Create(origin).Error)
+	require.NoError(t, database.Create(&model.Task{TaskID: "task_public", UserId: 7, ChannelId: origin.Id, Platform: constant.TaskPlatform("sora"),
+		Properties:  model.Properties{OriginModelName: "sora-2"},
+		PrivateData: model.TaskPrivateData{UpstreamTaskID: "video_upstream"}}).Error)
+	source, err := builtinplugins.Source("sora")
+	require.NoError(t, err)
+	plugin, err := pluginruntime.NewRegistry().RegisterFactory(source, pluginruntime.Options{Key: "sora"})
+	require.NoError(t, err)
+
+	require.NoError(t, i18n.Init())
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/task_public/remix", strings.NewReader(`{"prompt":"make it blue"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "video_id", Value: "task_public"}}
+	c.Set("group", "default")
+	info, err := relaycommon.GenRelayInfo(c, kittypes.RelayFormatTask, nil, nil)
+	require.NoError(t, err)
+	require.False(t, info.HasChannelMeta())
+	info.UserId, info.UserGroup, info.UsingGroup = 7, "default", "default"
+
+	require.Nil(t, ResolveOriginTask(c, info))
+	locked, ok := info.LockedChannel.(*model.Channel)
+	require.True(t, ok)
+	assert.Equal(t, origin.Id, locked.Id)
+	assert.Equal(t, "sora-2", info.OriginModelName)
+	assert.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyChannelId), "the submission loop sets the locked channel up")
+
+	// The submission loop's setup of the locked channel.
+	common.SetContextKey(c, constant.ContextKeyChannelId, origin.Id)
+	common.SetContextKey(c, constant.ContextKeyChannelType, origin.Type)
+	common.SetContextKey(c, constant.ContextKeyChannelKey, "origin-key")
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
+	c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Plugin: plugin})
+	c.Set("task_plugin_key", "sora")
+	info.Billing = &imageReservation{limit: 1 << 30}
+	_, taskErr := RelayTaskSubmit(c, info)
+	require.Nil(t, taskErr, "submission error: %+v", taskErr)
+	assert.Equal(t, []string{"POST /v1/videos/video_upstream/remix"}, paths)
+	assert.Equal(t, constant.TaskActionRemix, info.Action)
 }

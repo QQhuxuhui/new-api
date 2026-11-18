@@ -88,6 +88,7 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 		respondTaskPluginImageError(c, taskErr)
 		return
 	}
+	pinned = submittedPinnedEndpoint(c, pinned)
 	if outcome == nil || outcome.Task == nil || outcome.Task.Platform != constant.TaskPlatform(pinned.Plugin.Meta.Key) {
 		logger.LogError(c, common.LogText("task protocol submission returned an invalid durable outcome"))
 		respondPluginProtocolError(c, http.StatusInternalServerError, "task_protocol_error", "Task protocol request failed")
@@ -248,6 +249,9 @@ func respondTaskPluginImageError(c *gin.Context, taskErr *dto.TaskError) {
 			code = upstream.Code
 		}
 	}
+	// The final error may come from any tried channel, and an upstream body
+	// can name its host without a URL around it.
+	message = common.MaskSensitiveInfo(message, common.UpstreamAddresses(c)...)
 	errorType := "new_api_error"
 	if status < http.StatusInternalServerError {
 		errorType = "invalid_request_error"

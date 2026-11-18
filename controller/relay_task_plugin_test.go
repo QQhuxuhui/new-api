@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
@@ -689,4 +690,80 @@ func TestExecuteTaskSubmissionRefundsWhenFinalReserveFails(t *testing.T) {
 	assert.Equal(t, []string{"reserve", "refund"}, events)
 	assert.Equal(t, 1, billing.refunds)
 	assert.False(t, c.Writer.Written())
+}
+
+// Every setup failure of a locked channel uses one attempt of its RetryTimes
+// budget and keeps its own error code, including the first setup of a remix,
+// which reaches its origin task's channel without the distributor.
+func TestLockedTaskSetupFailuresUseRetryBudget(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	previousRetries := common.RetryTimes
+	common.RetryTimes = 2
+	t.Cleanup(func() { common.RetryTimes = previousRetries })
+	for _, tc := range []struct {
+		name string
+		// distributorChannel is the channel the distributor set up: the
+		// locked one for a pinned continuation, none for a remix.
+		distributorChannel int
+		wantSubmits        int
+	}{
+		{name: "pinned continuation", distributorChannel: 1, wantSubmits: 1},
+		{name: "remix", distributorChannel: 0, wantSubmits: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := taskSubmissionTestContext()
+			common.SetContextKey(c, constant.ContextKeyChannelId, tc.distributorChannel)
+			info := taskSubmissionRelayInfo(nil)
+			// No key of the locked channel is enabled, so every setup of it
+			// fails before any upstream request.
+			info.LockedChannel = &model.Channel{Id: 1, Type: constant.ChannelTypeTaskPlugin, Name: "plugin", Key: "k1\nk2",
+				ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeySize: 2, MultiKeyStatusList: map[int]int{0: common.ChannelStatusManuallyDisabled, 1: common.ChannelStatusManuallyDisabled}}}
+			submits := 0
+			outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+				submits++
+				return nil, &dto.TaskError{Code: "upstream_error", Message: "bad gateway", StatusCode: http.StatusBadGateway}
+			})
+			assert.Nil(t, outcome)
+			require.NotNil(t, taskErr)
+			assert.Equal(t, tc.wantSubmits, submits)
+			assert.Equal(t, "channel:no_available_key", taskErr.Code)
+			assert.Equal(t, []string{"1", "1", "1"}, c.GetStringSlice("use_channel"), "three attempts: the first and RetryTimes retries")
+			events := service.RequestPolicy(c).Events()
+			require.NotEmpty(t, events)
+			assert.Equal(t, "attempt_budget_exhausted", events[len(events)-1].Decision.Reason)
+		})
+	}
+}
+
+// The final task error may come from an earlier channel; its message is
+// masked against every tried upstream, including hosts without a URL.
+func TestRespondTaskSubmissionErrorMasksTriedUpstreams(t *testing.T) {
+	previousErrorLog := constant.ErrorLogEnabled
+	constant.ErrorLogEnabled = false
+	t.Cleanup(func() { constant.ErrorLogEnabled = previousErrorLog })
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/plugin/submit", strings.NewReader(`{}`))
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://private-a.example")
+	common.RecordTriedUpstreamAddresses(c)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://public-b.example")
+	respondTaskSubmissionError(c, &dto.TaskError{Code: "upstream_error", Message: "backend private-a.example unavailable", StatusCode: http.StatusBadGateway})
+	assert.Equal(t, http.StatusBadGateway, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "upstream_error")
+	assert.NotContains(t, recorder.Body.String(), "private-a.example")
+}
+
+// The Images protocol renders the upstream error body itself; it is masked
+// the same way and keeps the upstream status and business code.
+func TestRespondTaskPluginImageErrorMasksTriedUpstreams(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{}`))
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://private-a.example")
+	common.RecordTriedUpstreamAddresses(c)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://public-b.example")
+	respondTaskPluginImageError(c, &dto.TaskError{Code: "upstream_error", Message: `{"code":"backend_down","message":"backend private-a.example unavailable"}`, StatusCode: http.StatusBadGateway})
+	assert.Equal(t, http.StatusBadGateway, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "backend_down")
+	assert.NotContains(t, recorder.Body.String(), "private-a.example")
 }

@@ -2428,7 +2428,7 @@
     "Exchange rate adjustments: {{count}}": "按匯率調整：{{count}} 個模型",
     "Exchange rate is required": "匯率為必填項",
     "Exchange rate must be greater than 0": "匯率必須大於 0",
-    "Excludes the first attempt. Counted per group.": "不含首次，依分組計算。",
+    "Same-channel retries for a task locked to its original channel. Other requests try each untried channel until one succeeds.": "鎖定原渠道的任務在同一渠道上的重試次數。其他請求會依序切換到未試過的渠道，直到成功。",
     "Execute code in a sandbox during the response": "在回應過程中沙箱執行程式碼",
     "Executor": "執行實例",
     "Exhausted": "已耗盡",
