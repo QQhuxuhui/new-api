@@ -92,6 +92,11 @@ func TestDecideTaskRetryAppliesErrorRules(t *testing.T) {
 	assert.Equal(t, "stop", decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusBadRequest, Message: "key invalid", NoRetry: true}, false).Action, "an accepted task is never resubmitted")
 	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"},
 		decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusInternalServerError}, true), "a locked channel stops after RetryTimes")
+	// A pre-consume rejection such as insufficient balance never reached an
+	// upstream: it stops without moving to another channel.
+	insufficient := service.TaskErrorFromAPIError(types.NewErrorWithStatusCode(errors.New("insufficient quota"), types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry()))
+	assert.True(t, insufficient.LocalError, "a local rejection is kept out of channel health")
+	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "local_rejection", Source: "system"}, decideTaskRetry(c, insufficient, false))
 }
 
 func TestSameChannelPinsMergeToStricterRetryMode(t *testing.T) {
