@@ -526,10 +526,16 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		},
 	}))
 	resp, err := relayClient.Do(req)
-	// A request is written into a buffer before it is flushed. The transport
-	// replays a request on a new connection only when nothing of it went out,
-	// so a final failure to connect means the upstream received nothing.
-	c.Set(ginKeyUpstreamRequestWritten, requestWritten.Load() && !failedToConnect(err))
+	// A request is written into a buffer before it is flushed. Without an
+	// idempotency key the transport replays a request on a new connection
+	// only when nothing of it went out, so a final failure to connect means
+	// the upstream received nothing. A request carrying one may be replayed
+	// after it arrived, and is then taken as sent.
+	written := requestWritten.Load()
+	if written && failedToConnect(err) && req.Header.Get("Idempotency-Key") == "" && req.Header.Get("X-Idempotency-Key") == "" {
+		written = false
+	}
+	c.Set(ginKeyUpstreamRequestWritten, written)
 	if releaseRelayTimeout != nil && (err != nil || resp == nil) {
 		releaseRelayTimeout()
 	}

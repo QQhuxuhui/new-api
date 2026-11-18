@@ -61,6 +61,28 @@ func TestViduMetadataCannotChangeWhatIsBilled(t *testing.T) {
 	assert.Equal(t, float64(7), body["seed"])
 }
 
+// Vidu has no remix of an earlier video: a remix, from the host's remix
+// route or the legacy remixGenerate action, is rejected rather than sent to
+// text-to-video as a new billed task.
+func TestViduRejectsRemix(t *testing.T) {
+	source, err := builtinplugins.Source("vidu")
+	require.NoError(t, err)
+	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "vidu"})
+	require.NoError(t, err)
+	for name, ctx := range map[string]map[string]any{
+		"remix route": {"action": "remix", "originTaskId": "video_1",
+			"requestBody": map[string]any{"model": "viduq2", "prompt": "p"}},
+		"remixGenerate": {"requestBody": map[string]any{"model": "viduq2", "prompt": "p", "metadata": map[string]any{"action": "remixGenerate"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx["baseUrl"], ctx["apiKey"], ctx["model"], ctx["upstreamModel"] = "https://api.vidu.example", "vendor-key", "viduq2", "viduq2"
+			_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", ctx)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "remix is not supported")
+		})
+	}
+}
+
 // A New API channel reaches Vidu through another gateway's /vidu routes. The
 // gateway rebuilds the request this driver sent, so Vidu receives one body and
 // both gateways bill the same facts, and the gateway's task reads back as the

@@ -197,6 +197,10 @@ func ApplyOriginTaskAffinity(c *gin.Context, info *relaycommon.RelayInfo) *dto.T
 	return ApplyChannelPin(c, info)
 }
 
+// taskErrorBodyLimit bounds the part of a failed submission's reply that is
+// read for its error message.
+const taskErrorBodyLimit = 1 << 20
+
 // RelayTaskSubmit 完成 task 提交的全部流程（每次尝试调用一次）：
 // 刷新渠道元数据 → 确定 platform/adaptor → 验证请求 →
 // 估算计费(EstimateBilling) → 计算价格 → 预扣费（重试时补足差额）→
@@ -378,7 +382,8 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// A gateway error renderer may answer a failure with 200, so the header
 	// marks the reply a failure whatever its status.
 	if resp.StatusCode/100 != 2 || outcomeUnknown {
-		responseBody, _ := io.ReadAll(resp.Body)
+		// The body only describes the failure: read a bounded part of it.
+		responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, taskErrorBodyLimit))
 		status := resp.StatusCode
 		if status/100 == 2 {
 			status = http.StatusBadGateway

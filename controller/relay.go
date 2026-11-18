@@ -620,8 +620,18 @@ func executeTaskSubmissionWith(
 	c *gin.Context,
 	relayInfo *relaycommon.RelayInfo,
 	submit taskSubmitAttempt,
-) (*taskSubmissionOutcome, *taskdto.TaskError) {
+) (_ *taskSubmissionOutcome, finalErr *taskdto.TaskError) {
 	policy := service.RequestPolicy(c)
+	// Once an upstream accepted the submission, the task may exist whatever
+	// fails afterwards (reservation, persistence, settlement, the client
+	// leaving): no failure from then on may be resubmitted, here or by a
+	// downstream gateway.
+	accepted := false
+	defer func() {
+		if accepted && finalErr != nil {
+			finalErr.NoRetry = true
+		}
+	}()
 	diagnostics := newTaskPluginSubmitDiagnostics(c)
 	diagnostics.start(relayInfo)
 	var result *relay.TaskSubmitResult
@@ -826,6 +836,7 @@ func executeTaskSubmissionWith(
 		diagnostics.failed("submit", "missing_result", taskErr, false)
 		return nil, taskErr
 	}
+	accepted = true
 	if requestErr := c.Request.Context().Err(); requestErr != nil {
 		diagnostics.cancelled("before_reserve", retryParam.GetRetry()+1)
 		return nil, service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)

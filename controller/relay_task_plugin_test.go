@@ -182,9 +182,23 @@ func TestExecuteTaskSubmissionRefundsWhenInsertFails(t *testing.T) {
 	assert.Nil(t, outcome)
 	require.NotNil(t, taskErr)
 	assert.Equal(t, "task_insert_failed", taskErr.Code)
+	assertAcceptedTaskFailureNotResubmitted(t, taskErr)
 	assert.Equal(t, []string{"reserve", "insert", "refund"}, events)
 	assert.Equal(t, 1, billing.refunds)
 	assert.False(t, c.Writer.Written())
+}
+
+// assertAcceptedTaskFailureNotResubmitted checks that a failure after an
+// upstream accepted the task is not moved to another channel, and that its
+// reply tells a downstream gateway the task may exist.
+func assertAcceptedTaskFailureNotResubmitted(t *testing.T, taskErr *dto.TaskError) {
+	t.Helper()
+	assert.Equal(t, "stop", decideTaskRetry(taskSubmissionTestContext(), taskErr, false).Action)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{}`))
+	respondTaskSubmissionError(c, taskErr)
+	assert.Equal(t, "unknown", recorder.Header().Get(service.TaskOutcomeHeader))
 }
 
 func TestExecuteTaskSubmissionSettlementFailureStaysDurableAndWritesNothing(t *testing.T) {
@@ -204,6 +218,7 @@ func TestExecuteTaskSubmissionSettlementFailureStaysDurableAndWritesNothing(t *t
 	assert.Nil(t, outcome)
 	require.NotNil(t, taskErr)
 	assert.Equal(t, "task_billing_settlement_failed", taskErr.Code)
+	assertAcceptedTaskFailureNotResubmitted(t, taskErr)
 	assert.Equal(t, []string{"reserve", "insert", "settle"}, events)
 	assert.Zero(t, billing.refunds)
 	var count int64

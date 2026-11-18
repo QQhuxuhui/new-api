@@ -7,7 +7,7 @@ export const meta = {
     en: "Shengshu Vidu video generation (text-to-video, image-to-video, first-and-last-frame, and reference-to-video)",
     zh: "生数 Vidu 视频生成（文生视频、图生视频、首尾帧、参考生视频）",
   },
-  version: "1.2.0",
+  version: "1.2.1",
   author: { name: "QuantumNous" },
   channelTypes: [52],
   models: [
@@ -385,6 +385,9 @@ function submitSettings(ctx, action) {
 export function buildSubmitRequest(ctx) {
   const req = ctx.requestBody;
   const action = actionFor(req);
+  // Vidu's API has no remix of an earlier video; sending the request to
+  // another endpoint would start an unrelated billed task.
+  if (action === "remix" || ctx.action === "remix") throw new Error("remix is not supported by Vidu");
   const model = ctx.upstreamModel || req.model;
   let body;
   if (req.vendorBody) body = Object.assign({}, req.vendorBody, { model: model });

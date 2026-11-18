@@ -880,19 +880,26 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 		outcome    string
 		status     int
 		wantStatus int
+		large      bool
 	}{
 		{outcome: "unknown", status: http.StatusInternalServerError, wantStatus: http.StatusInternalServerError},
 		// A native error renderer may answer a failure with 200.
 		{outcome: "unknown", status: http.StatusOK, wantStatus: http.StatusBadGateway},
 		{outcome: "", status: http.StatusInternalServerError, wantStatus: http.StatusInternalServerError},
+		// An oversized failure reply is read only up to the limit.
+		{outcome: "unknown", status: http.StatusOK, wantStatus: http.StatusBadGateway, large: true},
 	} {
 		outcome := tc.outcome
-		t.Run(fmt.Sprintf("outcome=%s/status=%d", outcome, tc.status), func(t *testing.T) {
+		t.Run(fmt.Sprintf("outcome=%s/status=%d/large=%t", outcome, tc.status, tc.large), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if outcome != "" {
 					w.Header().Set(service.TaskOutcomeHeader, outcome)
 				}
 				w.WriteHeader(tc.status)
+				if tc.large {
+					_, _ = w.Write([]byte(strings.Repeat("x", 2*taskErrorBodyLimit)))
+					return
+				}
 				_, _ = w.Write([]byte(`{"code":"upstream_error","message":"failed"}`))
 			}))
 			defer server.Close()
@@ -908,6 +915,7 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 			assert.Equal(t, tc.wantStatus, taskErr.StatusCode)
 			assert.Equal(t, outcome == "unknown", taskErr.SkipRetry)
 			assert.Equal(t, outcome == "unknown", taskErr.Code == service.TaskOutcomeUnknownCode)
+			assert.LessOrEqual(t, len(taskErr.Message), taskErrorBodyLimit)
 		})
 	}
 }
