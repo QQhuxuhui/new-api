@@ -532,7 +532,10 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	// the upstream received nothing. A request carrying one may be replayed
 	// after it arrived, and is then taken as sent.
 	written := requestWritten.Load()
-	if written && failedToConnect(err) && req.Header.Get("Idempotency-Key") == "" && req.Header.Get("X-Idempotency-Key") == "" {
+	// The transport checks the header's presence, empty or not.
+	_, idempotencyKey := req.Header["Idempotency-Key"]
+	_, xIdempotencyKey := req.Header["X-Idempotency-Key"]
+	if written && failedToConnect(err) && !idempotencyKey && !xIdempotencyKey {
 		written = false
 	}
 	c.Set(ginKeyUpstreamRequestWritten, written)

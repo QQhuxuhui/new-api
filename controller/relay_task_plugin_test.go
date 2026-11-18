@@ -370,9 +370,25 @@ func TestExecuteTaskSubmissionRefundsCancellationBeforeDurableBarrier(t *testing
 	assert.Nil(t, outcome)
 	require.NotNil(t, taskErr)
 	assert.Equal(t, "request_cancelled", taskErr.Code)
+	assertAcceptedTaskFailureNotResubmitted(t, taskErr)
 	assert.Equal(t, []string{"refund"}, events)
 	assert.Equal(t, 1, billing.refunds)
 	assert.False(t, c.Writer.Written())
+
+	// A submission whose outcome was already unknown keeps that through the
+	// cancellation, too.
+	c = taskSubmissionTestContext()
+	requestContext, cancel = context.WithCancel(c.Request.Context())
+	c.Request = c.Request.WithContext(requestContext)
+	_, taskErr = executeTaskSubmissionWith(c, taskSubmissionRelayInfo(&taskSubmissionTestBilling{events: &events}), func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+		cancel()
+		lost := service.TaskErrorWrapper(errors.New("read: connection reset by peer"), "do_request_failed", http.StatusInternalServerError)
+		service.MarkTaskOutcomeUnknown(lost)
+		return nil, lost
+	})
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "request_cancelled", taskErr.Code)
+	assertAcceptedTaskFailureNotResubmitted(t, taskErr)
 }
 
 func TestExecuteTaskSubmissionDisconnectBeforeUpstreamAcceptanceSkipsSubmitAndRefunds(t *testing.T) {

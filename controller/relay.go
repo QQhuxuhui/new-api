@@ -786,9 +786,16 @@ func executeTaskSubmissionWith(
 		stage = "submit"
 		result, taskErr = submit(c, relayInfo)
 		common.RecordTriedUpstreamAddresses(c)
+		// Whether the task may exist is settled by the submission itself, so
+		// a cancellation noticed afterwards keeps it.
+		mayExist := taskErr != nil && (taskErr.NoRetry || taskErr.Code == service.TaskOutcomeUnknownCode)
+		if taskErr == nil && result != nil {
+			accepted = true
+		}
 		if requestErr := c.Request.Context().Err(); requestErr != nil {
 			diagnostics.cancelled("after_submit", retryParam.GetRetry()+1)
 			taskErr = service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)
+			taskErr.NoRetry = mayExist
 			break
 		}
 		if taskErr == nil {
