@@ -113,29 +113,28 @@ func GetChannel(
 	pick ChannelPick,
 	filters []dto.ChannelFilter,
 ) (*Channel, []int, error) {
+	// Like the memory cache, channels declaring the exact model name come
+	// first, and the routing name (for example without @ modifiers) serves the
+	// request when none of them is left for this pick.
+	names := []string{model}
+	if normalized := ratio_setting.RoutingMatchModelName(model); normalized != "" && normalized != model {
+		names = append(names, normalized)
+	}
 	var abilities []Ability
-	err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Order("priority DESC, weight DESC").Find(&abilities).Error
-	if err != nil {
-		return nil, nil, err
-	}
-	abilities, err = filterAbilitiesByConstraints(abilities, model, filters)
-	if err != nil {
-		return nil, nil, err
-	}
-	// Like the memory cache, retry with the routing name (for example without
-	// @ modifiers) when no channel serves the exact name.
-	if normalized := ratio_setting.RoutingMatchModelName(model); len(abilities) == 0 && normalized != "" && normalized != model {
-		err = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, normalized, true).Order("priority DESC, weight DESC").Find(&abilities).Error
-		if err != nil {
-			return nil, nil, err
-		}
-		abilities, err = filterAbilitiesByConstraints(abilities, model, filters)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
 	var missed []int
-	if len(abilities) > 0 {
+	for _, name := range names {
+		var found []Ability
+		err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, name, true).Order("priority DESC, weight DESC").Find(&found).Error
+		if err != nil {
+			return nil, nil, err
+		}
+		abilities, err = filterAbilitiesByConstraints(found, model, filters)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(abilities) == 0 {
+			continue
+		}
 		priorities := make([]int64, 0)
 		seen := make(map[int64]bool)
 		for _, ability := range abilities {
@@ -163,13 +162,16 @@ func GetChannel(
 			levels[levelIndex[priority]] = append(levels[levelIndex[priority]], ability.ChannelId)
 			ids = append(ids, ability.ChannelId)
 		}
+		selected, nameMissed := pickPriorityLevel(levels, pick, loadChannelHealthFlags(ids))
+		missed = append(missed, nameMissed...)
 		keep := make(map[int]bool)
-		var selected []int
-		selected, missed = pickPriorityLevel(levels, pick, loadChannelHealthFlags(ids))
 		for _, id := range selected {
 			keep[id] = true
 		}
 		abilities = lo.Filter(abilities, func(ability Ability, _ int) bool { return keep[ability.ChannelId] })
+		if len(abilities) > 0 {
+			break
+		}
 	}
 	channel := Channel{}
 	if len(abilities) > 0 {
@@ -191,7 +193,7 @@ func GetChannel(
 	} else {
 		return nil, missed, nil
 	}
-	err = DB.First(&channel, "id = ?", channel.Id).Error
+	err := DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, missed, err
 }
 

@@ -1649,6 +1649,7 @@ export function parseTaskResult(){return {status:"SUCCESS"};}
 export const protocols = {openai_image: {
   decodeRequest: function(ctx) { return {kind:"submit", model: ctx.model, requestBody: ctx.body.value}; },
   render: function(ctx, task) {
+    if (task.data && task.data.renderFails) throw new Error("render failed");
     const data = (task.data && task.data.images || []).map(function(url) { return {url: url}; });
     return {data: data, vendor: "test"};
   },
@@ -1751,18 +1752,23 @@ func TestServeTaskPluginImageProtocolRendersImmediateResultAndInlinesBase64(t *t
 
 // An asynchronous vendor task is polled inside the request until it is
 // terminal; a failure and the protocol timeout become OpenAI error envelopes
-// while the durable task stays with the background poller.
+// while the durable task stays with the background poller. A task that is
+// still running or already succeeded must not be submitted again by a
+// gateway in front of this one; a failed one was refunded and may be.
 func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		terminal    model.TaskStatus
-		wantStatus  int
-		wantCode    string
-		wantMessage string
+		name           string
+		terminal       model.TaskStatus
+		renderFails    bool
+		wantStatus     int
+		wantCode       string
+		wantMessage    string
+		outcomeUnknown bool
 	}{
-		{"success", model.TaskStatusSuccess, http.StatusOK, "", ""},
-		{"failure", model.TaskStatusFailure, http.StatusBadRequest, "image_generation_failed", "DataInspectionFailed"},
-		{"timeout", "", http.StatusGatewayTimeout, "task_timeout", "still running"},
+		{"success", model.TaskStatusSuccess, false, http.StatusOK, "", "", false},
+		{"failure", model.TaskStatusFailure, false, http.StatusBadRequest, "image_generation_failed", "DataInspectionFailed", false},
+		{"timeout", "", false, http.StatusGatewayTimeout, "task_timeout", "still running", true},
+		{"render failure", model.TaskStatusSuccess, true, http.StatusInternalServerError, "task_protocol_error", "Task protocol request failed", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pinned := imageProtocolTestEndpoint(t)
@@ -1782,7 +1788,7 @@ func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 				}
 				task.Status = tc.terminal
 				task.FailReason = "DataInspectionFailed: see https://private.example.com/jobs/1"
-				task.SetData(map[string]any{"images": []string{"https://cdn.example/polled.png"}})
+				task.SetData(map[string]any{"images": []string{"https://cdn.example/polled.png"}, "renderFails": tc.renderFails})
 				return nil
 			}
 			deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
@@ -1790,6 +1796,11 @@ func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 			}
 			serveTaskPluginImageProtocol(c, pinned, deps)
 			require.Equal(t, tc.wantStatus, recorder.Code, recorder.Body.String())
+			if tc.outcomeUnknown {
+				assert.Equal(t, "unknown", recorder.Header().Get(service.TaskOutcomeHeader))
+			} else {
+				assert.Empty(t, recorder.Header().Get(service.TaskOutcomeHeader))
+			}
 			var response map[string]any
 			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 			if tc.wantStatus == http.StatusOK {

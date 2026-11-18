@@ -97,6 +97,8 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 	task := outcome.Task
 	if task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure {
 		if taskErr = waitTaskPluginImageTask(c, task, deps); taskErr != nil {
+			// The task keeps running and settles in the background.
+			taskErr.NoRetry = true
 			if c.Request.Context().Err() == nil {
 				respondTaskPluginImageError(c, taskErr)
 			}
@@ -114,6 +116,9 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 		respondTaskPluginImageError(c, taskErr)
 		return
 	}
+	// The task succeeded and settled: a failure to present it must not make a
+	// gateway in front of this one submit it again.
+	c.Header(service.TaskOutcomeHeader, "unknown")
 	view, err := service.BuildTaskPluginView(task)
 	if err != nil {
 		logger.LogError(c, common.LogText("build task protocol view failed: %s", err.Error()))
@@ -166,6 +171,7 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 			item["b64_json"] = encoded
 		}
 	}
+	c.Writer.Header().Del(service.TaskOutcomeHeader)
 	c.JSON(http.StatusOK, response)
 }
 

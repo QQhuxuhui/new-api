@@ -98,10 +98,19 @@ func warningMissedChannels(c *gin.Context) map[int]bool {
 	return map[int]bool{}
 }
 
-func markAutoGroupStart(c *gin.Context, group string) {
-	if _, exists := c.Get(ginKeyAutoGroupStart); !exists {
+// MarkAutoGroupStart records the auto group of the request's first selected
+// channel, unless one is recorded; later selections start from it.
+func MarkAutoGroupStart(c *gin.Context, group string) {
+	if c.GetString(ginKeyAutoGroupStart) == "" {
 		c.Set(ginKeyAutoGroupStart, group)
 	}
+}
+
+// ForgetAutoGroupStart drops the auto group recorded by a selection made
+// before the request's constraints were final, such as the shared endpoint
+// probe, so the first channel accepted under them sets it.
+func ForgetAutoGroupStart(c *gin.Context) {
+	c.Set(ginKeyAutoGroupStart, "")
 }
 
 // CacheGetRandomSatisfiedChannel picks the next channel of the request.
@@ -143,7 +152,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			if param.TokenGroup == "auto" {
 				common.SetContextKey(c, constant.ContextKeyAutoGroup, group)
-				markAutoGroupStart(c, group)
+				MarkAutoGroupStart(c, group)
 			}
 			return channel, group, nil
 		}
@@ -370,7 +379,7 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 				affinityUsable = true
 				if usingGroup == "auto" {
 					common.SetContextKey(c, constant.ContextKeyAutoGroup, memberGroup)
-					markAutoGroupStart(c, memberGroup)
+					MarkAutoGroupStart(c, memberGroup)
 				}
 				MarkChannelAffinityUsed(c, memberGroup, preferred.Id)
 			}

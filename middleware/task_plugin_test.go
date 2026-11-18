@@ -24,6 +24,8 @@ import (
 	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -2149,6 +2151,7 @@ func TestRouteTaskPluginEndpointUsesSelectedChannel(t *testing.T) {
 						decoderRejects, syncOnly bool
 						originPin, retry         bool
 						legacy, mapped, shared   bool
+						autoGroups               bool
 						wantStatus               int
 					}{
 						{name: "ordinary images bypass plugin decoder", decoderRejects: true},
@@ -2172,6 +2175,10 @@ func TestRouteTaskPluginEndpointUsesSelectedChannel(t *testing.T) {
 						{name: "ordinary multipart edits are preserved", path: "/v1/images/edits", multipart: true, decoderRejects: true},
 						{name: "plugin multipart edits remain usable", path: "/v1/images/edits", multipart: true, pluginOnly: true, wantPlugin: true},
 						{name: "ordinary Responses bypass unsupported plugin mode", path: "/v1/responses", stream: true, syncOnly: true},
+						// The probe before decoding picks the plugin of the first
+						// auto group; the request still starts in the next group,
+						// whose plugin serves the streaming mode.
+						{name: "auto group moves past unsupported plugin mode", path: "/v1/responses", pluginOnly: true, stream: true, syncOnly: true, autoGroups: true, wantPlugin: true},
 						{name: "plugin Responses remain usable", path: "/v1/responses", pluginOnly: true, wantPlugin: true},
 						{name: "ordinary videos bypass plugin decoder", path: "/v1/videos", multipart: true, decoderRejects: true},
 						{name: "plugin videos remain usable", path: "/v1/videos", multipart: true, pluginOnly: true, wantPlugin: true},
@@ -2228,6 +2235,15 @@ func TestRouteTaskPluginEndpointUsesSelectedChannel(t *testing.T) {
 							if tc.wrongGroup {
 								plugin.Group = "another-group"
 							}
+							if tc.autoGroups {
+								previousUsable, previousRatios := setting.UserUsableGroups2JSONString(), ratio_setting.GroupRatio2JSONString()
+								require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"route-test":"A","route-alt":"B"}`))
+								require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"route-test":1,"route-alt":1}`))
+								t.Cleanup(func() {
+									require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(previousUsable))
+									require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(previousRatios))
+								})
+							}
 							if tc.wrongModel {
 								plugin.Models = "another-model"
 							}
@@ -2238,7 +2254,7 @@ func TestRouteTaskPluginEndpointUsesSelectedChannel(t *testing.T) {
 							if !tc.pluginOnly {
 								channels = append(channels, ordinary)
 							}
-							if tc.originPin || tc.retry || tc.shared {
+							if tc.originPin || tc.retry || tc.shared || tc.autoGroups {
 								alternate := &model.Channel{Type: ordinary.Type, Status: common.ChannelStatusEnabled, Name: "alternate", Key: "alternate-key", Group: "route-test", Models: modelName}
 								if tc.wantPlugin {
 									alternate.Type = plugin.Type
@@ -2250,6 +2266,15 @@ func TestRouteTaskPluginEndpointUsesSelectedChannel(t *testing.T) {
 									_, err := jsplugin.DefaultRegistry.Register(alternateSource, jsplugin.Options{})
 									require.NoError(t, err)
 									t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister(alternateKey)) })
+									alternate.SetSetting(kitdto.ChannelSettings{TaskPluginKey: alternateKey})
+								}
+								if tc.autoGroups {
+									const alternateKey = "channel-route-ztest"
+									alternateSource := taskResponsesPluginSource(alternateKey, 0, `["channel-route-model"]`, `["stream", "sync"]`, `renderEvents: function() { return {events: [], done: false}; }, renderFinal: function() { return {}; },`, decode)
+									_, err := jsplugin.DefaultRegistry.Register(alternateSource, jsplugin.Options{})
+									require.NoError(t, err)
+									t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister(alternateKey)) })
+									alternate.Group = "route-alt"
 									alternate.SetSetting(kitdto.ChannelSettings{TaskPluginKey: alternateKey})
 								}
 								channels = append(channels, alternate)
@@ -2280,6 +2305,12 @@ func TestRouteTaskPluginEndpointUsesSelectedChannel(t *testing.T) {
 							router.POST(path, func(c *gin.Context) {
 								common.SetContextKey(c, constant.ContextKeyUsingGroup, "route-test")
 								common.SetContextKey(c, constant.ContextKeyUserId, 7)
+								if tc.autoGroups {
+									common.SetContextKey(c, constant.ContextKeyUsingGroup, "auto")
+									common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+									common.SetContextKey(c, constant.ContextKeyTokenAutoGroups, []string{"route-test", "route-alt"})
+									common.SetContextKey(c, constant.ContextKeyTokenCrossGroupRetry, false)
+								}
 								if tc.pinOrdinary || tc.pinPlugin {
 									id := ordinary.Id
 									if tc.pinPlugin {
@@ -2296,7 +2327,7 @@ func TestRouteTaskPluginEndpointUsesSelectedChannel(t *testing.T) {
 								expected := ordinary
 								if tc.wantPlugin {
 									expected = plugin
-									if tc.shared {
+									if tc.shared || tc.autoGroups {
 										assert.Equal(t, "channel-route-ztest", c.GetString("task_plugin_key"))
 									} else {
 										assert.Equal(t, key, c.GetString("task_plugin_key"))
@@ -2309,7 +2340,7 @@ func TestRouteTaskPluginEndpointUsesSelectedChannel(t *testing.T) {
 									if tc.mapped {
 										assert.Equal(t, "channel-route-model", c.MustGet(jsplugin.ContextKeyPinnedEndpoint).(jsplugin.PinnedEndpoint).MappedModel)
 									}
-									if tc.originPin || tc.shared {
+									if tc.originPin || tc.shared || tc.autoGroups {
 										expected = channels[len(channels)-1]
 									}
 								} else {

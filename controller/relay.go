@@ -104,6 +104,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if relayFormat != types.RelayFormatOpenAIRealtime {
 				c.Header("Content-Type", "application/json; charset=utf-8")
 			}
+			if newAPIError.GetErrorCode() == types.ErrorCode(service.TaskOutcomeUnknownCode) {
+				c.Header(service.TaskOutcomeHeader, "unknown")
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError(upstreamURLs...))

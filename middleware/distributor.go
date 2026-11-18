@@ -105,6 +105,10 @@ func Distribute() func(c *gin.Context) {
 				if selected, ok := value.(taskPluginEndpointSelection); ok && selected.Model == modelRequest.Model && selected.Channel != nil && selected.Channel.Status == common.ChannelStatusEnabled {
 					if matches, _ := model.ChannelSatisfiesFilters(selected.Channel, modelRequest.Model, constraints.Filters); matches {
 						channel = selected.Channel
+						if usingGroup == "auto" {
+							common.SetContextKey(c, constant.ContextKeyAutoGroup, selected.Group)
+							service.MarkAutoGroupStart(c, selected.Group)
+						}
 					}
 				}
 			}

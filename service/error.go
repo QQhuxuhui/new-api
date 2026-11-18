@@ -87,6 +87,14 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	// A downstream New API gateway whose task may exist upstream says so:
+	// the request is not moved to another channel, and the next gateway is
+	// told the same (see TaskOutcomeHeader).
+	if resp.Header.Get(TaskOutcomeHeader) != "" {
+		defer func() {
+			newApiErr = types.NewOpenAIError(errors.New(newApiErr.Error()), types.ErrorCode(TaskOutcomeUnknownCode), resp.StatusCode, types.ErrOptionWithSkipRetry())
+		}()
+	}
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -39,6 +39,7 @@ const contextKeyTaskPluginEndpointSelection = "task_plugin_endpoint_channel_sele
 type taskPluginEndpointSelection struct {
 	Generation *pluginruntime.RoutingGeneration
 	Channel    *model.Channel
+	Group      string
 	Model      string
 }
 
@@ -543,12 +544,15 @@ func RouteTaskPluginEndpoint() gin.HandlerFunc {
 		constraints.AddFilter(filter)
 		constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterRequestPath, RequestPath: c.Request.URL.Path})
 		group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-		channel, _, selectErr := service.SelectChannelForRequest(c, request.Model, &service.RetryParam{
+		channel, selectedGroup, selectErr := service.SelectChannelForRequest(c, request.Model, &service.RetryParam{
 			Ctx: c, ModelName: request.Model, TokenGroup: group,
 			RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0),
 		})
+		// The plugin filters are not final yet: the distributor's choice
+		// decides where an auto group request starts.
+		service.ForgetAutoGroupStart(c)
 		c.Set(contextKeyTaskPluginEndpointSelection, taskPluginEndpointSelection{
-			Generation: generation, Channel: channel, Model: request.Model,
+			Generation: generation, Channel: channel, Group: selectedGroup, Model: request.Model,
 		})
 		if selectErr != nil {
 			// Keep the existing plugin diagnostics and canonical-model lookup

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -448,6 +449,42 @@ func TestRequestMayHaveReachedUpstream(t *testing.T) {
 	c.Set(ginKeyUpstreamRequestWritten, true)
 	ForgetUpstreamRequest(c)
 	assert.False(t, RequestMayHaveReachedUpstream(c), "a request that fails before the transport sent nothing")
+}
+
+// An empty idempotency key tells the upstream nothing, yet its presence lets
+// the transport replay a submission that already arrived on a reused
+// connection, which would create the task twice.
+func TestEmptyIdempotencyKeyIsNotSent(t *testing.T) {
+	service.InitHttpClient()
+	gin.SetMode(gin.TestMode)
+	var posts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		if posts.Add(1) == 1 {
+			return
+		}
+		// The next submission arrives on the reused connection and its
+		// receipt is lost.
+		if conn, _, hijackErr := w.(http.Hijacker).Hijack(); hijackErr == nil {
+			_ = conn.Close()
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	adaptor := &stubTaskAdaptor{baseURL: upstream.URL, header: http.Header{"Idempotency-Key": {""}, "X-Idempotency-Key": {" "}}}
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	resp, err := DoTaskApiRequest(adaptor, c, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}, strings.NewReader(`{"prompt":"p"}`))
+	require.NoError(t, err)
+	_, _ = io.Copy(io.Discard, resp.Body)
+	require.NoError(t, resp.Body.Close())
+
+	_, err = DoTaskApiRequest(adaptor, c, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}, strings.NewReader(`{"prompt":"p"}`))
+	require.Error(t, err)
+	assert.EqualValues(t, 2, posts.Load(), "the lost submission must not be sent again")
+	assert.True(t, RequestMayHaveReachedUpstream(c))
+	assert.NotContains(t, adaptor.capturedReq.Header, "Idempotency-Key")
+	assert.NotContains(t, adaptor.capturedReq.Header, "X-Idempotency-Key")
 }
 
 // The transport replays a request on a new connection only when none of it

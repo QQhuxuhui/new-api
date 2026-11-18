@@ -134,43 +134,49 @@ func GetRandomSatisfiedChannel(
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
-	// First, try to find channels with the exact model name.
-	channels, _ := filterCandidateIDs(group2model2channels[group][model], model, filters)
-
-	// If no channels found, try to find channels with the normalized model name.
-	if len(channels) == 0 {
-		normalizedModel := ratio_setting.RoutingMatchModelName(model)
-		channels, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], model, filters)
+	// Channels declaring the exact model name come first; the routing name
+	// (for example without @ modifiers) serves the request when none of them
+	// is left for this pick.
+	names := []string{model}
+	if normalized := ratio_setting.RoutingMatchModelName(model); normalized != "" && normalized != model {
+		names = append(names, normalized)
 	}
+	var selected, missed []int
+	for _, name := range names {
+		channels, _ := filterCandidateIDs(group2model2channels[group][name], model, filters)
+		if len(channels) == 0 {
+			continue
+		}
+		uniquePriorities := make(map[int]bool)
+		for _, channelId := range channels {
+			if channel, ok := channelsIDM[channelId]; ok {
+				uniquePriorities[int(channel.GetPriority())] = true
+			} else {
+				return nil, nil, fmt.Errorf("database consistency error: channel #%d does not exist, please contact the administrator", channelId)
+			}
+		}
+		var sortedUniquePriorities []int
+		for priority := range uniquePriorities {
+			sortedUniquePriorities = append(sortedUniquePriorities, priority)
+		}
+		sort.Sort(sort.Reverse(sort.IntSlice(sortedUniquePriorities)))
 
-	if len(channels) == 0 {
-		return nil, nil, nil
-	}
-
-	uniquePriorities := make(map[int]bool)
-	for _, channelId := range channels {
-		if channel, ok := channelsIDM[channelId]; ok {
-			uniquePriorities[int(channel.GetPriority())] = true
-		} else {
-			return nil, nil, fmt.Errorf("database consistency error: channel #%d does not exist, please contact the administrator", channelId)
+		levelIndex := make(map[int64]int, len(sortedUniquePriorities))
+		for i, priority := range sortedUniquePriorities {
+			levelIndex[int64(priority)] = i
+		}
+		levels := make([][]int, len(sortedUniquePriorities))
+		for _, channelId := range channels {
+			i := levelIndex[channelsIDM[channelId].GetPriority()]
+			levels[i] = append(levels[i], channelId)
+		}
+		var nameMissed []int
+		selected, nameMissed = pickPriorityLevel(levels, pick, loadChannelHealthFlags(channels))
+		missed = append(missed, nameMissed...)
+		if len(selected) > 0 {
+			break
 		}
 	}
-	var sortedUniquePriorities []int
-	for priority := range uniquePriorities {
-		sortedUniquePriorities = append(sortedUniquePriorities, priority)
-	}
-	sort.Sort(sort.Reverse(sort.IntSlice(sortedUniquePriorities)))
-
-	levelIndex := make(map[int64]int, len(sortedUniquePriorities))
-	for i, priority := range sortedUniquePriorities {
-		levelIndex[int64(priority)] = i
-	}
-	levels := make([][]int, len(sortedUniquePriorities))
-	for _, channelId := range channels {
-		i := levelIndex[channelsIDM[channelId].GetPriority()]
-		levels[i] = append(levels[i], channelId)
-	}
-	selected, missed := pickPriorityLevel(levels, pick, loadChannelHealthFlags(channels))
 	if len(selected) == 0 {
 		return nil, missed, nil
 	}

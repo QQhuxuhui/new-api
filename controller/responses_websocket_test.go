@@ -1003,10 +1003,14 @@ func TestResponsesHTTPHealthCountsFinalResult(t *testing.T) {
 		firstStatus, attempts int
 		success               bool
 		ignored               bool
+		outcomeUnknown        bool
 	}{
-		{"business rejection", "context_length_exceeded", 400, 1, false, true},
-		{"credentials rejected as 400", "invalid_api_key", 400, 1, false, false},
-		{"retry succeeds", "server_error", 500, 2, true, false},
+		{"business rejection", "context_length_exceeded", 400, 1, false, true, false},
+		{"credentials rejected as 400", "invalid_api_key", 400, 1, false, false, false},
+		{"retry succeeds", "server_error", 500, 2, true, false, false},
+		// A downstream New API gateway whose task may exist upstream says so;
+		// another channel would create it again.
+		{"task outcome unknown stops", "task_protocol_error", 500, 1, false, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newResponsesWSBillingTest(t, `tier("request", fixed(0.002))`, func(*websocket.Conn, *http.Request) {})
@@ -1017,6 +1021,9 @@ func TestResponsesHTTPHealthCountsFinalResult(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				if attempts.Add(1) == 1 {
+					if tc.outcomeUnknown {
+						w.Header().Set(service.TaskOutcomeHeader, "unknown")
+					}
 					w.WriteHeader(tc.firstStatus)
 					_, _ = fmt.Fprintf(w, `{"error":{"type":"%s","code":"%s","message":"test rejection"}}`, tc.code, tc.code)
 					return
@@ -1050,6 +1057,9 @@ func TestResponsesHTTPHealthCountsFinalResult(t *testing.T) {
 			}
 			fixture.closeAndWait(t)
 			assert.Equal(t, int64(tc.attempts), attempts.Load())
+			if tc.outcomeUnknown {
+				assert.Equal(t, "unknown", response.Header.Get(service.TaskOutcomeHeader), "the next gateway must not resubmit either")
+			}
 			if !tc.success {
 				assert.Equal(t, tc.firstStatus, response.StatusCode)
 			} else {

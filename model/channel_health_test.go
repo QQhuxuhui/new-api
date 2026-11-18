@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
@@ -143,6 +144,42 @@ func TestSelectionSkipsTriedAndSuspendedChannels(t *testing.T) {
 
 			server.FlushAll()
 			assert.Equal(t, map[string]int{"177": 200}, pickNames(t, ChannelPick{Tried: map[int]bool{214: true, 219: true}}), "untried channels are taken from the highest level")
+		})
+	}
+}
+
+// Channels declaring the exact model name come first, and a channel serving
+// the routing name still takes the request once none of them is left.
+func TestSelectionFallsBackToRoutingNameChannels(t *testing.T) {
+	originalMemoryCache := common.MemoryCacheEnabled
+	t.Cleanup(func() { common.MemoryCacheEnabled = originalMemoryCache; InitChannelCache() })
+	const requested = "health-model@thinking:on"
+	require.Equal(t, "health-model", ratio_setting.RoutingMatchModelName(requested))
+
+	for _, memoryCache := range []bool{false, true} {
+		t.Run(fmt.Sprintf("memory cache %v", memoryCache), func(t *testing.T) {
+			truncateTables(t)
+			server := useHealthRedis(t)
+			exact := Channel{Id: 944001, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: "exact", Models: requested, Group: "default"}
+			base := Channel{Id: 944002, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: "base", Models: "health-model", Group: "default"}
+			require.NoError(t, exact.Insert())
+			require.NoError(t, base.Insert())
+			common.MemoryCacheEnabled = memoryCache
+			InitChannelCache()
+			pick := func(pick ChannelPick) string {
+				selected, _, err := GetRandomSatisfiedChannel("default", requested, pick, nil)
+				require.NoError(t, err)
+				if selected == nil {
+					return ""
+				}
+				return selected.Name
+			}
+
+			assert.Equal(t, "exact", pick(ChannelPick{}))
+			assert.Equal(t, "base", pick(ChannelPick{Tried: map[int]bool{exact.Id: true}}), "a retry after the exact channel failed")
+			require.NoError(t, server.Set(fmt.Sprintf(ChannelHealthSuspendedKey, exact.Id), "1"))
+			assert.Equal(t, "base", pick(ChannelPick{}), "the exact channel is suspended")
+			assert.Empty(t, pick(ChannelPick{Tried: map[int]bool{base.Id: true}}))
 		})
 	}
 }

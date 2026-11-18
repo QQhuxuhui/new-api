@@ -184,6 +184,7 @@ type stubTaskAdaptor struct {
 	TaskAdaptor
 	baseURL     string
 	capturedReq *http.Request
+	header      http.Header
 }
 
 func (s *stubTaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, error) {
@@ -192,6 +193,9 @@ func (s *stubTaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, 
 
 func (s *stubTaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo) error {
 	s.capturedReq = req
+	for key, values := range s.header {
+		req.Header[key] = values
+	}
 	return nil
 }
 

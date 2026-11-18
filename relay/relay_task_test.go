@@ -851,6 +851,26 @@ func TestRemixSubmitsRemixOfOriginUpstreamVideo(t *testing.T) {
 	assert.Equal(t, []string{"POST /v1/videos/video_upstream/remix"}, paths)
 	assert.Equal(t, constant.TaskActionRemix, info.Action)
 	assert.Equal(t, common.QuotaRound(8*0.1*common.QuotaPerUnit), billing.held, "8 seconds of the origin video at 0.1 per second")
+
+	// Another node disabled the channel and this node's cache has not synced
+	// yet: the remix still stops before reaching the upstream.
+	require.NoError(t, database.AutoMigrate(&model.Ability{}))
+	common.MemoryCacheEnabled = true
+	model.InitChannelCache()
+	require.NoError(t, database.Model(origin).Update("status", common.ChannelStatusManuallyDisabled).Error)
+	cached, err := model.CacheGetChannel(origin.Id)
+	require.NoError(t, err)
+	require.Equal(t, common.ChannelStatusEnabled, cached.Status, "the cache is stale")
+	stale, _ := gin.CreateTestContext(httptest.NewRecorder())
+	stale.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/task_public/remix", strings.NewReader(`{"prompt":"make it blue"}`))
+	stale.Params = c.Params
+	staleInfo, err := relaycommon.GenRelayInfo(stale, kittypes.RelayFormatTask, nil, nil)
+	require.NoError(t, err)
+	staleInfo.UserId = 7
+	taskErr = ResolveOriginTask(stale, staleInfo)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "task_channel_disable", taskErr.Code)
+	assert.Nil(t, staleInfo.LockedChannel)
 }
 
 // An upstream New API gateway that lost its own upstream's reply answers with

@@ -511,6 +511,13 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		var once sync.Once
 		releaseRelayTimeout = func() { once.Do(release) }
 	}
+	// An empty idempotency key tells the upstream nothing, yet its presence
+	// lets the transport replay a request that already arrived.
+	for _, key := range []string{"Idempotency-Key", "X-Idempotency-Key"} {
+		if strings.TrimSpace(strings.Join(req.Header.Values(key), "")) == "" {
+			req.Header.Del(key)
+		}
+	}
 	// The error below is masked for the client, so whether the request left
 	// is recorded from the transport itself.
 	var requestWritten atomic.Bool
@@ -532,7 +539,6 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	// the upstream received nothing. A request carrying one may be replayed
 	// after it arrived, and is then taken as sent.
 	written := requestWritten.Load()
-	// The transport checks the header's presence, empty or not.
 	_, idempotencyKey := req.Header["Idempotency-Key"]
 	_, xIdempotencyKey := req.Header["X-Idempotency-Key"]
 	if written && failedToConnect(err) && !idempotencyKey && !xIdempotencyKey {
