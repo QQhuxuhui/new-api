@@ -172,6 +172,11 @@ func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) 
 		if !ok {
 			return
 		}
+		// A task that may exist upstream stays an error: a next gateway
+		// reading a success status would not see it must not resubmit.
+		if intCode < http.StatusBadRequest && newApiErr.GetErrorCode() == types.ErrorCode(TaskOutcomeUnknownCode) {
+			return
+		}
 		newApiErr.StatusCode = intCode
 	}
 }

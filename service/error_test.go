@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,7 @@ func TestResetStatusCode(t *testing.T) {
 		name             string
 		statusCode       int
 		statusCodeConfig string
+		outcomeUnknown   bool
 		expectedCode     int
 	}{
 		{
@@ -48,6 +50,22 @@ func TestResetStatusCode(t *testing.T) {
 			statusCodeConfig: `{"200":503}`,
 			expectedCode:     200,
 		},
+		{
+			// A task that may exist upstream stays an error, so the next
+			// gateway does not take it for a reply it may resubmit.
+			name:             "outcome unknown is not mapped to success",
+			statusCode:       500,
+			statusCodeConfig: `{"500":200}`,
+			outcomeUnknown:   true,
+			expectedCode:     500,
+		},
+		{
+			name:             "outcome unknown keeps an error mapping",
+			statusCode:       500,
+			statusCodeConfig: `{"500":502}`,
+			outcomeUnknown:   true,
+			expectedCode:     502,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -56,6 +74,9 @@ func TestResetStatusCode(t *testing.T) {
 
 			newAPIError := &types.NewAPIError{
 				StatusCode: tc.statusCode,
+			}
+			if tc.outcomeUnknown {
+				newAPIError = types.NewOpenAIError(errors.New("failed"), types.ErrorCode(TaskOutcomeUnknownCode), tc.statusCode)
 			}
 			ResetStatusCode(newAPIError, tc.statusCodeConfig)
 			require.Equal(t, tc.expectedCode, newAPIError.StatusCode)

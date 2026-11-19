@@ -816,14 +816,19 @@ func TestLockedTaskRetryReadsCurrentKeyStatus(t *testing.T) {
 // again from the request's snapshot.
 func TestLockedTaskRetryStopsOnRemovedChannel(t *testing.T) {
 	require.NoError(t, i18n.Init())
-	for _, removal := range []string{"deleted", "disabled"} {
+	// "disabled elsewhere" is another node disabling the channel while this
+	// node's cache still holds it enabled.
+	for _, removal := range []string{"deleted", "disabled", "disabled elsewhere"} {
 		t.Run(removal, func(t *testing.T) {
 			db := modelManagementDB(t, "sqlite", "")
 			previousRetries, previousCache := common.RetryTimes, common.MemoryCacheEnabled
-			common.RetryTimes, common.MemoryCacheEnabled = 2, false
+			common.RetryTimes, common.MemoryCacheEnabled = 2, removal == "disabled elsewhere"
 			t.Cleanup(func() { common.RetryTimes, common.MemoryCacheEnabled = previousRetries, previousCache })
 			channel := model.Channel{Name: "locked", Type: constant.ChannelTypeTaskPlugin, Key: "k0", Status: common.ChannelStatusEnabled}
 			require.NoError(t, db.Create(&channel).Error)
+			if common.MemoryCacheEnabled {
+				model.InitChannelCache()
+			}
 			snapshot, err := model.GetChannelById(channel.Id, true)
 			require.NoError(t, err)
 

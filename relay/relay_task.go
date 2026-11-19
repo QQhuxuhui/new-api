@@ -88,19 +88,14 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		}
 	}
 
-	// 锁定到原始任务的渠道（重试时复用同一渠道，轮换 key）。启用状态以数据库
-	// 为准：其他节点禁用渠道后，本节点缓存同步前也不能再提交。提交用缓存中的
-	// 渠道对象，多 key 轮询的游标与其他请求共用；取 key 与渠道设置由提交循环
-	// 的首次尝试完成，计入锁定渠道的重试次数。
-	stored, err := model.GetChannelById(originTask.ChannelId, false)
+	// 锁定到原始任务的渠道（重试时复用同一渠道，轮换 key）。状态以数据库为准
+	// （见 model.CurrentChannel）；取 key 与渠道设置由提交循环的首次尝试完成，
+	// 计入锁定渠道的重试次数。
+	ch, err := model.CurrentChannel(originTask.ChannelId)
 	if err != nil {
 		return service.TaskErrorWrapperLocal(err, "channel_not_found", http.StatusBadRequest)
 	}
-	ch, err := model.CacheGetChannel(originTask.ChannelId)
-	if err != nil {
-		return service.TaskErrorWrapperLocal(err, "channel_not_found", http.StatusBadRequest)
-	}
-	if stored.Status != common.ChannelStatusEnabled || ch.Status != common.ChannelStatusEnabled {
+	if ch.Status != common.ChannelStatusEnabled {
 		return service.TaskErrorWrapperLocal(errors.New("the channel of the origin task is disabled"), "task_channel_disable", http.StatusBadRequest)
 	}
 	info.LockedChannel = ch

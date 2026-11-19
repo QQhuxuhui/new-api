@@ -871,6 +871,27 @@ func TestRemixSubmitsRemixOfOriginUpstreamVideo(t *testing.T) {
 	require.NotNil(t, taskErr)
 	assert.Equal(t, "task_channel_disable", taskErr.Code)
 	assert.Nil(t, staleInfo.LockedChannel)
+
+	// A channel another node just created is not in this node's cache yet;
+	// its origin task can still be remixed.
+	fresh := &model.Channel{Name: "sora-fresh", Type: constant.ChannelTypeSora, Key: "fresh-key", Status: common.ChannelStatusEnabled, BaseURL: &server.URL}
+	require.NoError(t, database.Create(fresh).Error)
+	require.NoError(t, database.Create(&model.Task{TaskID: "task_fresh", UserId: 7, ChannelId: fresh.Id, Platform: constant.TaskPlatform("sora"),
+		Properties:  model.Properties{OriginModelName: "sora-2"},
+		Data:        []byte(`{"id":"video_fresh","status":"completed","seconds":"8","size":"1280x720"}`),
+		PrivateData: model.TaskPrivateData{UpstreamTaskID: "video_fresh"}}).Error)
+	_, err = model.CacheGetChannel(fresh.Id)
+	require.Error(t, err, "the cache has not synced")
+	freshCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	freshCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/task_fresh/remix", strings.NewReader(`{"prompt":"make it blue"}`))
+	freshCtx.Params = gin.Params{{Key: "video_id", Value: "task_fresh"}}
+	freshInfo, err := relaycommon.GenRelayInfo(freshCtx, kittypes.RelayFormatTask, nil, nil)
+	require.NoError(t, err)
+	freshInfo.UserId = 7
+	require.Nil(t, ResolveOriginTask(freshCtx, freshInfo))
+	locked, ok = freshInfo.LockedChannel.(*model.Channel)
+	require.True(t, ok)
+	assert.Equal(t, fresh.Id, locked.Id)
 }
 
 // An upstream New API gateway that lost its own upstream's reply answers with

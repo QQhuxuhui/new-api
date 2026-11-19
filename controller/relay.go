@@ -696,8 +696,8 @@ func executeTaskSubmissionWith(
 				// setup failure counts against the RetryTimes budget. The
 				// channel is read again so the key choice and the key status
 				// it saves start from the current state, not the snapshot the
-				// request locked.
-				current, lookupErr := model.CacheGetChannel(channel.Id)
+				// request locked; another node may have disabled it meanwhile.
+				current, lookupErr := model.CurrentChannel(channel.Id)
 				switch {
 				case lookupErr != nil:
 					service.StoreChannelSetupError(c, types.NewError(lookupErr, types.ErrorCodeGetChannelFailed))

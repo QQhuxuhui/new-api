@@ -234,6 +234,25 @@ func CacheGetChannel(id int) (*Channel, error) {
 	return c, nil
 }
 
+// CurrentChannel returns the channel as stored now. Its status comes from
+// the database, so a channel another node changed is seen before this node's
+// cache syncs, and a channel the cache does not hold yet is still found. The
+// cached object is returned when it agrees, keeping the multi-key polling
+// cursor shared with other requests.
+func CurrentChannel(id int) (*Channel, error) {
+	stored, err := GetChannelById(id, true)
+	if err != nil {
+		return nil, err
+	}
+	if !common.MemoryCacheEnabled {
+		return stored, nil
+	}
+	if cached, cacheErr := CacheGetChannel(id); cacheErr == nil && cached.Status == stored.Status {
+		return cached, nil
+	}
+	return stored, nil
+}
+
 func CacheGetChannelInfo(id int) (*ChannelInfo, error) {
 	if !common.MemoryCacheEnabled {
 		channel, err := GetChannelById(id, true)
