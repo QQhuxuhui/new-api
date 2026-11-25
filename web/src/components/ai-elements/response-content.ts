@@ -186,3 +186,83 @@ export function parseResponseContent(
 
   return { bodyNodes, footnotes }
 }
+
+export type DataImage = {
+  alt: string
+  offset: number
+  src: string
+}
+
+const DATA_IMAGE_SUBTYPES = new Set(['png', 'jpeg', 'webp', 'gif'])
+
+function isBase64Char(code: number): boolean {
+  return (
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    (code >= 48 && code <= 57) ||
+    code === 43 ||
+    code === 47 ||
+    code === 61
+  )
+}
+
+function skipWhitespace(content: string, index: number): number {
+  let next = index
+  while (next < content.length && /\s/.test(content[next])) {
+    next++
+  }
+  return next
+}
+
+/**
+ * Returns the images when the content consists only of markdown images with
+ * base64 data URLs (as returned by image generation models), otherwise null.
+ * Scans linearly so multi-megabyte image payloads never hit regex backtracking.
+ */
+export function extractDataImageOnlyContent(
+  content: string
+): DataImage[] | null {
+  const images: DataImage[] = []
+  let index = skipWhitespace(content, 0)
+
+  while (index < content.length) {
+    if (!content.startsWith('![', index)) {
+      return null
+    }
+    const altEnd = content.indexOf('](', index + 2)
+    if (altEnd < 0) {
+      return null
+    }
+    const alt = content.slice(index + 2, altEnd)
+    if (alt.includes(']') || alt.includes('\n')) {
+      return null
+    }
+    const srcStart = altEnd + 2
+    if (!content.startsWith('data:image/', srcStart)) {
+      return null
+    }
+    const subtypeStart = srcStart + 'data:image/'.length
+    const subtypeEnd = content.indexOf(';base64,', subtypeStart)
+    if (
+      subtypeEnd < 0 ||
+      !DATA_IMAGE_SUBTYPES.has(content.slice(subtypeStart, subtypeEnd))
+    ) {
+      return null
+    }
+    let cursor = subtypeEnd + ';base64,'.length
+    const payloadStart = cursor
+    while (
+      cursor < content.length &&
+      isBase64Char(content.charCodeAt(cursor))
+    ) {
+      cursor++
+    }
+    if (cursor === payloadStart || content[cursor] !== ')') {
+      return null
+    }
+    images.push({ alt, offset: index, src: content.slice(srcStart, cursor) })
+    index = skipWhitespace(content, cursor + 1)
+  }
+
+  return images.length > 0 ? images : null
+}

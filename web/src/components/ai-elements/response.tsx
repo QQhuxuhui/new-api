@@ -23,7 +23,11 @@ import { getMarkdown, parseMarkdownToStructure } from 'stream-markdown-parser'
 
 import { cn } from '@/lib/utils'
 
-import { getMarkdownContent, parseResponseContent } from './response-content'
+import {
+  extractDataImageOnlyContent,
+  getMarkdownContent,
+  parseResponseContent,
+} from './response-content'
 import {
   beginRun,
   commitRun,
@@ -34,6 +38,7 @@ import {
   type FadeState,
 } from './response-fade'
 import { renderChildren, renderFootnotes } from './response-renderer'
+import { ResponseImage } from './response-renderer-image'
 import type { ResponseProps } from './response-types'
 
 const DEFAULT_PARSER_ID = 'new-api-response'
@@ -75,6 +80,12 @@ export const Response = memo((props: ResponseProps) => {
     })
   }, [content, isFinal, markdown, shouldParseMarkdown])
   const parsedContent = useMemo(() => parseResponseContent(nodes), [nodes])
+  // Content above the parse limit is shown as raw text, except generated
+  // images returned as data URLs, which would otherwise print as base64.
+  const dataImages = useMemo(
+    () => (shouldParseMarkdown ? null : extractDataImageOnlyContent(content)),
+    [content, shouldParseMarkdown]
+  )
 
   let fadeRun: FadeRun | undefined
   let renderedContent
@@ -93,6 +104,19 @@ export const Response = memo((props: ResponseProps) => {
       renderedContent = renderChildren(parsedContent.bodyNodes)
       footnotes = renderFootnotes(parsedContent.footnotes)
     }
+  } else if (dataImages != null) {
+    renderedContent = dataImages.map((image) => (
+      <ResponseImage
+        key={image.offset}
+        node={{
+          type: 'image',
+          raw: '',
+          src: image.src,
+          alt: image.alt,
+          title: null,
+        }}
+      />
+    ))
   } else {
     renderedContent = content
     footnotes = renderFootnotes(parsedContent.footnotes)
